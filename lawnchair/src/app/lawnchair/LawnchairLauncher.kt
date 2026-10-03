@@ -85,6 +85,7 @@ import com.patrykmichalik.opto.core.firstBlocking
 import com.patrykmichalik.opto.core.onEach
 import dev.kdrag0n.monet.theme.ColorScheme
 import java.util.stream.Stream
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -245,7 +246,13 @@ class LawnchairLauncher : QuickstepLauncher() {
 
         reloadIconsIfNeeded()
 
-        AppDatabase.INSTANCE.get(this).checkpointSync()
+        // Database WAL checkpointing is maintenance work and must never block launcher startup.
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching { AppDatabase.INSTANCE.get(this@LawnchairLauncher).checkpoint() }
+                .onFailure { error ->
+                    android.util.Log.w("LawnchairLauncher", "Deferred database checkpoint skipped", error)
+                }
+        }
     }
 
     override fun collectStateHandlers(out: MutableList<StateHandler<LauncherState>>) {
