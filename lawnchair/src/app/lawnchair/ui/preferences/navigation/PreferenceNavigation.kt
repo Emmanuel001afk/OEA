@@ -23,11 +23,8 @@ import app.lawnchair.ui.preferences.components.colorpreference.ColorSelection
 import app.lawnchair.ui.preferences.components.search.SearchProviderPreferenceScreen
 import app.lawnchair.ui.preferences.destinations.AppDrawerFoldersPreference
 import app.lawnchair.ui.preferences.destinations.AppDrawerPreferences
-import app.lawnchair.ui.preferences.destinations.AriaDebugPreferences
 import app.lawnchair.ui.preferences.destinations.OeaThemePreferences
 import app.lawnchair.ui.preferences.destinations.OeaSystemsPreferences
-import app.lawnchair.ui.preferences.destinations.AriaLlmProviderSetupPreferences
-import app.lawnchair.ui.preferences.destinations.AriaSettingsPreferences
 import app.lawnchair.ui.preferences.destinations.BackupAndRestorePreference
 import app.lawnchair.ui.preferences.destinations.CustomIconShapePreference
 import app.lawnchair.ui.preferences.destinations.DebugMenuPreferences
@@ -56,8 +53,6 @@ import app.lawnchair.ui.preferences.destinations.SelectIconPreference
 import app.lawnchair.ui.preferences.destinations.ShapePreference
 import app.lawnchair.ui.preferences.destinations.SmartspacePreferences
 import com.android.launcher3.util.ComponentKey
-import com.aria.launcher.aria.ui.memory.MemoryManagerScreen
-import com.aria.launcher.aria.ui.rules.RulesScreen
 import soup.compose.material.motion.animation.materialSharedAxisXIn
 import soup.compose.material.motion.animation.materialSharedAxisXOut
 import soup.compose.material.motion.animation.rememberSlideDistance
@@ -161,11 +156,6 @@ fun PreferenceNavigation(
 
         composable<OeaThemes> { OeaThemePreferences() }
         composable<OeaSystems> { OeaSystemsPreferences() }
-        composable<AriaDebug> { AriaDebugPreferences() }
-        composable<AriaSettings> { AriaSettingsPreferences() }
-        composable<AriaLlmSetup> { AriaLlmProviderSetupPreferences() }
-        composable<AriaRules> { RulesScreen() }
-        composable<AriaMemory> { MemoryManagerScreen() }
 
         composable<SelectIcon> { backStackEntry ->
             val args: SelectIcon = backStackEntry.toRoute()
