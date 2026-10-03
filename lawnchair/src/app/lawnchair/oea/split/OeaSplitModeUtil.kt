@@ -23,7 +23,7 @@ object OeaSplitModeUtil {
         bottom.addCategory(Intent.CATEGORY_LAUNCHER)
         top.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
         bottom.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-        Handler().postDelayed { activity.startActivities(arrayOf(bottom, top), options) }, 100)
+        Handler().postDelayed({ activity.startActivities(arrayOf(bottom, top), options) }, 100)
         true
     }.getOrDefault(false)
 }
