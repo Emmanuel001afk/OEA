@@ -16,7 +16,7 @@ sealed class SmartspaceMode(
 
     companion object {
         fun fromString(value: String): SmartspaceMode = when (value) {
-            "aria" -> AriaSmartspace
+            "aria", "oea" -> OeaSmartspace
             "google" -> GoogleSmartspace
             "google_search" -> GoogleSearchSmartspace
             "smartspacer" -> Smartspacer
@@ -27,7 +27,7 @@ sealed class SmartspaceMode(
          * @return The list of all smartspace options
          */
         fun values() = listOf(
-            AriaSmartspace,
+            OeaSmartspace,
             LawnchairSmartspace,
             GoogleSmartspace,
             GoogleSearchSmartspace,
@@ -77,11 +77,11 @@ object Smartspacer : SmartspaceMode(
     }
 }
 
-object AriaSmartspace : SmartspaceMode(
-    nameResourceId = R.string.smartspace_mode_aria,
-    layoutResourceId = R.layout.aria_smartspace,
+object OeaSmartspace : SmartspaceMode(
+    nameResourceId = R.string.smartspace_mode_oea,
+    layoutResourceId = R.layout.smartspace_container,
 ) {
-    override val cellRowSpan: Int = 2
-    override fun toString(): String = "aria"
+    override val cellRowSpan: Int = 1
+    override fun toString(): String = "oea"
     override fun isAvailable(context: Context): Boolean = true
 }
