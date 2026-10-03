@@ -80,15 +80,9 @@ import com.android.launcher3.widget.LauncherWidgetHolder
 import com.android.launcher3.widget.RoundedCornerEnforcement
 import com.android.systemui.plugins.shared.LauncherOverlayManager
 import com.android.systemui.shared.system.QuickStepContract
-import com.aria.launcher.aria.ui.AriaHomeState
-import com.aria.launcher.aria.ui.onboarding.AriaOnboardingActivity
 import com.kieronquinn.app.smartspacer.sdk.client.SmartspacerClient
 import com.patrykmichalik.opto.core.firstBlocking
 import com.patrykmichalik.opto.core.onEach
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
 import dev.kdrag0n.monet.theme.ColorScheme
 import java.util.stream.Stream
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -97,12 +91,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class LawnchairLauncher : QuickstepLauncher() {
-
-    @EntryPoint
-    @InstallIn(SingletonComponent::class)
-    interface AriaLauncherEntryPoint {
-        fun ariaHomeState(): AriaHomeState
-    }
 
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
     private val prefs by unsafeLazy { PreferenceManager.getInstance(this) }
@@ -254,11 +242,6 @@ class LawnchairLauncher : QuickstepLauncher() {
         colorScheme = themeProvider.colorScheme
 
         showQuickstepWarningIfNecessary()
-
-        // ARIA: Show onboarding on first launch to request permissions
-        if (!AriaOnboardingActivity.isOnboardingComplete(this)) {
-            AriaOnboardingActivity.launch(this)
-        }
 
         reloadIconsIfNeeded()
 
@@ -466,17 +449,6 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onResume() {
         super.onResume()
         restartIfPending()
-
-        // ARIA: Refresh context key so greeting/predictions update on every resume
-        try {
-            val entryPoint = EntryPointAccessors.fromApplication(
-                applicationContext,
-                AriaLauncherEntryPoint::class.java,
-            )
-            entryPoint.ariaHomeState().refreshContext()
-        } catch (_: Exception) {
-            // Non-fatal — Hilt might not be ready during early startup
-        }
 
         dragLayer.viewTreeObserver.addOnDrawListener(
             object : ViewTreeObserver.OnDrawListener {
