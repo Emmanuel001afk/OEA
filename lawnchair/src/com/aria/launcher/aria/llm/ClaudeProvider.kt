@@ -1,4 +1,4 @@
-package app.lawnchair.oea.ai.llm
+package com.aria.launcher.aria.llm
 
 import android.util.Log
 import com.anthropic.client.AnthropicClient
