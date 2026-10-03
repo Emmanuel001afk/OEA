@@ -19,6 +19,10 @@
 -dontwarn com.android.org.conscrypt.TrustManagerImpl
 -dontwarn com.android.wm.shell.**
 -dontwarn com.skydoves.balloon.**
+# Android does not implement Java type-annotation reflection APIs; jsonschema-generator references them for JRE use.
+-dontwarn java.lang.reflect.AnnotatedType
+-dontwarn java.lang.reflect.AnnotatedParameterizedType
+-dontwarn java.lang.reflect.Executable
 -dontwarn dalvik.system.CloseGuard
 -dontwarn lineageos.providers.LineageSettings$System
 -dontwarn androidx.compose.runtime.PrimitiveSnapshotStateKt
