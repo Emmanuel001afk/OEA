@@ -64,6 +64,14 @@ object OeaCallBlockRules {
         return exact.contains(number) || prefix.any { number.startsWith(it) } || suffix.any { number.endsWith(it) }
     }
 
+    fun matches(context: Context, number: String): Boolean {
+        val p = context.getSharedPreferences(PREFS, 0)
+        val exact = p.getStringSet(EXACT, emptySet()).orEmpty()
+        val prefix = p.getStringSet(PREFIX, emptySet()).orEmpty()
+        val suffix = p.getStringSet(SUFFIX, emptySet()).orEmpty()
+        return exact.contains(number) || prefix.any { number.startsWith(it) } || suffix.any { number.endsWith(it) }
+    }
+
     fun recordBlocked(context: Context, number: String) {
         val p = context.getSharedPreferences(PREFS, 0)
         val old = p.getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
