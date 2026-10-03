@@ -149,7 +149,7 @@ android {
     namespace "com.android.launcher3"
     defaultConfig {
         /*
-         * ARIA Launcher 0.2.0 Alpha
+         * OEA Launcher 0.2.0 Alpha
          * see CONTRIBUTING.md#versioning-scheme
          */
         versionCode 2
@@ -168,7 +168,7 @@ android {
     applicationVariants.configureEach { variant ->
         variant.outputs.configureEach {
             def channel = variant.productFlavors.last().name
-            outputFileName = "ARIA.${variant.versionName}.$channel.${variant.buildType.name}.apk"
+            outputFileName = "OEA.${variant.versionName}.$channel.${variant.buildType.name}.apk"
         }
     }
 
@@ -241,7 +241,7 @@ android {
 
         debug {
             applicationIdSuffix ".debug"
-            resValue("string", "derived_app_name", "ARIA (Debug)")
+            resValue("string", "derived_app_name", "OEA Launcher (Debug)")
 
             manifestPlaceholders.quickstepMinSdk = "0"
             manifestPlaceholders.quickstepMaxSdk = "100000"
@@ -250,7 +250,7 @@ android {
         }
 
         release {
-            resValue("string", "derived_app_name", "ARIA")
+            resValue("string", "derived_app_name", "OEA Launcher")
             minifyEnabled true
             shrinkResources true
             pseudoLocalesEnabled false
