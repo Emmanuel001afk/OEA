@@ -25,6 +25,14 @@ jobs:
       - name: Verify complete launcher feature suites
         run: python3 tools/launcher-feature-suite.py
 
+      - name: Refresh recursive submodules
+        run: |
+          git submodule update --init --recursive || true
+          if [ ! -d platform_frameworks_libs_systemui/viewcapturelib ]; then
+            rm -rf platform_frameworks_libs_systemui
+            git clone --depth 1 --branch 16-dev https://github.com/LawnchairLauncher/platform_frameworks_libs_systemui platform_frameworks_libs_systemui
+          fi
+
       - name: Verify Gradle wrapper
         run: test -x ./gradlew || chmod +x ./gradlew
 
