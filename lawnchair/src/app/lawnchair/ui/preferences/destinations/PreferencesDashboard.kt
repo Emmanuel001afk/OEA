@@ -57,6 +57,7 @@ import app.lawnchair.ui.preferences.components.layout.PreferenceLayout
 import app.lawnchair.ui.preferences.components.layout.PreferenceTemplate
 import app.lawnchair.ui.preferences.data.liveinfo.SyncLiveInformation
 import app.lawnchair.ui.preferences.navigation.About
+import app.lawnchair.ui.preferences.navigation.OeaThemes
 import app.lawnchair.ui.preferences.navigation.AppDrawer
 import app.lawnchair.ui.preferences.navigation.AriaDebug
 import app.lawnchair.ui.preferences.navigation.AriaSettings
@@ -246,7 +247,7 @@ fun PreferencesDashboard(
 
             Item {
                 PreferenceCategory(
-                    label = "ARIA",
+                    label = "OEA",
                     description = "AI provider setup, WiFi labels, and layout",
                     iconResource = R.drawable.ic_lightbulb,
                     onNavigate = { onNavigate(AriaSettings) },
@@ -258,11 +259,23 @@ fun PreferencesDashboard(
 
             Item {
                 PreferenceCategory(
-                    label = "ARIA Debug",
+                    label = "OEA Debug",
                     description = "Prediction engine and data tools",
                     iconResource = R.drawable.ic_bug_notification,
                     onNavigate = { onNavigate(AriaDebug) },
                     isSelected = currentRoute is AriaDebug,
+                    isFirst = it.isFirst,
+                    isLast = it.isLast,
+                )
+            }
+
+            Item {
+                PreferenceCategory(
+                    label = stringResource(R.string.oea_themes_label),
+                    description = stringResource(R.string.oea_themes_description),
+                    iconResource = R.drawable.ic_wallpaper,
+                    onNavigate = { onNavigate(OeaThemes) },
+                    isSelected = currentRoute is OeaThemes,
                     isFirst = it.isFirst,
                     isLast = it.isLast,
                 )
