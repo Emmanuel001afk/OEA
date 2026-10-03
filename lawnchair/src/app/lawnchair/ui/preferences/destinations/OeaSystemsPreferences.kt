@@ -98,6 +98,9 @@ fun OeaSystemsPreferences(modifier: Modifier = Modifier) {
                     Button(onClick = { OeaSplitLauncher.launchPair(context, firstPackage.trim(), secondPackage.trim()) }) {
                         Text("Launch pair in split screen")
                     }
+                    Button(onClick = { openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS) }) {
+                        Text("Enable OEA split-screen service")
+                    }
                 }
             }
         }
