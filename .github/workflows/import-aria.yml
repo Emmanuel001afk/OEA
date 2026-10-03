@@ -10,16 +10,22 @@ permissions:
 
 jobs:
   import-aria:
-    if: ${{ !hashFiles('.oea-aria-imported') }}
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout OEA
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - name: Clone ARIA Launcher source
+      - name: Check import state
+        run: |
+          if [ -f .oea-aria-imported ]; then
+            echo "ARIA base already imported."
+            exit 0
+          fi
+      - name: Clone ARIA Launcher aria-dev
         run: git clone --depth 1 --branch aria-dev https://github.com/trek-boldly-go/aria-launcher.git /tmp/aria
-      - name: Import source
+      - name: Import ARIA source
         run: |
           rm -rf /tmp/aria/.git
           cp -a /tmp/aria/. .
@@ -29,11 +35,9 @@ jobs:
           cat > OEA_BASE.md <<'EOF'
 # OEA
 
-OEA is the user's launcher project.
+OEA launcher project based on the ARIA Launcher aria-dev source.
 
-The initial implementation is based on the ARIA Launcher aria-dev source as a starting point. OEA is the destination project; ARIA itself is not modified.
-
-The imported source will be audited and adapted: unwanted ARIA/Lawnchair features will be removed and OEA-specific functionality will be added in subsequent commits.
+ARIA is the source project only; OEA is the destination and will be independently adapted.
 EOF
           cat > .github/workflows/import-aria.yml <<'EOF'
 name: Import ARIA Launcher base
@@ -45,13 +49,13 @@ permissions:
   contents: write
 jobs:
   import-aria:
-    if: ${{ !hashFiles('.oea-aria-imported') }}
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo 'ARIA import marker exists; no second import is required.'
+      - run: echo "ARIA base import already completed."
 EOF
-      - name: Commit imported base
+      - name: Commit imported source
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
