@@ -286,7 +286,7 @@ fun PreferencesDashboard(
                 PreferenceCategory(
                     label = stringResource(R.string.oea_systems_label),
                     description = stringResource(R.string.oea_systems_description),
-                    iconResource = R.drawable.ic_build,
+                    iconResource = R.drawable.ic_lightbulb,
                     onNavigate = { onNavigate(OeaSystems) },
                     isSelected = currentRoute is OeaSystems,
                     isFirst = it.isFirst,
