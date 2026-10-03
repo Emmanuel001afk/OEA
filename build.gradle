@@ -514,9 +514,9 @@ dependencies {
         exclude group: 'org.apache.httpcomponents.client5'
         exclude group: 'org.apache.httpcomponents.core5'
     }
-    implementation(libs.litertlm.android) { // LiteRT-LM: on-device LLM inference (Session 15)
-        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-reflect'
-    }
+    // LiteRT-LM uses kotlin-reflect for its Tool/ToolSet reflection path; keep the runtime dependency so release R8 does not leave ToolManager with missing KClasses.
+    implementation(libs.litertlm.android)
+    implementation "org.jetbrains.kotlin:kotlin-reflect:${libs.versions.kotlin.get()}"
     implementation libs.play.services.code.scanner
     implementation libs.litert // LiteRT (16KB-aligned TFLite replacement) — seam for Session 14 on-device model
 
