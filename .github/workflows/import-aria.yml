@@ -1,20 +1,28 @@
-name: Package ARIA Launcher base
+name: Import ARIA Launcher base
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  workflow_dispatch:
 jobs:
-  package-aria:
+  import:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clone ARIA
-        run: git clone --depth 1 --branch aria-dev https://github.com/trek-boldly-go/aria-launcher.git /tmp/aria
-      - name: Package source
-        run: tar -C /tmp/aria --exclude=.git -czf /tmp/aria-launcher-aria-dev.tar.gz .
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
         with:
-          name: aria-launcher-aria-dev
-          path: /tmp/aria-launcher-aria-dev.tar.gz
-          retention-days: 1
+          fetch-depth: 1
+      - name: Import ARIA source
+        run: |
+          rm -rf /tmp/aria
+          git clone --depth 1 --branch aria-dev https://github.com/trek-boldly-go/aria-launcher.git /tmp/aria
+          rsync -a --exclude='.git' --exclude='.github' /tmp/aria/ ./
+          rm -f OEA_IMPORT_START.md OEA_PACKAGE_TRIGGER.md
+          touch .oea-aria-imported
+          printf '%s\n' '# OEA' '' 'OEA launcher based on the ARIA Launcher aria-dev source.' 'The original ARIA repository is not modified.' > OEA_BASE.md
+      - name: Commit imported source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Import ARIA Launcher base into OEA'
+          git push origin HEAD:main
