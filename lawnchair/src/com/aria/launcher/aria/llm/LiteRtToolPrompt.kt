@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Donovon Simpson. See LICENSE-ARIA.md for licensing terms.
-package app.lawnchair.oea.ai.llm
+package com.aria.launcher.aria.llm
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
