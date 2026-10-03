@@ -205,6 +205,8 @@
     <string name="oea_themes_description">Add images from your device as themes. OEA applies the image as your wallpaper and uses its colors for the launcher.</string>
     <string name="oea_theme_add">Add theme image</string>
     <string name="oea_themes_empty">No custom themes yet. Add an image to create your first theme.</string>
+    <string name="oea_systems_label">OEA Systems</string>
+    <string name="oea_systems_description">Call blocker, split screen, and Game Boost</string>
     <string name="oea_theme_name">OEA Theme %1$d</string>
 
 
