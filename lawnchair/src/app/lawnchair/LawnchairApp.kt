@@ -56,9 +56,6 @@ import com.android.launcher3.R
 import com.android.launcher3.Utilities
 import com.android.quickstep.RecentsActivity
 import com.android.systemui.shared.system.QuickStepContract
-import com.aria.launcher.aria.data.ContextSignalManager
-import com.aria.launcher.aria.scheduler.NightlyPredictionWorker
-import com.aria.launcher.aria.scheduler.UsageCollectionWorker
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
 import javax.inject.Inject
@@ -67,8 +64,6 @@ import javax.inject.Inject
 class LawnchairApp :
     Application(),
     Configuration.Provider {
-
-    @Inject lateinit var contextSignalManager: ContextSignalManager
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
 
@@ -89,11 +84,6 @@ class LawnchairApp :
         Flowerpot.Manager.getInstance(this)
         registerActivityLifecycleCallbacks(activityHandler)
 
-        // ARIA: seed context signals and start periodic collection + nightly prediction
-        contextSignalManager.init()
-        UsageCollectionWorker.schedule(this)
-        UsageCollectionWorker.runOnce(this) // DEBUG: immediate first collection
-        NightlyPredictionWorker.schedule(this)
     }
 
     fun hideClockInStatusBar() {
