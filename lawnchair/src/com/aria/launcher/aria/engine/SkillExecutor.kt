@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Donovon Simpson. See LICENSE-ARIA.md for licensing terms.
+// OEA launcher skill execution interface.
 package com.aria.launcher.aria.engine
 
 import com.aria.launcher.aria.data.AppSkill
