@@ -47,12 +47,6 @@
     <uses-permission android:name="android.permission.SUSPEND_APPS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- ARIA context signal permissions -->
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <!--override
     minSdk declared in it-->
@@ -77,56 +71,6 @@
         <meta-data
             android:name="preloaded_fonts"
             android:resource="@array/preloaded_fonts" />
-
-        <!-- ARIA receivers -->
-        <receiver android:name="com.aria.launcher.aria.data.ChargingReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
-                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
-            </intent-filter>
-        </receiver>
-        <receiver android:name="com.aria.launcher.aria.data.ActivityUpdateReceiver"
-            android:exported="false" />
-        <receiver android:name="com.aria.launcher.aria.data.AndroidAutoReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.app.action.ENTER_CAR_MODE" />
-                <action android:name="android.app.action.EXIT_CAR_MODE" />
-            </intent-filter>
-        </receiver>
-        <receiver android:name="com.aria.launcher.aria.data.PackageChangeReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.PACKAGE_ADDED" />
-                <action android:name="android.intent.action.PACKAGE_REMOVED" />
-                <action android:name="android.intent.action.PACKAGE_CHANGED" />
-                <action android:name="android.intent.action.PACKAGE_REPLACED" />
-                <data android:scheme="package" />
-            </intent-filter>
-        </receiver>
-
-        <service
-            android:name="com.aria.launcher.aria.data.AriaNotificationListener"
-            android:label="ARIA Smart Cards"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
-        <!-- Disable AOSP NotificationListener — ARIA's AriaNotificationListener replaces it -->
-        <service
-            android:name="com.android.launcher3.notification.NotificationListener"
-            android:enabled="false"
-            tools:node="replace" />
-
-        <activity
-            android:name="com.aria.launcher.aria.ui.onboarding.AriaOnboardingActivity"
-            android:theme="@style/Theme.Lawnchair"
-            android:exported="false"
-            android:enableOnBackInvokedCallback="true" />
 
         <activity
             android:name="app.lawnchair.ui.preferences.PreferenceActivity"
