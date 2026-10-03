@@ -10,8 +10,8 @@ import android.telecom.CallScreeningService
 
 class OeaCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
-        val number = callDetails.handle?.schemeSpecificPart?.let(::normalize) ?: ""
-        if (number.isEmpty() || !OeaCallBlockRules.shouldBlock(this, number)) {
+        val number = callDetails.handle?.schemeSpecificPart?.let(OeaCallBlockEngine::normalize) ?: ""
+        if (!OeaCallBlockEngine.screen(this, callDetails)) {
             respondToCall(callDetails, CallResponse.Builder().build())
             return
         }
@@ -20,7 +20,6 @@ class OeaCallScreeningService : CallScreeningService() {
             .setDisallowCall(true).setRejectCall(true).setSkipNotification(true)
             .setSkipCallLog(false).build())
     }
-    private fun normalize(value: String): String = value.filter { it.isDigit() }.takeLast(15)
 }
 
 object OeaCallBlockRules {
