@@ -76,7 +76,8 @@ object OeaCallBlockRules {
         val p = context.getSharedPreferences(PREFS, 0)
         val old = p.getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
         old.add(number + "|" + System.currentTimeMillis())
-        p.edit().putStringSet(HISTORY, old.toList().takeLast(100).toSet()).apply()
+        while (old.size > 100) old.remove(old.first())
+        p.edit().putStringSet(HISTORY, old).apply()
     }
 
     private fun isInContacts(context: Context, number: String, starredOnly: Boolean): Boolean {
