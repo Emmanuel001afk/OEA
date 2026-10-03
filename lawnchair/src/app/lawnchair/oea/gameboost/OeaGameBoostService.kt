@@ -17,7 +17,7 @@ import androidx.core.app.NotificationCompat
 import com.android.launcher3.R
 import java.util.Locale
 
-class OeaGameBoostService : Service() {
+class OeaGameBoostService : android.app.Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var overlay: View? = null
     private var activeGame: String? = null
