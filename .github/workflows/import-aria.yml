@@ -9,19 +9,11 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout OEA
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - name: Clone ARIA Launcher
-        run: git clone --depth 1 --branch aria-dev https://github.com/trek-boldly-go/aria-launcher.git /tmp/aria
-      - name: Import ARIA source
-        run: |
-          rsync -a --exclude='.git' --exclude='.github' /tmp/aria/ ./
-          touch .oea-aria-imported
-          printf '%s\n' '# OEA' 'OEA launcher based on the ARIA Launcher aria-dev source.' 'The original ARIA repository is not modified.' > OEA_BASE.md
-      - name: Commit and push
-        run: |
+      - uses: actions/checkout@v4
+      - run: git clone --depth 1 --branch aria-dev https://github.com/trek-boldly-go/aria-launcher.git /tmp/aria
+      - run: rsync -a --exclude=.git --exclude=.github /tmp/aria/ ./
+      - run: touch .oea-aria-imported && printf '%s\n' '# OEA' 'OEA launcher based on ARIA Launcher aria-dev.' > OEA_BASE.md
+      - run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
