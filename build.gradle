@@ -152,7 +152,7 @@ android {
          * OEA Launcher 0.2.0 Alpha
          * see CONTRIBUTING.md#versioning-scheme
          */
-        versionCode 2
+        versionCode 3
         versionName "${versionDisplayName}"
         buildConfigField "String", "VERSION_DISPLAY_NAME", "\"${versionDisplayName}\""
         buildConfigField "String", "MAJOR_VERSION", "\"${majorVersion}\""
