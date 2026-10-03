@@ -1,4 +1,4 @@
-package com.aria.launcher.aria.llm
+package app.lawnchair.oea.ai.llm
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
