@@ -65,6 +65,9 @@ class OeaGameBoostService : android.app.Service() {
     override fun onBind(intent: Intent?) = null
 
     private fun activate(packageName: String) {
+        val profile = OeaGameProfile(packageName = packageName)
+        engine.enter(profile)
+
         val prefs = OeaGameBoostStore.prefs(this)
         if (prefs.getBoolean("dnd", true)) {
             val nm = getSystemService(NotificationManager::class.java)
