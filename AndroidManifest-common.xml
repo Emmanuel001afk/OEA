@@ -43,7 +43,7 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <uses-permission android:name="android.permission.ACCESS_RESTRICTED_SETTINGS" />
-    
+
     <!-- for rotating surface by arbitrary degree -->
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.ROTATE_SURFACE_FLINGER" />
@@ -88,6 +88,12 @@
         android:supportsRtl="true"
         tools:replace="android:label">
 
+        <provider
+            android:name="app.lawnchair.oea.OeaLauncherSafetyNetProvider"
+            android:authorities="${applicationId}.oea.launcher.safetynet"
+            android:exported="false"
+            android:initOrder="100" />
+
         <!-- Intent received when a session is committed -->
         <receiver
             android:name="com.android.launcher3.SessionCommitReceiver"
@@ -129,11 +135,6 @@
             </intent-filter>
         </activity>
 
-        <!--
-        The settings provider contains Home's data, like the workspace favorites. The permissions
-        should be changed to what is defined above. The authorities should also be changed to
-        represent the package name.
-        -->
         <provider
             android:name="com.android.launcher3.LauncherProvider"
             android:authorities="${applicationId}.settings"
@@ -141,20 +142,11 @@
             android:writePermission="${applicationId}.permission.WRITE_SETTINGS"
             android:readPermission="${applicationId}.permission.READ_SETTINGS" />
 
-        <!--
-          The content provider for exposing various launcher grid options.
-          The caller should hold one of the following permissions:
-             - android.permission.BIND_WALLPAPER
-             - ${applicationId}.permission.GRID_CONTROL
-         -->
         <provider
             android:name="com.android.launcher3.graphics.LauncherCustomizationProvider"
             android:authorities="${applicationId}.grid_control"
             android:exported="true" />
 
-        <!--
-        The settings activity. To extend point settings_fragment_name to appropriate fragment class
-        -->
         <activity
             android:name="com.android.launcher3.settings.SettingsActivity"
             android:label="@string/settings_button_text"
@@ -175,9 +167,6 @@
             android:exported="true"
             android:enabled="false" />
 
-        <!--
-        Launcher activity for secondary display
-        -->
         <activity
             android:name="com.android.launcher3.secondarydisplay.SecondaryDisplayLauncher"
             android:theme="@style/AppTheme"
@@ -191,7 +180,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Disable eager initialization of Jetpack libraries. See bug 197780098. -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
