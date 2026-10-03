@@ -285,6 +285,11 @@ class PreferenceManager2 @Inject constructor(
         defaultValue = ColorOption.fromString(context.getString(R.string.config_default_accent_color)),
     )
 
+    val oeaThemeWallpapers = preference(
+        key = stringSetPreferencesKey(name = "oea_theme_wallpapers"),
+        defaultValue = emptySet(),
+    )
+
     val hiddenApps = preference(
         key = stringSetPreferencesKey(name = "hidden_apps"),
         defaultValue = setOf(),
