@@ -1,4 +1,5 @@
 name: OEA Launcher APK
+# Build validation branch
 
 permissions:
   contents: write
@@ -38,7 +39,7 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build OEA Launcher APK
-        run: ./gradlew assembleLawnWithQuickstepGithubRelease --stacktrace
+        run: ./gradlew assembleLawnWithQuickstepGithubDebug --stacktrace
 
       - name: Publish latest APK release
         env:
@@ -46,7 +47,7 @@ jobs:
         run: |
           APK="$(find . -path '*build/outputs/apk/*.apk' | head -n 1)"
           test -n "$APK"
-          if gh release view oea-latest >/dev/null 2>&1; then
+          if gh release view oea-debug >/dev/null 2>&1; then
             gh release upload oea-latest "$APK" --clobber
           else
             gh release create oea-latest "$APK" --title "OEA Latest" --notes "Latest OEA Launcher build from main."

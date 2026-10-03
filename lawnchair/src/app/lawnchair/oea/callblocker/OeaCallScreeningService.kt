@@ -10,8 +10,8 @@ import android.telecom.CallScreeningService
 
 class OeaCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
-        val number = callDetails.handle?.schemeSpecificPart?.let(::normalize) ?: ""
-        if (number.isEmpty() || !OeaCallBlockRules.shouldBlock(this, number)) {
+        val number = callDetails.handle?.schemeSpecificPart?.let(OeaCallBlockEngine::normalize) ?: ""
+        if (!OeaCallBlockEngine.screen(this, callDetails)) {
             respondToCall(callDetails, CallResponse.Builder().build())
             return
         }
@@ -20,7 +20,6 @@ class OeaCallScreeningService : CallScreeningService() {
             .setDisallowCall(true).setRejectCall(true).setSkipNotification(true)
             .setSkipCallLog(false).build())
     }
-    private fun normalize(value: String): String = value.filter { it.isDigit() }.takeLast(15)
 }
 
 object OeaCallBlockRules {
@@ -58,6 +57,14 @@ object OeaCallBlockRules {
         if (!enabled(context)) return false
         if (allowContacts(context) && isInContacts(context, number, false)) return false
         if (allowStarred(context) && isInContacts(context, number, true)) return false
+        val p = context.getSharedPreferences(PREFS, 0)
+        val exact = p.getStringSet(EXACT, emptySet()).orEmpty()
+        val prefix = p.getStringSet(PREFIX, emptySet()).orEmpty()
+        val suffix = p.getStringSet(SUFFIX, emptySet()).orEmpty()
+        return exact.contains(number) || prefix.any { number.startsWith(it) } || suffix.any { number.endsWith(it) }
+    }
+
+    fun matches(context: Context, number: String): Boolean {
         val p = context.getSharedPreferences(PREFS, 0)
         val exact = p.getStringSet(EXACT, emptySet()).orEmpty()
         val prefix = p.getStringSet(PREFIX, emptySet()).orEmpty()
