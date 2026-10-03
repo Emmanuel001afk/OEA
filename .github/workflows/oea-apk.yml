@@ -40,16 +40,20 @@ jobs:
       - name: Build OEA Launcher APK
         run: ./gradlew assembleLawnWithQuickstepGithubRelease --stacktrace
 
+      - name: Prepare APK for publishing
+        run: |
+          APK="$(find . -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
+
       - name: Publish latest APK release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          APK="$(find . -path '*build/outputs/apk/*.apk' | head -n 1)"
-          test -n "$APK"
           if gh release view oea-latest >/dev/null 2>&1; then
-            gh release upload oea-latest "$APK" --clobber
+            gh release upload oea-latest "$RUNNER_TEMP/OEA-latest.apk" --clobber
           else
-            gh release create oea-latest "$APK" --title "OEA Latest" --notes "Latest OEA Launcher build from main."
+            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --title "OEA Latest" --notes "Latest OEA Launcher build from main."
           fi
 
       - name: Upload APK
