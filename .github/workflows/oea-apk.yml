@@ -21,7 +21,10 @@ jobs:
           submodules: recursive
 
       - name: Refresh recursive submodules
-        run: git submodule sync --recursive && git submodule update --init --recursive --remote
+        run: git submodule sync --recursive
+          git submodule update --init --recursive
+          git -C platform_frameworks_libs_systemui fetch origin 7d9e92b
+          git -C platform_frameworks_libs_systemui checkout 7d9e92b
 
       - name: Set up Java 21
         uses: actions/setup-java@v4
