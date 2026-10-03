@@ -1,4 +1,4 @@
-package com.aria.launcher.aria.llm
+package app.lawnchair.oea.ai.llm
 
 import android.content.Context
 import android.util.Log
