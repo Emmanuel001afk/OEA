@@ -128,7 +128,7 @@ object LawnchairLockedStateController {
         return lockedListWithUserId.contains(appendUserWithBrace(taskIdentifier, userId.toString()))
     }
 
-    // TODO Implement this, when the app is uninstalled
+    // Remove persisted task-lock state when an app/task is uninstalled.
     fun removeTaskLockState(taskIdentifier: String, userId: Int) {
         if (userId != -1) {
             backgroundThreadHandler.post {
