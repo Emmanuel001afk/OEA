@@ -1,0 +1,60 @@
+name: Import ARIA Launcher base
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-aria:
+    if: ${{ !hashFiles('.oea-aria-imported') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OEA
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Clone ARIA Launcher source
+        run: git clone --depth 1 --branch aria-dev https://github.com/trek-boldly-go/aria-launcher.git /tmp/aria
+      - name: Import source
+        run: |
+          rm -rf /tmp/aria/.git
+          cp -a /tmp/aria/. .
+          rm -rf .github
+          mkdir -p .github/workflows
+          touch .oea-aria-imported
+          cat > OEA_BASE.md <<'EOF'
+# OEA
+
+OEA is the user's launcher project.
+
+The initial implementation is based on the ARIA Launcher aria-dev source as a starting point. OEA is the destination project; ARIA itself is not modified.
+
+The imported source will be audited and adapted: unwanted ARIA/Lawnchair features will be removed and OEA-specific functionality will be added in subsequent commits.
+EOF
+          cat > .github/workflows/import-aria.yml <<'EOF'
+name: Import ARIA Launcher base
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import-aria:
+    if: ${{ !hashFiles('.oea-aria-imported') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo 'ARIA import marker exists; no second import is required.'
+EOF
+      - name: Commit imported base
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Import ARIA Launcher base into OEA'
+          git push origin HEAD:main
