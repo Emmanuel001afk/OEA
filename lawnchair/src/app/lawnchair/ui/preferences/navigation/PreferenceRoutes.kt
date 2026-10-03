@@ -78,20 +78,10 @@ data object OeaThemes : PreferenceRootRoute
 @Serializable
 data object OeaSystems : PreferenceRootRoute
 
-@Serializable
-data object AriaDebug : PreferenceRootRoute
 
-@Serializable
-data object AriaSettings : PreferenceRootRoute
 
-@Serializable
-data object AriaRules : PreferenceRootRoute
 
-@Serializable
-data object AriaMemory : PreferenceRootRoute
 
-@Serializable
-data object AriaLlmSetup : PreferenceRoute
 
 @Serializable
 data object FeatureFlags : PreferenceRoute
