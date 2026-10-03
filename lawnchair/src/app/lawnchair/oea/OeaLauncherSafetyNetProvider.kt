@@ -1,0 +1,200 @@
+package app.lawnchair.oea
+
+import android.app.Activity
+import android.app.Application
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.GridLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import com.android.launcher3.Launcher
+
+/**
+ * OEA launcher safety net.
+ *
+ * Launcher3/Lawnchair remains the real launcher. This provider is only a last-resort recovery
+ * surface: if the launcher activity is resumed with an empty/blank decor tree, it exposes a
+ * functional app surface instead of leaving the user on a black screen.
+ *
+ * It deliberately does not replace Launcher3 features during normal operation.
+ */
+class OeaLauncherSafetyNetProvider : android.content.ContentProvider() {
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    override fun onCreate(): Boolean {
+        val app = context?.applicationContext as? Application ?: return false
+        app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityResumed(activity: Activity) {
+                if (activity is Launcher) scheduleHealthCheck(activity)
+            }
+            override fun onActivityPaused(activity: Activity) = Unit
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) = Unit
+        })
+        return true
+    }
+
+    private fun scheduleHealthCheck(activity: Activity) {
+        mainHandler.postDelayed({
+            if (activity.isFinishing || activity.isDestroyed) return@postDelayed
+            val root = activity.window?.decorView as? ViewGroup ?: return@postDelayed
+            if (root.childCount == 0 || !hasVisibleContent(root)) {
+                installRecoverySurface(activity, root)
+            }
+        }, 1200L)
+    }
+
+    private fun hasVisibleContent(root: ViewGroup): Boolean {
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (child.visibility == View.VISIBLE && child.width > 0 && child.height > 0) return true
+        }
+        return false
+    }
+
+    private fun installRecoverySurface(activity: Activity, root: ViewGroup) {
+        if (root.findViewWithTag<View>(TAG) != null) return
+
+        val scroll = ScrollView(activity).apply {
+            tag = TAG
+            setBackgroundColor(Color.BLACK)
+            isFillViewport = true
+        }
+        val content = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(activity, 24), dp(activity, 32), dp(activity, 24), dp(activity, 32))
+        }
+
+        content.addView(TextView(activity).apply {
+            text = "OEA Launcher"
+            textSize = 28f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+        }, match())
+        content.addView(TextView(activity).apply {
+            text = "Launcher recovery surface"
+            textSize = 15f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
+        }, match())
+
+        val apps = activity.packageManager.queryIntentActivities(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
+            0,
+        ).sortedBy { it.loadLabel(activity.packageManager).toString().lowercase() }
+
+        val grid = GridLayout(activity).apply {
+            columnCount = 4
+            useDefaultMargins = true
+            alignmentMode = GridLayout.ALIGN_BOUNDS
+        }
+        for (resolveInfo in apps) {
+            val label = resolveInfo.loadLabel(activity.packageManager).toString()
+            val icon = resolveInfo.loadIcon(activity.packageManager)
+            grid.addView(Button(activity).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                setCompoundDrawablesWithIntrinsicBounds(null, icon, null, null)
+                setOnClickListener {
+                    runCatching {
+                        val launch = Intent(Intent.ACTION_MAIN).apply {
+                            addCategory(Intent.CATEGORY_LAUNCHER)
+                            component = ComponentName(
+                                resolveInfo.activityInfo.packageName,
+                                resolveInfo.activityInfo.name,
+                            )
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        activity.startActivity(launch)
+                    }
+                }
+            }, GridLayout.LayoutParams().apply {
+                width = 0
+                height = dp(activity, 92)
+                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+            })
+        }
+        content.addView(grid, match())
+
+        content.addView(Button(activity).apply {
+            text = "Launcher settings"
+            setOnClickListener { startSettings(activity, Settings.ACTION_HOME_SETTINGS) }
+        }, match())
+        content.addView(Button(activity).apply {
+            text = "Widgets"
+            setOnClickListener {
+                runCatching {
+                    activity.startActivity(
+                        Intent("android.intent.action.PICK").addCategory(Intent.CATEGORY_DEFAULT),
+                    )
+                }
+            }
+        }, match())
+        content.addView(Button(activity).apply {
+            text = "Restart launcher"
+            setOnClickListener {
+                root.removeView(scroll)
+                activity.recreate()
+            }
+        }, match())
+
+        scroll.addView(content, match())
+        root.addView(scroll, ViewGroup.LayoutParams(-1, -1))
+    }
+
+    private fun startSettings(activity: Activity, action: String) {
+        runCatching { activity.startActivity(Intent(action)) }
+    }
+
+    private fun dp(context: Context, value: Int): Int =
+        (value * context.resources.displayMetrics.density).toInt()
+
+    private fun match(): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = 8
+        }
+
+    override fun query(
+        uri: android.net.Uri,
+        projection: Array<String>?,
+        selection: String?,
+        selectionArgs: Array<String>?,
+        sortOrder: String?,
+    ) = null
+
+    override fun getType(uri: android.net.Uri) = null
+
+    override fun insert(uri: android.net.Uri, values: android.content.ContentValues?) = null
+
+    override fun delete(
+        uri: android.net.Uri,
+        selection: String?,
+        selectionArgs: Array<String>?,
+    ) = 0
+
+    override fun update(
+        uri: android.net.Uri,
+        values: android.content.ContentValues?,
+        selection: String?,
+        selectionArgs: Array<String>?,
+    ) = 0
+
+    companion object {
+        private const val TAG = "oea_launcher_recovery"
+    }
+}
