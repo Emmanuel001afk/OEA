@@ -1,9 +1,9 @@
-package com.aria.launcher.aria.llm
+package app.lawnchair.oea.ai.llm
 
-import com.aria.launcher.aria.data.ContextSignalManager
-import com.aria.launcher.aria.engine.ContextKey
-import com.aria.launcher.aria.engine.DeviceCapabilityCatalog
-import com.aria.launcher.aria.engine.EditorialToolPolicy
+import app.lawnchair.oea.ai.data.ContextSignalManager
+import app.lawnchair.oea.ai.engine.ContextKey
+import app.lawnchair.oea.ai.engine.DeviceCapabilityCatalog
+import app.lawnchair.oea.ai.engine.EditorialToolPolicy
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
