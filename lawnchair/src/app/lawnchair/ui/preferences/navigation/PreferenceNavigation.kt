@@ -25,6 +25,7 @@ import app.lawnchair.ui.preferences.destinations.AppDrawerFoldersPreference
 import app.lawnchair.ui.preferences.destinations.AppDrawerPreferences
 import app.lawnchair.ui.preferences.destinations.AriaDebugPreferences
 import app.lawnchair.ui.preferences.destinations.OeaThemePreferences
+import app.lawnchair.ui.preferences.destinations.OeaSystemsPreferences
 import app.lawnchair.ui.preferences.destinations.AriaLlmProviderSetupPreferences
 import app.lawnchair.ui.preferences.destinations.AriaSettingsPreferences
 import app.lawnchair.ui.preferences.destinations.BackupAndRestorePreference
@@ -159,6 +160,7 @@ fun PreferenceNavigation(
         composable<FeatureFlags> { FeatureFlagsPreference() }
 
         composable<OeaThemes> { OeaThemePreferences() }
+        composable<OeaSystems> { OeaSystemsPreferences() }
         composable<AriaDebug> { AriaDebugPreferences() }
         composable<AriaSettings> { AriaSettingsPreferences() }
         composable<AriaLlmSetup> { AriaLlmProviderSetupPreferences() }
