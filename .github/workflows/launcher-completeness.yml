@@ -22,6 +22,9 @@ jobs:
       - name: Verify launcher component contract
         run: python3 tools/launcher-completeness-check.py
 
+      - name: Verify complete launcher feature suites
+        run: python3 tools/launcher-feature-suite.py
+
       - name: Verify Gradle wrapper
         run: test -x ./gradlew || chmod +x ./gradlew
 
