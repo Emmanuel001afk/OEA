@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Donovon Simpson. See LICENSE-ARIA.md for licensing terms.
-package com.aria.launcher.aria.llm
+package app.lawnchair.oea.ai.llm
 
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
