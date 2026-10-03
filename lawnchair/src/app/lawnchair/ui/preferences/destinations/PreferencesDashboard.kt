@@ -58,6 +58,7 @@ import app.lawnchair.ui.preferences.components.layout.PreferenceTemplate
 import app.lawnchair.ui.preferences.data.liveinfo.SyncLiveInformation
 import app.lawnchair.ui.preferences.navigation.About
 import app.lawnchair.ui.preferences.navigation.OeaThemes
+import app.lawnchair.ui.preferences.navigation.OeaSystems
 import app.lawnchair.ui.preferences.navigation.AppDrawer
 import app.lawnchair.ui.preferences.navigation.AriaDebug
 import app.lawnchair.ui.preferences.navigation.AriaSettings
@@ -276,6 +277,18 @@ fun PreferencesDashboard(
                     iconResource = R.drawable.ic_wallpaper,
                     onNavigate = { onNavigate(OeaThemes) },
                     isSelected = currentRoute is OeaThemes,
+                    isFirst = it.isFirst,
+                    isLast = it.isLast,
+                )
+            }
+
+            Item {
+                PreferenceCategory(
+                    label = stringResource(R.string.oea_systems_label),
+                    description = stringResource(R.string.oea_systems_description),
+                    iconResource = R.drawable.ic_build,
+                    onNavigate = { onNavigate(OeaSystems) },
+                    isSelected = currentRoute is OeaSystems,
                     isFirst = it.isFirst,
                     isLast = it.isLast,
                 )
