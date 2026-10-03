@@ -152,7 +152,6 @@ import app.lawnchair.preferences.PreferenceManager;
 import app.lawnchair.preferences2.PreferenceManager2;
 import app.lawnchair.smartspace.DoubleShadowTextView;
 import app.lawnchair.smartspace.SmartspaceAppWidgetProvider;
-import app.lawnchair.smartspace.model.AriaSmartspace;
 import app.lawnchair.smartspace.model.LawnchairSmartspace;
 import app.lawnchair.smartspace.model.SmartspaceMode;
 import app.lawnchair.theme.drawable.DrawableTokens;
@@ -275,7 +274,6 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     private float mYDown;
     private View mFirstPagePinnedItem;
     private int mSmartspaceCellRowSpan = 1;
-    private View mAriaPredictedPanel;
     private boolean mIsEventOverFirstPagePinnedItem;
 
     final static float START_DAMPING_TOUCH_SLOP_ANGLE = (float) Math.PI / 6;
@@ -690,21 +688,6 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             Log.e(TAG, "Failed to add to item at (0, 0) to CellLayout");
         }
 
-        // ARIA: Add predicted apps panel below the smartspace, filling remaining rows
-        int numRows = mLauncher.getDeviceProfile().inv.numRows;
-        int ariaStartRow = mSmartspaceCellRowSpan;
-        int ariaRows = numRows - ariaStartRow;
-        if (ariaRows > 0) {
-            mAriaPredictedPanel = LayoutInflater.from(getContext())
-                    .inflate(R.layout.aria_predicted_panel, firstPage, false);
-            CellLayoutLayoutParams ariaLp = new CellLayoutLayoutParams(
-                    0, ariaStartRow, cellHSpan, ariaRows);
-            ariaLp.canReorder = false;
-            if (!firstPage.addViewToCellLayout(
-                    mAriaPredictedPanel, 0, R.id.aria_predicted_panel, ariaLp, true)) {
-                Log.e(TAG, "Failed to add ARIA predicted panel");
-            }
-        }
     }
 
     public void removeAllWorkspaceScreens() {
@@ -715,15 +698,6 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         // Recycle the first page pinned item
         if (mFirstPagePinnedItem != null) {
             ((ViewGroup) mFirstPagePinnedItem.getParent()).removeView(mFirstPagePinnedItem);
-        }
-
-        // Recycle the ARIA predicted apps panel
-        if (mAriaPredictedPanel != null) {
-            ViewGroup parent = (ViewGroup) mAriaPredictedPanel.getParent();
-            if (parent != null) {
-                parent.removeView(mAriaPredictedPanel);
-            }
-            mAriaPredictedPanel = null;
         }
 
         // Remove the pages and clear the screen models
