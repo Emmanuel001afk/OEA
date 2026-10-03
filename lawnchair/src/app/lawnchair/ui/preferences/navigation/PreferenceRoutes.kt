@@ -76,6 +76,9 @@ data object DebugMenu : PreferenceRootRoute
 data object OeaThemes : PreferenceRootRoute
 
 @Serializable
+data object OeaSystems : PreferenceRootRoute
+
+@Serializable
 data object AriaDebug : PreferenceRootRoute
 
 @Serializable
