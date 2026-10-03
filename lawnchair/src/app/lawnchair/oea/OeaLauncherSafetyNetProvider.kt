@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -18,13 +19,16 @@ import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
+import com.android.launcher3.folder.FolderIcon
+import com.android.launcher3.widget.LauncherAppWidgetHostView
 
 /**
  * OEA launcher safety net.
  *
  * Launcher3/Lawnchair remains the real launcher. This provider is only a last-resort recovery
- * surface: if the launcher activity is resumed with an empty/blank decor tree, it exposes a
+ * surface: if the launcher activity is resumed but has no actual launcher content, it exposes a
  * functional app surface instead of leaving the user on a black screen.
  *
  * It deliberately does not replace Launcher3 features during normal operation.
@@ -48,25 +52,42 @@ class OeaLauncherSafetyNetProvider : android.content.ContentProvider() {
         return true
     }
 
-    private fun scheduleHealthCheck(activity: Activity) {
+    private fun scheduleHealthCheck(activity: Launcher) {
         mainHandler.postDelayed({
             if (activity.isFinishing || activity.isDestroyed) return@postDelayed
             val root = activity.window?.decorView as? ViewGroup ?: return@postDelayed
-            if (root.childCount == 0 || !hasVisibleContent(root)) {
+
+            // A populated decor tree can still exist while Launcher3 failed to bind its
+            // workspace. Check for actual launcher items instead of merely checking visibility.
+            if (!hasUsableLauncherContent(root)) {
                 installRecoverySurface(activity, root)
             }
-        }, 1200L)
+        }, 1500L)
     }
 
-    private fun hasVisibleContent(root: ViewGroup): Boolean {
-        for (i in 0 until root.childCount) {
-            val child = root.getChildAt(i)
-            if (child.visibility == View.VISIBLE && child.width > 0 && child.height > 0) return true
+    private fun hasUsableLauncherContent(root: ViewGroup): Boolean {
+        if (root.findViewWithTag<View>(TAG) != null) return true
+
+        var meaningfulItems = 0
+        fun walk(view: View) {
+            if (view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return
+            if (view is BubbleTextView || view is FolderIcon || view is LauncherAppWidgetHostView) {
+                meaningfulItems++
+                return
+            }
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    walk(view.getChildAt(i))
+                    if (meaningfulItems >= 1) return
+                }
+            }
         }
-        return false
+
+        walk(root)
+        return meaningfulItems > 0
     }
 
-    private fun installRecoverySurface(activity: Activity, root: ViewGroup) {
+    private fun installRecoverySurface(activity: Launcher, root: ViewGroup) {
         if (root.findViewWithTag<View>(TAG) != null) return
 
         val scroll = ScrollView(activity).apply {
@@ -81,13 +102,13 @@ class OeaLauncherSafetyNetProvider : android.content.ContentProvider() {
         }
 
         content.addView(TextView(activity).apply {
-            text = "OEA Launcher"
+            text = "OEA Launcher Recovery"
             textSize = 28f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
         }, match())
         content.addView(TextView(activity).apply {
-            text = "Launcher recovery surface"
+            text = "The launcher did not load its Home content. Your apps are still installed."
             textSize = 15f
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
@@ -132,9 +153,24 @@ class OeaLauncherSafetyNetProvider : android.content.ContentProvider() {
         content.addView(grid, match())
 
         content.addView(Button(activity).apply {
-            text = "Launcher settings"
+            text = "Switch default Home launcher"
             setOnClickListener { startSettings(activity, Settings.ACTION_HOME_SETTINGS) }
         }, match())
+
+        content.addView(Button(activity).apply {
+            text = "OEA app settings"
+            setOnClickListener {
+                runCatching {
+                    activity.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${activity.packageName}"),
+                        ),
+                    )
+                }
+            }
+        }, match())
+
         content.addView(Button(activity).apply {
             text = "Widgets"
             setOnClickListener {
@@ -145,6 +181,7 @@ class OeaLauncherSafetyNetProvider : android.content.ContentProvider() {
                 }
             }
         }, match())
+
         content.addView(Button(activity).apply {
             text = "Restart launcher"
             setOnClickListener {
