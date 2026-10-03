@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Donovon Simpson. See LICENSE-ARIA.md for licensing terms.
-package com.aria.launcher.aria.llm
+package app.lawnchair.oea.ai.llm
 
-import com.aria.launcher.aria.data.WeatherProvider
-import com.aria.launcher.aria.engine.AriaContext
+import app.lawnchair.oea.ai.data.WeatherProvider
+import app.lawnchair.oea.ai.engine.AriaContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
