@@ -50,8 +50,8 @@ SUITES = {
         "src/com/android/launcher3/dot/DotInfo.java",
     ],
     "icons/themes/wallpaper": [
-        "src/com/android/launcher3/icons/LauncherIcons.java",
-        "src/com/android/launcher3/util/WallpaperThemeManager.java",
+        "src/com/android/launcher3/icons/LauncherIcons.kt",
+        "src/com/android/launcher3/util/WallpaperThemeManager.kt",
         "lawnchair/src/app/lawnchair/icons/LawnchairThemeManager.kt",
         "lawnchair/src/app/lawnchair/theme/ThemeProvider.kt",
     ],
@@ -64,7 +64,7 @@ SUITES = {
     "backup/restore/model": [
         "src/com/android/launcher3/LauncherBackupAgent.java",
         "src/com/android/launcher3/LauncherProvider.java",
-        "src/com/android/launcher3/model/LauncherModel.java",
+        "src/com/android/launcher3/model/LoaderTask.java",
         "src/com/android/launcher3/model/ModelWriter.java",
     ],
     "OEA runtime safety": [
