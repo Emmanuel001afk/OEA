@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""OEA launcher feature-suite contract.
-
-This gate verifies that every normal-launcher subsystem remains present in the source tree,
-that OEA/Lawnchair integration points remain wired, and that the build exposes the launcher
-through Android's HOME contract. It is deliberately structural: Android UI behavior still
-requires the APK smoke build and device testing.
-"""
+"""OEA launcher feature-suite contract."""
 from pathlib import Path
 import re
 import sys
@@ -79,9 +73,6 @@ SUITES = {
     ],
 }
 
-MANIFEST = ROOT / "AndroidManifest-common.xml"
-MANIFEST2 = ROOT / "AndroidManifest.xml"
-
 REQUIRED_MANIFEST = {
     "HOME": r"android\.intent\.category\.HOME",
     "DEFAULT": r"android\.intent\.category\.DEFAULT",
@@ -89,7 +80,7 @@ REQUIRED_MANIFEST = {
     "LauncherProvider": r"com\.android\.launcher3\.LauncherProvider",
     "WidgetPicker": r"com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity",
     "NotificationListener": r"com\.android\.launcher3\.notification\.NotificationListener",
-    "BackupAgent": r"android:backupAgent="com\.android\.launcher3\.LauncherBackupAgent"",
+    "BackupAgent": r'android:backupAgent="com\.android\.launcher3\.LauncherBackupAgent"',
     "OEA safety net": r"app\.lawnchair\.oea\.OeaLauncherSafetyNetProvider",
 }
 
@@ -102,40 +93,43 @@ def main():
         if missing:
             failures.extend(f"[{suite}] missing: {p}" for p in missing)
 
-    manifest = MANIFEST.read_text(encoding="utf-8") + "\n" + MANIFEST2.read_text(encoding="utf-8")
+    manifest = (
+        (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
+        + "\n"
+        + (ROOT / "AndroidManifest.xml").read_text(encoding="utf-8")
+    )
     for name, pattern in REQUIRED_MANIFEST.items():
         if not re.search(pattern, manifest):
             failures.append(f"[manifest] missing launcher contract: {name}")
 
-    # Catch accidental placeholder implementations in launcher-owned source.
     source_files = []
     for base in ("src/com/android/launcher3", "quickstep/src/com/android/quickstep",
                  "lawnchair/src/app/lawnchair"):
         source_files.extend((ROOT / base).rglob("*.java"))
         source_files.extend((ROOT / base).rglob("*.kt"))
+
     placeholder_patterns = [
-        r"TODO\\s*\\(?(?:implement|implementation|stub)",
-        r"throw\\s+UnsupportedOperationException",
-        r"NotImplementedError\\s*\\(",
+        r"TODO\s*\(?(?:implement|implementation|stub)",
+        r"throw\s+UnsupportedOperationException",
+        r"NotImplementedError\s*\(",
     ]
     for path in source_files:
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        source = path.read_text(encoding="utf-8", errors="ignore")
         for pattern in placeholder_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
+            if re.search(pattern, source, re.IGNORECASE):
                 failures.append(f"[placeholder] suspicious unfinished implementation: {path}")
 
     print("OEA Launcher Feature Suite")
     print("===========================")
     for suite, count in counts.items():
         print(f"PASS  {suite}: {count}/{len(SUITES[suite])} components present")
-    print(f"PASS  manifest: {len(REQUIRED_MANIFEST)}/{len(REQUIRED_MANIFEST)} contracts present")
-
     if failures:
         print("\nFAILURES")
         for failure in failures:
             print(" - " + failure)
         return 1
 
+    print(f"PASS  manifest: {len(REQUIRED_MANIFEST)}/{len(REQUIRED_MANIFEST)} contracts present")
     print(f"PASS  unfinished-code scan: {len(source_files)} launcher source files checked")
     print("RESULT: COMPLETE STRUCTURAL CONTRACT")
     return 0
