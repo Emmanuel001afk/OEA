@@ -1,28 +1,12 @@
-name: Import ARIA Launcher base
+name: OEA write permission test
 on:
-  workflow_dispatch:
   push:
     branches: [main]
 jobs:
-  import:
-    if: github.actor != 'github-actions[bot]'
+  test:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - name: Import ARIA source
-        run: |
-          rm -rf /tmp/aria
-          git clone --depth 1 --branch aria-dev https://github.com/trek-boldly-go/aria-launcher.git /tmp/aria
-          rsync -a --exclude='.git' --exclude='.github' /tmp/aria/ ./
-          rm -f OEA_IMPORT_START.md OEA_PACKAGE_TRIGGER.md
-          touch .oea-aria-imported
-          printf '%s\n' '# OEA' '' 'OEA launcher based on the ARIA Launcher aria-dev source.' 'The original ARIA repository is not modified.' > OEA_BASE.md
-      - name: Commit imported source
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'Import ARIA Launcher base into OEA'
-          git push origin HEAD:main
+      - run: echo "runner and write permission active"
