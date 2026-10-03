@@ -974,4 +974,5 @@
     <string name="grant_requested_permissions_tap">Tap to grant permissions</string>
     <!-- Message shown when all home screen views are removed -->
     <string name="home_screen_all_views_removed_msg">Home screen cleared</string>
+    <string name="oea_split_accessibility_description">OEA split screen launcher</string>
 </resources>
