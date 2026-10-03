@@ -198,6 +198,16 @@
 
     <string name="about_label">About</string>
 
+    <!-- OEA theme gallery -->
+    <string name="oea_themes_label">OEA Themes</string>
+    <string name="oea_themes_gallery">Theme gallery</string>
+    <string name="oea_themes_title">Make your own OEA theme</string>
+    <string name="oea_themes_description">Add images from your device as themes. OEA applies the image as your wallpaper and uses its colors for the launcher.</string>
+    <string name="oea_theme_add">Add theme image</string>
+    <string name="oea_themes_empty">No custom themes yet. Add an image to create your first theme.</string>
+    <string name="oea_theme_name">OEA Theme %1$d</string>
+
+
     <string name="app_info_drop_target_label">App info</string>
     <string name="debug_restart_launcher">Restart Lawnchair</string>
     <string name="experimental_features_label">Experimental features</string>
