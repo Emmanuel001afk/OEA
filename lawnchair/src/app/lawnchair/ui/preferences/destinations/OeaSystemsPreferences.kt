@@ -9,6 +9,8 @@ import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,6 +35,7 @@ fun OeaSystemsPreferences(modifier: Modifier = Modifier) {
     var dnd by remember { mutableStateOf(OeaGameBoostStore.prefs(context).getBoolean("dnd", true)) }
     var firstPackage by remember { mutableStateOf(games.firstOrNull().orEmpty()) }
     var secondPackage by remember { mutableStateOf(games.drop(1).firstOrNull().orEmpty()) }
+    val contactPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun openSettings(action: String) = runCatching {
         context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -70,6 +73,7 @@ fun OeaSystemsPreferences(modifier: Modifier = Modifier) {
                         Text("Allow starred/favorites")
                         Switch(checked = allowStarred, onCheckedChange = { allowStarred = it; OeaCallBlockRules.setAllowStarred(context, it) })
                     }
+                    Button(onClick = { contactPermission.launch(android.Manifest.permission.READ_CONTACTS) }) { Text("Allow contacts access") }
                     Button(onClick = { OeaCallBlockRules.setRules(context, setOf(exactText), setOf(prefixText), setOf(suffixText)) }) {
                         Text("Save blocking rules")
                     }
