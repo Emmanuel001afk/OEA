@@ -41,6 +41,6 @@ class LawnchairLayoutFactory(context: Context) :
     }
 
     override fun close() {
-        TODO("Not yet implemented")
+        // No external resources are owned by this factory.
     }
 }
