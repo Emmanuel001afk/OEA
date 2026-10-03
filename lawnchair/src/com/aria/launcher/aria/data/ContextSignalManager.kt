@@ -55,13 +55,16 @@ class ContextSignalManager @Inject constructor(
 
     /** Call once from Application.onCreate() to seed initial state. */
     fun init() {
+        // Context collection must never be able to prevent the launcher from starting.
         _isCharging.value = readChargingState()
         _batteryLevel.value = readBatteryLevel()
         _wifiSsid.value = readWifiSsid()
         _isAndroidAutoConnected.value = AndroidAutoReceiver.isCurrentlyInCarMode(context)
         _connectedCarName.value = AndroidAutoReceiver.lastCarName
-        registerActivityRecognition()
-        registerWifiListener()
+        runCatching { registerActivityRecognition() }
+            .onFailure { Log.w(TAG, "Activity recognition registration skipped", it) }
+        runCatching { registerWifiListener() }
+            .onFailure { Log.w(TAG, "WiFi listener registration skipped", it) }
         registerAndroidAutoListener()
         Log.d(TAG, "ContextSignalManager initialized: charging=${_isCharging.value}, wifi=${_wifiSsid.value}")
     }
@@ -188,6 +191,12 @@ class ContextSignalManager @Inject constructor(
 
     @SuppressLint("MissingPermission")
     private fun registerActivityRecognition() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.d(TAG, "Activity recognition permission not granted; deferring registration")
+            return
+        }
         val intent = Intent(context, ActivityUpdateReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
