@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Donovon Simpson. See LICENSE-ARIA.md for licensing terms.
-package com.aria.launcher.aria.llm
+package app.lawnchair.oea.ai.llm
 
 import android.app.ActivityManager
 import android.content.Context
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import com.aria.launcher.aria.scheduler.ModelDownloadWorker
+import app.lawnchair.oea.ai.scheduler.ModelDownloadWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
