@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Donovon Simpson. See LICENSE-ARIA.md for licensing terms.
-package com.aria.launcher.aria.llm
+package app.lawnchair.oea.ai.llm
 
 import java.util.Base64
 import kotlinx.serialization.SerialName
