@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -187,19 +188,20 @@ private fun OeaThemeCard(
         shape = RoundedCornerShape(20.dp),
     ) {
         Column {
-            Image(
-                bitmap?.let { androidx.compose.ui.graphics.asImageBitmap() }
-                    ?: return@Column,
-                contentDescription = stringResource(
-                    R.string.oea_theme_name,
-                    index + 1,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp)
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
-                contentScale = ContentScale.Crop,
-            )
+            bitmap?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = stringResource(
+                        R.string.oea_theme_name,
+                        index + 1,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(start = 12.dp),
