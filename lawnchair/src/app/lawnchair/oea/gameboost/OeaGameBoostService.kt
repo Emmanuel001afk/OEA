@@ -25,7 +25,7 @@ class OeaGameBoostService : Service() {
 
     private val tick = object : Runnable {
         override fun run() {
-            if (!isUsageAccessGranted()) { stopSelf(); return }
+            if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
             val game = foregroundPackage()
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                 if (activeGame != game) {
