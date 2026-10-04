@@ -49,7 +49,7 @@ Any change that affects the database schema requires a version bump and migratio
 
 ## How to find the correct SQL
 
-Compare the exported schemas in `schemas/com.aria.launcher.aria.data.AriaDatabase/`:
+Compare the exported schemas in `schemas/app.lawnchair.data.AppDatabase/`:
 ```bash
 diff <(python3 -c "..." N.json | sort) <(python3 -c "..." N+1.json | sort)
 ```
