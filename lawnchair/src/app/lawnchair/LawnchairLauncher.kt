@@ -268,11 +268,6 @@ class LawnchairLauncher : QuickstepLauncher() {
         }
     }
 
-    override fun onDestroy() {
-        oeaHomeController.onLauncherDetached()
-        super.onDestroy()
-    }
-
     override fun collectStateHandlers(out: MutableList<StateHandler<LauncherState>>) {
         super.collectStateHandlers(out)
         out.add(SearchBarStateHandler(this))
@@ -495,6 +490,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onDestroy() {
+        oeaHomeController.onLauncherDetached()
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled
         SmartspacerClient.close()
