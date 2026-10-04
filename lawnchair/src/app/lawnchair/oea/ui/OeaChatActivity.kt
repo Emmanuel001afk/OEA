@@ -1,55 +1,57 @@
 package app.lawnchair.oea.ui
 
 import android.os.Bundle
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import app.lawnchair.oea.agent.OeaAgent
 import app.lawnchair.oea.engine.OeaEngine
 
+/**
+ * OEA command surface. It intentionally uses the existing Android view stack so the
+ * launcher does not gain another UI framework dependency just for the command layer.
+ */
 class OeaChatActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         val agent = OeaAgent.get(this)
-
-        setContent {
-            var command by remember { mutableStateOf("") }
-            var result by remember { mutableStateOf<String?>(null) }
-
-            MaterialTheme {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Text("OEA", style = MaterialTheme.typography.headlineMedium)
-                    Text("Deterministic command surface")
-                    OutlinedTextField(
-                        value = command,
-                        onValueChange = { command = it },
-                        label = { Text("Command") },
-                        singleLine = true,
-                    )
-                    Button(onClick = {
-                        result = when (val response = agent.handle(command)) {
-                            is OeaEngine.Result.Success -> response.message
-                            is OeaEngine.Result.Failure -> response.message
-                        }
-                    }) {
-                        Text("Run")
-                    }
-                    result?.let { Text(it) }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 24, 24, 24)
+        }
+        val title = TextView(this).apply {
+            text = "OEA"
+            textSize = 28f
+        }
+        val command = EditText(this).apply {
+            hint = "Try: open Settings"
+            singleLine = true
+        }
+        val result = TextView(this)
+        val run = Button(this).apply {
+            text = "Run"
+            setOnClickListener {
+                result.text = when (val response = agent.handle(command.text.toString())) {
+                    is OeaEngine.Result.Success -> response.message
+                    is OeaEngine.Result.Failure -> response.message
                 }
             }
         }
+
+        root.addView(title, match())
+        root.addView(command, match())
+        root.addView(run, match())
+        root.addView(result, match())
+        setContentView(root)
     }
+
+    private fun match(): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { bottomMargin = 16 }
 }
