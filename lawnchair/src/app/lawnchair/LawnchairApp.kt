@@ -83,7 +83,6 @@ class LawnchairApp :
         super.onCreate()
         instance = this
         OeaRuntime.initialize(this)
-        OeaScheduler.initialize(this)
         QuickStepContract.sRecentsDisabled = !recentsEnabled
         Flowerpot.Manager.getInstance(this)
         registerActivityLifecycleCallbacks(activityHandler)
