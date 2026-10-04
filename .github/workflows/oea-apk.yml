@@ -44,6 +44,12 @@ jobs:
         run: |
           APK="$(find . -type f -name '*.apk' -print -quit)"
           test -n "$APK"
+          echo "Verifying APK application identity: $APK"
+          aapt2 dump badging "$APK" | grep -F "package: name='com.oea.launcher'"
+          if aapt2 dump badging "$APK" | grep -Fq "com.aria.launcher"; then
+            echo "ERROR: OEA APK still contains the Aria application identity."
+            exit 1
+          fi
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
 
       - name: Publish latest APK release
