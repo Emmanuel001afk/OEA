@@ -15,8 +15,17 @@ import kotlinx.coroutines.flow.asStateFlow
 class OeaDataStore private constructor(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    private val _modelBound = MutableStateFlow(false)
+    val modelBound: StateFlow<Boolean> = _modelBound.asStateFlow()
+
+    private val _applicationCount = MutableStateFlow(0)
+    val applicationCount: StateFlow<Int> = _applicationCount.asStateFlow()
+
     private val _homeSurfaceEnabled = MutableStateFlow(prefs.getBoolean(KEY_HOME_SURFACE, false))
     val homeSurfaceEnabled: StateFlow<Boolean> = _homeSurfaceEnabled.asStateFlow()
+
+    fun markModelBound() { _modelBound.value = true }
+    fun setApplicationCount(count: Int) { _applicationCount.value = count }
 
     fun setHomeSurfaceEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_HOME_SURFACE, enabled).apply()
