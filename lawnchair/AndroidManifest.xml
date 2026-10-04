@@ -99,6 +99,36 @@
             android:exported="false"
             android:label="OEA"
             android:theme="@style/Theme.Lawnchair" />
+        
+        <activity
+            android:name="app.lawnchair.oea.applock.OeaAppLockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Lawnchair" />
+
+        <receiver
+            android:name="app.lawnchair.oea.applock.OeaDeviceAdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/oea_device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name="app.lawnchair.oea.applock.OeaAppLockService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/oea_accessibility_service" />
+        </service>
 
         <activity
             android:name="app.lawnchair.smartspace.SmartspacePreferencesShortcut"
