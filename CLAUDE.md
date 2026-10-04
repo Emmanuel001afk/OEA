@@ -70,7 +70,7 @@ The build uses a 3-dimension flavor matrix:
 | `recents` | `withQuickstep` | Quickswitch recents integration |
 | `channel` | `github`, `nightly`, `play` | Distribution channel |
 
-The development variant is **`lawnWithQuickstepPlayDebug`** — use this for all local builds and tests. The `play` channel matches the installed package (`com.aria.launcher.play.debug`).
+The development variant is **`lawnWithQuickstepPlayDebug`** — use this for all local builds and tests. The `play` channel matches the installed package (`com.oea.launcher.play.debug`).
 
 ## Test Commands
 
