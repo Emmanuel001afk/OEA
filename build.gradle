@@ -285,17 +285,17 @@ android {
         }
 
         github {
-            applicationId 'com.aria.launcher'
+            applicationId 'com.oea.launcher'
             dimension "channel"
         }
 
         nightly {
-            applicationId 'com.aria.launcher.nightly'
+            applicationId 'com.oea.launcher.nightly'
             dimension "channel"
         }
 
         play {
-            applicationId "com.aria.launcher.play"
+            applicationId "com.oea.launcher.play"
             dimension "channel"
             isDefault true
         }
