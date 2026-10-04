@@ -161,13 +161,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <provider
-            android:name="app.lawnchair.oea.OeaLauncherSafetyNetProvider"
-            android:authorities="\${applicationId}.oea.safety"
-            android:exported="false"
-            android:initOrder="100" />
-
-        <provider
+<provider
             android:name="app.lawnchair.bugreport.FileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
