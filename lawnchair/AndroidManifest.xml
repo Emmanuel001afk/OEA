@@ -94,6 +94,11 @@
             android:name="app.lawnchair.BlankActivity"
             android:theme="@style/Theme.Transparent" />
 
+        <provider
+            android:name="app.lawnchair.oea.OeaLauncherSafetyNetProvider"
+            android:authorities="${applicationId}.oea.safety"
+            android:exported="false" />
+
         <activity
             android:name="app.lawnchair.oea.ui.OeaChatActivity"
             android:exported="false"
