@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
@@ -15,6 +17,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.lawnchair.oea.applock.OeaAppFreezer
+import app.lawnchair.oea.applock.OeaAppLockStore
+import app.lawnchair.oea.applock.OeaDeviceAdminReceiver
+import app.lawnchair.oea.ai.OeaAiConfig
+import app.lawnchair.oea.ai.OeaAiStore
 import app.lawnchair.oea.callblocker.OeaCallBlockRules
 import app.lawnchair.oea.gameboost.OeaGameBoostService
 import app.lawnchair.oea.gameboost.OeaGameBoostStore
@@ -34,6 +41,10 @@ fun OeaSystemsPreferences(modifier: Modifier = Modifier) {
     var games by remember { mutableStateOf(OeaGameBoostStore.games(context)) }
     var dnd by remember { mutableStateOf(OeaGameBoostStore.prefs(context).getBoolean("dnd", true)) }
     var firstPackage by remember { mutableStateOf(games.firstOrNull().orEmpty()) }
+    var lockEnabled by remember { mutableStateOf(OeaAppLockStore.enabled(context)) }
+    var lockPackage by remember { mutableStateOf(OeaAppLockStore.packages(context).firstOrNull().orEmpty()) }
+    var freezerPackage by remember { mutableStateOf("") }
+    var ai by remember { mutableStateOf(OeaAiStore.get(context)) }
     var secondPackage by remember { mutableStateOf(games.drop(1).firstOrNull().orEmpty()) }
     val contactPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
