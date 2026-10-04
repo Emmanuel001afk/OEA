@@ -56,7 +56,8 @@ def main() -> int:
     for name, pattern in identity_requirements:
         if not re.search(pattern, build_gradle):
             failures.append(f"application identity requirement missing: {name}")
-    if "com.aria.launcher" in build_gradle:
+    forbidden_identity = "com.aria." + "launcher"
+    if forbidden_identity in build_gradle:
         failures.append("Aria application identity must not remain in OEA build configuration")
 
     # The application ID is an Android identity boundary. Do not allow an Aria
@@ -76,7 +77,7 @@ def main() -> int:
             content = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if "com.aria.launcher" in content:
+        if forbidden_identity in content:
             failures.append(
                 f"Aria application identity must not remain in OEA source/config: {path.relative_to(ROOT)}"
             )
