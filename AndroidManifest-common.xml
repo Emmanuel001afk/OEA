@@ -88,12 +88,6 @@
         android:supportsRtl="true"
         tools:replace="android:label">
 
-        <provider
-            android:name="app.lawnchair.oea.OeaLauncherSafetyNetProvider"
-            android:authorities="${applicationId}.oea.launcher.safetynet"
-            android:exported="false"
-            android:initOrder="100" />
-
         <!-- Intent received when a session is committed -->
         <receiver
             android:name="com.android.launcher3.SessionCommitReceiver"
