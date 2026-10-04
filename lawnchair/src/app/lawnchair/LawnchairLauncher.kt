@@ -39,6 +39,7 @@ import app.lawnchair.gestures.GestureController
 import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
+import app.lawnchair.oea.runtime.OeaHomeController
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.root.RootHelperManager
@@ -92,6 +93,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class LawnchairLauncher : QuickstepLauncher() {
+
+    private val oeaHomeController = OeaHomeController()
 
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
     private val prefs by unsafeLazy { PreferenceManager.getInstance(this) }
@@ -157,6 +160,16 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onCreate(savedInstanceState: Bundle?) {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
+
+        oeaHomeController.onLauncherAttached(launcher.stateManager.state)
+        launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
+            override fun onStateTransitionStart(toState: LauncherState) {
+                oeaHomeController.onLauncherStateChanged(toState)
+            }
+            override fun onStateTransitionComplete(finalState: LauncherState) {
+                oeaHomeController.onLauncherStateChanged(finalState)
+            }
+        })
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
@@ -253,6 +266,11 @@ class LawnchairLauncher : QuickstepLauncher() {
                     android.util.Log.w("LawnchairLauncher", "Deferred database checkpoint skipped", error)
                 }
         }
+    }
+
+    override fun onDestroy() {
+        oeaHomeController.onLauncherDetached()
+        super.onDestroy()
     }
 
     override fun collectStateHandlers(out: MutableList<StateHandler<LauncherState>>) {
