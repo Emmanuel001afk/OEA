@@ -47,6 +47,18 @@ def main() -> int:
         if not (ROOT / rel).is_file():
             failures.append(f"missing required launcher component: {rel}")
 
+    build_gradle = (ROOT / "build.gradle").read_text(encoding="utf-8")
+    identity_requirements = [
+        ("GitHub application ID", r"""applicationId\s+['"]com\.oea\.launcher['"]"""),
+        ("nightly application ID", r"""applicationId\s+['"]com\.oea\.launcher\.nightly['"]"""),
+        ("Play application ID", r"""applicationId\s+['"]com\.oea\.launcher\.play['"]"""),
+    ]
+    for name, pattern in identity_requirements:
+        if not re.search(pattern, build_gradle):
+            failures.append(f"application identity requirement missing: {name}")
+    if "com.aria.launcher" in build_gradle:
+        failures.append("Aria application identity must not remain in OEA build configuration")
+
     common = (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
     specific = (ROOT / "AndroidManifest.xml").read_text(encoding="utf-8")
     merged = common + "\n" + specific
