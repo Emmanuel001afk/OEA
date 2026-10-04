@@ -29,7 +29,7 @@ class OeaChatActivity : ComponentActivity() {
         }
         val command = EditText(this).apply {
             hint = "Try: open Settings"
-            singleLine = true
+            setSingleLine(true)
         }
         val result = TextView(this)
         val run = Button(this).apply {
