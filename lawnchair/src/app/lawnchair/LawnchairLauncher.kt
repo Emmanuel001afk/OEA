@@ -40,6 +40,7 @@ import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
 import app.lawnchair.oea.runtime.OeaHomeController
+import app.lawnchair.oea.scheduler.OeaScheduler
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.root.RootHelperManager
@@ -160,6 +161,9 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onCreate(savedInstanceState: Bundle?) {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
+
+        // Keep non-visual OEA maintenance out of Application.onCreate and the first frame.
+        rootView.postDelayed({ OeaScheduler.initialize(applicationContext) }, 1500L)
 
         oeaHomeController.onLauncherAttached(this, launcher.stateManager.state)
         launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
