@@ -3,7 +3,8 @@
 
 This is intentionally a structural gate, not a replacement for Android UI testing. It prevents
 large launcher subsystems from disappearing from a refactor and verifies that the manifest still
-exposes the components required for a normal launcher build.
+exposes the components required for a normal launcher build. OEA recovery is intentionally a
+normal helper rather than a manifest-started Android component.
 """
 from pathlib import Path
 import re
@@ -26,7 +27,7 @@ REQUIRED_FILES = [
     "quickstep/src/com/android/launcher3/uioverrides/QuickstepLauncher.java",
     "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
     "lawnchair/src/app/lawnchair/LawnchairApp.kt",
-    "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNetProvider.kt",
+    "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNet.kt",
 ]
 
 MANIFEST_REQUIREMENTS = [
@@ -37,7 +38,6 @@ MANIFEST_REQUIREMENTS = [
     ("widget picker", r'android:name="com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity"'),
     ("notification listener", r'android:name="com\.android\.launcher3\.notification\.NotificationListener"'),
     ("backup agent", r'android:backupAgent="com\.android\.launcher3\.LauncherBackupAgent"'),
-    ("OEA safety net", r'android:name="app\.lawnchair\.oea\.OeaLauncherSafetyNetProvider"'),
 ]
 
 
