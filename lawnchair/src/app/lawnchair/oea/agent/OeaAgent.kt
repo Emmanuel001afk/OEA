@@ -34,7 +34,7 @@ class OeaAgent private constructor(private val context: Context) {
         ).firstOrNull { info ->
             info.loadLabel(context.packageManager).toString().lowercase(Locale.ROOT) == target
                 || info.activityInfo.packageName.lowercase(Locale.ROOT) == target
-        } ?: return OeaEngine.Result.Failure("I couldn't find an app named "$target"")
+        } ?: return OeaEngine.Result.Failure("I couldn't find an app named \\$target")
 
         return engine.execute(OeaEngine.Action.LaunchPackage(resolve.activityInfo.packageName))
     }
