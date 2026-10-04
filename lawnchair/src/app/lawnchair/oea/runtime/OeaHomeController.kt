@@ -18,10 +18,12 @@ import kotlinx.coroutines.flow.StateFlow
 class OeaHomeController {
     private var surfaceController: OeaHomeSurfaceController? = null
     private var modelBridge: OeaModelBridge? = null
+    private var attachedLauncher: Launcher? = null
     val state: StateFlow<OeaRuntime.RuntimeState>
         get() = OeaRuntime.state
 
     fun onLauncherAttached(launcher: Launcher, initialState: LauncherState) {
+        attachedLauncher = launcher
         OeaRuntime.attachLauncher(initialState)
         surfaceController = OeaHomeSurfaceController(launcher).also { it.attach() }
         modelBridge = OeaModelBridge(OeaDataStore.get(launcher)).also { bridge ->
@@ -38,9 +40,10 @@ class OeaHomeController {
         surfaceController?.detach()
         surfaceController = null
         modelBridge?.let { bridge ->
-            LauncherAppState.getInstance(null).model.removeCallbacks(bridge)
+            attachedLauncher?.let { LauncherAppState.getInstance(it).model.removeCallbacks(bridge) }
         }
         modelBridge = null
+        attachedLauncher = null
         OeaRuntime.detachLauncher()
     }
 }
