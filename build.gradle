@@ -360,7 +360,7 @@ android {
             manifest.srcFile "quickstep/AndroidManifest.xml"
         }
 
-        // ARIA unit test sources (must be outside production source roots)
+        // OEA unit test sources (must be outside production source roots)
         test {
             java.srcDirs += ['tests/unit']
             kotlin.directories.add('tests/unit')
@@ -498,7 +498,7 @@ dependencies {
     implementation libs.dagger.hilt.android
     ksp libs.dagger.hilt.compiler
 
-    // ARIA dependencies
+    // OEA dependencies
     implementation libs.androidx.work.runtime
     implementation libs.androidx.hilt.work
     ksp libs.androidx.hilt.compiler
@@ -526,7 +526,7 @@ dependencies {
 
     debugImplementation libs.leakcanary.android
 
-    // ARIA test dependencies
+    // OEA test dependencies
     testImplementation libs.junit
     testImplementation libs.mockito.kotlin
     testImplementation libs.mockito.robolectric
