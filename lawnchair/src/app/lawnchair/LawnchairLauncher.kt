@@ -96,6 +96,7 @@ import kotlinx.coroutines.launch
 class LawnchairLauncher : QuickstepLauncher() {
 
     private val oeaHomeController = OeaHomeController()
+    private var oeaSafetyNet: OeaLauncherSafetyNet? = null
 
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
     private val prefs by unsafeLazy { PreferenceManager.getInstance(this) }
@@ -162,8 +163,12 @@ class LawnchairLauncher : QuickstepLauncher() {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
 
-        // Keep non-visual OEA maintenance out of Application.onCreate and the first frame.
-        rootView.postDelayed({ OeaScheduler.initialize(applicationContext) }, 1500L)
+        // Keep non-visual OEA maintenance and recovery checks out of Application.onCreate and
+        // the first frame. The safety net is a normal helper, not an Android startup component.
+        rootView.postDelayed({
+            OeaScheduler.initialize(applicationContext)
+            oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
+        }, 1500L)
 
         oeaHomeController.onLauncherAttached(this, launcher.stateManager.state)
         launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
@@ -494,6 +499,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onDestroy() {
+        oeaSafetyNet = null
         oeaHomeController.onLauncherDetached()
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled
