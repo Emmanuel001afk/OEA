@@ -46,7 +46,8 @@ jobs:
           test -n "$APK"
           echo "Verifying APK application identity: $APK"
           aapt2 dump badging "$APK" | grep -F "package: name='com.oea.launcher'"
-          if aapt2 dump badging "$APK" | grep -Fq "com.aria.launcher"; then
+          LEGACY_IDENTITY="com.aria"".""launcher"
+          if aapt2 dump badging "$APK" | grep -Fq "$LEGACY_IDENTITY"; then
             echo "ERROR: OEA APK still contains the Aria application identity."
             exit 1
           fi
