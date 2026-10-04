@@ -6,7 +6,6 @@ import app.lawnchair.oea.ui.OeaHomeSurfaceController
 import app.lawnchair.oea.data.OeaDataStore
 import app.lawnchair.oea.engine.OeaModelBridge
 import com.android.launcher3.LauncherAppState
-import com.android.launcher3.model.BgDataModel
 import kotlinx.coroutines.flow.StateFlow
 
 /**
