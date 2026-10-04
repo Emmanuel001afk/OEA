@@ -66,7 +66,7 @@ def main() -> int:
     ignored_dirs = {".git", ".gradle", "build", ".idea"}
     text_suffixes = {
         ".gradle", ".gradle.kts", ".kt", ".java", ".xml", ".properties",
-        ".json", ".toml", ".yaml", ".yml", ".py", ".sh", ".md", ".txt",
+        ".json", ".toml", ".yaml", ".yml", ".py", ".sh",
     }
     for path in ROOT.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in text_suffixes:
