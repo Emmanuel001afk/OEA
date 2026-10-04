@@ -36,7 +36,7 @@ If it says `unauthorized`, unlock your phone and tap "Allow USB debugging" on th
 **Step 1 — Grant the usage stats permission** (one-time setup):
 
 ```bash
-~/Library/Android/sdk/platform-tools/adb shell appops set com.aria.launcher.play.debug android:get_usage_stats allow
+~/Library/Android/sdk/platform-tools/adb shell appops set com.oea.launcher.play.debug android:get_usage_stats allow
 ```
 
 No output means success.
@@ -215,7 +215,7 @@ Note the number of events.
 **Step 2 — Force-stop ARIA:**
 
 ```bash
-~/Library/Android/sdk/platform-tools/adb shell am force-stop com.aria.launcher.play.debug
+~/Library/Android/sdk/platform-tools/adb shell am force-stop com.oea.launcher.play.debug
 ```
 
 Your home screen will briefly reload (since ARIA is your launcher).
@@ -239,7 +239,7 @@ The event count should be **higher than before** (not reset to zero). If it rese
 **Step 1 — Uninstall:**
 
 ```bash
-~/Library/Android/sdk/platform-tools/adb uninstall com.aria.launcher.play.debug
+~/Library/Android/sdk/platform-tools/adb uninstall com.oea.launcher.play.debug
 ```
 
 **Step 2 — Reinstall:**
@@ -257,7 +257,7 @@ Your phone should prompt you to pick a launcher. Choose ARIA. If it doesn't prom
 **Step 4 — Grant usage stats permission:**
 
 ```bash
-~/Library/Android/sdk/platform-tools/adb shell appops set com.aria.launcher.play.debug android:get_usage_stats allow
+~/Library/Android/sdk/platform-tools/adb shell appops set com.oea.launcher.play.debug android:get_usage_stats allow
 ```
 
 **Step 5 — Verify no crashes after 30 seconds:**
