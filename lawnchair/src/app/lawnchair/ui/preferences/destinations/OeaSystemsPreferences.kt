@@ -144,3 +144,66 @@ fun OeaSystemsPreferences(modifier: Modifier = Modifier) {
         }
     }
 }
+        item {
+            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("App Lock", style = MaterialTheme.typography.titleLarge)
+                    Text("Protect selected apps with your Android device credential. OEA uses Accessibility only to detect when a protected app comes to the foreground.")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("App Lock enabled")
+                        Switch(checked = lockEnabled, onCheckedChange = { lockEnabled = it; OeaAppLockStore.setEnabled(context, it) })
+                    }
+                    OutlinedTextField(lockPackage, { lockPackage = it }, label = { Text("Package name") }, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            val set = OeaAppLockStore.packages(context).toMutableSet()
+                            val pkg = lockPackage.trim()
+                            if (pkg.isNotBlank()) {
+                                if (!set.add(pkg)) set.remove(pkg)
+                                OeaAppLockStore.setPackages(context, set)
+                            }
+                        }) { Text("Add / remove") }
+                        Button(onClick = { openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS) }) { Text("Enable service") }
+                    }
+                    Text("Locked apps: " + OeaAppLockStore.packages(context).size)
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("App Freezer", style = MaterialTheme.typography.titleLarge)
+                    Text("Real package suspension is available when OEA has Android device-owner authority. A normal launcher cannot silently freeze arbitrary apps.")
+                    OutlinedTextField(freezerPackage, { freezerPackage = it }, label = { Text("Package name") }, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { OeaAppFreezer.setFrozen(context, freezerPackage.trim(), true) }) { Text("Freeze") }
+                        Button(onClick = { OeaAppFreezer.setFrozen(context, freezerPackage.trim(), false) }) { Text("Unfreeze") }
+                    }
+                    Button(onClick = {
+                        runCatching {
+                            context.startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).putExtra(
+                                DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                                ComponentName(context, OeaDeviceAdminReceiver::class.java),
+                            ))
+                        }
+                    }) { Text("Configure device-admin authority") }
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("OEA AI", style = MaterialTheme.typography.titleLarge)
+                    Text("Optional remote API integration. No local LLM is bundled. Your existing AI Tunnel can be connected later without OEA owning its database.")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("AI enabled")
+                        Switch(checked = ai.enabled, onCheckedChange = { ai = ai.copy(enabled = it); OeaAiStore.save(context, ai) })
+                    }
+                    OutlinedTextField(ai.endpoint, { ai = ai.copy(endpoint = it) }, label = { Text("API endpoint") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(ai.apiKey, { ai = ai.copy(apiKey = it) }, label = { Text("API key") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(ai.model, { ai = ai.copy(model = it) }, label = { Text("Model (optional)") }, modifier = Modifier.fillMaxWidth())
+                    Button(onClick = { OeaAiStore.save(context, ai) }) { Text("Save AI configuration") }
+                }
+            }
+        }
+
