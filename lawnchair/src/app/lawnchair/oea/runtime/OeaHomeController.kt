@@ -27,7 +27,17 @@ class OeaHomeController {
         surfaceController = OeaHomeSurfaceController(launcher).also { it.attach() }
         modelBridge = OeaModelBridge(OeaDataStore.get(launcher)).also { bridge ->
             LauncherAppState.getInstance(launcher).model.addCallbacks(bridge)
-            LauncherAppState.getInstance(launcher).model.rebindCallbacks()
+
+        // Never force a model rebind during launcher startup. Launcher3 owns the initial
+        // bind; forcing another bind here can block first-frame rendering on low-memory devices.
+        // OEA only observes the model and can attach to future model updates safely.
+        launcher.dragLayer?.postDelayed({
+            if (attachedLauncher === launcher) {
+                runCatching {
+                    LauncherAppState.getInstance(launcher).model.rebindCallbacks()
+                }
+            }
+        }, 1200L)
         }
     }
 
