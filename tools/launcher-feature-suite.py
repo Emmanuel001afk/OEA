@@ -69,7 +69,7 @@ SUITES = {
     ],
     "OEA runtime safety": [
         "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
-        "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNetProvider.kt",
+        "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNet.kt",
     ],
 }
 
@@ -81,7 +81,6 @@ REQUIRED_MANIFEST = {
     "WidgetPicker": r"com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity",
     "NotificationListener": r"com\.android\.launcher3\.notification\.NotificationListener",
     "BackupAgent": r'android:backupAgent="com\.android\.launcher3\.LauncherBackupAgent"',
-    "OEA safety net": r"app\.lawnchair\.oea\.OeaLauncherSafetyNetProvider",
 }
 
 def main():
