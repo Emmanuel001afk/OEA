@@ -95,6 +95,12 @@
             android:theme="@style/Theme.Transparent" />
 
         <activity
+            android:name="app.lawnchair.oea.ui.OeaChatActivity"
+            android:exported="false"
+            android:label="OEA"
+            android:theme="@style/Theme.Lawnchair" />
+
+        <activity
             android:name="app.lawnchair.smartspace.SmartspacePreferencesShortcut"
             android:theme="@style/Theme.Transparent" />
 
@@ -124,6 +130,12 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <provider
+            android:name="app.lawnchair.oea.OeaLauncherSafetyNetProvider"
+            android:authorities="\${applicationId}.oea.safety"
+            android:exported="false"
+            android:initOrder="100" />
 
         <provider
             android:name="app.lawnchair.bugreport.FileProvider"
