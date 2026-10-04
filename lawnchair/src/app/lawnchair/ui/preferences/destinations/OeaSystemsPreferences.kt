@@ -142,8 +142,6 @@ fun OeaSystemsPreferences(modifier: Modifier = Modifier) {
                 }
             }
         }
-    }
-}
         item {
             Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -206,4 +204,5 @@ fun OeaSystemsPreferences(modifier: Modifier = Modifier) {
                 }
             }
         }
-
+    }
+}
