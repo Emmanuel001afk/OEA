@@ -161,7 +161,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
 
-        oeaHomeController.onLauncherAttached(launcher.stateManager.state)
+        oeaHomeController.onLauncherAttached(this, launcher.stateManager.state)
         launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
             override fun onStateTransitionStart(toState: LauncherState) {
                 oeaHomeController.onLauncherStateChanged(toState)
