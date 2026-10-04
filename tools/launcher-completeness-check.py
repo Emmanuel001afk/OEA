@@ -59,6 +59,28 @@ def main() -> int:
     if "com.aria.launcher" in build_gradle:
         failures.append("Aria application identity must not remain in OEA build configuration")
 
+    # The application ID is an Android identity boundary. Do not allow an Aria
+    # package identifier to reappear in any checked-in OEA source/config file.
+    # This catches regressions outside build.gradle (manifests, scripts, CI, etc.).
+    ignored_dirs = {".git", ".gradle", "build", ".idea"}
+    text_suffixes = {
+        ".gradle", ".gradle.kts", ".kt", ".java", ".xml", ".properties",
+        ".json", ".toml", ".yaml", ".yml", ".py", ".sh", ".md", ".txt",
+    }
+    for path in ROOT.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in text_suffixes:
+            continue
+        if any(part in ignored_dirs for part in path.parts):
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if "com.aria.launcher" in content:
+            failures.append(
+                f"Aria application identity must not remain in OEA source/config: {path.relative_to(ROOT)}"
+            )
+
     common = (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
     specific = (ROOT / "AndroidManifest.xml").read_text(encoding="utf-8")
     merged = common + "\n" + specific
