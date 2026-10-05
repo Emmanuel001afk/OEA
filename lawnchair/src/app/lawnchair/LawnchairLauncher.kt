@@ -164,7 +164,7 @@ class LawnchairLauncher : QuickstepLauncher() {
 
         // Attach the independent OEA engine after the base HOME activity is created.
         // OEA observes the visible activity but does not register callbacks on Launcher3's model.
-        oeaHomeController.onLauncherAttached(this, stateManager.state)
+        oeaHomeController.onLauncherAttached(this)
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
