@@ -1,35 +1,44 @@
 package app.lawnchair.oea.runtime
 
-import com.android.launcher3.LauncherState
-import com.android.launcher3.Launcher
-import app.lawnchair.oea.ui.OeaHomeSurfaceController
 import app.lawnchair.oea.data.OeaDataStore
 import app.lawnchair.oea.engine.OeaModelBridge
+import app.lawnchair.oea.ui.OeaHomeSurfaceController
+import com.android.launcher3.Launcher
 import com.android.launcher3.LauncherAppState
+import com.android.launcher3.LauncherState
 import kotlinx.coroutines.flow.StateFlow
 
 /**
  * OEA home/controller facade.
  *
- * Keeps OEA feature code out of the Launcher3 model itself while exposing the current
- * launcher state to OEA-owned UI and services.
+ * Launcher3/Lawnchair remains the owner of the real home model and workspace. OEA attaches
+ * after the launcher has created its first view hierarchy, then requests an initial callback
+ * bind so OEA observes the already-loaded model without replacing Launcher3's callbacks.
  */
 class OeaHomeController {
     private var surfaceController: OeaHomeSurfaceController? = null
     private var modelBridge: OeaModelBridge? = null
     private var attachedLauncher: Launcher? = null
+
     val state: StateFlow<OeaRuntime.RuntimeState>
         get() = OeaRuntime.state
 
     fun onLauncherAttached(launcher: Launcher, initialState: LauncherState) {
         attachedLauncher = launcher
         OeaRuntime.attachLauncher(initialState)
-        surfaceController = OeaHomeSurfaceController(launcher).also { it.attach() }
-        modelBridge = OeaModelBridge(OeaDataStore.get(launcher)).also { bridge ->
-            LauncherAppState.getInstance(launcher).model.addCallbacks(bridge)
 
-        // Do not force a model rebind here. Launcher3 owns the initial workspace/app binding;
-        // OEA observes subsequent model updates without taking over the startup bind.
+        launcher.rootView.post {
+            if (attachedLauncher !== launcher) return@post
+
+            surfaceController = OeaHomeSurfaceController(launcher).also { it.attach() }
+
+            val bridge = OeaModelBridge(OeaDataStore.get(launcher))
+            modelBridge = bridge
+
+            // addCallbacks() alone never delivers the current model. addCallbacksAndLoad()
+            // binds OEA to the current Launcher3 model while preserving Launcher3 ownership
+            // of the workspace and all existing callbacks.
+            LauncherAppState.getInstance(launcher).model.addCallbacksAndLoad(bridge)
         }
     }
 
@@ -41,7 +50,9 @@ class OeaHomeController {
         surfaceController?.detach()
         surfaceController = null
         modelBridge?.let { bridge ->
-            attachedLauncher?.let { LauncherAppState.getInstance(it).model.removeCallbacks(bridge) }
+            attachedLauncher?.let {
+                LauncherAppState.getInstance(it).model.removeCallbacks(bridge)
+            }
         }
         modelBridge = null
         attachedLauncher = null
