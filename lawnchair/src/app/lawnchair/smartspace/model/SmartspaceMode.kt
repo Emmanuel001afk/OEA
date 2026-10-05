@@ -1,7 +1,6 @@
 package app.lawnchair.smartspace.model
 
 import android.content.Context
-import android.os.Build
 import androidx.annotation.LayoutRes
 import androidx.annotation.StringRes
 import app.lawnchair.util.isPackageInstalledAndEnabled
@@ -19,7 +18,6 @@ sealed class SmartspaceMode(
             "aria", "oea" -> OeaSmartspace
             "google" -> GoogleSmartspace
             "google_search" -> GoogleSearchSmartspace
-            "smartspacer" -> Smartspacer
             else -> LawnchairSmartspace
         }
 
@@ -31,7 +29,6 @@ sealed class SmartspaceMode(
             LawnchairSmartspace,
             GoogleSmartspace,
             GoogleSearchSmartspace,
-            Smartspacer,
         )
     }
 
