@@ -12,22 +12,24 @@ import android.widget.ScrollView
 import android.widget.TextView
 import app.lawnchair.oea.engine.OeaAppCatalog
 import app.lawnchair.oea.engine.OeaEngine
-import com.android.launcher3.Launcher
+import android.app.Activity
 
 /**
  * OEA-owned HOME surface.
  *
- * This visible surface is driven by OEA engine state and Android launcher APIs.
+ * This visible surface is driven by OEA engine state and Android activity APIs.
  * It does not read Launcher3's model/database to decide which apps are shown.
  */
-class OeaHomeSurfaceController(private val launcher: Launcher) {
+class OeaHomeSurfaceController(
+    private val activity: Activity,
+    private val root: ViewGroup,
+) {
     private var surface: ViewGroup? = null
 
     fun attach() {
         if (surface != null) return
 
-        val engine = OeaEngine.get(launcher).start()
-        val root = launcher.dragLayer ?: return
+        val engine = OeaEngine.get(activity).start()
 
         val container = LinearLayout(launcher).apply {
             orientation = LinearLayout.VERTICAL
