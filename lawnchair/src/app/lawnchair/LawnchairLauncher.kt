@@ -171,13 +171,33 @@ class LawnchairLauncher : QuickstepLauncher() {
             oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
         }, 1500L)
 
-        oeaHomeController.onLauncherAttached(this, launcher.stateManager.state)
-        launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
-            override fun onStateTransitionStart(toState: LauncherState) {
-                oeaHomeController.onLauncherStateChanged(toState)
-            }
-            override fun onStateTransitionComplete(finalState: LauncherState) {
-                oeaHomeController.onLauncherStateChanged(finalState)
+        // OEA is an optional feature layer. Never allow OEA initialization to prevent the
+        // Launcher3 workspace from creating or drawing. Attach it only after the launcher has
+        // produced its first frame, and fail closed if an OEA component is unavailable.
+        rootView.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            private var handled = false
+
+            override fun onPreDraw(): Boolean {
+                if (handled) return true
+                handled = true
+                rootView.viewTreeObserver.removeOnPreDrawListener(this)
+                rootView.post {
+                    runCatching {
+                        oeaHomeController.onLauncherAttached(this@LawnchairLauncher, launcher.stateManager.state)
+                        launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
+                            override fun onStateTransitionStart(toState: LauncherState) {
+                                oeaHomeController.onLauncherStateChanged(toState)
+                            }
+
+                            override fun onStateTransitionComplete(finalState: LauncherState) {
+                                oeaHomeController.onLauncherStateChanged(finalState)
+                            }
+                        })
+                    }.onFailure { error ->
+                        android.util.Log.e("LawnchairLauncher", "OEA optional startup integration disabled", error)
+                    }
+                }
+                return true
             }
         })
 
