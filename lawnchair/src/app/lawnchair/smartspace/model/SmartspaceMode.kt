@@ -61,19 +61,6 @@ object GoogleSmartspace : SmartspaceMode(
     override fun isAvailable(context: Context): Boolean = context.packageManager.isPackageInstalledAndEnabled("com.google.android.googlequicksearchbox")
 }
 
-object Smartspacer : SmartspaceMode(
-    nameResourceId = R.string.smartspace_mode_smartspacer,
-    layoutResourceId = R.layout.smartspace_default,
-) {
-    override fun toString(): String = "smartspacer"
-
-    override fun isAvailable(context: Context): Boolean {
-        // Smartspacer requires Android 10+
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            context.packageManager.isPackageInstalledAndEnabled("com.kieronquinn.app.smartspacer")
-    }
-}
-
 object OeaSmartspace : SmartspaceMode(
     nameResourceId = R.string.smartspace_mode_oea,
     layoutResourceId = R.layout.smartspace_container,
