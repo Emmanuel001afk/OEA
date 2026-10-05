@@ -26,10 +26,14 @@ class OeaHomeController {
         OeaRuntime.attachLauncher(initialState)
         surfaceController = OeaHomeSurfaceController(launcher).also { it.attach() }
         modelBridge = OeaModelBridge(OeaDataStore.get(launcher)).also { bridge ->
-            LauncherAppState.getInstance(launcher).model.addCallbacks(bridge)
-
-        // Do not force a model rebind here. Launcher3 owns the initial workspace/app binding;
-        // OEA observes subsequent model updates without taking over the startup bind.
+            val model = LauncherAppState.getInstance(launcher).model
+            // Join an existing Launcher3 load instead of interrupting it. If no load is active,
+            // use the normal loader path so OEA receives an initial model snapshot too.
+            if (model.isActive()) {
+                model.addCallbacks(bridge)
+            } else {
+                model.addCallbacksAndLoad(bridge)
+            }
         }
     }
 
