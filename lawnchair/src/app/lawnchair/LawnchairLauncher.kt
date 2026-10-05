@@ -164,7 +164,12 @@ class LawnchairLauncher : QuickstepLauncher() {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
 
-        // Launcher3/Lawnchair is the authoritative HOME implementation. OEA integration is
+        // Attach the independent OEA engine after the base HOME activity is created.
+        // OEA observes the visible activity but does not register callbacks on Launcher3's model.
+        oeaHomeController.onLauncherAttached(this, stateManager.state)
+
+        // Launcher3/Lawnchair remains the compatibility HOME surface while OEA's independent
+        // engine is being migrated in verified stages.
         // intentionally disabled during launcher startup while the base HOME path is being
         // recovered. This prevents optional OEA code from being able to blank or block HOME.
 
