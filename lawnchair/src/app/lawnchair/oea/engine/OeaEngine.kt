@@ -61,6 +61,20 @@ class OeaEngine private constructor(context: Context) {
         return result
     }
 
+    data class Health(
+        val running: Boolean,
+        val appCount: Int,
+        val workspaceCount: Int,
+        val searchReady: Boolean,
+    )
+
+    fun health(): Health = Health(
+        running = apps.value.isNotEmpty() || catalog.apps.value.isEmpty(),
+        appCount = apps.value.size,
+        workspaceCount = workspace.load().size,
+        searchReady = search.search("a", 1).isNotEmpty() || apps.value.isEmpty(),
+    )
+
     fun execute(action: Action): Result {
         val result = when (action) {
             is Action.LaunchPackage -> {
