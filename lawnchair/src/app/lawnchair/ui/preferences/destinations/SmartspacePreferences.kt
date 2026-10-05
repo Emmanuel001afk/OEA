@@ -269,33 +269,3 @@ fun SmartspaceCalendarPreference(
     )
 }
 
-@Composable
-fun SmartspacerSettings(
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    val prefs2 = preferenceManager2()
-
-    Column(modifier) {
-        PreferenceGroup(
-            heading = stringResource(id = R.string.smartspacer_settings),
-        ) {
-            Item {
-                SliderPreference(
-                    label = stringResource(R.string.maximum_number_of_targets),
-                    adapter = prefs2.smartspacerMaxCount.getAdapter(),
-                    valueRange = 5..15,
-                    step = 1,
-                )
-            }
-            Item {
-                ClickablePreference(label = stringResource(R.string.open_smartspacer_settings)) {
-                    val intent = context.packageManager.getLaunchIntentForPackage(
-                        "",
-                    )
-                    context.startActivity(intent)
-                }
-            }
-        }
-    }
-}
