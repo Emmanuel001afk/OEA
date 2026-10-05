@@ -31,6 +31,7 @@ class OeaHomeSurfaceController(private val launcher: Launcher) {
 
         val container = LinearLayout(launcher).apply {
             orientation = LinearLayout.VERTICAL
+            tag = OEA_HOME_TAG
             setPadding(24, 32, 24, 16)
             setBackgroundColor(Color.rgb(18, 18, 20))
             elevation = 40f
@@ -90,6 +91,8 @@ class OeaHomeSurfaceController(private val launcher: Launcher) {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
         ))
+        container.bringToFront()
+        container.post { container.bringToFront() }
         surface = container
 
         fun render(query: String = "") {
@@ -166,6 +169,10 @@ class OeaHomeSurfaceController(private val launcher: Launcher) {
     fun detach() {
         surface?.let { view -> (view.parent as? ViewGroup)?.removeView(view) }
         surface = null
+    }
+
+    companion object {
+        const val OEA_HOME_TAG = "oea_home_surface"
     }
 
     private class SimpleTextWatcher(
