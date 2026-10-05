@@ -144,7 +144,7 @@ class OeaHomeSurfaceController(private val launcher: Launcher) {
             val icon = ImageView(launcher)
             val drawable: Drawable? = runCatching {
                 launcher.getSystemService(android.content.pm.LauncherApps::class.java)
-                    .getActivityIcon(app.component, app.user)
+                    ?.resolveActivityInfo(app.component, app.user)?.loadIcon(launcher.packageManager)
             }.getOrNull()
             icon.setImageDrawable(drawable)
             item.addView(icon, LinearLayout.LayoutParams(48, 48))
