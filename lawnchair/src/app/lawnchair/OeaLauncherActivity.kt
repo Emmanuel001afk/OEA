@@ -1,29 +1,37 @@
 package app.lawnchair
 
+import android.app.Activity
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.view.Window
+import android.widget.FrameLayout
 import app.lawnchair.oea.OeaLauncherSafetyNet
 import app.lawnchair.oea.runtime.OeaHomeController
-import com.android.launcher3.Launcher
 
 /**
- * OEA's HOME activity.
+ * OEA's real HOME activity.
  *
- * This is intentionally a thin Android/Launcher3 compatibility shell. The visible HOME,
- * application inventory, search and launching are owned by OEA, not by Lawnchair's Quickstep
- * activity or Launcher3's workspace model.
+ * Launcher3 remains available as a feature foundation elsewhere in the project, but it does not
+ * own OEA HOME window initialization or visible HOME state.
  */
-class OeaLauncherActivity : Launcher() {
-    private val oeaHomeController = OeaHomeController()
+class OeaLauncherActivity : Activity() {
+    private lateinit var homeRoot: FrameLayout
+    private lateinit var oeaHomeController: OeaHomeController
     private var safetyNet: OeaLauncherSafetyNet? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Give the HOME window a real surface before the Launcher3 compatibility shell draws.
-        // This prevents a failed/slow legacy workspace bind from presenting a black window.
-        window?.setBackgroundDrawable(ColorDrawable(Color.rgb(18, 18, 20)))
+        requestWindowFeature(Window.FEATURE_NO_TITLE)
+        window.setBackgroundDrawable(ColorDrawable(Color.rgb(18, 18, 20)))
         super.onCreate(savedInstanceState)
-        oeaHomeController.onLauncherAttached(this)
+
+        homeRoot = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(18, 18, 20))
+        }
+        setContentView(homeRoot)
+
+        oeaHomeController = OeaHomeController()
+        oeaHomeController.onHomeAttached(this, homeRoot)
     }
 
     override fun onResume() {
@@ -33,7 +41,7 @@ class OeaLauncherActivity : Launcher() {
 
     override fun onDestroy() {
         safetyNet = null
-        oeaHomeController.onLauncherDetached()
+        if (::oeaHomeController.isInitialized) oeaHomeController.onHomeDetached()
         super.onDestroy()
     }
 }
