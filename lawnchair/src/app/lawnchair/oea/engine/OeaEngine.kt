@@ -1,11 +1,10 @@
 package app.lawnchair.oea.engine
 
-import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.os.Build
+import android.content.pm.LauncherApps
+import android.os.UserHandle
 import android.provider.Settings
 import app.lawnchair.oea.data.OeaDataStore
 import kotlinx.coroutines.flow.StateFlow
@@ -25,57 +24,31 @@ class OeaEngine private constructor(context: Context) {
 
     private val appContext = context.applicationContext
     private val dataStore = OeaDataStore.get(appContext)
+    private val launcherApps = appContext.getSystemService(LauncherApps::class.java)
 
     val catalog = OeaAppCatalog(appContext)
     val search = OeaSearchEngine(catalog)
     val workspace = OeaWorkspaceStore(appContext)
     val apps: StateFlow<List<OeaAppCatalog.App>> = catalog.apps
 
-    private var packageMonitor: BroadcastReceiver? = null
-
     @Synchronized
     fun start(): OeaEngine {
-        if (packageMonitor != null) return this
-        catalog.refresh()
-
-        packageMonitor = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                catalog.refresh()
-            }
-        }
-
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_PACKAGE_ADDED)
-            addAction(Intent.ACTION_PACKAGE_CHANGED)
-            addAction(Intent.ACTION_PACKAGE_REMOVED)
-            addAction(Intent.ACTION_PACKAGE_REPLACED)
-            addDataScheme("package")
-        }
-
-        if (Build.VERSION.SDK_INT >= 33) {
-            appContext.registerReceiver(packageMonitor, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            appContext.registerReceiver(packageMonitor, filter)
-        }
+        catalog.start()
         return this
     }
 
     @Synchronized
     fun stop() {
-        packageMonitor?.let { runCatching { appContext.unregisterReceiver(it) } }
-        packageMonitor = null
+        catalog.stop()
     }
 
-    fun launch(component: ComponentName): Result {
-        val intent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-            this.component = component
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
+    fun launch(component: ComponentName, user: UserHandle? = null): Result {
+        val app = apps.value.firstOrNull {
+            it.component == component && (user == null || it.user == user)
+        } ?: return Result.Failure("App is no longer available: " + component.flattenToShortString())
 
         val result = runCatching {
-            appContext.startActivity(intent)
+            launcherApps.startMainActivity(app.component, app.user, null, null)
             Result.Success("Opened " + component.packageName)
         }.getOrElse {
             Result.Failure("Unable to open " + component.packageName, it)
@@ -95,7 +68,7 @@ class OeaEngine private constructor(context: Context) {
                 if (app == null) {
                     Result.Failure("No launchable app for " + action.packageName)
                 } else {
-                    launch(app.component)
+                    launch(app.component, app.user)
                 }
             }
 
