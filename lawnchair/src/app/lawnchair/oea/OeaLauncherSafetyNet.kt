@@ -33,23 +33,33 @@ import com.android.launcher3.widget.LauncherAppWidgetHostView
  */
 class OeaLauncherSafetyNet(private val launcher: Launcher) {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var rebindAttempted = false
 
     /** Starts the non-critical recovery check after Launcher3 has had a chance to draw. */
     fun start() {
-        scheduleHealthCheck(launcher)
+        scheduleHealthCheck(launcher, 1500L)
     }
 
-    private fun scheduleHealthCheck(activity: Launcher) {
+    private fun scheduleHealthCheck(activity: Launcher, delayMs: Long) {
         mainHandler.postDelayed({
             if (activity.isFinishing || activity.isDestroyed) return@postDelayed
             val root = activity.window?.decorView as? ViewGroup ?: return@postDelayed
 
-            // A populated decor tree can still exist while Launcher3 failed to bind its
-            // workspace. Check for actual launcher items instead of merely checking visibility.
+            // Give the real Launcher3 model one controlled rebind before exposing recovery.
+            // OEA never replaces the Launcher3 workspace during normal operation.
             if (!hasUsableLauncherContent(root)) {
-                installRecoverySurface(activity, root)
+                if (!rebindAttempted) {
+                    rebindAttempted = true
+                    runCatching {
+                        com.android.launcher3.LauncherAppState.getInstance(activity)
+                            .model.rebindCallbacks()
+                    }
+                    scheduleHealthCheck(activity, 1200L)
+                } else {
+                    installRecoverySurface(activity, root)
+                }
             }
-        }, 1500L)
+        }, delayMs)
     }
 
     private fun hasUsableLauncherContent(root: ViewGroup): Boolean {
