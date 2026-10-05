@@ -485,11 +485,6 @@ dependencies {
     // Compose drag and drop library
     implementation libs.reorderable
 
-    // Smartspacer
-    implementation(libs.smartspacer.sdk) {
-        exclude group: "com.github.skydoves", module: "balloon"
-    }
-
     implementation libs.hoko.blur
 
     implementation libs.androidx.window
