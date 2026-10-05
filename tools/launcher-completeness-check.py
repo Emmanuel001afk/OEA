@@ -26,6 +26,7 @@ REQUIRED_FILES = [
     "src/com/android/launcher3/settings/SettingsActivity.java",
     "quickstep/src/com/android/launcher3/uioverrides/QuickstepLauncher.java",
     "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
+    "lawnchair/src/app/lawnchair/OeaLauncherActivity.kt",
     "lawnchair/src/app/lawnchair/LawnchairApp.kt",
     "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNet.kt",
 ]
@@ -33,7 +34,7 @@ REQUIRED_FILES = [
 MANIFEST_REQUIREMENTS = [
     ("HOME category", r'<category\s+android:name="android.intent.category.HOME"'),
     ("DEFAULT category", r'<category\s+android:name="android.intent.category.DEFAULT"'),
-    ("launcher activity", r'android:name="app\.lawnchair\.LawnchairLauncher"'),
+    ("launcher activity", r'android:name="app\.lawnchair\.OeaLauncherActivity"'),
     ("launcher provider", r'android:name="com\.android\.launcher3\.LauncherProvider"'),
     ("widget picker", r'android:name="com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity"'),
     ("notification listener", r'android:name="com\.android\.launcher3\.notification\.NotificationListener"'),

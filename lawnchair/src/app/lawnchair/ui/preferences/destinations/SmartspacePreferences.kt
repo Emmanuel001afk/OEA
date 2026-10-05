@@ -25,20 +25,16 @@ import app.lawnchair.smartspace.model.LawnchairSmartspace
 import app.lawnchair.smartspace.model.SmartspaceCalendar
 import app.lawnchair.smartspace.model.SmartspaceMode
 import app.lawnchair.smartspace.model.SmartspaceTimeFormat
-import app.lawnchair.smartspace.model.Smartspacer
 import app.lawnchair.smartspace.provider.SmartspaceProvider
 import app.lawnchair.ui.preferences.LocalIsExpandedScreen
-import app.lawnchair.ui.preferences.components.controls.ClickablePreference
 import app.lawnchair.ui.preferences.components.controls.ListPreference
 import app.lawnchair.ui.preferences.components.controls.ListPreferenceEntry
 import app.lawnchair.ui.preferences.components.controls.MainSwitchPreference
-import app.lawnchair.ui.preferences.components.controls.SliderPreference
 import app.lawnchair.ui.preferences.components.controls.SwitchPreference
 import app.lawnchair.ui.preferences.components.layout.PreferenceGroup
 import app.lawnchair.ui.preferences.components.layout.PreferenceLayout
 import app.lawnchair.ui.theme.isSelectedThemeDark
 import com.android.launcher3.R
-import com.kieronquinn.app.smartspacer.sdk.SmartspacerConstants
 
 @Composable
 fun SmartspacePreferences(
@@ -86,9 +82,6 @@ fun SmartspacePreferences(
                             LawnchairSmartspaceSettings(smartspaceProvider)
                         }
 
-                        Smartspacer -> {
-                            SmartspacerSettings()
-                        }
 
                         else -> {}
                     }
@@ -277,33 +270,3 @@ fun SmartspaceCalendarPreference(
     )
 }
 
-@Composable
-fun SmartspacerSettings(
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    val prefs2 = preferenceManager2()
-
-    Column(modifier) {
-        PreferenceGroup(
-            heading = stringResource(id = R.string.smartspacer_settings),
-        ) {
-            Item {
-                SliderPreference(
-                    label = stringResource(R.string.maximum_number_of_targets),
-                    adapter = prefs2.smartspacerMaxCount.getAdapter(),
-                    valueRange = 5..15,
-                    step = 1,
-                )
-            }
-            Item {
-                ClickablePreference(label = stringResource(R.string.open_smartspacer_settings)) {
-                    val intent = context.packageManager.getLaunchIntentForPackage(
-                        SmartspacerConstants.SMARTSPACER_PACKAGE_NAME,
-                    )
-                    context.startActivity(intent)
-                }
-            }
-        }
-    }
-}

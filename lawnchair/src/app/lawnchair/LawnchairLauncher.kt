@@ -40,8 +40,6 @@ import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
 import app.lawnchair.oea.OeaLauncherSafetyNet
-import app.lawnchair.oea.runtime.OeaHomeController
-import app.lawnchair.oea.scheduler.OeaScheduler
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.root.RootHelperManager
@@ -83,7 +81,6 @@ import com.android.launcher3.widget.LauncherWidgetHolder
 import com.android.launcher3.widget.RoundedCornerEnforcement
 import com.android.systemui.plugins.shared.LauncherOverlayManager
 import com.android.systemui.shared.system.QuickStepContract
-import com.kieronquinn.app.smartspacer.sdk.client.SmartspacerClient
 import com.patrykmichalik.opto.core.firstBlocking
 import com.patrykmichalik.opto.core.onEach
 import dev.kdrag0n.monet.theme.ColorScheme
@@ -96,7 +93,6 @@ import kotlinx.coroutines.launch
 
 class LawnchairLauncher : QuickstepLauncher() {
 
-    private val oeaHomeController = OeaHomeController()
     private var oeaSafetyNet: OeaLauncherSafetyNet? = null
 
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
@@ -163,10 +159,6 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onCreate(savedInstanceState: Bundle?) {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
-
-        // Launcher3/Lawnchair is the authoritative HOME implementation. OEA integration is
-        // intentionally disabled during launcher startup while the base HOME path is being
-        // recovered. This prevents optional OEA code from being able to blank or block HOME.
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
@@ -467,6 +459,10 @@ class LawnchairLauncher : QuickstepLauncher() {
         super.onResume()
         restartIfPending()
 
+        // If the compatibility HOME surface is genuinely blank after it had time to draw,
+        // expose the independent OEA engine instead of leaving the device on a black screen.
+        oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
+
         dragLayer.viewTreeObserver.addOnDrawListener(
             object : ViewTreeObserver.OnDrawListener {
                 private var handled = false
@@ -488,10 +484,7 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun onDestroy() {
         oeaSafetyNet = null
-        oeaHomeController.onLauncherDetached()
         super.onDestroy()
-        // Only actually closes if required, safe to call if not enabled
-        SmartspacerClient.close()
     }
 
     override fun getDefaultOverlay(): LauncherOverlayManager = defaultOverlay

@@ -32,8 +32,8 @@ import app.lawnchair.util.useApplicationContext
 import com.android.launcher3.BuildConfig
 import com.android.launcher3.R
 import com.android.launcher3.Utilities
-import com.kieronquinn.app.smartspacer.sdk.SmartspacerConstants
 
+/** OEA deliberately does not integrate third-party Smartspacer. */
 class FeedBridge(private val context: Context) {
 
     private val shouldUseFeed = context.applicationInfo.flags and (FLAG_DEBUGGABLE or FLAG_SYSTEM) == 0
@@ -161,7 +161,7 @@ class FeedBridge(private val context: Context) {
             whitelist["com.saulhdev.neofeed"] = getSignatureHash(context, "com.saulhdev.neofeed")
             whitelist["ua.itaysonlab.homefeeder"] = 0x887456ed
             whitelist["launcher.libre.dev"] = 0x2e9dbab5
-            whitelist[SmartspacerConstants.SMARTSPACER_PACKAGE_NAME] = 0x15c6e36f
+            whitelist[""] = 0x15c6e36f
             whitelist["amirz.aidlbridge"] = 0xb662cc2f
             whitelist["com.google.android.googlequicksearchbox"] = 0xe3ca78d8
             whitelist["com.google.android.apps.nexuslauncher"] = 0xb662cc2f

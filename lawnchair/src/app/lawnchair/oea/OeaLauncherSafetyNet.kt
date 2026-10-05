@@ -17,74 +17,47 @@ import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.android.launcher3.BubbleTextView
-import com.android.launcher3.Launcher
-import com.android.launcher3.folder.FolderIcon
-import com.android.launcher3.widget.LauncherAppWidgetHostView
+import app.lawnchair.oea.engine.OeaEngine
+import app.lawnchair.oea.ui.OeaHomeSurfaceController
 
 /**
  * OEA launcher safety net.
  *
- * Launcher3/Lawnchair remains the real launcher. This is only a last-resort recovery
- * surface: if the launcher activity is resumed but has no actual launcher content, it exposes a
- * functional app surface instead of leaving the user on a black screen.
+ * OEA owns the visible launcher surface. This is only a last-resort recovery layer: if the
+ * OEA surface itself failed to attach, it exposes a functional app surface instead of leaving
+ * the user on a black screen.
  *
  * It deliberately does not replace Launcher3 features during normal operation.
  */
-class OeaLauncherSafetyNet(private val launcher: Launcher) {
+class OeaLauncherSafetyNet(private val launcher: Activity) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var rebindAttempted = false
 
-    /** Starts the non-critical recovery check after Launcher3 has had a chance to draw. */
+    /** Starts the non-critical recovery check after the OEA window has had a chance to draw. */
     fun start() {
         scheduleHealthCheck(launcher, 1500L)
     }
 
-    private fun scheduleHealthCheck(activity: Launcher, delayMs: Long) {
+    private fun scheduleHealthCheck(activity: Activity, delayMs: Long) {
         mainHandler.postDelayed({
             if (activity.isFinishing || activity.isDestroyed) return@postDelayed
             val root = activity.window?.decorView as? ViewGroup ?: return@postDelayed
 
-            // Give the real Launcher3 model one controlled rebind before exposing recovery.
-            // OEA never replaces the Launcher3 workspace during normal operation.
+            // The safety layer never touches Launcher3's model.
+            // The independent OEA engine is already running and is used as the recovery source.
             if (!hasUsableLauncherContent(root)) {
-                if (!rebindAttempted) {
-                    rebindAttempted = true
-                    runCatching {
-                        com.android.launcher3.LauncherAppState.getInstance(activity)
-                            .model.rebindCallbacks()
-                    }
-                    scheduleHealthCheck(activity, 1200L)
-                } else {
-                    installRecoverySurface(activity, root)
-                }
+                installRecoverySurface(activity, root)
             }
         }, delayMs)
     }
 
     private fun hasUsableLauncherContent(root: ViewGroup): Boolean {
+        if (root.findViewWithTag<View>(OeaHomeSurfaceController.OEA_HOME_TAG) != null) return true
         if (root.findViewWithTag<View>(TAG) != null) return true
 
-        var meaningfulItems = 0
-        fun walk(view: View) {
-            if (view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return
-            if (view is BubbleTextView || view is FolderIcon || view is LauncherAppWidgetHostView) {
-                meaningfulItems++
-                return
-            }
-            if (view is ViewGroup) {
-                for (i in 0 until view.childCount) {
-                    walk(view.getChildAt(i))
-                    if (meaningfulItems >= 1) return
-                }
-            }
-        }
-
-        walk(root)
-        return meaningfulItems > 0
+        return false
     }
 
-    private fun installRecoverySurface(activity: Launcher, root: ViewGroup) {
+    private fun installRecoverySurface(activity: Activity, root: ViewGroup) {
         if (root.findViewWithTag<View>(TAG) != null) return
 
         val scroll = ScrollView(activity).apply {
@@ -111,36 +84,21 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
             gravity = Gravity.CENTER
         }, match())
 
-        val apps = activity.packageManager.queryIntentActivities(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
-            0,
-        ).sortedBy { it.loadLabel(activity.packageManager).toString().lowercase() }
+        val apps = OeaEngine.get(activity).apps.value
 
         val grid = GridLayout(activity).apply {
             columnCount = 4
             useDefaultMargins = true
             alignmentMode = GridLayout.ALIGN_BOUNDS
         }
-        for (resolveInfo in apps) {
-            val label = resolveInfo.loadLabel(activity.packageManager).toString()
-            val icon = resolveInfo.loadIcon(activity.packageManager)
+        for (app in apps) {
+            val label = app.label
+            val icon = appContextIcon(activity, app.component)
             grid.addView(Button(activity).apply {
                 text = label
                 setTextColor(Color.WHITE)
                 setCompoundDrawablesWithIntrinsicBounds(null, icon, null, null)
-                setOnClickListener {
-                    runCatching {
-                        val launch = Intent(Intent.ACTION_MAIN).apply {
-                            addCategory(Intent.CATEGORY_LAUNCHER)
-                            component = ComponentName(
-                                resolveInfo.activityInfo.packageName,
-                                resolveInfo.activityInfo.name,
-                            )
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        activity.startActivity(launch)
-                    }
-                }
+                setOnClickListener { OeaEngine.get(activity).launch(app.component, app.user) }
             }, GridLayout.LayoutParams().apply {
                 width = 0
                 height = dp(activity, 92)
@@ -190,6 +148,9 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
         scroll.addView(content, match())
         root.addView(scroll, ViewGroup.LayoutParams(-1, -1))
     }
+
+    private fun appContextIcon(activity: Activity, component: ComponentName) =
+        runCatching { activity.packageManager.getActivityIcon(component) }.getOrNull()
 
     private fun startSettings(activity: Activity, action: String) {
         runCatching { activity.startActivity(Intent(action)) }
