@@ -17,10 +17,6 @@ import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.android.launcher3.BubbleTextView
-import com.android.launcher3.Launcher
-import com.android.launcher3.folder.FolderIcon
-import com.android.launcher3.widget.LauncherAppWidgetHostView
 import app.lawnchair.oea.engine.OeaEngine
 import app.lawnchair.oea.ui.OeaHomeSurfaceController
 
@@ -33,7 +29,7 @@ import app.lawnchair.oea.ui.OeaHomeSurfaceController
  *
  * It deliberately does not replace Launcher3 features during normal operation.
  */
-class OeaLauncherSafetyNet(private val launcher: Launcher) {
+class OeaLauncherSafetyNet(private val launcher: Activity) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** Starts the non-critical recovery check after Launcher3 has had a chance to draw. */
@@ -58,26 +54,10 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
         if (root.findViewWithTag<View>(OeaHomeSurfaceController.OEA_HOME_TAG) != null) return true
         if (root.findViewWithTag<View>(TAG) != null) return true
 
-        var meaningfulItems = 0
-        fun walk(view: View) {
-            if (view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return
-            if (view is BubbleTextView || view is FolderIcon || view is LauncherAppWidgetHostView) {
-                meaningfulItems++
-                return
-            }
-            if (view is ViewGroup) {
-                for (i in 0 until view.childCount) {
-                    walk(view.getChildAt(i))
-                    if (meaningfulItems >= 1) return
-                }
-            }
-        }
-
-        walk(root)
-        return meaningfulItems > 0
+        return false
     }
 
-    private fun installRecoverySurface(activity: Launcher, root: ViewGroup) {
+    private fun installRecoverySurface(activity: Activity, root: ViewGroup) {
         if (root.findViewWithTag<View>(TAG) != null) return
 
         val scroll = ScrollView(activity).apply {
@@ -118,7 +98,7 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
                 text = label
                 setTextColor(Color.WHITE)
                 setCompoundDrawablesWithIntrinsicBounds(null, icon, null, null)
-                setOnClickListener { OeaEngine.get(activity).launch(app.component) }
+                setOnClickListener { OeaEngine.get(activity).launch(app.component, app.user) }
             }, GridLayout.LayoutParams().apply {
                 width = 0
                 height = dp(activity, 92)
