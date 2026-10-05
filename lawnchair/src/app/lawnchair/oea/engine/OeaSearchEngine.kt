@@ -1,12 +1,14 @@
 package app.lawnchair.oea.engine
 
 import android.content.ComponentName
+import android.os.UserHandle
 
 class OeaSearchEngine(private val catalog: OeaAppCatalog) {
     data class Result(
         val component: ComponentName,
         val label: String,
         val packageName: String,
+        val user: UserHandle,
         val score: Int,
     )
 
@@ -17,12 +19,13 @@ class OeaSearchEngine(private val catalog: OeaAppCatalog) {
         return catalog.apps.value
             .mapNotNull { app ->
                 score(app.label, app.packageName, normalized)?.let {
-                    Result(app.component, app.label, app.packageName, it)
+                    Result(app.component, app.label, app.packageName, app.user, it)
                 }
             }
             .sortedWith(
                 compareByDescending<Result> { it.score }
-                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label }
+                    .thenBy { it.component.flattenToShortString() },
             )
             .take(limit.coerceIn(1, 100))
     }
