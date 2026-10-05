@@ -22,13 +22,14 @@ import com.android.launcher3.Launcher
 import com.android.launcher3.folder.FolderIcon
 import com.android.launcher3.widget.LauncherAppWidgetHostView
 import app.lawnchair.oea.engine.OeaEngine
+import app.lawnchair.oea.ui.OeaHomeSurfaceController
 
 /**
  * OEA launcher safety net.
  *
- * Launcher3/Lawnchair remains the real launcher. This is only a last-resort recovery
- * surface: if the launcher activity is resumed but has no actual launcher content, it exposes a
- * functional app surface instead of leaving the user on a black screen.
+ * OEA owns the visible launcher surface. This is only a last-resort recovery layer: if the
+ * OEA surface itself failed to attach, it exposes a functional app surface instead of leaving
+ * the user on a black screen.
  *
  * It deliberately does not replace Launcher3 features during normal operation.
  */
@@ -54,6 +55,7 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
     }
 
     private fun hasUsableLauncherContent(root: ViewGroup): Boolean {
+        if (root.findViewWithTag<View>(OeaHomeSurfaceController.OEA_HOME_TAG) != null) return true
         if (root.findViewWithTag<View>(TAG) != null) return true
 
         var meaningfulItems = 0
