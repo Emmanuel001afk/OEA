@@ -13,8 +13,9 @@ import kotlinx.coroutines.flow.StateFlow
  * Independent OEA launcher engine foundation.
  *
  * The engine owns application discovery, local search, workspace persistence and launching.
- * Launcher3 is still the compatibility UI while this engine is proven; the engine itself does
- * not depend on Launcher3's model or database.
+ * The engine is the OEA application-state authority. Launcher3 APIs are retained only where
+ * Android compatibility requires the existing base activity; the engine does not use its model
+ * or database as a source of truth.
  */
 class OeaEngine private constructor(context: Context) {
     sealed interface Result {
