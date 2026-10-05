@@ -40,7 +40,6 @@ import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
 import app.lawnchair.oea.OeaLauncherSafetyNet
-import app.lawnchair.oea.runtime.OeaHomeController
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.root.RootHelperManager
@@ -94,7 +93,6 @@ import kotlinx.coroutines.launch
 
 class LawnchairLauncher : QuickstepLauncher() {
 
-    private val oeaHomeController = OeaHomeController()
     private var oeaSafetyNet: OeaLauncherSafetyNet? = null
 
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
@@ -161,10 +159,6 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onCreate(savedInstanceState: Bundle?) {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
-
-        // Attach the independent OEA engine after the base HOME activity is created.
-        // OEA observes the visible activity but does not register callbacks on Launcher3's model.
-        oeaHomeController.onLauncherAttached(this)
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
@@ -490,7 +484,6 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun onDestroy() {
         oeaSafetyNet = null
-        oeaHomeController.onLauncherDetached()
         super.onDestroy()
     }
 
