@@ -170,8 +170,6 @@ class LawnchairLauncher : QuickstepLauncher() {
 
         // Launcher3/Lawnchair remains the compatibility HOME surface while OEA's independent
         // engine is being migrated in verified stages.
-        // intentionally disabled during launcher startup while the base HOME path is being
-        // recovered. This prevents optional OEA code from being able to blank or block HOME.
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
@@ -471,6 +469,10 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onResume() {
         super.onResume()
         restartIfPending()
+
+        // If the compatibility HOME surface is genuinely blank after it had time to draw,
+        // expose the independent OEA engine instead of leaving the device on a black screen.
+        oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
 
         dragLayer.viewTreeObserver.addOnDrawListener(
             object : ViewTreeObserver.OnDrawListener {
