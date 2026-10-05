@@ -81,12 +81,12 @@
         android:backupInForeground="true"
         android:fullBackupContent="@xml/backupscheme"
         android:hardwareAccelerated="true"
-        android:icon="@drawable/ic_oea_logo"
+        android:icon="@drawable/ic_launcher_home"
         android:label="@string/derived_app_name"
         android:largeHeap="@bool/config_largeHeap"
         android:restoreAnyVersion="true"
         android:supportsRtl="true"
-        tools:replace="android:label,android:icon">
+        tools:replace="android:label">
 
         <!-- Intent received when a session is committed -->
         <receiver
