@@ -21,7 +21,7 @@ class OeaLauncherActivity : Launcher() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Give the HOME window a real surface before the Launcher3 compatibility shell draws.
         // This prevents a failed/slow legacy workspace bind from presenting a black window.
-        window.setBackgroundDrawable(ColorDrawable(Color.rgb(18, 18, 20)))
+        window?.setBackgroundDrawable(ColorDrawable(Color.rgb(18, 18, 20)))
         super.onCreate(savedInstanceState)
         oeaHomeController.onLauncherAttached(this)
     }
