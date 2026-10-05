@@ -14,8 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * OEA-owned application inventory.
  *
  * LauncherApps is the Android launcher API and therefore the engine's inventory authority.
- * This avoids coupling app discovery to Launcher3's LauncherModel and naturally gives OEA a
- * path to work/profile-aware catalogs.
+ * This avoids coupling app discovery to Launcher3's LauncherModel.
  */
 class OeaAppCatalog(context: Context) {
     data class App(
@@ -32,13 +31,33 @@ class OeaAppCatalog(context: Context) {
     val apps: StateFlow<List<App>> = _apps.asStateFlow()
 
     private val callback = object : LauncherApps.Callback() {
-        override fun onPackageAdded(packageName: String, user: UserHandle) = refresh()
-        override fun onPackageRemoved(packageName: String, user: UserHandle) = refresh()
-        override fun onPackageChanged(packageName: String, user: UserHandle) = refresh()
-        override fun onPackagesAvailable(packageNames: Array<out String>, user: UserHandle, replacing: Boolean) =
+        override fun onPackageAdded(packageName: String, user: UserHandle) {
             refresh()
-        override fun onPackagesUnavailable(packageNames: Array<out String>, user: UserHandle, replacing: Boolean) =
+        }
+
+        override fun onPackageRemoved(packageName: String, user: UserHandle) {
             refresh()
+        }
+
+        override fun onPackageChanged(packageName: String, user: UserHandle) {
+            refresh()
+        }
+
+        override fun onPackagesAvailable(
+            packageNames: Array<out String>,
+            user: UserHandle,
+            replacing: Boolean,
+        ) {
+            refresh()
+        }
+
+        override fun onPackagesUnavailable(
+            packageNames: Array<out String>,
+            user: UserHandle,
+            replacing: Boolean,
+        ) {
+            refresh()
+        }
     }
 
     @Synchronized
@@ -76,7 +95,7 @@ class OeaAppCatalog(context: Context) {
         return result
     }
 
-    private fun toApp(info: LauncherActivityInfo, user: UserHandle): App? {
+    private fun toApp(info: LauncherActivityInfo, user: UserHandle): App {
         val component = info.componentName
         val label = info.label?.toString()?.trim()
             .takeUnless { it.isNullOrEmpty() } ?: component.packageName
