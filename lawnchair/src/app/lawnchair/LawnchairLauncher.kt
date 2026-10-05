@@ -171,15 +171,24 @@ class LawnchairLauncher : QuickstepLauncher() {
             oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
         }, 1500L)
 
-        oeaHomeController.onLauncherAttached(this, launcher.stateManager.state)
-        launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
-            override fun onStateTransitionStart(toState: LauncherState) {
-                oeaHomeController.onLauncherStateChanged(toState)
+        // OEA is an optional layer. Never let OEA initialization block Launcher3's
+        // first workspace render. Launcher3 must remain usable even if an OEA component
+        // or its persisted state is broken.
+        rootView.postDelayed({
+            runCatching {
+                oeaHomeController.onLauncherAttached(this, launcher.stateManager.state)
+                launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
+                    override fun onStateTransitionStart(toState: LauncherState) {
+                        runCatching { oeaHomeController.onLauncherStateChanged(toState) }
+                    }
+                    override fun onStateTransitionComplete(finalState: LauncherState) {
+                        runCatching { oeaHomeController.onLauncherStateChanged(finalState) }
+                    }
+                })
+            }.onFailure { error ->
+                android.util.Log.e("LawnchairLauncher", "OEA startup integration disabled", error)
             }
-            override fun onStateTransitionComplete(finalState: LauncherState) {
-                oeaHomeController.onLauncherStateChanged(finalState)
-            }
-        })
+        }, 500L)
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
