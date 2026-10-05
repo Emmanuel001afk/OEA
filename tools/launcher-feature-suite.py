@@ -69,6 +69,7 @@ SUITES = {
     ],
     "OEA runtime safety": [
         "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
+        "lawnchair/src/app/lawnchair/OeaLauncherActivity.kt",
         "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNet.kt",
     ],
 }
@@ -76,7 +77,7 @@ SUITES = {
 REQUIRED_MANIFEST = {
     "HOME": r"android\.intent\.category\.HOME",
     "DEFAULT": r"android\.intent\.category\.DEFAULT",
-    "Lawnchair launcher": r"app\.lawnchair\.LawnchairLauncher",
+    "OEA launcher": r"app\.lawnchair\.OeaLauncherActivity",
     "LauncherProvider": r"com\.android\.launcher3\.LauncherProvider",
     "WidgetPicker": r"com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity",
     "NotificationListener": r"com\.android\.launcher3\.notification\.NotificationListener",
