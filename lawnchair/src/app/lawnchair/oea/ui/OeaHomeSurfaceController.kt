@@ -31,7 +31,7 @@ class OeaHomeSurfaceController(
 
         val engine = OeaEngine.get(activity).start()
 
-        val container = LinearLayout(launcher).apply {
+        val container = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             tag = OEA_HOME_TAG
             setPadding(24, 32, 24, 16)
@@ -41,7 +41,7 @@ class OeaHomeSurfaceController(
             isFocusable = true
         }
 
-        container.addView(TextView(launcher).apply {
+        container.addView(TextView(activity).apply {
             text = "OEA"
             textSize = 28f
             setTextColor(Color.WHITE)
@@ -51,7 +51,7 @@ class OeaHomeSurfaceController(
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ))
 
-        val health = TextView(launcher).apply {
+        val health = TextView(activity).apply {
             textSize = 12f
             setTextColor(Color.LTGRAY)
             setPadding(4, 0, 4, 12)
@@ -61,7 +61,7 @@ class OeaHomeSurfaceController(
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ))
 
-        val searchBox = EditText(launcher).apply {
+        val searchBox = EditText(activity).apply {
             hint = "Search apps"
             setSingleLine(true)
             textSize = 16f
@@ -75,8 +75,8 @@ class OeaHomeSurfaceController(
             52,
         ).apply { bottomMargin = 12 })
 
-        val scroll = ScrollView(launcher)
-        val appGrid = LinearLayout(launcher).apply {
+        val scroll = ScrollView(activity)
+        val appGrid = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
         }
         scroll.addView(appGrid, ViewGroup.LayoutParams(
@@ -111,7 +111,7 @@ class OeaHomeSurfaceController(
     private fun renderApps(container: LinearLayout, apps: List<OeaAppCatalog.App>) {
         container.removeAllViews()
         if (apps.isEmpty()) {
-            container.addView(TextView(launcher).apply {
+            container.addView(TextView(activity).apply {
                 text = "No apps found"
                 textSize = 16f
                 setTextColor(Color.LTGRAY)
@@ -124,7 +124,7 @@ class OeaHomeSurfaceController(
         var row: LinearLayout? = null
         apps.forEachIndexed { index, app ->
             if (index % 4 == 0) {
-                row = LinearLayout(launcher).apply {
+                row = LinearLayout(activity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.TOP
                 }
@@ -134,23 +134,23 @@ class OeaHomeSurfaceController(
                 ))
             }
 
-            val item = LinearLayout(launcher).apply {
+            val item = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 isClickable = true
                 isFocusable = true
                 setPadding(4, 4, 4, 4)
-                setOnClickListener { OeaEngine.get(launcher).launch(app.component, app.user) }
+                setOnClickListener { OeaEngine.get(activity).launch(app.component, app.user) }
             }
 
-            val icon = ImageView(launcher)
+            val icon = ImageView(activity)
             val drawable: Drawable? = runCatching {
-                launcher.packageManager.getApplicationIcon(app.packageName)
+                activity.packageManager.getApplicationIcon(app.packageName)
             }.getOrNull()
             icon.setImageDrawable(drawable)
             item.addView(icon, LinearLayout.LayoutParams(48, 48))
 
-            item.addView(TextView(launcher).apply {
+            item.addView(TextView(activity).apply {
                 text = app.label
                 textSize = 11f
                 setTextColor(Color.WHITE)
