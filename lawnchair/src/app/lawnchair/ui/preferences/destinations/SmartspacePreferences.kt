@@ -38,7 +38,6 @@ import app.lawnchair.ui.preferences.components.layout.PreferenceGroup
 import app.lawnchair.ui.preferences.components.layout.PreferenceLayout
 import app.lawnchair.ui.theme.isSelectedThemeDark
 import com.android.launcher3.R
-import com.kieronquinn.app.smartspacer.sdk.SmartspacerConstants
 
 @Composable
 fun SmartspacePreferences(
@@ -299,7 +298,7 @@ fun SmartspacerSettings(
             Item {
                 ClickablePreference(label = stringResource(R.string.open_smartspacer_settings)) {
                     val intent = context.packageManager.getLaunchIntentForPackage(
-                        SmartspacerConstants.SMARTSPACER_PACKAGE_NAME,
+                        "",
                     )
                     context.startActivity(intent)
                 }
