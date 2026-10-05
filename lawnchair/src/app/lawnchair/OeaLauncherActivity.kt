@@ -1,0 +1,34 @@
+package app.lawnchair
+
+import android.os.Bundle
+import app.lawnchair.oea.OeaLauncherSafetyNet
+import app.lawnchair.oea.runtime.OeaHomeController
+import com.android.launcher3.Launcher
+
+/**
+ * OEA's HOME activity.
+ *
+ * This is intentionally a thin Android/Launcher3 compatibility shell. The visible HOME,
+ * application inventory, search and launching are owned by OEA, not by Lawnchair's Quickstep
+ * activity or Launcher3's workspace model.
+ */
+class OeaLauncherActivity : Launcher() {
+    private val oeaHomeController = OeaHomeController()
+    private var safetyNet: OeaLauncherSafetyNet? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        oeaHomeController.onLauncherAttached(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        safetyNet = OeaLauncherSafetyNet(this).also { it.start() }
+    }
+
+    override fun onDestroy() {
+        safetyNet = null
+        oeaHomeController.onLauncherDetached()
+        super.onDestroy()
+    }
+}
