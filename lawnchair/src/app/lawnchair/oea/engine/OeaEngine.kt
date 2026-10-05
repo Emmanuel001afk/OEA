@@ -79,7 +79,7 @@ class OeaEngine private constructor(context: Context) {
         running = started,
         appCount = apps.value.size,
         workspaceCount = workspace.load().size,
-        searchReady = search.search("a", 1).isNotEmpty() || apps.value.isEmpty(),
+        searchReady = started,
     )
 
     fun execute(action: Action): Result {
