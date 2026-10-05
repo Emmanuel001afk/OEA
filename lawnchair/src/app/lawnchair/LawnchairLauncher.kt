@@ -41,7 +41,6 @@ import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
 import app.lawnchair.oea.OeaLauncherSafetyNet
 import app.lawnchair.oea.runtime.OeaHomeController
-import app.lawnchair.oea.scheduler.OeaScheduler
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.root.RootHelperManager
@@ -83,7 +82,6 @@ import com.android.launcher3.widget.LauncherWidgetHolder
 import com.android.launcher3.widget.RoundedCornerEnforcement
 import com.android.systemui.plugins.shared.LauncherOverlayManager
 import com.android.systemui.shared.system.QuickStepContract
-import com.kieronquinn.app.smartspacer.sdk.client.SmartspacerClient
 import com.patrykmichalik.opto.core.firstBlocking
 import com.patrykmichalik.opto.core.onEach
 import dev.kdrag0n.monet.theme.ColorScheme
@@ -167,9 +165,6 @@ class LawnchairLauncher : QuickstepLauncher() {
         // Attach the independent OEA engine after the base HOME activity is created.
         // OEA observes the visible activity but does not register callbacks on Launcher3's model.
         oeaHomeController.onLauncherAttached(this, stateManager.state)
-
-        // Launcher3/Lawnchair remains the compatibility HOME surface while OEA's independent
-        // engine is being migrated in verified stages.
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
@@ -497,8 +492,6 @@ class LawnchairLauncher : QuickstepLauncher() {
         oeaSafetyNet = null
         oeaHomeController.onLauncherDetached()
         super.onDestroy()
-        // Only actually closes if required, safe to call if not enabled
-        SmartspacerClient.close()
     }
 
     override fun getDefaultOverlay(): LauncherOverlayManager = defaultOverlay
