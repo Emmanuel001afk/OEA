@@ -94,7 +94,7 @@ class OeaHomeSurfaceController(private val launcher: Launcher) {
 
         fun render(query: String = "") {
             val q = query.trim()
-            val apps = if (q.isEmpty()) engine.apps.value else engine.search(q).map { it.app }
+            val apps = if (q.isEmpty()) engine.apps.value else engine.search.search(q).mapNotNull { result -> engine.apps.value.firstOrNull { it.component == result.component && it.user == result.user } }
             renderApps(appGrid, apps)
             health.text = "Independent engine • " + engine.health().appCount + " apps • " + apps.size + " shown"
         }
