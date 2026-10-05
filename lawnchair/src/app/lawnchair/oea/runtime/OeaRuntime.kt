@@ -1,7 +1,6 @@
 package app.lawnchair.oea.runtime
 
 import android.app.Application
-import com.android.launcher3.LauncherState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,7 +20,6 @@ object OeaRuntime {
     data class RuntimeState(
         val initialized: Boolean = false,
         val launcherAttached: Boolean = false,
-        val launcherState: LauncherState? = null,
     )
 
     private var application: Application? = null
@@ -42,16 +40,9 @@ object OeaRuntime {
         _state.update { it.copy(initialized = true) }
     }
 
-    fun attachLauncher(state: LauncherState) {
+    fun attachLauncher() {
         if (!stateInitialized()) return
-        _state.update {
-            it.copy(launcherAttached = true, launcherState = state)
-        }
-    }
-
-    fun updateLauncherState(state: LauncherState) {
-        if (!stateInitialized()) return
-        _state.update { it.copy(launcherState = state) }
+        _state.update { it.copy(launcherAttached = true) }
     }
 
     fun detachLauncher() {
