@@ -17,64 +17,54 @@ import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.android.launcher3.BubbleTextView
 import com.android.launcher3.Launcher
-import com.android.launcher3.folder.FolderIcon
-import com.android.launcher3.widget.LauncherAppWidgetHostView
+import com.android.launcher3.Workspace
 
 /**
  * OEA launcher safety net.
  *
- * Launcher3/Lawnchair remains the real launcher. This is only a last-resort recovery
- * surface: if the launcher activity is resumed but has no actual launcher content, it exposes a
- * functional app surface instead of leaving the user on a black screen.
- *
- * It deliberately does not replace Launcher3 features during normal operation.
+ * Launcher3/Lawnchair remains the real launcher. This class is only a delayed recovery path
+ * for a launcher surface that genuinely failed to become ready. It never treats an empty
+ * workspace as a failure and never places a recovery view over a healthy launcher.
  */
 class OeaLauncherSafetyNet(private val launcher: Launcher) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Starts the non-critical recovery check after Launcher3 has had a chance to draw. */
     fun start() {
-        scheduleHealthCheck(launcher)
+        scheduleHealthCheck(INITIAL_DELAY_MS)
     }
 
-    private fun scheduleHealthCheck(activity: Launcher) {
+    private fun scheduleHealthCheck(delayMs: Long) {
         mainHandler.postDelayed({
-            if (activity.isFinishing || activity.isDestroyed) return@postDelayed
-            val root = activity.window?.decorView as? ViewGroup ?: return@postDelayed
+            if (launcher.isFinishing || launcher.isDestroyed) return@postDelayed
 
-            // A populated decor tree can still exist while Launcher3 failed to bind its
-            // workspace. Check for actual launcher items instead of merely checking visibility.
-            if (!hasUsableLauncherContent(root)) {
-                installRecoverySurface(activity, root)
+            val root = launcher.window?.decorView as? ViewGroup ?: return@postDelayed
+            if (hasHealthyLauncherSurface()) {
+                removeRecoverySurface(root)
+                return@postDelayed
             }
-        }, 1500L)
+
+            installRecoverySurface(launcher, root)
+        }, delayMs)
     }
 
-    private fun hasUsableLauncherContent(root: ViewGroup): Boolean {
-        if (root.findViewWithTag<View>(TAG) != null) return true
+    private fun hasHealthyLauncherSurface(): Boolean {
+        if (launcher.isWorkspaceLoading) return false
 
-        var meaningfulItems = 0
-        fun walk(view: View) {
-            if (view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return
-            if (view is BubbleTextView || view is FolderIcon || view is LauncherAppWidgetHostView) {
-                meaningfulItems++
-                return
-            }
-            if (view is ViewGroup) {
-                for (i in 0 until view.childCount) {
-                    walk(view.getChildAt(i))
-                    if (meaningfulItems >= 1) return
-                }
-            }
-        }
+        val workspace: Workspace<*> = launcher.getWorkspace() ?: return false
+        if (workspace.visibility != View.VISIBLE || !workspace.isLaidOut) return false
 
-        walk(root)
-        return meaningfulItems > 0
+        // A fresh launcher can legitimately have no icons. Workspace existence and layout,
+        // rather than child count, is therefore the authoritative health signal.
+        return workspace.width > 0 && workspace.height > 0
+    }
+
+    private fun removeRecoverySurface(root: ViewGroup) {
+        root.findViewWithTag<View>(TAG)?.let { root.removeView(it) }
     }
 
     private fun installRecoverySurface(activity: Launcher, root: ViewGroup) {
+        if (hasHealthyLauncherSurface()) return
         if (root.findViewWithTag<View>(TAG) != null) return
 
         val scroll = ScrollView(activity).apply {
@@ -95,7 +85,7 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
             gravity = Gravity.CENTER
         }, match())
         content.addView(TextView(activity).apply {
-            text = "The launcher did not load its Home content. Your apps are still installed."
+            text = "The launcher did not load its Home surface. Your apps are still installed."
             textSize = 15f
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
@@ -151,7 +141,7 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
                     activity.startActivity(
                         Intent(
                             Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            Uri.parse("package:${activity.packageName}"),
+                            Uri.parse("package:" + activity.packageName),
                         ),
                     )
                 }
@@ -194,6 +184,7 @@ class OeaLauncherSafetyNet(private val launcher: Launcher) {
         }
 
     companion object {
+        private const val INITIAL_DELAY_MS = 4000L
         private const val TAG = "oea_launcher_recovery"
     }
 }
