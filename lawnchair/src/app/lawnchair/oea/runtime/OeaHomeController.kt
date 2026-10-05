@@ -4,7 +4,6 @@ import app.lawnchair.oea.data.OeaDataStore
 import app.lawnchair.oea.engine.OeaEngine
 import app.lawnchair.oea.ui.OeaHomeSurfaceController
 import com.android.launcher3.Launcher
-import com.android.launcher3.LauncherState
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -22,18 +21,14 @@ class OeaHomeController {
     val state: StateFlow<OeaRuntime.RuntimeState>
         get() = OeaRuntime.state
 
-    fun onLauncherAttached(launcher: Launcher, initialState: LauncherState) {
+    fun onLauncherAttached(launcher: Launcher) {
         attachedLauncher = launcher
-        OeaRuntime.attachLauncher(initialState)
+        OeaRuntime.attachLauncher()
 
         engine = OeaEngine.get(launcher).start()
         OeaDataStore.get(launcher).setApplicationCount(engine?.apps?.value?.size ?: 0)
 
         surfaceController = OeaHomeSurfaceController(launcher).also { it.attach() }
-    }
-
-    fun onLauncherStateChanged(state: LauncherState) {
-        OeaRuntime.updateLauncherState(state)
     }
 
     fun onLauncherDetached() {
