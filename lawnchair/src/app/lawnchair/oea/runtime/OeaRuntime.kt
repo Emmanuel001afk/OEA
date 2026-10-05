@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.update
 /**
  * OEA-owned runtime boundary between the Lawnchair/Launcher3 foundation and OEA features.
  *
- * This deliberately contains no Aria-specific types. Launcher3 remains responsible for
- * workspace/model/app enumeration; OEA owns the lifecycle and feature coordination above it.
+ * This deliberately contains no upstream launcher-model state. OEA owns its runtime lifecycle;
+ * Android platform services are used only through explicit OEA engine adapters.
  */
 object OeaRuntime {
     data class RuntimeState(
