@@ -9,9 +9,8 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * OEA home/controller facade.
  *
- * The independent OEA engine is the source of OEA application state. Launcher3 is only the
- * current compatibility surface; this controller deliberately does not register an OEA callback
- * with Launcher3's model, preventing model lifecycle problems from becoming engine dependencies.
+ * OEA owns application state and the visible HOME surface. The Launcher3/Lawnchair base activity
+ * is only a compatibility shell; this controller never binds OEA state to Launcher3's model.
  */
 class OeaHomeController {
     private var surfaceController: OeaHomeSurfaceController? = null
