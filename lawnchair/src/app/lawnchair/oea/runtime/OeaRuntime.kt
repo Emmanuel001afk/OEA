@@ -47,7 +47,7 @@ object OeaRuntime {
 
     fun detachLauncher() {
         if (!stateInitialized()) return
-        _state.update { it.copy(launcherAttached = false, launcherState = null) }
+        _state.update { it.copy(launcherAttached = false) }
     }
 
     private fun stateInitialized(): Boolean = _state.value.initialized
