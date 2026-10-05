@@ -1,39 +1,35 @@
 package app.lawnchair.oea.runtime
 
+import android.app.Activity
+import android.view.ViewGroup
 import app.lawnchair.oea.data.OeaDataStore
 import app.lawnchair.oea.engine.OeaEngine
 import app.lawnchair.oea.ui.OeaHomeSurfaceController
-import com.android.launcher3.Launcher
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * OEA home/controller facade.
- *
- * OEA owns application state and the visible HOME surface. The Launcher3/Lawnchair base activity
- * is only a compatibility shell; this controller never binds OEA state to Launcher3's model.
+ * OEA home/controller facade. The HOME activity and surface are OEA-owned.
  */
 class OeaHomeController {
     private var surfaceController: OeaHomeSurfaceController? = null
-    private var attachedLauncher: Launcher? = null
+    private var attachedActivity: Activity? = null
     private var engine: OeaEngine? = null
 
     val state: StateFlow<OeaRuntime.RuntimeState>
         get() = OeaRuntime.state
 
-    fun onLauncherAttached(launcher: Launcher) {
-        attachedLauncher = launcher
+    fun onHomeAttached(activity: Activity, root: ViewGroup) {
+        attachedActivity = activity
         OeaRuntime.attachLauncher()
-
-        engine = OeaEngine.get(launcher).start()
-        OeaDataStore.get(launcher).setApplicationCount(engine?.apps?.value?.size ?: 0)
-
-        surfaceController = OeaHomeSurfaceController(launcher).also { it.attach() }
+        engine = OeaEngine.get(activity).start()
+        OeaDataStore.get(activity).setApplicationCount(engine?.apps?.value?.size ?: 0)
+        surfaceController = OeaHomeSurfaceController(activity, root).also { it.attach() }
     }
 
-    fun onLauncherDetached() {
+    fun onHomeDetached() {
         surfaceController?.detach()
         surfaceController = null
-        attachedLauncher = null
+        attachedActivity = null
         engine = null
         OeaRuntime.detachLauncher()
     }
