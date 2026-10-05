@@ -45,6 +45,7 @@ import app.lawnchair.backup.LawnchairBackup
 import app.lawnchair.flowerpot.Flowerpot
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.oea.runtime.OeaRuntime
+import app.lawnchair.oea.engine.OeaEngine
 import app.lawnchair.oea.scheduler.OeaScheduler
 import app.lawnchair.ui.ModalBottomSheetContent
 import app.lawnchair.ui.preferences.destinations.openAppInfo
@@ -83,6 +84,8 @@ class LawnchairApp :
         super.onCreate()
         instance = this
         OeaRuntime.initialize(this)
+        // Start the independent OEA engine at process level. It does not touch Launcher3's model.
+        OeaEngine.get(this).start()
         QuickStepContract.sRecentsDisabled = !recentsEnabled
         Flowerpot.Manager.getInstance(this)
         registerActivityLifecycleCallbacks(activityHandler)
