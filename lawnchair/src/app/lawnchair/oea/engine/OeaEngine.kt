@@ -30,16 +30,23 @@ class OeaEngine private constructor(context: Context) {
     val search = OeaSearchEngine(catalog)
     val workspace = OeaWorkspaceStore(appContext)
     val apps: StateFlow<List<OeaAppCatalog.App>> = catalog.apps
+    private var started = false
 
     @Synchronized
     fun start(): OeaEngine {
-        catalog.start()
+        if (!started) {
+            catalog.start()
+            started = true
+        }
         return this
     }
 
     @Synchronized
     fun stop() {
-        catalog.stop()
+        if (started) {
+            catalog.stop()
+            started = false
+        }
     }
 
     fun launch(component: ComponentName, user: UserHandle? = null): Result {
@@ -69,7 +76,7 @@ class OeaEngine private constructor(context: Context) {
     )
 
     fun health(): Health = Health(
-        running = apps.value.isNotEmpty() || catalog.apps.value.isEmpty(),
+        running = started,
         appCount = apps.value.size,
         workspaceCount = workspace.load().size,
         searchReady = search.search("a", 1).isNotEmpty() || apps.value.isEmpty(),
