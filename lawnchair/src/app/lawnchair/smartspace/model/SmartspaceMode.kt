@@ -66,7 +66,7 @@ object GoogleSmartspace : SmartspaceMode(
 
 object Smartspacer : SmartspaceMode(
     nameResourceId = R.string.smartspace_mode_smartspacer,
-    layoutResourceId = R.layout.smartspace_smartspacer,
+    layoutResourceId = R.layout.smartspace_default,
 ) {
     override fun toString(): String = "smartspacer"
 
