@@ -508,12 +508,6 @@ dependencies {
     // eagerly), but kotlin-reflect must be excluded — it crashes on Android because DEX
     // strips Kotlin builtins metadata. We override the mapper via .jsonMapper() with a bare
     // JsonMapper so kotlin-reflect is never invoked at serialization time.
-    implementation(libs.anthropic.java) {
-        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-reflect'
-        // Apache HttpClient5 is only needed for Bedrock/Vertex backends we don't use.
-        exclude group: 'org.apache.httpcomponents.client5'
-        exclude group: 'org.apache.httpcomponents.core5'
-    }
     // LiteRT-LM uses kotlin-reflect for its Tool/ToolSet reflection path; keep the runtime dependency so release R8 does not leave ToolManager with missing KClasses.
     implementation(libs.litertlm.android)
     implementation "org.jetbrains.kotlin:kotlin-reflect:${libs.versions.kotlin.get()}"
