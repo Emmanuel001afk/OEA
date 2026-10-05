@@ -33,6 +33,7 @@ import com.android.launcher3.BuildConfig
 import com.android.launcher3.R
 import com.android.launcher3.Utilities
 
+/** OEA deliberately does not integrate third-party Smartspacer. */
 class FeedBridge(private val context: Context) {
 
     private val shouldUseFeed = context.applicationInfo.flags and (FLAG_DEBUGGABLE or FLAG_SYSTEM) == 0
