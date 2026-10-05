@@ -32,17 +32,17 @@ import app.lawnchair.oea.ui.OeaHomeSurfaceController
 class OeaLauncherSafetyNet(private val launcher: Activity) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Starts the non-critical recovery check after Launcher3 has had a chance to draw. */
+    /** Starts the non-critical recovery check after the OEA window has had a chance to draw. */
     fun start() {
         scheduleHealthCheck(launcher, 1500L)
     }
 
-    private fun scheduleHealthCheck(activity: Launcher, delayMs: Long) {
+    private fun scheduleHealthCheck(activity: Activity, delayMs: Long) {
         mainHandler.postDelayed({
             if (activity.isFinishing || activity.isDestroyed) return@postDelayed
             val root = activity.window?.decorView as? ViewGroup ?: return@postDelayed
 
-            // Never rebind or manipulate Launcher3's model from the safety layer.
+            // The safety layer never touches Launcher3's model.
             // The independent OEA engine is already running and is used as the recovery source.
             if (!hasUsableLauncherContent(root)) {
                 installRecoverySurface(activity, root)
