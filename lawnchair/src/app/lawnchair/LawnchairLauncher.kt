@@ -164,31 +164,9 @@ class LawnchairLauncher : QuickstepLauncher() {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
 
-        // Keep non-visual OEA maintenance and recovery checks out of Application.onCreate and
-        // the first frame. The safety net is a normal helper, not an Android startup component.
-        rootView.postDelayed({
-            OeaScheduler.initialize(applicationContext)
-            oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
-        }, 1500L)
-
-        // OEA is an optional layer. Never let OEA initialization block Launcher3's
-        // first workspace render. Launcher3 must remain usable even if an OEA component
-        // or its persisted state is broken.
-        rootView.postDelayed({
-            runCatching {
-                oeaHomeController.onLauncherAttached(this, launcher.stateManager.state)
-                launcher.stateManager.addStateListener(object : StateManager.StateListener<LauncherState> {
-                    override fun onStateTransitionStart(toState: LauncherState) {
-                        runCatching { oeaHomeController.onLauncherStateChanged(toState) }
-                    }
-                    override fun onStateTransitionComplete(finalState: LauncherState) {
-                        runCatching { oeaHomeController.onLauncherStateChanged(finalState) }
-                    }
-                })
-            }.onFailure { error ->
-                android.util.Log.e("LawnchairLauncher", "OEA startup integration disabled", error)
-            }
-        }, 500L)
+        // Launcher3/Lawnchair is the authoritative HOME implementation. OEA integration is
+        // intentionally disabled during launcher startup while the base HOME path is being
+        // recovered. This prevents optional OEA code from being able to blank or block HOME.
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
