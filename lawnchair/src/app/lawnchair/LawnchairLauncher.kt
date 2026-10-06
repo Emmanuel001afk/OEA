@@ -39,8 +39,6 @@ import app.lawnchair.gestures.GestureController
 import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
-import app.lawnchair.oea.OeaLauncherSafetyNet
-import app.lawnchair.oea.runtime.OeaHomeController
 import app.lawnchair.oea.scheduler.OeaScheduler
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
@@ -96,8 +94,6 @@ import kotlinx.coroutines.launch
 
 class LawnchairLauncher : QuickstepLauncher() {
 
-    private val oeaHomeController = OeaHomeController()
-    private var oeaSafetyNet: OeaLauncherSafetyNet? = null
 
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
     private val prefs by unsafeLazy { PreferenceManager.getInstance(this) }
@@ -163,13 +159,6 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onCreate(savedInstanceState: Bundle?) {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
-
-        // Launcher3/Lawnchair remains the sole HOME implementation. OEA feature integration
-        // stays out of the synchronous startup path, but the launcher gets a delayed, isolated
-        // model-health check so a missed Launcher3 bind cannot leave HOME permanently blank.
-        rootView.post {
-            oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
-        }
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
@@ -490,8 +479,6 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onDestroy() {
-        oeaSafetyNet = null
-        oeaHomeController.onLauncherDetached()
         super.onDestroy()
         // Only actually closes if required, safe to call if not enabled
         SmartspacerClient.close()
