@@ -267,8 +267,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun addToDock(key: String) {
+        if (ws.dock().contains(key)) return
         val values = ws.dock().filterNot { it == key }.toMutableList()
-        if (values.size >= OeaWorkspaceStore.DOCK_SLOTS) values.removeAt(values.lastIndex)
+        if (values.size >= OeaWorkspaceStore.DOCK_SLOTS) {
+            Toast.makeText(context, "Dock is full — drag an existing icon out first.", Toast.LENGTH_SHORT).show()
+            return
+        }
         values.add(0, key)
         ws.setDock(values)
         ws.replaceItems(ws.items().filterNot { it.id == key })
@@ -613,6 +617,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawer.visibility = View.GONE
         pager.visibility = View.VISIBLE
         dock.visibility = View.VISIBLE
+        search.setText("")
+        drawerSearch.setText("")
         search.clearFocus()
         drawerSearch.clearFocus()
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
