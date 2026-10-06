@@ -11,11 +11,11 @@ class OeaHomeController(private val context: Context) {
 
     fun createHomeSurface(): android.view.View {
         engine.start()
-        return surfaceController.attach(engine.model.apps)
+        return surfaceController.attach(engine)
     }
 
     fun refresh() {
         engine.start()
-        surfaceController.attach(engine.model.apps)
+        surfaceController.refresh(engine)
     }
 }
