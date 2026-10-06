@@ -90,7 +90,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             dots.text = List(ws.pages()) { if (it == current) "●" else "•" }.joinToString(" ")
         }
         pages.orientation = LinearLayout.HORIZONTAL
-        pager.addView(pages, HorizontalScrollView.LayoutParams(-2, -1))
+        pager.addView(pages, FrameLayout.LayoutParams(-2, -1))
         root.addView(pager, LinearLayout.LayoutParams(-1, 0, 1f))
 
         dots.gravity = Gravity.CENTER
@@ -119,7 +119,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
         drawer.setBackgroundColor(Color.rgb(12, 15, 21))
         drawerGrid.columnCount = cols()
-        drawer.addView(drawerGrid, ScrollView.LayoutParams(-1, -2))
+        drawer.addView(drawerGrid, FrameLayout.LayoutParams(-1, -2))
         addView(drawer, FrameLayout.LayoutParams(-1, -1))
         drawer.visibility = View.GONE
         post { rebuild() }
@@ -201,7 +201,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 true
             } else if (item.itemId >= 1000) {
                 shortcuts.getOrNull(item.itemId - 1000)?.let {
-                    runCatching { context.startActivity(it.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    runCatching { it.intent?.let { intent -> context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
                 }
                 true
             } else false
@@ -394,15 +394,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun renderDrawer(query: String) {
         if (!drawerOpen) return
-        dragged = OeaWorkspaceStore.key(it.packageName, it.className).lowercase(Locale.ROOT)
         drawerGrid.removeAllViews()
-        drawerController.filter(apps, q).filterNot { store.isHidden(it.packageName, it.className) }.forEach {
-            val v = tile(it).apply {
+        drawerController.filter(apps, query).filterNot { app ->
+            store.isHidden(app.packageName, app.className)
+        }.forEach { app ->
+            val v = tile(app).apply {
                 setOnLongClickListener {
-                    dragged = OeaWorkspaceStore.key(it.packageName, it.className)
+                    dragged = OeaWorkspaceStore.key(app.packageName, app.className)
+                    val key = dragged!!
                     startDragAndDrop(
-                        ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, dragged),
-                        View.DragShadowBuilder(this), dragged, View.DRAG_FLAG_GLOBAL,
+                        ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, key),
+                        View.DragShadowBuilder(this), key, View.DRAG_FLAG_GLOBAL,
                     )
                     true
                 }
