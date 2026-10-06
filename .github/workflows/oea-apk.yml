@@ -36,6 +36,8 @@ jobs:
             echo "ERROR: Launcher3 identity remains in the APK."
             exit 1
           fi
+          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
       - name: Publish latest APK release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
