@@ -114,6 +114,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             pager,
             onSwipeUp = { openDrawer() },
             onSwipeDown = { closeDrawer() },
+            onSwipeLeft = { nextPage() },
+            onSwipeRight = { previousPage() },
         ))
         pages.orientation = LinearLayout.HORIZONTAL
         pager.addView(pages, FrameLayout.LayoutParams(-2, -1))
@@ -711,6 +713,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 columnSpec = GridLayout.spec(slot, 1, 1f)
             })
         }
+    }
+
+    private fun nextPage() {
+        val target = (ws.getCurrentPage() + 1).coerceAtMost(ws.pages() - 1)
+        if (target == ws.getCurrentPage()) return
+        ws.setCurrentPage(target)
+        pager.post { pager.smoothScrollTo(target * pager.width, 0) }
+        dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
+    }
+
+    private fun previousPage() {
+        val target = (ws.getCurrentPage() - 1).coerceAtLeast(0)
+        if (target == ws.getCurrentPage()) return
+        ws.setCurrentPage(target)
+        pager.post { pager.smoothScrollTo(target * pager.width, 0) }
+        dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
     }
 
     private fun openDrawer() {
