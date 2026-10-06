@@ -306,23 +306,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun freezeDialog(app: OeaAppInfo) {
-        val input = EditText(context).apply { hint = "Freeze or unfreeze this app" }
-        val result = OeaAppFreezer.setFrozen(context, app.packageName, true)
-        if (!result.success) {
-            AlertDialog.Builder(context)
-                .setTitle("App Freezer")
-                .setMessage(result.message + "\n\nOEA needs device-owner authority for real package suspension.")
-                .setPositiveButton("OK", null)
-                .show()
-        } else {
-            OeaAppFreezer.setFrozen(context, app.packageName, false)
-            AlertDialog.Builder(context)
-                .setTitle("App Freezer")
-                .setMessage("Choose the freezer control from OEA Systems to freeze or unfreeze " + app.label + ".")
-                .setPositiveButton("OEA Systems") { _, _ -> openSettings(OeaSystems) }
-                .setNegativeButton("Close", null)
-                .show()
-        }
+        AlertDialog.Builder(context)
+            .setTitle("App Freezer")
+            .setMessage("Freeze or unfreeze " + app.label + ". Real package suspension requires OEA to be device owner.")
+            .setPositiveButton("Freeze") { _, _ ->
+                val result = OeaAppFreezer.setFrozen(context, app.packageName, true)
+                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            }
+            .setNeutralButton("Unfreeze") { _, _ ->
+                val result = OeaAppFreezer.setFrozen(context, app.packageName, false)
+                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("OEA Systems") { _, _ -> openSettings(OeaSystems) }
+            .show()
     }
 
     private fun openSettings(route: app.lawnchair.ui.preferences.navigation.PreferenceRoute) {
@@ -658,8 +654,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             drawer.setBackgroundColor(themeBackground)
             search.setTextColor(themeText)
             search.setHintTextColor(themeMuted)
+            search.background = rounded(themeSurface, 28)
             drawerSearch.setTextColor(themeText)
             drawerSearch.setHintTextColor(themeMuted)
+            drawerSearch.background = rounded(themeSurface, 24)
+            (drawer.getChildAt(0) as? LinearLayout)?.let { header ->
+                header.setBackgroundColor(Color.TRANSPARENT)
+                (header.getChildAt(0) as? TextView)?.setTextColor(themeText)
+                (header.getChildAt(1) as? TextView)?.setTextColor(themeText)
+                (header.getChildAt(1) as? TextView)?.background = rounded(themeSurface, 18)
+            }
         }
     }
 
