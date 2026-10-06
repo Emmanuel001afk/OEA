@@ -80,7 +80,7 @@
             </intent-filter>
 </activity>
 
-        <activity android:name="com.android.launcher3.widgetpicker.WidgetPickerActivity"
+        <activity android:name="app.lawnchair.oea.widget.OeaWidgetPickerActivity"
             android:theme="@style/WidgetPickerActivityTheme"
             android:excludeFromRecents="true"
             android:autoRemoveFromRecents="true"
