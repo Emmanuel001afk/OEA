@@ -1,6 +1,8 @@
 package app.lawnchair.oea.workspace
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.view.Gravity
 import android.widget.GridLayout
@@ -31,8 +33,11 @@ class OeaWorkspace(context: Context) : GridLayout(context) {
                 setPadding(12, 12, 12, 12)
                 setBackgroundColor(Color.rgb(42, 47, 58))
                 setOnClickListener {
-                    val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
-                    intent?.let(context::startActivity)
+                    val intent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_LAUNCHER)
+                        component = ComponentName(app.packageName, app.className)
+                    }
+                    runCatching { context.startActivity(intent) }
                 }
             }
             addView(tile, GridLayout.LayoutParams().apply {
