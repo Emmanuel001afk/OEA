@@ -252,23 +252,23 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
 
         if (store.showAppLabels()) {
-        tile.addView(TextView(context).apply {
-            text = app.label
-            textSize = 12f
-            gravity = Gravity.CENTER
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-            setTextColor(Color.WHITE)
-            setPadding(2, dp(6), 2, 0)
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(38)
+            tile.addView(TextView(context).apply {
+                text = app.label
+                textSize = 12f
+                gravity = Gravity.CENTER
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                setTextColor(Color.WHITE)
+                setPadding(2, dp(6), 2, 0)
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(38)
+            ))
         }
-        ))
 
         return tile.apply {
             layoutParams = GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(106)
+                height = if (store.showAppLabels()) dp(106) else dp(76)
                 columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1, 1f)
                 setMargins(dp(4), dp(4), dp(4), dp(4))
             }
