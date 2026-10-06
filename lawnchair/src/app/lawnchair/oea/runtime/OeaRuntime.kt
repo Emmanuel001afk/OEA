@@ -1,63 +1,30 @@
 package app.lawnchair.oea.runtime
 
 import android.app.Application
-import com.android.launcher3.LauncherState
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import android.content.Context
+import app.lawnchair.oea.engine.OeaLauncherEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 
-/**
- * OEA-owned runtime boundary between the Lawnchair/Launcher3 foundation and OEA features.
- *
- * This deliberately contains no Aria-specific types. Launcher3 remains responsible for
- * workspace/model/app enumeration; OEA owns the lifecycle and feature coordination above it.
- */
 object OeaRuntime {
-    data class RuntimeState(
-        val initialized: Boolean = false,
-        val launcherAttached: Boolean = false,
-        val launcherState: LauncherState? = null,
-    )
+    data class RuntimeState(val initialized:Boolean=false)
 
     private var application: Application? = null
-    private var scope: CoroutineScope? = null
+    private var engine: OeaLauncherEngine? = null
     private val _state = MutableStateFlow(RuntimeState())
     val state: StateFlow<RuntimeState> = _state.asStateFlow()
 
     @Synchronized
     fun initialize(app: Application) {
-        if (application === app && scope != null) {
-            _state.update { it.copy(initialized = true) }
-            return
-        }
-
-        scope?.cancel()
+        if (application === app && engine != null) return
         application = app
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        _state.update { it.copy(initialized = true) }
+        engine = OeaLauncherEngine(app)
+        _state.value = RuntimeState(initialized = true)
     }
 
-    fun attachLauncher(state: LauncherState) {
-        if (!stateInitialized()) return
-        _state.update {
-            it.copy(launcherAttached = true, launcherState = state)
+    fun engine(context: Context): OeaLauncherEngine =
+        engine ?: synchronized(this) {
+            engine ?: OeaLauncherEngine(context.applicationContext).also { engine = it }
         }
-    }
-
-    fun updateLauncherState(state: LauncherState) {
-        if (!stateInitialized()) return
-        _state.update { it.copy(launcherState = state) }
-    }
-
-    fun detachLauncher() {
-        if (!stateInitialized()) return
-        _state.update { it.copy(launcherAttached = false, launcherState = null) }
-    }
-
-    private fun stateInitialized(): Boolean = _state.value.initialized
 }
