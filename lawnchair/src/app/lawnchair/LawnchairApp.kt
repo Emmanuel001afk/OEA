@@ -44,8 +44,8 @@ import androidx.work.Configuration
 import app.lawnchair.backup.LawnchairBackup
 import app.lawnchair.flowerpot.Flowerpot
 import app.lawnchair.preferences.PreferenceManager
-import app.lawnchair.oea.runtime.OeaRuntime
-import app.lawnchair.oea.scheduler.OeaScheduler
+import com.oea.launcher.runtime.OeaRuntime
+import com.oea.launcher.scheduler.OeaScheduler
 import app.lawnchair.ui.ModalBottomSheetContent
 import app.lawnchair.ui.preferences.destinations.openAppInfo
 import app.lawnchair.util.restartLauncher

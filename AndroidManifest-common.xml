@@ -71,7 +71,7 @@
         android:protectionLevel="signature|knownSigner"/>
 
     <application
-        android:name="app.lawnchair.oea.OeaApplication"
+        android:name="com.oea.launcher.OeaApplication"
         android:fullBackupOnly="true"
         android:backupInForeground="true"
         android:fullBackupContent="@xml/backupscheme"
@@ -84,7 +84,7 @@
         tools:replace="android:label">
 
         <service
-            android:name="app.lawnchair.oea.notifications.OeaNotificationListener"
+            android:name="com.oea.launcher.notifications.OeaNotificationListener"
             android:label="@string/notification_dots_service_title"
             android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">

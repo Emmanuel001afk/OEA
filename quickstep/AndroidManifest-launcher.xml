@@ -16,7 +16,7 @@
     </queries>
 
     <application
-        android:name="app.lawnchair.oea.OeaApplication"
+        android:name="com.oea.launcher.OeaApplication"
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_oea_logo"
         android:label="@string/derived_app_name"
@@ -50,7 +50,7 @@
 
         <!-- OEA-owned HOME entry point. -->
         <activity
-            android:name="app.lawnchair.oea.OeaLauncherActivity"
+            android:name="com.oea.launcher.OeaLauncherActivity"
             android:launchMode="singleTask"
             android:clearTaskOnLaunch="true"
             android:stateNotNeeded="true"

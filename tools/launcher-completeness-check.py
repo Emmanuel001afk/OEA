@@ -15,22 +15,22 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_FILES = [
     "AndroidManifest-common.xml",
     "AndroidManifest.xml",
-    "lawnchair/src/app/lawnchair/oea/OeaApplication.kt",
-    "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
-    "lawnchair/src/app/lawnchair/oea/runtime/OeaRuntime.kt",
-    "lawnchair/src/app/lawnchair/oea/runtime/OeaHomeController.kt",
-    "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
-    "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
-    "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspaceStore.kt",
-    "lawnchair/src/app/lawnchair/oea/model/OeaAppModel.kt",
-    "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
-    "lawnchair/src/app/lawnchair/oea/drawer/OeaAppDrawerController.kt",
-    "lawnchair/src/app/lawnchair/oea/folders/OeaFolderController.kt",
-    "lawnchair/src/app/lawnchair/oea/shortcuts/OeaShortcutController.kt",
-    "lawnchair/src/app/lawnchair/oea/widget/OeaWidgetPickerActivity.kt",
-    "lawnchair/src/app/lawnchair/oea/interaction/OeaGestureController.kt",
-    "lawnchair/src/app/lawnchair/oea/icons/OeaIconController.kt",
-    "lawnchair/src/app/lawnchair/oea/backup/OeaBackupManager.kt",
+    "lawnchair/src/com/oea/launcher/OeaApplication.kt",
+    "lawnchair/src/com/oea/launcher/OeaLauncherActivity.kt",
+    "lawnchair/src/com/oea/launcher/runtime/OeaRuntime.kt",
+    "lawnchair/src/com/oea/launcher/runtime/OeaHomeController.kt",
+    "lawnchair/src/com/oea/launcher/engine/OeaLauncherEngine.kt",
+    "lawnchair/src/com/oea/launcher/workspace/OeaWorkspace.kt",
+    "lawnchair/src/com/oea/launcher/workspace/OeaWorkspaceStore.kt",
+    "lawnchair/src/com/oea/launcher/model/OeaAppModel.kt",
+    "lawnchair/src/com/oea/launcher/notifications/OeaNotificationListener.kt",
+    "lawnchair/src/com/oea/launcher/drawer/OeaAppDrawerController.kt",
+    "lawnchair/src/com/oea/launcher/folders/OeaFolderController.kt",
+    "lawnchair/src/com/oea/launcher/shortcuts/OeaShortcutController.kt",
+    "lawnchair/src/com/oea/launcher/widget/OeaWidgetPickerActivity.kt",
+    "lawnchair/src/com/oea/launcher/interaction/OeaGestureController.kt",
+    "lawnchair/src/com/oea/launcher/icons/OeaIconController.kt",
+    "lawnchair/src/com/oea/launcher/backup/OeaBackupManager.kt",
  ]
 
 MANIFEST_REQUIREMENTS = [
@@ -98,7 +98,7 @@ def main() -> int:
         failures.append("LauncherProvider must not be declared in the OEA common manifest")
     if 'android:name="com.android.launcher3.notification.NotificationListener"' in common:
         failures.append("Launcher3 NotificationListener must not own OEA notifications")
-    if 'android:name="app.lawnchair.oea.OeaApplication"' not in common:
+    if 'android:name="com.oea.launcher.OeaApplication"' not in common:
         failures.append("OeaApplication must own the common application process")
 
     application_tag = oea.split("<application", 1)[1].split(">", 1)[0]

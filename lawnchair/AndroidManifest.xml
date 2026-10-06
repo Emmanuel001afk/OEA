@@ -95,19 +95,19 @@
             android:theme="@style/Theme.Transparent" />
 
         <activity
-            android:name="app.lawnchair.oea.ui.OeaChatActivity"
+            android:name="com.oea.launcher.ui.OeaChatActivity"
             android:exported="false"
             android:label="OEA"
             android:theme="@style/Theme.Lawnchair" />
         
         <activity
-            android:name="app.lawnchair.oea.applock.OeaAppLockActivity"
+            android:name="com.oea.launcher.applock.OeaAppLockActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@style/Theme.Lawnchair" />
 
         <receiver
-            android:name="app.lawnchair.oea.applock.OeaDeviceAdminReceiver"
+            android:name="com.oea.launcher.applock.OeaDeviceAdminReceiver"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
@@ -119,7 +119,7 @@
         </receiver>
 
         <service
-            android:name="app.lawnchair.oea.applock.OeaAppLockService"
+            android:name="com.oea.launcher.applock.OeaAppLockService"
             android:exported="false"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>

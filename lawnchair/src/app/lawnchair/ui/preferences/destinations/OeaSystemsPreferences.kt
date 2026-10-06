@@ -17,15 +17,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import app.lawnchair.oea.applock.OeaAppFreezer
-import app.lawnchair.oea.applock.OeaAppLockStore
-import app.lawnchair.oea.applock.OeaDeviceAdminReceiver
-import app.lawnchair.oea.ai.OeaAiConfig
-import app.lawnchair.oea.ai.OeaAiStore
-import app.lawnchair.oea.callblocker.OeaCallBlockRules
-import app.lawnchair.oea.gameboost.OeaGameBoostService
-import app.lawnchair.oea.gameboost.OeaGameBoostStore
-import app.lawnchair.oea.split.OeaSplitLauncher
+import com.oea.launcher.applock.OeaAppFreezer
+import com.oea.launcher.applock.OeaAppLockStore
+import com.oea.launcher.applock.OeaDeviceAdminReceiver
+import com.oea.launcher.ai.OeaAiConfig
+import com.oea.launcher.ai.OeaAiStore
+import com.oea.launcher.callblocker.OeaCallBlockRules
+import com.oea.launcher.gameboost.OeaGameBoostService
+import com.oea.launcher.gameboost.OeaGameBoostStore
+import com.oea.launcher.split.OeaSplitLauncher
 import com.android.launcher3.R
 
 @Composable

@@ -301,7 +301,7 @@ android {
         }
 
         configureEach {
-            resValue("string", "launcher_component", "${applicationId}/app.lawnchair.oea.OeaLauncherActivity")
+            resValue("string", "launcher_component", "${applicationId}/com.oea.launcher.OeaLauncherActivity")
         }
     }
 

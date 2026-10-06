@@ -41,7 +41,7 @@
 
 
     <application
-        android:name="app.lawnchair.oea.OeaApplication"
+        android:name="com.oea.launcher.OeaApplication"
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_oea_logo"
         android:label="@string/derived_app_name"
@@ -56,7 +56,7 @@
         attributes and intent filters the same
         -->
         <activity
-            android:name="app.lawnchair.oea.OeaLauncherActivity"
+            android:name="com.oea.launcher.OeaLauncherActivity"
             android:launchMode="singleTask"
             android:clearTaskOnLaunch="true"
             android:stateNotNeeded="true"
@@ -80,7 +80,7 @@
             </intent-filter>
 </activity>
 
-        <activity android:name="app.lawnchair.oea.widget.OeaWidgetPickerActivity"
+        <activity android:name="com.oea.launcher.widget.OeaWidgetPickerActivity"
             android:theme="@style/WidgetPickerActivityTheme"
             android:excludeFromRecents="true"
             android:autoRemoveFromRecents="true"
@@ -95,7 +95,7 @@
         </activity>
 
         <service
-            android:name="app.lawnchair.oea.callblocker.OeaCallScreeningService"
+            android:name="com.oea.launcher.callblocker.OeaCallScreeningService"
             android:exported="true"
             android:permission="android.permission.BIND_SCREENING_SERVICE">
             <intent-filter>
@@ -104,7 +104,7 @@
         </service>
 
         <service
-            android:name="app.lawnchair.oea.gameboost.OeaGameBoostService"
+            android:name="com.oea.launcher.gameboost.OeaGameBoostService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
