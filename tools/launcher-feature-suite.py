@@ -92,7 +92,13 @@ def main():
         if missing:
             failures.extend(f"[{suite}] missing: {p}" for p in missing)
 
-    manifest = (ROOT / "quickstep/AndroidManifest-launcher.xml").read_text(encoding="utf-8")
+    manifest = (
+        (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
+        + "\n"
+        + (ROOT / "AndroidManifest.xml").read_text(encoding="utf-8")
+        + "\n"
+        + (ROOT / "quickstep/AndroidManifest-launcher.xml").read_text(encoding="utf-8")
+    )
     for name, pattern in REQUIRED_MANIFEST.items():
         if not re.search(pattern, manifest):
             failures.append(f"[manifest] missing launcher contract: {name}")
