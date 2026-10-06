@@ -16,45 +16,27 @@ jobs:
     steps:
       - name: Checkout OEA
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Refresh recursive submodules
-        run: |
-          git submodule update --init --recursive || true
-          if [ ! -d platform_frameworks_libs_systemui/viewcapturelib ]; then
-            rm -rf platform_frameworks_libs_systemui
-            git clone --depth 1 --branch 16-dev https://github.com/LawnchairLauncher/platform_frameworks_libs_systemui platform_frameworks_libs_systemui
-          fi
-
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
-
       - name: Make Gradle executable
         run: chmod +x ./gradlew
-
-      - name: Build OEA Launcher APK
-        run: ./gradlew assembleLawnWithQuickstepGithubRelease --stacktrace
-
-      - name: Prepare APK for publishing
+      - name: Build standalone OEA Launcher APK
+        run: ./gradlew :oea:assembleRelease --stacktrace
+      - name: Verify APK identity
         run: |
-          APK="$(find . -type f -name '*.apk' -print -quit)"
+          APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"
           test -n "$APK"
-          echo "Verifying APK application identity: $APK"
           AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
-          test -x "$AAPT2"
           "$AAPT2" dump badging "$APK" | grep -F "package: name='com.oea.launcher'"
-          LEGACY_IDENTITY="com.aria"".""launcher"
-          if "$AAPT2" dump badging "$APK" | grep -Fq "$LEGACY_IDENTITY"; then
-            echo "ERROR: OEA APK still contains the Aria application identity."
+          if "$AAPT2" dump badging "$APK" | grep -Fq "com.android.launcher3"; then
+            echo "ERROR: Launcher3 identity remains in the APK."
             exit 1
           fi
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
-
       - name: Publish latest APK release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -63,14 +45,11 @@ jobs:
           if gh release view oea-latest >/dev/null 2>&1; then
             gh release upload oea-latest "$RUNNER_TEMP/OEA-latest.apk" --clobber
           else
-            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --title "OEA Latest" --notes "Latest OEA Launcher build from main."
+            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --title "OEA Latest" --notes "Latest standalone OEA Launcher build from main."
           fi
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: oea-launcher-apk
-          path: |
-            **/build/outputs/apk/**/*.apk
-            **/build/outputs/apk/*.apk
+          path: oea/build/outputs/apk/**/*.apk
           if-no-files-found: error
