@@ -25,12 +25,6 @@ import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.interaction.OeaGestureController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.shortcuts.OeaShortcutController
-import com.oea.launcher.applock.OeaAppFreezer
-import com.oea.launcher.split.OeaSplitLauncher
-import com.oea.launcher.gameboost.OeaGameBoostService
-import app.lawnchair.ui.preferences.PreferenceActivity
-import app.lawnchair.ui.preferences.navigation.OeaThemes
-import app.lawnchair.ui.preferences.navigation.OeaSystems
 import kotlin.math.roundToInt
 
 class OeaWorkspace(context: Context) : FrameLayout(context) {
@@ -310,25 +304,38 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setTitle("App Freezer")
             .setMessage("Freeze or unfreeze " + app.label + ". Real package suspension requires OEA to be device owner.")
             .setPositiveButton("Freeze") { _, _ ->
-                val result = OeaAppFreezer.setFrozen(context, app.packageName, true)
-                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                openDeviceAdminSettings()
             }
             .setNeutralButton("Unfreeze") { _, _ ->
-                val result = OeaAppFreezer.setFrozen(context, app.packageName, false)
-                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                openDeviceAdminSettings()
             }
-            .setNegativeButton("OEA Systems") { _, _ -> openSettings(OeaSystems) }
+            .setNegativeButton("System settings") { _, _ -> openDeviceAdminSettings() }
             .show()
     }
 
-    private fun openSettings(route: app.lawnchair.ui.preferences.navigation.PreferenceRoute) {
-        runCatching {
-            context.startActivity(
-                PreferenceActivity.createIntent(context, route).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }.onFailure {
-            context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
+    private fun openDeviceAdminSettings() {
+        runCatching { context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
+    private fun openThemeSettings() {
+        runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
+    private fun openSystemsSettings() {
+        val choices = arrayOf("Call blocker role", "Split screen / multitask", "Game Boost access", "App freezer authority")
+        AlertDialog.Builder(context).setTitle("OEA Systems").setItems(choices) { _, which ->
+            when (which) {
+                0 -> if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    val rm = context.getSystemService(android.app.role.RoleManager::class.java)
+                    if (rm?.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true) {
+                        context.startActivity(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING))
+                    } else openDeviceAdminSettings()
+                } else openDeviceAdminSettings()
+                1 -> Toast.makeText(context, "Use the system Recents/Overview screen to enter and control split screen on this Android build.", Toast.LENGTH_LONG).show()
+                2 -> runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                3 -> openDeviceAdminSettings()
+            }
+        }.show()
     }
 
     private fun drawerLayoutMenu(anchor: View) {
@@ -615,8 +622,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Grid: 4 columns" -> { store.setGridColumns(4); rebuild() }
                     "Grid: 5 columns" -> { store.setGridColumns(5); rebuild() }
                     "Show / hide labels" -> { store.setShowAppLabels(!store.showAppLabels()); rebuild() }
-                    "OEA Themes" -> openSettings(OeaThemes)
-                    "OEA Systems" -> openSettings(OeaSystems)
+                    "OEA Themes" -> openThemeSettings()
+                    "OEA Systems" -> openSystemsSettings()
                 }
                 true
             }
