@@ -1,31 +1,38 @@
 # OEA Launcher
 
-OEA Launcher is an AI-capable Android home-screen launcher built on the Lawnchair/AOSP Launcher3 foundation.
+OEA is an independent Android launcher and Android-skin layer built around its own engine and workspace.
 
-## What OEA provides
+## Architecture
 
-- A real Android home screen and default-launcher experience.
-- Customizable home-screen layout, icons, fonts, colors and wallpaper.
-- An **OEA Themes** gallery where you can add images from your device, save them as themes, apply them as the wallpaper, and use their colors for the launcher.
-- AI-oriented launcher features, context-aware cards, skills and provider integrations.
-- Standard Android launcher features including app search, folders, widgets, gestures, icon packs and backup/restore.
+The active launcher path is:
 
-## OEA Themes
+`OeaLauncherActivity → OeaHomeController → OeaRuntime → OeaLauncherEngine → OeaWorkspace`
 
-Open **Settings → OEA Themes → Add theme image**.
+OEA owns the home surface, app model, workspace persistence, drawer, dock, folders, shortcuts, gestures, themes, and system-feature integrations.
 
-Each image you add becomes an OEA theme entry. Tap a saved theme to apply it. OEA uses the selected wallpaper's colors for the launcher accent, giving the theme a launcher-wide visual identity rather than only changing the wallpaper.
+## OEA Systems
 
-## Foundation
+- App freezer using Android Device Policy package suspension when OEA has the required authority.
+- Call blocker using Android's call-screening role with exact/prefix/suffix rules and contact exceptions.
+- Split-pair launcher using Android multi-task/adjacent activity flags; Android controls the final split presentation.
+- Game Boost monitoring selected games with usage access, optional DND handling, and an optional session overlay.
+- Launcher navigation remains integrated with Android's own Home and Recents/Overview surfaces.
 
-OEA preserves the upstream Android Launcher3 and Lawnchair functionality while adding its own launcher features and branding.
+## Home and app drawer
 
-## Legal notices
+- Persistent home pages, dock, folders and drag/drop.
+- App search and All Apps search.
+- Grid, vertical-list and horizontal All Apps layouts.
+- Long-press app actions, hiding and app-freezer access.
+- Wallpaper-derived launcher theme colors.
+- Native Android launcher shortcuts.
 
-This repository contains code from multiple upstream projects and project-specific source code. Existing copyright, license and attribution notices required by those licenses are intentionally retained.
+## Independence
 
-- AOSP Launcher3 / Lawnchair portions: Apache License 2.0 — see [LICENSE.txt](LICENSE.txt).
-- Project-specific original-source licensing: see [LICENSE-ARIA.md](LICENSE-ARIA.md).
-- GPL-3.0 text: see [LICENSE-GPL.txt](LICENSE-GPL.txt).
+OEA does not build, run, or import Launcher3/Lawnchair source code. The repository contains only the standalone `oea` application module and OEA-owned launcher code.
 
-The legal notices are separate from the OEA product branding and do not change the launcher name shown to users.
+## Build
+
+`./gradlew :oea:assembleRelease`
+
+The resulting application ID is `com.oea.launcher`.
