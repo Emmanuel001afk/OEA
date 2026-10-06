@@ -1,13 +1,17 @@
 package app.lawnchair.oea
 
 import android.app.Application
+import app.lawnchair.oea.runtime.OeaRuntime
 
 /**
- * OEA-owned application process.
+ * OEA application owner.
  *
- * The native OEA HOME runtime does not initialize Launcher3/Lawnchair as its
- * launcher application. Legacy Lawnchair code remains available during the
- * migration only so individual features can be ported without changing the
- * OEA runtime owner.
+ * The application process is initialized by OEA itself. Launcher3/Lawnchair
+ * application state is intentionally not started from here.
  */
-class OeaApplication : Application()
+class OeaApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        OeaRuntime.initialize(this)
+    }
+}
