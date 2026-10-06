@@ -9,6 +9,6 @@ class OeaShortcutController(private val context: Context) {
         runCatching {
             context.getSystemService(ShortcutManager::class.java)
                 .getShortcuts(ShortcutManager.FLAG_MATCH_ALL_KINDS)
-                .filter { it.packageName == packageName }
+                .filter { it.getPackage() == packageName }
         }.getOrDefault(emptyList())
 }
