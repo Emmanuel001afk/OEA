@@ -193,9 +193,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
 
     private fun emptyCell() = TextView(context).apply {
-        setOnDragListener { _, e ->
-            if (e.action == DragEvent.ACTION_DROP) true else e.action == DragEvent.ACTION_DRAG_STARTED
-        }
         setOnLongClickListener { menu(this); true }
     }
 
@@ -302,6 +299,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         repeat(OeaWorkspaceStore.DOCK_SLOTS) { slot ->
             val app = values.getOrNull(slot)?.let(::find)
             val v = if (app == null) emptyCell() else tile(app)
+            if (app != null) {
+                v.setOnLongClickListener {
+                    dragged = values[slot]
+                    startDragAndDrop(
+                        ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, values[slot]),
+                        View.DragShadowBuilder(v), values[slot], View.DRAG_FLAG_GLOBAL,
+                    )
+                    true
+                }
+            }
             v.setOnDragListener { _, e ->
                 if (e.action == DragEvent.ACTION_DROP && dragged != null) {
                     val list = values.filterNot { it == dragged }.toMutableList()
