@@ -830,6 +830,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun cols() = store.gridColumns().coerceIn(3, 5)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    fun refreshBadges() { rebuild(); renderDrawer(drawerSearch.text.toString()) }
+
     fun handleBack(): Boolean {
         if (drawerOpen) {
             if (drawerSearch.hasFocus() && drawerSearch.text.isNotEmpty()) {
