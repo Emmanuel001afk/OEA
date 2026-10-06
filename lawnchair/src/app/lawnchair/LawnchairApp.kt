@@ -82,7 +82,6 @@ class LawnchairApp :
     override fun onCreate() {
         super.onCreate()
         instance = this
-        OeaRuntime.initialize(this)
         QuickStepContract.sRecentsDisabled = !recentsEnabled
         Flowerpot.Manager.getInstance(this)
         registerActivityLifecycleCallbacks(activityHandler)
