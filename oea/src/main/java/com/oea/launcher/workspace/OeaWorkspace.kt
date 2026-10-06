@@ -379,9 +379,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 if (number.isNotEmpty()) {
                     OeaCallBlockRules.setRules(
                         context,
-                        OeaCallBlockRules.getExact() + number,
-                        OeaCallBlockRules.getPrefix(),
-                        OeaCallBlockRules.getSuffix(),
+                        OeaCallBlockRules.getExact(context) + number,
+                        OeaCallBlockRules.getPrefix(context),
+                        OeaCallBlockRules.getSuffix(context),
                     )
                 }
                 OeaCallBlockRules.setEnabled(context, true)
