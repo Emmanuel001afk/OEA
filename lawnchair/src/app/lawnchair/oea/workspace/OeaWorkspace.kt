@@ -14,6 +14,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import app.lawnchair.oea.model.OeaAppInfo
 import app.lawnchair.ui.preferences.PreferenceActivity
 import java.util.Locale
@@ -179,6 +180,19 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 runCatching { context.startActivity(intent) }
+                    .onFailure {
+                        Toast.makeText(context, "Unable to open ${app.label}", Toast.LENGTH_SHORT).show()
+                    }
+            }
+            setOnLongClickListener {
+                runCatching {
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = android.net.Uri.parse("package:${app.packageName}")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    )
+                }.isSuccess
             }
         }
 
