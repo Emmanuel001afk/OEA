@@ -163,6 +163,11 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
             isClickable = true
             isFocusable = true
             background = rounded(Color.rgb(30, 36, 49), dp(20))
+            foreground = context.obtainStyledAttributes(
+                intArrayOf(android.R.attr.selectableItemBackground)
+            ).let { attrs ->
+                attrs.getDrawable(0).also { attrs.recycle() }
+            }
             setPadding(dp(8), dp(10), dp(8), dp(8))
             contentDescription = "Open ${app.label}"
             setOnClickListener {
