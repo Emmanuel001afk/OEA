@@ -3,6 +3,7 @@ package com.oea.launcher
 import android.app.Activity
 import android.os.Bundle
 import android.os.Build
+import android.os.Build
 import com.oea.launcher.runtime.OeaHomeController
 import com.oea.launcher.runtime.OeaRuntime
 
@@ -13,6 +14,11 @@ class OeaLauncherActivity : Activity() {
         OeaRuntime.initialize(application)
         home = OeaHomeController(this)
         setContentView(home.createHomeSurface())
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            ) { home.handleBack() }
+        }
         if (Build.VERSION.SDK_INT >= 33) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(
                 android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
