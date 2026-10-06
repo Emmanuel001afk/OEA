@@ -47,7 +47,7 @@ SUITES = {
     ],
     "notifications": [
         "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
-        "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
+        "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationState.kt",
     ],
     "icons/themes/wallpaper": [
         "src/com/android/launcher3/icons/LauncherIcons.kt",
