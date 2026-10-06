@@ -394,7 +394,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun renderDrawer(query: String) {
         if (!drawerOpen) return
-        val q = query.trim().lowercase(Locale.ROOT)
+        dragged = OeaWorkspaceStore.key(it.packageName, it.className).lowercase(Locale.ROOT)
         drawerGrid.removeAllViews()
         drawerController.filter(apps, q).filterNot { store.isHidden(it.packageName, it.className) }.forEach {
             val v = tile(it).apply {
