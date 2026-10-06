@@ -7,7 +7,7 @@ import android.content.ClipDescription
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapDrawable
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -60,7 +60,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(8))
         }
-        addView(root, LayoutParams(-1, -1))
+        addView(root, FrameLayout.LayoutParams(-1, -1))
 
         val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(TextView(context).apply {
@@ -165,7 +165,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawer.addView(drawerSearch, LinearLayout.LayoutParams(-1, dp(50)).apply { bottomMargin = dp(8) })
         drawerScroll.addView(drawerBody, ScrollView.LayoutParams(-1, -2))
         drawer.addView(drawerScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        addView(drawer, LayoutParams(-1, -1))
+        addView(drawer, FrameLayout.LayoutParams(-1, -1))
         drawer.visibility = View.GONE
     }
 
@@ -393,7 +393,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 visible.forEach { app ->
                     strip.addView(tile(app), LinearLayout.LayoutParams(dp(84), dp(92)).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) })
                 }
-                horizontal.addView(strip, HorizontalScrollView.LayoutParams(-2, -2))
+                horizontal.addView(strip, FrameLayout.LayoutParams(-2, -2))
                 drawerBody.addView(horizontal, FrameLayout.LayoutParams(-1, -2))
             }
             OeaDataStore.DrawerMode.GRID -> {
