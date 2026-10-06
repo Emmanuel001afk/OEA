@@ -36,6 +36,7 @@ MANIFEST_REQUIREMENTS = [
     ("OEA launcher activity", r'android:name="app\.lawnchair\.oea\.OeaLauncherActivity"'),
     ("legacy Lawnchair HOME removal", r'<activity android:name="app\.lawnchair\.LawnchairLauncher"[^>]*tools:node="remove"'),
     ("legacy LauncherProvider removal", r'<provider android:name="com\.android\.launcher3\.LauncherProvider"[^>]*tools:node="remove"'),
+    ("legacy secondary HOME removal", r'<activity android:name="com\.android\.launcher3\.secondarydisplay\.SecondaryDisplayLauncher"[^>]*tools:node="remove"'),
     ("launcher package visibility", r"<queries>[\s\S]*android.intent.action.MAIN[\s\S]*android.intent.category.LAUNCHER[\s\S]*</queries>"),
     ("HOME task isolation", r'android:taskAffinity=""'),
 ]
