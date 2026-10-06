@@ -2,21 +2,20 @@ package app.lawnchair.oea.ui
 
 import android.content.Context
 import android.view.View
-import app.lawnchair.oea.model.OeaAppInfo
-import app.lawnchair.oea.workspace.OeaWorkspace
+import app.lawnchair.oea.engine.OeaLauncherEngine
 
 /**
- * OEA-owned home surface. No Launcher3 Launcher/DragLayer/Workspace dependency.
+ * OEA-owned home surface. The engine-owned workspace is the single displayed
+ * workspace instance, so refreshes update the visible HOME rather than an
+ * off-screen replacement view.
  */
 class OeaHomeSurfaceController(private val context: Context) {
-    private var workspace: OeaWorkspace? = null
-
-    fun attach(apps: List<OeaAppInfo>): View {
-        workspace = OeaWorkspace(context).also { it.bind(apps) }
-        return workspace!!
+    fun attach(engine: OeaLauncherEngine): View {
+        engine.workspace.bind(engine.model.apps)
+        return engine.workspace
     }
 
-    fun detach() {
-        workspace = null
+    fun refresh(engine: OeaLauncherEngine) {
+        engine.workspace.bind(engine.model.apps)
     }
 }
