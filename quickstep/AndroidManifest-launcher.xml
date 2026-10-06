@@ -15,7 +15,16 @@
         android:largeHeap="@bool/config_largeHeap"
         android:restoreAnyVersion="true"
         android:supportsRtl="true"
-        tools:replace="android:name,android:icon">
+        tools:replace="android:name,android:icon,android:backupAgent,android:fullBackupOnly,android:fullBackupContent" tools:node="merge">
+
+        <!-- Remove legacy Launcher3/Quickstep runtime components from the OEA HOME variant. -->
+        <service android:name="com.android.quickstep.TouchInteractionService" tools:node="remove"/>
+        <activity android:name="com.android.quickstep.RecentsActivity" tools:node="remove"/>
+        <provider android:name="com.android.quickstep.LauncherSearchIndexablesProvider" tools:node="remove"/>
+        <activity android:name="com.android.launcher3.proxy.ProxyActivityStarter" tools:node="remove"/>
+        <activity android:name="com.android.quickstep.interaction.GestureSandboxActivity" tools:node="remove"/>
+        <activity android:name="com.android.quickstep.interaction.AllSetActivity" tools:node="remove"/>
+        <activity android:name="com.android.launcher3.QuickstepWidgetPickerActivity" tools:node="remove"/>
 
         <!-- OEA is now the HOME runtime. Launcher3/Quickstep is no longer the HOME activity. -->
         <activity
