@@ -27,6 +27,10 @@ import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.shortcuts.OeaShortcutController
 import com.oea.launcher.applock.OeaAppFreezer
 import com.oea.launcher.applock.OeaDeviceAdminReceiver
+import com.oea.launcher.callblocker.OeaCallBlockRules
+import com.oea.launcher.gameboost.OeaGameBoostService
+import com.oea.launcher.gameboost.OeaGameBoostStore
+import com.oea.launcher.split.OeaSplitLauncher
 import kotlin.math.roundToInt
 
 class OeaWorkspace(context: Context) : FrameLayout(context) {
@@ -339,20 +343,100 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openSystemsSettings() {
-        val choices = arrayOf("Call blocker role", "Split screen / multitask", "Game Boost access", "App freezer authority")
+        val choices = arrayOf("Call blocker", "Split pair", "Game Boost", "App freezer authority")
         AlertDialog.Builder(context).setTitle("OEA Systems").setItems(choices) { _, which ->
             when (which) {
-                0 -> if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    val rm = context.getSystemService(android.app.role.RoleManager::class.java)
-                    if (rm?.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true) {
-                        context.startActivity(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING))
-                    } else openDeviceAdminSettings()
-                } else openDeviceAdminSettings()
-                1 -> Toast.makeText(context, "Use the system Recents/Overview screen to enter and control split screen on this Android build.", Toast.LENGTH_LONG).show()
-                2 -> runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                0 -> openCallBlockerSettings()
+                1 -> openSplitPairDialog()
+                2 -> openGameBoostSettings()
                 3 -> openDeviceAdminSettings()
             }
         }.show()
+    }
+
+    private fun openCallBlockerSettings() {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val rm = context.getSystemService(android.app.role.RoleManager::class.java)
+            if (rm?.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true &&
+                !rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING)) {
+                runCatching { context.startActivity(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING)) }
+            }
+        }
+        val input = EditText(context).apply {
+            hint = "Exact number to block (optional)"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(context)
+            .setTitle("OEA Call blocker")
+            .setMessage("Add an exact number. Contacts remain allowed by default.")
+            .setView(input)
+            .setNegativeButton("Close", null)
+            .setNeutralButton(if (OeaCallBlockRules.enabled(context)) "Disable" else "Enable") { _, _ ->
+                OeaCallBlockRules.setEnabled(context, !OeaCallBlockRules.enabled(context))
+            }
+            .setPositiveButton("Save") { _, _ ->
+                val number = input.text.toString().trim()
+                if (number.isNotEmpty()) {
+                    OeaCallBlockRules.setRules(
+                        context,
+                        OeaCallBlockRules.getExact() + number,
+                        OeaCallBlockRules.getPrefix(),
+                        OeaCallBlockRules.getSuffix(),
+                    )
+                }
+                OeaCallBlockRules.setEnabled(context, true)
+            }.show()
+    }
+
+    private fun openSplitPairDialog() {
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+        val first = EditText(context).apply { hint = "First package name"; setSingleLine(true) }
+        val second = EditText(context).apply { hint = "Second package name"; setSingleLine(true) }
+        box.addView(first)
+        box.addView(second, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        AlertDialog.Builder(context)
+            .setTitle("OEA Split pair")
+            .setMessage("OEA launches both activities with adjacent/multi-task flags. Android decides the final split presentation.")
+            .setView(box)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Launch") { _, _ ->
+                if (!OeaSplitLauncher.launchPair(context, first.text.toString().trim(), second.text.toString().trim())) {
+                    Toast.makeText(context, "Could not launch both apps", Toast.LENGTH_LONG).show()
+                }
+            }.show()
+    }
+
+    private fun openGameBoostSettings() {
+        val input = EditText(context).apply {
+            hint = "Game package name"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(context)
+            .setTitle("OEA Game Boost")
+            .setMessage("Add a game package, then enable monitoring. Usage access and overlay permission are required for automatic detection/overlay.")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Permissions") { _, _ ->
+                runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+            .setPositiveButton(if (OeaGameBoostStore.enabled(context)) "Disable" else "Enable") { _, _ ->
+                val packageName = input.text.toString().trim()
+                if (packageName.isNotEmpty()) OeaGameBoostStore.setGames(context, OeaGameBoostStore.games(context) + packageName)
+                val enabled = !OeaGameBoostStore.enabled(context)
+                OeaGameBoostStore.setEnabled(context, enabled)
+                if (enabled) {
+                    runCatching {
+                        if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(Intent(context, OeaGameBoostService::class.java))
+                        else context.startService(Intent(context, OeaGameBoostService::class.java))
+                    }
+                } else {
+                    context.stopService(Intent(context, OeaGameBoostService::class.java))
+                }
+            }.show()
     }
 
     private fun drawerLayoutMenu(anchor: View) {
