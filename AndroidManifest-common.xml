@@ -101,26 +101,6 @@
                        android:value="true" />
 
         <provider
-            android:name="com.android.launcher3.LauncherProvider"
-            android:authorities="${applicationId}.settings"
-            android:exported="true"
-            android:writePermission="${applicationId}.permission.WRITE_SETTINGS"
-            android:readPermission="${applicationId}.permission.READ_SETTINGS" />
-
-        <provider
-            android:name="com.android.launcher3.graphics.LauncherCustomizationProvider"
-            android:authorities="${applicationId}.grid_control"
-            android:exported="true" />
-
-        <provider
-            android:name="com.android.launcher3.testing.TestInformationProvider"
-            android:authorities="${applicationId}.TestInfo"
-            android:readPermission="android.permission.WRITE_SECURE_SETTINGS"
-            android:writePermission="android.permission.WRITE_SECURE_SETTINGS"
-            android:exported="true"
-            android:enabled="false" />
-
-        <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             tools:node="remove" />
