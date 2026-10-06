@@ -85,7 +85,8 @@ def main() -> int:
         if not re.search(pattern, oea):
             failures.append(f"OEA manifest requirement missing: {name}")
 
-    if 'android:theme="@style/Theme.OeaHome"' in re.search(r'<application[\\s\\S]*?</application>', oea).group(0).split('<activity', 1)[0]:
+    application_tag = oea.split("<application", 1)[1].split(">", 1)[0]
+    if 'android:theme="@style/Theme.OeaHome"' in application_tag:
         failures.append("OEA theme must be applied to OeaLauncherActivity, not the application")
 
     if failures:
