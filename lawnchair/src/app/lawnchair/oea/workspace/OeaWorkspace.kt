@@ -16,6 +16,7 @@ import android.widget.*
 import app.lawnchair.oea.data.OeaDataStore
 import app.lawnchair.oea.model.OeaAppInfo
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * OEA-owned HOME renderer. Pages, cells, dock and folders are OEA state; Launcher3 is not used
@@ -73,6 +74,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         root.addView(search, LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(8) })
 
         pager.isHorizontalScrollBarEnabled = false
+        pager.setOnScrollChangeListener { _, scrollX, _, _, _ ->
+            val pageWidth = width.coerceAtLeast(1)
+            val current = (scrollX.toFloat() / pageWidth).roundToInt().coerceIn(0, ws.pages() - 1)
+            dots.text = List(ws.pages()) { if (it == current) "●" else "•" }.joinToString(" ")
+        }
         pages.orientation = LinearLayout.HORIZONTAL
         pager.addView(pages, HorizontalScrollView.LayoutParams(-2, -1))
         root.addView(pager, LinearLayout.LayoutParams(-1, 0, 1f))
