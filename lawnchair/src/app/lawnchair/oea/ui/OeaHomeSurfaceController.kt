@@ -1,6 +1,5 @@
 package app.lawnchair.oea.ui
 
-import android.content.Context
 import android.view.View
 import app.lawnchair.oea.engine.OeaLauncherEngine
 
@@ -9,7 +8,7 @@ import app.lawnchair.oea.engine.OeaLauncherEngine
  * workspace instance, so refreshes update the visible HOME rather than an
  * off-screen replacement view.
  */
-class OeaHomeSurfaceController(private val context: Context) {
+class OeaHomeSurfaceController {
     fun attach(engine: OeaLauncherEngine): View {
         engine.workspace.bind(engine.model.apps)
         return engine.workspace
