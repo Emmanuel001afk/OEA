@@ -69,7 +69,6 @@ SUITES = {
     ],
     "OEA runtime safety": [
         "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
-        "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNet.kt",
     ],
 }
 
