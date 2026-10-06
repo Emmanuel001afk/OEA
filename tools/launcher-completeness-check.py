@@ -31,11 +31,11 @@ REQUIRED_FILES = [
 ]
 
 MANIFEST_REQUIREMENTS = [
-    ("OEA HOME category", r'<category\\s+android:name="android.intent.category.HOME"'),
-    ("OEA DEFAULT category", r'<category\\s+android:name="android.intent.category.DEFAULT"'),
-    ("OEA launcher activity", r'android:name="app\\.lawnchair\\.oea\\.OeaLauncherActivity"'),
-    ("legacy Lawnchair HOME removal", r'<activity android:name="app\\.lawnchair\\.LawnchairLauncher"[^>]*tools:node="remove"'),
-    ("legacy LauncherProvider removal", r'<provider android:name="com\\.android\\.launcher3\\.LauncherProvider"[^>]*tools:node="remove"'),
+    ("OEA HOME category", r'<category\s+android:name="android.intent.category.HOME"'),
+    ("OEA DEFAULT category", r'<category\s+android:name="android.intent.category.DEFAULT"'),
+    ("OEA launcher activity", r'android:name="app\.lawnchair\.oea\.OeaLauncherActivity"'),
+    ("legacy Lawnchair HOME removal", r'<activity android:name="app\.lawnchair\.LawnchairLauncher"[^>]*tools:node="remove"'),
+    ("legacy LauncherProvider removal", r'<provider android:name="com\.android\.launcher3\.LauncherProvider"[^>]*tools:node="remove"'),
 ]
 
 
