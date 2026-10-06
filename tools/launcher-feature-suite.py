@@ -76,11 +76,11 @@ SUITES = {
 REQUIRED_MANIFEST = {
     "OEA HOME": r"android\.intent\.category\.HOME",
     "OEA DEFAULT": r"android\.intent\.category\.DEFAULT",
-    "OEA launcher activity": r"com\.oea\.launcher\.OeaLauncherActivity",
+    "OEA launcher activity": r"app\.lawnchair\.oea\.OeaLauncherActivity",
     "Legacy Lawnchair HOME removal": r'app\.lawnchair\.LawnchairLauncher.*tools:node="remove"',
     "Legacy LauncherProvider removal": r'com\.android\.launcher3\.LauncherProvider.*tools:node="remove"',
-        "OEA NotificationListener": r"com\.oea\.launcher\.notifications\.OeaNotificationListener",
-    "OEA WidgetPicker": r"com\.oea\.launcher\.widget\.OeaWidgetPickerActivity",
+        "OEA NotificationListener": r"app\.lawnchair\.oea\.notifications\.OeaNotificationListener",
+    "OEA WidgetPicker": r"app\.lawnchair\.oea\.widget\.OeaWidgetPickerActivity",
 }
 
 def main():
