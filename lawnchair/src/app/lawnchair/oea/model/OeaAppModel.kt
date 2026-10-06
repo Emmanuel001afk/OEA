@@ -1,6 +1,8 @@
 package app.lawnchair.oea.model
 
 import android.content.Context
+import android.content.ComponentName
+import android.content.Intent
 import android.content.pm.ResolveInfo
 
 data class OeaAppInfo(
@@ -14,8 +16,8 @@ class OeaAppModel(private val context: Context) {
         private set
 
     fun load() {
-        val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
-            addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        val intent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
         }
         apps = context.packageManager.queryIntentActivities(intent, 0)
             .map { info: ResolveInfo ->
@@ -25,7 +27,7 @@ class OeaAppModel(private val context: Context) {
                     info.loadLabel(context.packageManager).toString()
                 )
             }
-            .distinctBy { it.packageName }
+            .distinctBy { ComponentName(it.packageName, it.className) }
             .sortedBy { it.label.lowercase() }
     }
 }
