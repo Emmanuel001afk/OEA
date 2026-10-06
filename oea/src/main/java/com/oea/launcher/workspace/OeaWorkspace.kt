@@ -968,7 +968,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             if (bitmap.width <= 0 || bitmap.height <= 0) return
             val pixel = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
             val lum = (Color.red(pixel) * 0.299 + Color.green(pixel) * 0.587 + Color.blue(pixel) * 0.114)
-            if (lum > 150) {
+            val mode = store.themeMode()
+            val light = when (mode) {
+                "light" -> true
+                "dark" -> false
+                else -> lum > 150
+            }
+            if (light) {
                 themeBackground = Color.rgb(245, 246, 249)
                 themeSurface = Color.rgb(228, 231, 238)
                 themeText = Color.rgb(20, 24, 31)
