@@ -31,6 +31,8 @@
 
         <!-- OEA does not use Launcher3's database/provider as its authoritative HOME runtime. -->
         <provider android:name="com.android.launcher3.LauncherProvider" tools:node="remove"/>
+        <!-- OEA owns HOME on supported displays; do not leave Launcher3's secondary HOME entry point. -->
+        <activity android:name="com.android.launcher3.secondarydisplay.SecondaryDisplayLauncher" tools:node="remove"/>
 
         <!-- Remove legacy Launcher3 event/data components from the OEA runtime variant. -->
         <provider android:name="com.android.launcher3.graphics.LauncherCustomizationProvider" tools:node="remove"/>
