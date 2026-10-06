@@ -151,7 +151,7 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
             it.label.lowercase(Locale.ROOT).contains(normalized) ||
                 it.packageName.lowercase(Locale.ROOT).contains(normalized)
         }
-        val visible = sortApps(filtered)
+        val visible = sortApps(filtered.filterNot { store.isHidden(it.packageName, it.className) })
         countLabel.text = if (normalized.isEmpty()) "${visible.size}" else "${visible.size} found"
 
         appGrid.removeAllViews()
@@ -277,6 +277,7 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
         PopupMenu(context, anchor).apply {
             menu.add(if (store.isFavorite(app.packageName, app.className)) "Remove from favorites" else "Add to favorites")
             menu.add("App info")
+            menu.add("Hide app")
             setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
                     "Add to favorites" -> {
@@ -308,6 +309,8 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
             menu.add("Grid: 5 columns")
             menu.add("Sort: A-Z")
             menu.add("Sort: Recent")
+            menu.add("Show labels")
+            menu.add("Manage hidden apps")
             menu.add("Refresh apps")
             setOnMenuItemClickListener { item ->
                 when {
@@ -326,6 +329,15 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
                     item.title.toString() == "Sort: Recent" -> {
                         store.setSortMode(OeaDataStore.SortMode.RECENT); renderApps(search.text.toString()); true
                     }
+                    item.title.toString() == "Show labels" -> {
+                        store.setShowAppLabels(!store.showAppLabels())
+                        renderApps(search.text.toString())
+                        true
+                    }
+                    item.title.toString() == "Manage hidden apps" -> {
+                        showHiddenAppsDialog()
+                        true
+                    }
                     item.title.toString() == "Refresh apps" -> {
                         Toast.makeText(context, "Apps refresh when HOME resumes", Toast.LENGTH_SHORT).show()
                         true
@@ -335,6 +347,25 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
             }
             show()
         }
+    }
+
+    private fun showHiddenAppsDialog() {
+        val hidden = allApps.filter { store.isHidden(it.packageName, it.className) }
+        if (hidden.isEmpty()) {
+            Toast.makeText(context, "No hidden apps", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = hidden.map { it.label }.toTypedArray()
+        val checked = BooleanArray(hidden.size) { true }
+        android.app.AlertDialog.Builder(context)
+            .setTitle("Hidden apps")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                val app = hidden[which]
+                store.setHidden(app.packageName, app.className, !isChecked)
+            }
+            .setPositiveButton("Done") { _, _ -> renderApps(search.text.toString()) }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun launch(app: OeaAppInfo) {
