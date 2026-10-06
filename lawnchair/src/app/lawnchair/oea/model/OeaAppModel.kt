@@ -20,6 +20,7 @@ class OeaAppModel(private val context: Context) {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
         apps = context.packageManager.queryIntentActivities(intent, 0)
+            .filter { info: ResolveInfo -> info.activityInfo.packageName != context.packageName }
             .map { info: ResolveInfo ->
                 OeaAppInfo(
                     info.activityInfo.packageName,
