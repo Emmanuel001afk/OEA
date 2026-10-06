@@ -7,7 +7,7 @@ import app.lawnchair.oea.ui.OeaHomeSurfaceController
 class OeaHomeController(private val context: Context) {
     private val engine: OeaLauncherEngine
         get() = OeaRuntime.engine(context)
-    private val surfaceController = OeaHomeSurfaceController(context)
+    private val surfaceController = OeaHomeSurfaceController()
 
     fun createHomeSurface(): android.view.View {
         engine.start()
