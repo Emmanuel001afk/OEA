@@ -14,17 +14,17 @@ SUITES = {
         "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
     ],
     "app-drawer/search": [
-        "src/com/android/launcher3/allapps/ActivityAllAppsContainerView.java",
-        "lawnchair/src/app/lawnchair/allapps/AllAppsSearchInput.kt",
-        "lawnchair/src/app/lawnchair/search/LawnchairSearchUiDelegate.kt",
-        "lawnchair/src/app/lawnchair/search/algorithms/LawnchairLocalSearchAlgorithm.kt",
-        "lawnchair/src/app/lawnchair/search/algorithms/engine/provider/apps/AppSearchProvider.kt",
+        "lawnchair/src/app/lawnchair/oea/drawer/OeaAppDrawerController.kt",
+        "lawnchair/src/app/lawnchair/oea/model/OeaAppModel.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspaceStore.kt",
+        "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
     ],
     "folders/shortcuts": [
-        "src/com/android/launcher3/folder/Folder.java",
-        "src/com/android/launcher3/folder/FolderIcon.java",
-        "src/com/android/launcher3/shortcuts/DeepShortcutView.java",
-        "src/com/android/launcher3/popup/PopupDataProvider.java",
+        "lawnchair/src/app/lawnchair/oea/folders/OeaFolderController.kt",
+        "lawnchair/src/app/lawnchair/oea/shortcuts/OeaShortcutController.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspaceStore.kt",
     ],
     "widgets": [
         "lawnchair/src/app/lawnchair/oea/widget/OeaWidgetPickerActivity.kt",
@@ -33,11 +33,11 @@ SUITES = {
         "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
     ],
     "gestures/interaction": [
-        "lawnchair/src/app/lawnchair/gestures/GestureController.kt",
-        "lawnchair/src/app/lawnchair/gestures/VerticalSwipeTouchController.kt",
-        "lawnchair/src/app/lawnchair/gestures/handlers/OpenAppDrawerGestureHandler.kt",
-        "lawnchair/src/app/lawnchair/gestures/handlers/RecentsGestureHandler.kt",
-        "src/com/android/launcher3/touch/AllAppsSwipeController.java",
+        "lawnchair/src/app/lawnchair/oea/interaction/OeaGestureController.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
+        "lawnchair/src/app/lawnchair/oea/runtime/OeaHomeController.kt",
+        "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
+        "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
     ],
     "recents/quickstep": [
         "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
@@ -50,10 +50,10 @@ SUITES = {
         "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationState.kt",
     ],
     "icons/themes/wallpaper": [
-        "src/com/android/launcher3/icons/LauncherIcons.kt",
-        "src/com/android/launcher3/util/WallpaperThemeManager.kt",
-        "lawnchair/src/app/lawnchair/icons/LawnchairThemeManager.kt",
-        "lawnchair/src/app/lawnchair/theme/ThemeProvider.kt",
+        "lawnchair/src/app/lawnchair/oea/icons/OeaIconController.kt",
+        "lawnchair/src/app/lawnchair/oea/data/OeaDataStore.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
+        "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
     ],
     "settings/default-launcher": [
         "lawnchair/src/app/lawnchair/ui/preferences/destinations/OeaSystemsPreferences.kt",
@@ -79,8 +79,8 @@ REQUIRED_MANIFEST = {
     "OEA launcher activity": r"app\.lawnchair\.oea\.OeaLauncherActivity",
     "Legacy Lawnchair HOME removal": r'app\.lawnchair\.LawnchairLauncher.*tools:node="remove"',
     "Legacy LauncherProvider removal": r'com\.android\.launcher3\.LauncherProvider.*tools:node="remove"',
-    "WidgetPicker": r"com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity",
-    "OEA NotificationListener": r"app\.lawnchair\.oea\.notifications\.OeaNotificationListener",
+        "OEA NotificationListener": r"app\.lawnchair\.oea\.notifications\.OeaNotificationListener",
+    "OEA WidgetPicker": r"app\.lawnchair\.oea\.widget\.OeaWidgetPickerActivity",
 }
 
 def main():
