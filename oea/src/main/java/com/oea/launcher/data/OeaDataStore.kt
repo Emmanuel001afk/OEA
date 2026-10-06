@@ -43,6 +43,11 @@ class OeaDataStore private constructor(context: Context) {
     fun setShowAppLabels(v: Boolean) { prefs.edit().putBoolean(KEY_SHOW_LABELS, v).apply() }
     fun gridColumns() = prefs.getInt(KEY_GRID_COLUMNS, 4).coerceIn(3, 5)
     fun setGridColumns(v: Int) { prefs.edit().putInt(KEY_GRID_COLUMNS, v.coerceIn(3, 5)).apply() }
+    enum class DrawerMode { GRID, VERTICAL, HORIZONTAL }
+    fun drawerMode() = runCatching {
+        DrawerMode.valueOf(prefs.getString(KEY_DRAWER_MODE, DrawerMode.GRID.name) ?: DrawerMode.GRID.name)
+    }.getOrDefault(DrawerMode.GRID)
+    fun setDrawerMode(v: DrawerMode) { prefs.edit().putString(KEY_DRAWER_MODE, v.name).apply() }
     fun sortMode() = runCatching {
         SortMode.valueOf(prefs.getString(KEY_SORT_MODE, SortMode.NAME.name) ?: SortMode.NAME.name)
     }.getOrDefault(SortMode.NAME)
@@ -72,6 +77,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_HIDDEN_APPS = "hidden_apps"
         private const val KEY_SHOW_LABELS = "show_app_labels"
         private const val KEY_GRID_COLUMNS = "grid_columns"
+        private const val KEY_DRAWER_MODE = "drawer_mode"
         private const val KEY_SORT_MODE = "sort_mode"
         private const val KEY_RECENTS = "recent_launches"
         private const val SEP = "|"
