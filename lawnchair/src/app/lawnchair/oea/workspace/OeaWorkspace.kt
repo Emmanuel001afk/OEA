@@ -76,7 +76,7 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
 
         search.hint = "Search apps"
         search.textSize = 16f
-        search.singleLine = true
+        search.setSingleLine(true)
         search.setTextColor(Color.WHITE)
         search.setHintTextColor(Color.rgb(154, 162, 177))
         search.setPadding(dp(18), 0, dp(18), 0)
