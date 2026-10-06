@@ -26,6 +26,7 @@ import com.oea.launcher.interaction.OeaGestureController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.notifications.OeaNotificationState
 import com.oea.launcher.R
+import com.oea.launcher.widgets.OeaWidgetController
 import com.oea.launcher.shortcuts.OeaShortcutController
 import com.oea.launcher.applock.OeaAppFreezer
 import com.oea.launcher.applock.OeaDeviceAdminReceiver
@@ -53,6 +54,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val folderController = OeaFolderController()
     private val iconController = OeaIconController(context)
     private val shortcutController = OeaShortcutController(context)
+    private val widgetController = OeaWidgetController(context)
     private var drawerOpen = false
     private var dragged: String? = null
     private var themeBackground = Color.rgb(12, 15, 21)
@@ -139,6 +141,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(4) })
 
         buildDrawer()
+        widgetController.start()
         post {
             applyThemeFromWallpaper()
             rebuild()
@@ -204,6 +207,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
         dots.text = List(ws.pages()) { if (it == ws.getCurrentPage()) "●" else "•" }.joinToString(" ")
         renderDock()
+        renderWidgets()
     }
 
     private fun renderPage(grid: GridLayout, page: Int) {
@@ -732,6 +736,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
     }
 
+    private fun openWallpaperChooser() {
+        runCatching { context.startActivity(Intent(Intent.ACTION_CHANGE_LIVE_WALLPAPER)) }
+            .onFailure { runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) } }
+    }
+
     private fun openNotificationAccessSettings() {
         runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
@@ -745,6 +754,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Grid: 5 columns")
             menu.add("Show / hide labels")
             menu.add("OEA Themes")
+            menu.add("Add widget")
+            menu.add("Wallpaper")
             menu.add("Notification access")
             menu.add("OEA Systems")
             setOnMenuItemClickListener {
@@ -756,6 +767,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Grid: 5 columns" -> { store.setGridColumns(5); rebuild() }
                     "Show / hide labels" -> { store.setShowAppLabels(!store.showAppLabels()); rebuild() }
                     "OEA Themes" -> openThemeSettings()
+                    "Add widget" -> (context as? android.app.Activity)?.let { widgetController.pickWidget(it) }
+                    "Wallpaper" -> openWallpaperChooser()
                     "Notification access" -> openNotificationAccessSettings()
                     "OEA Systems" -> openSystemsSettings()
                 }
@@ -830,6 +843,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun selectable(): Drawable? = context.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).let { a ->
         a.getDrawable(0).also { a.recycle() }
     }
+    private fun renderWidgets() {
+        val grid = pages.getChildAt(0) as? GridLayout ?: return
+        widgetController.views().forEach { view ->
+            grid.addView(view, GridLayout.LayoutParams().apply {
+                width = 0
+                height = dp(220)
+                columnSpec = GridLayout.spec(0, cols(), 1f)
+                rowSpec = GridLayout.spec((grid.childCount / cols()) + 1)
+                setMargins(dp(6), dp(6), dp(6), dp(6))
+            })
+        }
+    }
+
     private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
         setColor(color)
         cornerRadius = dp(radius).toFloat()
