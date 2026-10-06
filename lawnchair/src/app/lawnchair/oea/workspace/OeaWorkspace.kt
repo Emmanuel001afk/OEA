@@ -171,16 +171,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val app = find(item.id) ?: return emptyCell()
         return tile(app).apply {
             setOnLongClickListener {
-                showAppActions(app, this)
-                true
-            }
-            setOnLongClickListener {
-                dragged = item.id
-                startDragAndDrop(
-                    ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, item.id),
-                    View.DragShadowBuilder(this), item.id,
-                    View.DRAG_FLAG_GLOBAL,
-                )
+                showAppActions(app, this, item.id)
                 true
             }
             setOnDragListener { _, e ->
@@ -192,16 +183,21 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun showAppActions(app: OeaAppInfo, anchor: View) {
+    private fun showAppActions(app: OeaAppInfo, anchor: View, itemId: String) {
         val popup = PopupMenu(context, anchor)
-        popup.menu.add("Open")
+        popup.menu.add(0, 1, 0, "Open")
+        popup.menu.add(0, 2, 1, "Drag to place")
         val shortcuts = shortcutController.shortcuts(app.packageName)
         shortcuts.take(5).forEachIndexed { index, shortcut ->
             popup.menu.add(0, 1000 + index, index + 1, shortcut.shortLabel ?: shortcut.longLabel ?: "Shortcut")
         }
         popup.setOnMenuItemClickListener { item ->
-            if (item.itemId == 0) {
+            if (item.itemId == 1) {
                 launch(app)
+                true
+            } else if (item.itemId == 2) {
+                dragged = itemId
+                startDragAndDrop(ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, itemId), View.DragShadowBuilder(anchor), itemId, View.DRAG_FLAG_GLOBAL)
                 true
             } else if (item.itemId >= 1000) {
                 shortcuts.getOrNull(item.itemId - 1000)?.let {
