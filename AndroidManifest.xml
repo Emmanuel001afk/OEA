@@ -60,7 +60,7 @@
         attributes and intent filters the same
         -->
         <activity
-            android:name="app.lawnchair.LawnchairLauncher"
+            android:name="app.lawnchair.oea.OeaLauncherActivity"
             android:launchMode="singleTask"
             android:clearTaskOnLaunch="true"
             android:stateNotNeeded="true"
@@ -82,10 +82,7 @@
                 <category android:name="android.intent.category.MONKEY"/>
                 <category android:name="android.intent.category.LAUNCHER_APP" />
             </intent-filter>
-            <meta-data
-                android:name="com.android.launcher3.grid.control"
-                android:value="${packageName}.grid_control" />
-        </activity>
+</activity>
 
         <service
             android:name="app.lawnchair.oea.callblocker.OeaCallScreeningService"
