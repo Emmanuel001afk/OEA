@@ -9,12 +9,9 @@ import app.lawnchair.oea.engine.OeaLauncherEngine
  * off-screen replacement view.
  */
 class OeaHomeSurfaceController {
-    fun attach(engine: OeaLauncherEngine): View {
-        engine.workspace.bind(engine.model.apps)
-        return engine.workspace
-    }
+    fun attach(engine: OeaLauncherEngine): View = engine.workspace
 
     fun refresh(engine: OeaLauncherEngine) {
-        engine.workspace.bind(engine.model.apps)
+        engine.start()
     }
 }
