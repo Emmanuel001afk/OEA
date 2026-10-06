@@ -18,7 +18,7 @@ class OeaWorkspace(context: Context) : GridLayout(context) {
         columnCount = 4
         rowCount = 5
         setPadding(24, 48, 24, 24)
-        setBackgroundColor(Color.BLACK)
+        setBackgroundColor(Color.rgb(16, 18, 22))
     }
 
     fun bind(apps: List<OeaAppInfo>) {
@@ -28,7 +28,8 @@ class OeaWorkspace(context: Context) : GridLayout(context) {
                 text = app.label
                 setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
-                setPadding(8, 8, 8, 8)
+                setPadding(12, 12, 12, 12)
+                setBackgroundColor(Color.rgb(42, 47, 58))
                 setOnClickListener {
                     val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
                     intent?.let(context::startActivity)
