@@ -23,4 +23,13 @@ class OeaLauncherActivity : Activity() {
         super.onResume()
         if (::home.isInitialized) home.refresh()
     }
+
+    @Deprecated("Launcher HOME should not be closed by an accidental Back press.")
+    override fun onBackPressed() {
+        if (::home.isInitialized) {
+            home.handleBack()
+        } else {
+            super.onBackPressed()
+        }
+    }
 }
