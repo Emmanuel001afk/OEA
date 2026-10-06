@@ -52,6 +52,8 @@ class OeaDataStore private constructor(context: Context) {
         SortMode.valueOf(prefs.getString(KEY_SORT_MODE, SortMode.NAME.name) ?: SortMode.NAME.name)
     }.getOrDefault(SortMode.NAME)
     fun setSortMode(v: SortMode) { prefs.edit().putString(KEY_SORT_MODE, v.name).apply() }
+    fun themeMode() = prefs.getString(KEY_THEME_MODE, "system") ?: "system"
+    fun setThemeMode(v: String) { prefs.edit().putString(KEY_THEME_MODE, v).apply() }
 
     fun recordLaunch(p: String, c: String) {
         val k = componentKey(p, c)
@@ -86,6 +88,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_GRID_COLUMNS = "grid_columns"
         private const val KEY_DRAWER_MODE = "drawer_mode"
         private const val KEY_SORT_MODE = "sort_mode"
+        private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_RECENTS = "recent_launches"
         private const val KEY_LAUNCH_COUNT_PREFIX = "launch_count:"
         private const val SEP = "|"
