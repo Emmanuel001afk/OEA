@@ -25,6 +25,8 @@ import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.interaction.OeaGestureController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.shortcuts.OeaShortcutController
+import com.oea.launcher.applock.OeaAppFreezer
+import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import kotlin.math.roundToInt
 
 class OeaWorkspace(context: Context) : FrameLayout(context) {
@@ -302,19 +304,30 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun freezeDialog(app: OeaAppInfo) {
         AlertDialog.Builder(context)
             .setTitle("App Freezer")
-            .setMessage("Freeze or unfreeze " + app.label + ". Real package suspension requires OEA to be device owner.")
+            .setMessage("Freeze or unfreeze " + app.label + ". OEA must be device owner for real package suspension.")
             .setPositiveButton("Freeze") { _, _ ->
-                openDeviceAdminSettings()
+                val result = OeaAppFreezer.setFrozen(context, app.packageName, true)
+                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
             }
             .setNeutralButton("Unfreeze") { _, _ ->
-                openDeviceAdminSettings()
+                val result = OeaAppFreezer.setFrozen(context, app.packageName, false)
+                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
             }
-            .setNegativeButton("System settings") { _, _ -> openDeviceAdminSettings() }
+            .setNegativeButton("Authority") { _, _ -> openDeviceAdminSettings() }
             .show()
     }
 
     private fun openDeviceAdminSettings() {
-        runCatching { context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        runCatching {
+            context.startActivity(
+                Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                    .putExtra(
+                        android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                        ComponentName(context, OeaDeviceAdminReceiver::class.java),
+                    )
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
     }
 
     private fun openThemeSettings() {
