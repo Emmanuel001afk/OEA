@@ -1,6 +1,8 @@
 package app.lawnchair.oea.agent
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import app.lawnchair.oea.engine.OeaEngine
 import java.util.Locale
 
@@ -36,7 +38,12 @@ class OeaAgent private constructor(private val context: Context) {
                 || info.activityInfo.packageName.lowercase(Locale.ROOT) == target
         } ?: return OeaEngine.Result.Failure("I couldn't find an app named \\$target")
 
-        return engine.execute(OeaEngine.Action.LaunchPackage(resolve.activityInfo.packageName))
+        return engine.execute(
+            OeaEngine.Action.LaunchActivity(
+                resolve.activityInfo.packageName,
+                resolve.activityInfo.name,
+            )
+        )
     }
 
     companion object {
