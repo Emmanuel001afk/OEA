@@ -95,18 +95,7 @@ class OeaWorkspaceStore private constructor(context: Context) {
 
     fun ensureSeeded(apps: List<Triple<String, String, String>>) {
         if (prefs.contains(KEY_SEEDED)) return
-        val items = apps.take(20).mapIndexed { index, app ->
-            Item(
-                id = key(app.first, app.second),
-                packageName = app.first,
-                className = app.second,
-                page = index / 20,
-                cell = index,
-            )
-        }
-        replaceItems(items)
-        setDock(apps.take(DOCK_SLOTS).map { key(it.first, it.second) })
-        setPages(if (apps.isEmpty()) 1 else 1)
+        val dockKeys = apps.take(DOCK_SLOTS).map { key(it.first, it.second) }\n        val homeApps = apps.drop(DOCK_SLOTS).take(20)\n        val items = homeApps.mapIndexed { index, app ->\n            Item(\n                id = key(app.first, app.second),\n                packageName = app.first,\n                className = app.second,\n                page = index / 20,\n                cell = index,\n            )\n        }\n        replaceItems(items)\n        setDock(dockKeys)\n        setPages(if (apps.isEmpty()) 1 else 1)
         prefs.edit().putBoolean(KEY_SEEDED, true).apply()
     }
 
