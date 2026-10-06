@@ -1,0 +1,10 @@
+<resources>
+    <style name="OeaTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#8AB4F8</item>
+        <item name="android:navigationBarColor">#0C0F15</item>
+        <item name="android:statusBarColor">#0C0F15</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
