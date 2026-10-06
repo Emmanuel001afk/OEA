@@ -37,7 +37,8 @@
             android:configChanges="keyboard|keyboardHidden|mcc|mnc|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:resizeableActivity="true"
             android:exported="true"
-            android:enabled="true">
+            android:enabled="true"
+            android:theme="@style/Theme.OeaHome">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <action android:name="android.intent.action.SHOW_WORK_APPS"/>
