@@ -27,10 +27,10 @@ SUITES = {
         "src/com/android/launcher3/popup/PopupDataProvider.java",
     ],
     "widgets": [
-        "src/com/android/launcher3/widget/LauncherWidgetHolder.java",
-        "src/com/android/launcher3/widget/LauncherAppWidgetHostView.java",
-        "src/com/android/launcher3/widget/picker/WidgetsFullSheet.java",
-        "quickstep/src/com/android/launcher3/QuickstepWidgetPickerActivity.java",
+        "lawnchair/src/app/lawnchair/oea/widget/OeaWidgetPickerActivity.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspaceStore.kt",
+        "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
     ],
     "gestures/interaction": [
         "lawnchair/src/app/lawnchair/gestures/GestureController.kt",
@@ -40,10 +40,10 @@ SUITES = {
         "src/com/android/launcher3/touch/AllAppsSwipeController.java",
     ],
     "recents/quickstep": [
-        "quickstep/src/com/android/launcher3/uioverrides/QuickstepLauncher.java",
-        "quickstep/src/com/android/quickstep/LauncherActivityInterface.java",
-        "quickstep/src/com/android/quickstep/views/LauncherRecentsView.java",
-        "quickstep/src/com/android/quickstep/GestureState.java",
+        "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
+        "lawnchair/src/app/lawnchair/oea/runtime/OeaHomeController.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
+        "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
     ],
     "notifications": [
         "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
@@ -56,16 +56,16 @@ SUITES = {
         "lawnchair/src/app/lawnchair/theme/ThemeProvider.kt",
     ],
     "settings/default-launcher": [
-        "src/com/android/launcher3/settings/SettingsActivity.java",
         "lawnchair/src/app/lawnchair/ui/preferences/destinations/OeaSystemsPreferences.kt",
         "lawnchair/src/app/lawnchair/ui/preferences/destinations/OeaThemePreferences.kt",
-        "src/com/android/launcher3/LauncherProvider.java",
+        "lawnchair/src/app/lawnchair/oea/runtime/OeaRuntime.kt",
+        "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
     ],
     "backup/restore/model": [
-        "src/com/android/launcher3/LauncherBackupAgent.java",
-        "src/com/android/launcher3/LauncherProvider.java",
-        "src/com/android/launcher3/model/LoaderTask.java",
-        "src/com/android/launcher3/model/ModelWriter.java",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspaceStore.kt",
+        "lawnchair/src/app/lawnchair/oea/data/OeaDataStore.kt",
+        "lawnchair/src/app/lawnchair/oea/model/OeaAppModel.kt",
+        "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
     ],
     "OEA runtime safety": [
         "lawnchair/src/app/lawnchair/oea/OeaApplication.kt",
