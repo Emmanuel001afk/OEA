@@ -12,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import app.lawnchair.oea.data.OeaDataStore
 import app.lawnchair.oea.model.OeaAppInfo
@@ -43,7 +44,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(8))
         }
-        addView(root, LayoutParams(-1, -1))
+        addView(root, FrameLayout.LayoutParams(-1, -1))
 
         val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(TextView(context).apply {
@@ -110,7 +111,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawer.setBackgroundColor(Color.rgb(12, 15, 21))
         drawerGrid.columnCount = cols()
         drawer.addView(drawerGrid, ScrollView.LayoutParams(-1, -2))
-        addView(drawer, LayoutParams(-1, -1))
+        addView(drawer, FrameLayout.LayoutParams(-1, -1))
         drawer.visibility = View.GONE
         post { rebuild() }
     }
@@ -355,7 +356,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1, 1f)
                 setMargins(dp(3), dp(3), dp(3), dp(3))
             })
-        })
+        }
     }
 
     private fun closeDrawer() {
