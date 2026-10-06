@@ -848,7 +848,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openWallpaperChooser() {
-        runCatching { context.startActivity(Intent(Intent.ACTION_CHANGE_LIVE_WALLPAPER)) }
+        runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) }
             .onFailure { runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) } }
     }
 
