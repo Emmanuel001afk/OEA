@@ -84,10 +84,16 @@ def main() -> int:
 
     common = (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
     specific = (ROOT / "AndroidManifest.xml").read_text(encoding="utf-8")
-    merged = common + "\n" + specific
+    oea = (ROOT / "quickstep/AndroidManifest-launcher.xml").read_text(encoding="utf-8")
+    merged = common + "\n" + specific + "\n" + oea
     for name, pattern in MANIFEST_REQUIREMENTS:
         if not re.search(pattern, merged):
             failures.append(f"manifest requirement missing: {name}")
+
+    if re.search(r'android:name="app\\.lawnchair\\.LawnchairLauncher"[^>]*>', oea):
+        failures.append("OEA variant still declares the legacy LawnchairLauncher HOME activity")
+    if re.search(r'android:name="com\\.android\\.launcher3\\.LauncherProvider"[^>]*>', oea) and "tools:node=\"remove\"" not in oea:
+        failures.append("OEA variant does not explicitly remove the legacy LauncherProvider")
 
     if failures:
         print("OEA launcher completeness gate: FAILED")
