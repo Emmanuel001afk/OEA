@@ -24,6 +24,7 @@ import com.oea.launcher.folders.OeaFolderController
 import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.interaction.OeaGestureController
 import com.oea.launcher.model.OeaAppInfo
+import com.oea.launcher.notifications.OeaNotificationState
 import com.oea.launcher.shortcuts.OeaShortcutController
 import com.oea.launcher.applock.OeaAppFreezer
 import com.oea.launcher.applock.OeaDeviceAdminReceiver
@@ -558,10 +559,26 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         foreground = selectable()
         contentDescription = "Open " + app.label
         setOnClickListener { launch(app) }
-        addView(ImageView(context).apply {
-            setImageDrawable(icon(app.packageName))
-            scaleType = ImageView.ScaleType.FIT_CENTER
-        }, LinearLayout.LayoutParams(dp(44), dp(46)))
+        addView(FrameLayout(context).apply {
+            val iconView = ImageView(context).apply {
+                setImageDrawable(icon(app.packageName))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }
+            addView(iconView, FrameLayout.LayoutParams(dp(44), dp(46), Gravity.CENTER))
+            val count = OeaNotificationState.countForPackage(app.packageName)
+            if (count > 0) {
+                addView(TextView(context).apply {
+                    text = if (count > 99) "99+" else count.toString()
+                    textSize = 8f
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    background = rounded(Color.rgb(210, 60, 70), 12)
+                    minWidth = dp(18)
+                    minHeight = dp(18)
+                    setPadding(dp(3), 0, dp(3), 0)
+                }, FrameLayout.LayoutParams(-2, dp(18), Gravity.TOP or Gravity.END))
+            }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
         if (store.showAppLabels()) addView(TextView(context).apply {
             text = app.label
             textSize = 10.5f
@@ -708,6 +725,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
     }
 
+    private fun openNotificationAccessSettings() {
+        runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
     private fun menu(anchor: View) {
         PopupMenu(context, anchor).apply {
             menu.add("Add page")
@@ -717,6 +738,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Grid: 5 columns")
             menu.add("Show / hide labels")
             menu.add("OEA Themes")
+            menu.add("Notification access")
             menu.add("OEA Systems")
             setOnMenuItemClickListener {
                 when (it.title.toString()) {
@@ -727,6 +749,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Grid: 5 columns" -> { store.setGridColumns(5); rebuild() }
                     "Show / hide labels" -> { store.setShowAppLabels(!store.showAppLabels()); rebuild() }
                     "OEA Themes" -> openThemeSettings()
+                    "Notification access" -> openNotificationAccessSettings()
                     "OEA Systems" -> openSystemsSettings()
                 }
                 true
