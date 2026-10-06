@@ -164,9 +164,12 @@ class LawnchairLauncher : QuickstepLauncher() {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
 
-        // Launcher3/Lawnchair is the authoritative HOME implementation. OEA integration is
-        // intentionally disabled during launcher startup while the base HOME path is being
-        // recovered. This prevents optional OEA code from being able to blank or block HOME.
+        // Launcher3/Lawnchair remains the sole HOME implementation. OEA feature integration
+        // stays out of the synchronous startup path, but the launcher gets a delayed, isolated
+        // model-health check so a missed Launcher3 bind cannot leave HOME permanently blank.
+        rootView.post {
+            oeaSafetyNet = OeaLauncherSafetyNet(this).also { it.start() }
+        }
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
         prefs.feedProvider.subscribeChanges(this, defaultOverlay::reconnect)
