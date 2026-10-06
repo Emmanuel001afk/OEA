@@ -357,7 +357,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openThemeSettings() {
-        runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        val choices = arrayOf("System / Wallpaper", "Dark", "Light")
+        val current = store.themeMode()
+        val checked = when (current) { "dark" -> 1; "light" -> 2; else -> 0 }
+        AlertDialog.Builder(context)
+            .setTitle("OEA Themes")
+            .setSingleChoiceItems(choices, checked) { dialog, which ->
+                when (which) {
+                    0 -> store.setThemeMode("system")
+                    1 -> store.setThemeMode("dark")
+                    2 -> store.setThemeMode("light")
+                }
+                applyThemeFromWallpaper()
+                rebuild()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Wallpaper") { _, _ -> openWallpaperChooser() }
+            .setPositiveButton("Done", null)
+            .show()
     }
 
     private fun openFocusSettings() {
