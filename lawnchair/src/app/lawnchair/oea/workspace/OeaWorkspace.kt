@@ -15,8 +15,12 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import app.lawnchair.oea.data.OeaDataStore
+import app.lawnchair.oea.drawer.OeaAppDrawerController
+import app.lawnchair.oea.folders.OeaFolderController
+import app.lawnchair.oea.icons.OeaIconController
+import app.lawnchair.oea.interaction.OeaGestureController
 import app.lawnchair.oea.model.OeaAppInfo
-import java.util.Locale
+import app.lawnchair.oea.shortcuts.OeaShortcutController
 import kotlin.math.roundToInt
 
 /**
@@ -34,7 +38,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val search = EditText(context)
     private val dots = TextView(context)
     private var apps: List<OeaAppInfo> = emptyList()
-    private val icons = mutableMapOf<String, Drawable.ConstantState?>()
+    private val drawerController = OeaAppDrawerController()
+    private val folderController = OeaFolderController()
+    private val iconController = OeaIconController(context)
+    private val shortcutController = OeaShortcutController(context)
     private var drawerOpen = false
     private var dragged: String? = null
 
@@ -75,6 +82,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         root.addView(search, LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(8) })
 
         pager.isHorizontalScrollBarEnabled = false
+        pager.setOnTouchListener(OeaGestureController(pager, onSwipeUp = { openDrawer() }, onSwipeDown = { closeDrawer() }))
         pager.setOnScrollChangeListener { _, scrollX, _, _, _ ->
             val pageWidth = width.coerceAtLeast(1)
             val current = (scrollX.toFloat() / pageWidth).roundToInt().coerceIn(0, ws.pages() - 1)
@@ -163,6 +171,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val app = find(item.id) ?: return emptyCell()
         return tile(app).apply {
             setOnLongClickListener {
+                showAppActions(app, this)
+                true
+            }
+            setOnLongClickListener {
                 dragged = item.id
                 startDragAndDrop(
                     ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, item.id),
@@ -178,6 +190,27 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 } else e.action == DragEvent.ACTION_DRAG_STARTED
             }
         }
+    }
+
+    private fun showAppActions(app: OeaAppInfo, anchor: View) {
+        val popup = PopupMenu(context, anchor)
+        popup.menu.add("Open")
+        val shortcuts = shortcutController.shortcuts(app.packageName)
+        shortcuts.take(5).forEachIndexed { index, shortcut ->
+            popup.menu.add(0, 1000 + index, index + 1, shortcut.shortLabel ?: shortcut.longLabel ?: "Shortcut")
+        }
+        popup.setOnMenuItemClickListener { item ->
+            if (item.itemId == 0) {
+                launch(app)
+                true
+            } else if (item.itemId >= 1000) {
+                shortcuts.getOrNull(item.itemId - 1000)?.let {
+                    runCatching { context.startActivity(it.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+                true
+            } else false
+        }
+        popup.show()
     }
 
     private fun folderTile(folder: OeaWorkspaceStore.Folder): View =
@@ -275,7 +308,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val folders = ws.folders().toMutableList()
         val existing = folders.firstOrNull { it.page == t.page && it.cell == t.cell }
         if (existing == null) folders.add(OeaWorkspaceStore.Folder("folder-" + System.currentTimeMillis(), "Folder", t.page, t.cell, listOf(target, source)))
-        else folders[folders.indexOf(existing)] = existing.copy(members = (existing.members + source).distinct())
+        else folders[folders.indexOf(existing)] = existing.copy(members = folderController.mergeMembers(existing.members, source))
         ws.replaceFolders(folders)
         ws.replaceItems(ws.items().filterNot { it.id == target || it.id == source })
         ws.setDock(ws.dock().filterNot { it == source || it == target })
@@ -367,9 +400,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (!drawerOpen) return
         val q = query.trim().lowercase(Locale.ROOT)
         drawerGrid.removeAllViews()
-        apps.filterNot { store.isHidden(it.packageName, it.className) }.filter {
-            q.isEmpty() || it.label.lowercase(Locale.ROOT).contains(q) || it.packageName.lowercase(Locale.ROOT).contains(q)
-        }.sortedBy { it.label.lowercase(Locale.ROOT) }.forEach {
+        drawerController.filter(apps, q).filterNot { store.isHidden(it.packageName, it.className) }.forEach {
             val v = tile(it).apply {
                 setOnLongClickListener {
                     dragged = OeaWorkspaceStore.key(it.packageName, it.className)
@@ -448,10 +479,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun icon(pkg: String): Drawable? {
-        if (icons.containsKey(pkg)) return icons[pkg]?.newDrawable(resources)
-        val state = runCatching { context.packageManager.getApplicationIcon(pkg).constantState }.getOrNull()
-        icons[pkg] = state
-        return state?.newDrawable(resources)
+        return iconController.icon(pkg)
     }
 
     private fun selectable(): Drawable? =
