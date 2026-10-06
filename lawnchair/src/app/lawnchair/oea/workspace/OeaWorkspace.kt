@@ -251,6 +251,7 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
             scaleType = ImageView.ScaleType.FIT_CENTER
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
 
+        if (store.showAppLabels()) {
         tile.addView(TextView(context).apply {
             text = app.label
             textSize = 12f
@@ -261,6 +262,7 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
             setPadding(2, dp(6), 2, 0)
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(38)
+        }
         ))
 
         return tile.apply {
@@ -292,6 +294,11 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
                     }
                     "App info" -> {
                         openAppInfo(app)
+                        true
+                    }
+                    "Hide app" -> {
+                        store.setHidden(app.packageName, app.className, true)
+                        renderApps(search.text.toString())
                         true
                     }
                     else -> false
