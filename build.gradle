@@ -322,8 +322,30 @@ android {
         lawn {
             java.srcDirs = ['src_flags', 'src_shortcuts_overrides', 'lawnchair/src', 'tests/shared']
             kotlin.directories.addAll('src_flags', 'src_shortcuts_overrides', 'lawnchair/src', 'tests/shared')
-            java.exclude 'com/oea/launcher/**'
-            kotlin.exclude 'com/oea/launcher/**'
+            java.exclude 'com/oea/launcher/OeaApplication.kt'
+            java.exclude 'com/oea/launcher/OeaLauncherActivity.kt'
+            java.exclude 'com/oea/launcher/runtime/**'
+            java.exclude 'com/oea/launcher/engine/**'
+            java.exclude 'com/oea/launcher/model/**'
+            java.exclude 'com/oea/launcher/data/**'
+            java.exclude 'com/oea/launcher/drawer/**'
+            java.exclude 'com/oea/launcher/workspace/**'
+            java.exclude 'com/oea/launcher/folders/**'
+            java.exclude 'com/oea/launcher/icons/**'
+            java.exclude 'com/oea/launcher/interaction/**'
+            java.exclude 'com/oea/launcher/shortcuts/**'
+            kotlin.exclude 'com/oea/launcher/OeaApplication.kt'
+            kotlin.exclude 'com/oea/launcher/OeaLauncherActivity.kt'
+            kotlin.exclude 'com/oea/launcher/runtime/**'
+            kotlin.exclude 'com/oea/launcher/engine/**'
+            kotlin.exclude 'com/oea/launcher/model/**'
+            kotlin.exclude 'com/oea/launcher/data/**'
+            kotlin.exclude 'com/oea/launcher/drawer/**'
+            kotlin.exclude 'com/oea/launcher/workspace/**'
+            kotlin.exclude 'com/oea/launcher/folders/**'
+            kotlin.exclude 'com/oea/launcher/icons/**'
+            kotlin.exclude 'com/oea/launcher/interaction/**'
+            kotlin.exclude 'com/oea/launcher/shortcuts/**'
             aidl.srcDirs = ['lawnchair/aidl']
             res.srcDirs = ['lawnchair/res', 'platform_frameworks_libs_systemui/animationlib/res']
             manifest.srcFile "lawnchair/AndroidManifest.xml"
