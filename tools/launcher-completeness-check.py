@@ -24,11 +24,13 @@ REQUIRED_FILES = [
     "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspaceStore.kt",
     "lawnchair/src/app/lawnchair/oea/model/OeaAppModel.kt",
     "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
-    "src/com/android/launcher3/allapps/ActivityAllAppsContainerView.java",
-    "src/com/android/launcher3/folder/Folder.java",
-    "src/com/android/launcher3/widget/LauncherWidgetHolder.java",
-    "src/com/android/launcher3/widget/LauncherAppWidgetHostView.java",
-    "src/com/android/launcher3/notification/NotificationListener.java",
+    "lawnchair/src/app/lawnchair/oea/drawer/OeaAppDrawerController.kt",
+    "lawnchair/src/app/lawnchair/oea/folders/OeaFolderController.kt",
+    "lawnchair/src/app/lawnchair/oea/shortcuts/OeaShortcutController.kt",
+    "lawnchair/src/app/lawnchair/oea/widget/OeaWidgetPickerActivity.kt",
+    "lawnchair/src/app/lawnchair/oea/interaction/OeaGestureController.kt",
+    "lawnchair/src/app/lawnchair/oea/icons/OeaIconController.kt",
+    "lawnchair/src/app/lawnchair/oea/backup/OeaBackupManager.kt",
  ]
 
 MANIFEST_REQUIREMENTS = [
