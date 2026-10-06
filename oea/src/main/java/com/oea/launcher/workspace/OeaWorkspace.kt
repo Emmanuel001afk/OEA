@@ -28,6 +28,8 @@ import com.oea.launcher.notifications.OeaNotificationState
 import com.oea.launcher.R
 import com.oea.launcher.widgets.OeaWidgetController
 import com.oea.launcher.shortcuts.OeaShortcutController
+import com.oea.launcher.focus.OeaFocusStore
+import com.oea.launcher.search.OeaSearchController
 import com.oea.launcher.applock.OeaAppFreezer
 import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import com.oea.launcher.callblocker.OeaCallBlockRules
@@ -54,6 +56,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val folderController = OeaFolderController()
     private val iconController = OeaIconController(context)
     private val shortcutController = OeaShortcutController(context)
+    private val focusStore = OeaFocusStore.get(context)
+    private val searchController = OeaSearchController(context)
     private val widgetController = OeaWidgetController(context)
     private var drawerOpen = false
     private var dragged: String? = null
@@ -356,6 +360,26 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
+    private fun openFocusSettings() {
+        val choices = apps.filterNot { store.isHidden(it.packageName, it.className) }
+        val checked = BooleanArray(choices.size) { focusStore.isFocused(OeaWorkspaceStore.key(choices[it].packageName, choices[it].className)) }
+        AlertDialog.Builder(context)
+            .setTitle("OEA Focus apps (max 7)")
+            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { dialog, which, selected ->
+                val key = OeaWorkspaceStore.key(choices[which].packageName, choices[which].className)
+                val current = focusStore.apps().toMutableSet()
+                if (selected) {
+                    if (current.size >= OeaFocusStore.MAX_APPS) {
+                        (dialog as AlertDialog).listView.setItemChecked(which, false)
+                        Toast.makeText(context, "Focus is limited to 7 apps.", Toast.LENGTH_SHORT).show()
+                    } else current.add(key)
+                } else current.remove(key)
+                focusStore.setApps(current)
+            }
+            .setPositiveButton("Done") { _, _ -> renderDrawer(drawerSearch.text.toString()) }
+            .show()
+    }
+
     private fun openSystemsSettings() {
         val choices = arrayOf("Call blocker", "Split pair", "Game Boost", "App freezer authority")
         AlertDialog.Builder(context).setTitle("OEA Systems").setItems(choices) { _, which ->
@@ -476,6 +500,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerBody.removeAllViews()
         val visible = drawerController.filter(apps, query)
             .filterNot { store.isHidden(it.packageName, it.className) }
+        if (query.isNotBlank()) renderSearchActions(query)
+        else renderFocusStrip()
         when (store.drawerMode()) {
             OeaDataStore.DrawerMode.VERTICAL -> {
                 val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -510,6 +536,60 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 drawerBody.addView(drawerGrid, FrameLayout.LayoutParams(-1, -2))
             }
         }
+    }
+
+    private fun renderSearchActions(query: String) {
+        val actions = searchController.actions(query)
+        if (actions.isEmpty()) return
+        val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        addSectionLabel(list, "Search anywhere")
+        actions.forEach { action ->
+            list.addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), 0, dp(14), 0)
+                background = rounded(themeSurface, 16)
+                addView(TextView(context).apply {
+                    text = action.title
+                    textSize = 14f
+                    setTextColor(themeText)
+                }, LinearLayout.LayoutParams(0, dp(56), 1f))
+                addView(TextView(context).apply {
+                    text = action.subtitle
+                    textSize = 11f
+                    setTextColor(themeMuted)
+                }, LinearLayout.LayoutParams(-2, dp(56)))
+                setOnClickListener {
+                    runCatching { context.startActivity(action.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }, LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(5) })
+        }
+        drawerBody.addView(list)
+    }
+
+    private fun renderFocusStrip() {
+        val focused = focusStore.apps().mapNotNull(::find)
+        if (focused.isEmpty()) return
+        val section = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        addSectionLabel(section, "OEA Focus · " + focused.size + "/" + OeaFocusStore.MAX_APPS)
+        val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        focused.forEach { app ->
+            row.addView(tile(app), LinearLayout.LayoutParams(dp(84), dp(92)).apply {
+                setMargins(dp(3), dp(3), dp(3), dp(3))
+            })
+        }
+        strip.addView(row, FrameLayout.LayoutParams(-2, -2))
+        section.addView(strip, LinearLayout.LayoutParams(-1, dp(100)))
+        drawerBody.addView(section)
+    }
+
+    private fun addSectionLabel(parent: LinearLayout, title: String) {
+        parent.addView(TextView(context).apply {
+            text = title
+            textSize = 12f
+            setTextColor(themeMuted)
+            setPadding(dp(4), dp(8), dp(4), dp(6))
+        }, LinearLayout.LayoutParams(-1, dp(34)))
     }
 
     private fun drawerRow(app: OeaAppInfo): View {
@@ -775,6 +855,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Add widget")
             menu.add("Wallpaper")
             menu.add("Notification access")
+            menu.add("OEA Focus apps")
             menu.add("OEA Systems")
             setOnMenuItemClickListener {
                 when (it.title.toString()) {
@@ -788,6 +869,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Add widget" -> (context as? android.app.Activity)?.let { widgetController.pickWidget(it) }
                     "Wallpaper" -> openWallpaperChooser()
                     "Notification access" -> openNotificationAccessSettings()
+                    "OEA Focus apps" -> openFocusSettings()
                     "OEA Systems" -> openSystemsSettings()
                 }
                 true
