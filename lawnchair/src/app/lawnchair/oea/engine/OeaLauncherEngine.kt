@@ -2,7 +2,6 @@ package app.lawnchair.oea.engine
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ResolveInfo
 import app.lawnchair.oea.model.OeaAppModel
 import app.lawnchair.oea.workspace.OeaWorkspace
 
