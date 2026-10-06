@@ -176,7 +176,10 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
         }
 
         val icon = ImageView(context).apply {
-            setImageDrawable(context.packageManager.getApplicationIcon(app.packageName))
+            setImageDrawable(
+                runCatching { context.packageManager.getApplicationIcon(app.packageName) }
+                    .getOrNull()
+            )
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
         tile.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -201,6 +204,24 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
                 setMargins(dp(4), dp(4), dp(4), dp(4))
             }
         }
+    }
+
+    /**
+     * HOME should not accidentally finish its root activity on Back.
+     * Clear search first, then return to the top; otherwise consume Back.
+     */
+    fun handleBack(): Boolean {
+        if (search.text?.isNotEmpty() == true) {
+            search.text?.clear()
+            search.clearFocus()
+            context.getSystemService<InputMethodManager>()?.hideSoftInputFromWindow(search.windowToken, 0)
+            return true
+        }
+        if (scrollY != 0) {
+            smoothScrollTo(0, 0)
+            return true
+        }
+        return true
     }
 
     private fun rounded(color: Int, radiusDp: Int): GradientDrawable =
