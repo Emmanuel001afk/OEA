@@ -3,6 +3,7 @@ package app.lawnchair.oea.model
 import android.content.Context
 import android.content.ComponentName
 import android.content.Intent
+import app.lawnchair.oea.OeaLauncherActivity
 import android.content.pm.ResolveInfo
 
 data class OeaAppInfo(
@@ -29,6 +30,10 @@ class OeaAppModel(private val context: Context) {
                 )
             }
             .distinctBy { ComponentName(it.packageName, it.className) }
+            .filterNot {
+                it.packageName == context.packageName &&
+                    it.className == OeaLauncherActivity::class.java.name
+            }
             .sortedBy { it.label.lowercase() }
     }
 }
