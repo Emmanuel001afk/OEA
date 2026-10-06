@@ -15,19 +15,21 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_FILES = [
     "AndroidManifest-common.xml",
     "AndroidManifest.xml",
-    "src/com/android/launcher3/Launcher.java",
-    "src/com/android/launcher3/LauncherProvider.java",
-    "src/com/android/launcher3/Workspace.java",
+    "lawnchair/src/app/lawnchair/oea/OeaApplication.kt",
+    "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
+    "lawnchair/src/app/lawnchair/oea/runtime/OeaRuntime.kt",
+    "lawnchair/src/app/lawnchair/oea/runtime/OeaHomeController.kt",
+    "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
+    "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
+    "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspaceStore.kt",
+    "lawnchair/src/app/lawnchair/oea/model/OeaAppModel.kt",
+    "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
     "src/com/android/launcher3/allapps/ActivityAllAppsContainerView.java",
     "src/com/android/launcher3/folder/Folder.java",
     "src/com/android/launcher3/widget/LauncherWidgetHolder.java",
     "src/com/android/launcher3/widget/LauncherAppWidgetHostView.java",
     "src/com/android/launcher3/notification/NotificationListener.java",
-    "src/com/android/launcher3/settings/SettingsActivity.java",
-    "quickstep/src/com/android/launcher3/uioverrides/QuickstepLauncher.java",
-    "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
-    "lawnchair/src/app/lawnchair/LawnchairApp.kt",
-]
+ ]
 
 MANIFEST_REQUIREMENTS = [
     ("OEA HOME category", r'<category\s+android:name="android.intent.category.HOME"'),
@@ -86,6 +88,16 @@ def main() -> int:
     for name, pattern in MANIFEST_REQUIREMENTS:
         if not re.search(pattern, oea):
             failures.append(f"OEA manifest requirement missing: {name}")
+
+    common = (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
+    if 'android:name="app.lawnchair.LawnchairApp"' in common:
+        failures.append("LawnchairApp must not own the OEA application process")
+    if 'android:name="com.android.launcher3.LauncherProvider"' in common:
+        failures.append("LauncherProvider must not be declared in the OEA common manifest")
+    if 'android:name="com.android.launcher3.notification.NotificationListener"' in common:
+        failures.append("Launcher3 NotificationListener must not own OEA notifications")
+    if 'android:name="app.lawnchair.oea.OeaApplication"' not in common:
+        failures.append("OeaApplication must own the common application process")
 
     application_tag = oea.split("<application", 1)[1].split(">", 1)[0]
     if 'android:theme="@style/Theme.OeaHome"' in application_tag:
