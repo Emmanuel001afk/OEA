@@ -37,6 +37,12 @@ class OeaWorkspaceStore private constructor(context: Context) {
 
     fun items(): List<Item> = readItems()
 
+    fun getCurrentPage(): Int = prefs.getInt(KEY_CURRENT_PAGE, 0).coerceIn(0, pages() - 1)
+
+    fun setCurrentPage(page: Int) {
+        prefs.edit().putInt(KEY_CURRENT_PAGE, page.coerceIn(0, pages() - 1)).apply()
+    }
+
     fun dock(): List<String> =
         prefs.getStringSet(KEY_DOCK, emptySet())?.toList()?.sortedBy {
             it.substringBefore("|").toIntOrNull() ?: Int.MAX_VALUE
@@ -95,7 +101,21 @@ class OeaWorkspaceStore private constructor(context: Context) {
 
     fun ensureSeeded(apps: List<Triple<String, String, String>>) {
         if (prefs.contains(KEY_SEEDED)) return
-        val dockKeys = apps.take(DOCK_SLOTS).map { key(it.first, it.second) }\n        val homeApps = apps.drop(DOCK_SLOTS).take(20)\n        val items = homeApps.mapIndexed { index, app ->\n            Item(\n                id = key(app.first, app.second),\n                packageName = app.first,\n                className = app.second,\n                page = index / 20,\n                cell = index,\n            )\n        }\n        replaceItems(items)\n        setDock(dockKeys)\n        setPages(if (apps.isEmpty()) 1 else 1)
+        val dockKeys = apps.take(DOCK_SLOTS).map { key(it.first, it.second) }
+        val homeApps = apps.drop(DOCK_SLOTS).take(20)
+        val items = homeApps.mapIndexed { index, app ->
+            Item(
+                id = key(app.first, app.second),
+                packageName = app.first,
+                className = app.second,
+                page = 0,
+                cell = index,
+            )
+        }
+        replaceItems(items)
+        setDock(dockKeys)
+        setPages(1)
+        setCurrentPage(0)
         prefs.edit().putBoolean(KEY_SEEDED, true).apply()
     }
 
@@ -113,7 +133,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
         private const val KEY_FOLDERS = "folders"
         private const val KEY_DOCK = "dock"
         private const val KEY_PAGES = "pages"
-        private const val KEY_SEEDED = "seeded"\n        private const val KEY_CURRENT_PAGE = "current_page"
+        private const val KEY_SEEDED = "seeded"
+        private const val KEY_CURRENT_PAGE = "current_page"
         @Volatile private var instance: OeaWorkspaceStore? = null
 
         fun get(context: Context): OeaWorkspaceStore =
