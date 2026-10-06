@@ -23,6 +23,24 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".OeaSystemToolsActivity"
+            android:exported="false" />
+        <activity-alias android:name=".OeaSettings" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="OEA Settings" android:icon="@drawable/oea_logo">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".OeaAppFreezer" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="App Freezer" android:icon="@drawable/oea_logo">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".OeaCallBlocker" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="Call Blocker" android:icon="@drawable/oea_logo">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".OeaGameBoost" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="Game Boost" android:icon="@drawable/oea_logo">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".OeaMultitask" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="Multitask &amp; Split Screen" android:icon="@drawable/oea_logo">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
         <receiver
             android:name="com.oea.launcher.applock.OeaDeviceAdminReceiver"
             android:exported="true"
