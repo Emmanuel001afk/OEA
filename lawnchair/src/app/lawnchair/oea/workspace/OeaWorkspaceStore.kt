@@ -113,7 +113,7 @@ class OeaWorkspaceStore private constructor(context: Context) {
         private const val KEY_FOLDERS = "folders"
         private const val KEY_DOCK = "dock"
         private const val KEY_PAGES = "pages"
-        private const val KEY_SEEDED = "seeded"
+        private const val KEY_SEEDED = "seeded"\n        private const val KEY_CURRENT_PAGE = "current_page"
         @Volatile private var instance: OeaWorkspaceStore? = null
 
         fun get(context: Context): OeaWorkspaceStore =
