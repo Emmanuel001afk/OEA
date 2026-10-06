@@ -18,4 +18,6 @@ class OeaHomeController(private val context: Context) {
         engine.start()
         surfaceController.refresh(engine)
     }
+
+    fun handleBack(): Boolean = engine.workspace.handleBack()
 }
