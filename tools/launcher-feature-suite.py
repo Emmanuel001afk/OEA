@@ -74,13 +74,13 @@ SUITES = {
 }
 
 REQUIRED_MANIFEST = {
-    "HOME": r"android\.intent\.category\.HOME",
-    "DEFAULT": r"android\.intent\.category\.DEFAULT",
-    "Lawnchair launcher": r"app\.lawnchair\.LawnchairLauncher",
-    "LauncherProvider": r"com\.android\.launcher3\.LauncherProvider",
+    "OEA HOME": r"android\.intent\.category\.HOME",
+    "OEA DEFAULT": r"android\.intent\.category\.DEFAULT",
+    "OEA launcher activity": r"app\.lawnchair\.oea\.OeaLauncherActivity",
+    "Legacy Lawnchair HOME removal": r'app\.lawnchair\.LawnchairLauncher.*tools:node="remove"',
+    "Legacy LauncherProvider removal": r'com\.android\.launcher3\.LauncherProvider.*tools:node="remove"',
     "WidgetPicker": r"com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity",
     "NotificationListener": r"com\.android\.launcher3\.notification\.NotificationListener",
-    "BackupAgent": r'android:backupAgent="com\.android\.launcher3\.LauncherBackupAgent"',
 }
 
 def main():
@@ -92,11 +92,7 @@ def main():
         if missing:
             failures.extend(f"[{suite}] missing: {p}" for p in missing)
 
-    manifest = (
-        (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
-        + "\n"
-        + (ROOT / "AndroidManifest.xml").read_text(encoding="utf-8")
-    )
+    manifest = (ROOT / "quickstep/AndroidManifest-launcher.xml").read_text(encoding="utf-8")
     for name, pattern in REQUIRED_MANIFEST.items():
         if not re.search(pattern, manifest):
             failures.append(f"[manifest] missing launcher contract: {name}")
