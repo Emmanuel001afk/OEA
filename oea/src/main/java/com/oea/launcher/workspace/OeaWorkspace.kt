@@ -865,6 +865,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     fun refreshBadges() { rebuild(); renderDrawer(drawerSearch.text.toString()) }
 
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean = widgetController.handleActivityResult(requestCode, resultCode, data)
+
     fun handleBack(): Boolean {
         if (drawerOpen) {
             if (drawerSearch.hasFocus() && drawerSearch.text.isNotEmpty()) {
