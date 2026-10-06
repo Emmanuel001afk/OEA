@@ -214,7 +214,8 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
         if (search.text?.isNotEmpty() == true) {
             search.text?.clear()
             search.clearFocus()
-            context.getSystemService<InputMethodManager>()?.hideSoftInputFromWindow(search.windowToken, 0)
+            context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                ?.hideSoftInputFromWindow(search.windowToken, 0)
             return true
         }
         if (scrollY != 0) {
