@@ -37,6 +37,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <permission android:name="${applicationId}.permission.START_WIDGET_PICKER_ACTIVITY" android:protectionLevel="signature|privileged" />
+
+
     <application
         android:name="app.lawnchair.oea.OeaApplication"
         android:hardwareAccelerated="true"
@@ -76,6 +79,20 @@
                 <category android:name="android.intent.category.LAUNCHER_APP" />
             </intent-filter>
 </activity>
+
+        <activity android:name="com.android.launcher3.widgetpicker.WidgetPickerActivity"
+            android:theme="@style/WidgetPickerActivityTheme"
+            android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:launchMode="singleTop"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:permission="${applicationId}.permission.START_WIDGET_PICKER_ACTIVITY">
+            <intent-filter>
+                <action android:name="android.intent.action.PICK" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name="app.lawnchair.oea.callblocker.OeaCallScreeningService"
