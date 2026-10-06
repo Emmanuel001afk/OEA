@@ -163,7 +163,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerSearch.background = rounded(themeSurface, 24)
         drawerSearch.addTextChangedListener(Watcher { renderDrawer(it) })
         drawer.addView(drawerSearch, LinearLayout.LayoutParams(-1, dp(50)).apply { bottomMargin = dp(8) })
-        drawerScroll.addView(drawerBody, ScrollView.LayoutParams(-1, -2))
+        drawerScroll.addView(drawerBody, FrameLayout.LayoutParams(-1, -2))
         drawer.addView(drawerScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         addView(drawer, FrameLayout.LayoutParams(-1, -1))
         drawer.visibility = View.GONE
