@@ -322,6 +322,8 @@ android {
         lawn {
             java.srcDirs = ['src_flags', 'src_shortcuts_overrides', 'lawnchair/src', 'tests/shared']
             kotlin.directories.addAll('src_flags', 'src_shortcuts_overrides', 'lawnchair/src', 'tests/shared')
+            java.exclude 'com/oea/launcher/**'
+            kotlin.exclude 'com/oea/launcher/**'
             aidl.srcDirs = ['lawnchair/aidl']
             res.srcDirs = ['lawnchair/res', 'platform_frameworks_libs_systemui/animationlib/res']
             manifest.srcFile "lawnchair/AndroidManifest.xml"
@@ -384,7 +386,7 @@ composeCompiler {
 addFrameworkJar('framework-16.jar')
 
 dependencies {
-    implementation projects.iconloaderlib
+    // OEA core runtime is isolated from the Lawnchair source tree.\n    implementation project(':oea')\n\n    implementation projects.iconloaderlib
     implementation projects.searchuilib
     implementation projects.animationlib
     implementation projects.msdllib
