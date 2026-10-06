@@ -46,7 +46,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val dock = GridLayout(context)
     private val drawer = LinearLayout(context)
     private val drawerScroll = ScrollView(context)
-    private val drawerBody = FrameLayout(context)
+    private val drawerBody = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val drawerGrid = GridLayout(context)
     private val drawerSearch = EditText(context)
     private val search = EditText(context)
@@ -502,6 +502,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .filterNot { store.isHidden(it.packageName, it.className) }
         if (query.isNotBlank()) renderSearchActions(query)
         else renderFocusStrip()
+        addSectionLabel(drawerBody, "All apps · " + visible.size)
         when (store.drawerMode()) {
             OeaDataStore.DrawerMode.VERTICAL -> {
                 val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -523,17 +524,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             OeaDataStore.DrawerMode.GRID -> {
                 drawerGrid.removeAllViews()
                 drawerGrid.columnCount = cols()
-                visible.forEach { app ->
+                visible.forEachIndexed { index, app ->
                     drawerGrid.addView(tile(app).apply {
                         setOnLongClickListener { showAppActions(app, this, OeaWorkspaceStore.key(app.packageName, app.className)); true }
                     }, GridLayout.LayoutParams().apply {
                         width = 0
                         height = dp(92)
-                        columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1, 1f)
+                        columnSpec = GridLayout.spec(index % cols(), 1, 1f)
+                        rowSpec = GridLayout.spec(index / cols())
                         setMargins(dp(3), dp(3), dp(3), dp(3))
                     })
                 }
-                drawerBody.addView(drawerGrid, FrameLayout.LayoutParams(-1, -2))
+                drawerBody.addView(drawerGrid, LinearLayout.LayoutParams(-1, -2))
             }
         }
     }
