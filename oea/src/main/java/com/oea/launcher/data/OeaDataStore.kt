@@ -56,8 +56,15 @@ class OeaDataStore private constructor(context: Context) {
     fun recordLaunch(p: String, c: String) {
         val k = componentKey(p, c)
         val r = recentLaunches().toMutableList().apply { remove(k); add(0, k) }.take(MAX_RECENTS)
-        prefs.edit().putString(KEY_RECENTS, r.joinToString(SEP)).apply()
+        val count = launchCount(k) + 1
+        prefs.edit()
+            .putString(KEY_RECENTS, r.joinToString(SEP))
+            .putInt(KEY_LAUNCH_COUNT_PREFIX + k, count)
+            .apply()
     }
+    fun launchCount(key: String): Int = prefs.getInt(KEY_LAUNCH_COUNT_PREFIX + key, 0)
+    fun mostUsed(keys: Collection<String>, limit: Int = 8): List<String> =
+        keys.sortedWith(compareByDescending<String> { launchCount(it) }.thenBy { it }).take(limit)
     fun recentLaunches() = prefs.getString(KEY_RECENTS, null)?.split(SEP)?.filter { it.isNotBlank() } ?: emptyList()
     fun recordAction(c: String, r: String) {
         prefs.edit().putString(KEY_LAST_COMMAND, c).putString(KEY_LAST_RESULT, r).apply()
@@ -80,6 +87,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_DRAWER_MODE = "drawer_mode"
         private const val KEY_SORT_MODE = "sort_mode"
         private const val KEY_RECENTS = "recent_launches"
+        private const val KEY_LAUNCH_COUNT_PREFIX = "launch_count:"
         private const val SEP = "|"
         private const val MAX_RECENTS = 12
         @Volatile private var instance: OeaDataStore? = null
