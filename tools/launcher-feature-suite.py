@@ -8,10 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 SUITES = {
     "home/workspace": [
-        "src/com/android/launcher3/Launcher.java",
-        "src/com/android/launcher3/Workspace.java",
-        "src/com/android/launcher3/Hotseat.java",
-        "src/com/android/launcher3/dragndrop/LauncherDragController.java",
+        "lawnchair/src/app/lawnchair/oea/OeaLauncherActivity.kt",
+        "lawnchair/src/app/lawnchair/oea/runtime/OeaHomeController.kt",
+        "lawnchair/src/app/lawnchair/oea/engine/OeaLauncherEngine.kt",
+        "lawnchair/src/app/lawnchair/oea/workspace/OeaWorkspace.kt",
     ],
     "app-drawer/search": [
         "src/com/android/launcher3/allapps/ActivityAllAppsContainerView.java",
@@ -46,8 +46,8 @@ SUITES = {
         "quickstep/src/com/android/quickstep/GestureState.java",
     ],
     "notifications": [
-        "src/com/android/launcher3/notification/NotificationListener.java",
-        "src/com/android/launcher3/dot/DotInfo.java",
+        "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
+        "lawnchair/src/app/lawnchair/oea/notifications/OeaNotificationListener.kt",
     ],
     "icons/themes/wallpaper": [
         "src/com/android/launcher3/icons/LauncherIcons.kt",
@@ -68,7 +68,8 @@ SUITES = {
         "src/com/android/launcher3/model/ModelWriter.java",
     ],
     "OEA runtime safety": [
-        "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
+        "lawnchair/src/app/lawnchair/oea/OeaApplication.kt",
+        "lawnchair/src/app/lawnchair/oea/runtime/OeaRuntime.kt",
     ],
 }
 
@@ -79,7 +80,7 @@ REQUIRED_MANIFEST = {
     "Legacy Lawnchair HOME removal": r'app\.lawnchair\.LawnchairLauncher.*tools:node="remove"',
     "Legacy LauncherProvider removal": r'com\.android\.launcher3\.LauncherProvider.*tools:node="remove"',
     "WidgetPicker": r"com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity",
-    "NotificationListener": r"com\.android\.launcher3\.notification\.NotificationListener",
+    "OEA NotificationListener": r"app\.lawnchair\.oea\.notifications\.OeaNotificationListener",
 }
 
 def main():
