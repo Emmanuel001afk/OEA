@@ -11,13 +11,19 @@
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_oea_logo"
         android:label="@string/derived_app_name"
-        android:theme="@style/Theme.OeaHome"
         android:largeHeap="@bool/config_largeHeap"
         android:restoreAnyVersion="true"
         android:supportsRtl="true"
-        tools:replace="android:name,android:icon" tools:remove="android:backupAgent,android:fullBackupOnly,android:fullBackupContent">
+        tools:replace="android:name,android:icon"
+        tools:remove="android:backupAgent,android:fullBackupOnly,android:fullBackupContent,android:theme">
 
-        <!-- Remove legacy Launcher3/Quickstep runtime components from the OEA HOME variant. -->
+        <!-- OEA owns the HOME entry point. Do not merge the legacy Launcher3/Lawnchair HOME activity. -->
+        <activity android:name="app.lawnchair.LawnchairLauncher" tools:node="remove"/>
+
+        <!-- OEA does not use Launcher3's database/provider as its authoritative HOME runtime. -->
+        <provider android:name="com.android.launcher3.LauncherProvider" tools:node="remove"/>
+
+        <!-- Remove legacy Quickstep runtime components from the OEA HOME variant. -->
         <service android:name="com.android.quickstep.TouchInteractionService" tools:node="remove"/>
         <activity android:name="com.android.quickstep.RecentsActivity" tools:node="remove"/>
         <provider android:name="com.android.quickstep.LauncherSearchIndexablesProvider" tools:node="remove"/>
@@ -26,7 +32,7 @@
         <activity android:name="com.android.quickstep.interaction.AllSetActivity" tools:node="remove"/>
         <activity android:name="com.android.launcher3.QuickstepWidgetPickerActivity" tools:node="remove"/>
 
-        <!-- OEA is now the HOME runtime. Launcher3/Quickstep is no longer the HOME activity. -->
+        <!-- OEA-owned HOME entry point. -->
         <activity
             android:name="app.lawnchair.oea.OeaLauncherActivity"
             android:launchMode="singleTask"
