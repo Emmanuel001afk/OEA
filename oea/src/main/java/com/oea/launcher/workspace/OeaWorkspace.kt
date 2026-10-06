@@ -607,6 +607,49 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }, LinearLayout.LayoutParams(-1, dp(34)))
     }
 
+    private fun renderOeaTools() {
+        addSectionLabel(drawerBody, "OEA tools")
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf(
+            "⚙" to "OEA Settings",
+            "❄" to "App Freezer",
+            "☎" to "Call Blocker",
+            "🎮" to "Game Boost",
+            "▣" to "Multitask / Split",
+        ).forEach { (iconText, title) ->
+            row.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = rounded(themeSurface, 18)
+                setOnClickListener {
+                    when (title) {
+                        "OEA Settings" -> openSystemsSettings()
+                        "App Freezer" -> openDeviceAdminSettings()
+                        "Call Blocker" -> openCallBlockerSettings()
+                        "Game Boost" -> openGameBoostSettings()
+                        "Multitask / Split" -> openSplitPairDialog()
+                    }
+                }
+                addView(TextView(context).apply {
+                    text = iconText
+                    textSize = 25f
+                    gravity = Gravity.CENTER
+                    setTextColor(themeText)
+                }, LinearLayout.LayoutParams(-1, dp(42)))
+                addView(TextView(context).apply {
+                    text = title
+                    textSize = 9f
+                    gravity = Gravity.CENTER
+                    setTextColor(themeText)
+                    maxLines = 2
+                }, LinearLayout.LayoutParams(-1, dp(32)))
+            }, LinearLayout.LayoutParams(0, dp(82), 1f).apply {
+                setMargins(dp(3), dp(3), dp(3), dp(8))
+            })
+        }
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(94)))
+    }
+
     private fun drawerRow(app: OeaAppInfo): View {
         val key = OeaWorkspaceStore.key(app.packageName, app.className)
         return LinearLayout(context).apply {
