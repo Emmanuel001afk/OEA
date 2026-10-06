@@ -27,7 +27,6 @@ REQUIRED_FILES = [
     "quickstep/src/com/android/launcher3/uioverrides/QuickstepLauncher.java",
     "lawnchair/src/app/lawnchair/LawnchairLauncher.kt",
     "lawnchair/src/app/lawnchair/LawnchairApp.kt",
-    "lawnchair/src/app/lawnchair/oea/OeaLauncherSafetyNet.kt",
 ]
 
 MANIFEST_REQUIREMENTS = [
