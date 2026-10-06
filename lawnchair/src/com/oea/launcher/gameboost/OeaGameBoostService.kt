@@ -14,7 +14,6 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
-import com.android.launcher3.R
 import java.util.Locale
 
 class OeaGameBoostService : android.app.Service() {
@@ -45,7 +44,7 @@ class OeaGameBoostService : android.app.Service() {
         super.onCreate()
         createChannel()
         val notification = NotificationCompat.Builder(this, "oea_game_boost")
-            .setSmallIcon(R.drawable.ic_launcher_home)
+            .setSmallIcon(android.R.drawable.sym_def_app_icon)
             .setContentTitle("OEA Game Boost")
             .setContentText("Monitoring selected games")
             .setOngoing(true).build()
