@@ -8,6 +8,8 @@ android {
 }
 
 dependencies {
+    implementation platform(libs.compose.bom)
+    implementation "androidx.compose.runtime:runtime"
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
 }
