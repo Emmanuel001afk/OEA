@@ -568,19 +568,32 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun renderFocusStrip() {
         val focused = focusStore.apps().mapNotNull(::find)
-        if (focused.isEmpty()) return
+        val allKeys = apps.filterNot { store.isHidden(it.packageName, it.className) }
+            .map { OeaWorkspaceStore.key(it.packageName, it.className) }
+        val used = store.mostUsed(allKeys, 8).mapNotNull(::find)
+        if (focused.isEmpty() && used.isEmpty()) return
         val section = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        addSectionLabel(section, "OEA Focus · " + focused.size + "/" + OeaFocusStore.MAX_APPS)
+        if (focused.isNotEmpty()) {
+            addSectionLabel(section, "OEA Focus · " + focused.size + "/" + OeaFocusStore.MAX_APPS)
+            section.addView(appStrip(focused), LinearLayout.LayoutParams(-1, dp(100)))
+        }
+        if (used.isNotEmpty()) {
+            addSectionLabel(section, "Most used")
+            section.addView(appStrip(used), LinearLayout.LayoutParams(-1, dp(100)))
+        }
+        drawerBody.addView(section)
+    }
+
+    private fun appStrip(values: List<OeaAppInfo>): HorizontalScrollView {
         val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        focused.forEach { app ->
+        values.forEach { app ->
             row.addView(tile(app), LinearLayout.LayoutParams(dp(84), dp(92)).apply {
                 setMargins(dp(3), dp(3), dp(3), dp(3))
             })
         }
         strip.addView(row, FrameLayout.LayoutParams(-2, -2))
-        section.addView(strip, LinearLayout.LayoutParams(-1, dp(100)))
-        drawerBody.addView(section)
+        return strip
     }
 
     private fun addSectionLabel(parent: LinearLayout, title: String) {
