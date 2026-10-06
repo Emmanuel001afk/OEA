@@ -1,13 +1,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <receiver
-        android:name="com.oea.launcher.applock.OeaDeviceAdminReceiver"
-        android:exported="true"
-        android:label="OEA App Freezer">
-        <meta-data
-            android:name="android.app.device_admin"
-            android:resource="@xml/oea_device_admin" />
-        <intent-filter>
-            <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-        </intent-filter>
-    </receiver>
+    <application
+        android:theme="@style/OeaTheme"
+        android:label="OEA Launcher"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+        <activity
+            android:name=".OeaLauncherActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <receiver
+            android:name="com.oea.launcher.applock.OeaDeviceAdminReceiver"
+            android:exported="true"
+            android:label="OEA App Freezer">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/oea_device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>
