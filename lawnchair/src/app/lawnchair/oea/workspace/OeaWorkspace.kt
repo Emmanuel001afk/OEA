@@ -78,6 +78,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pager.setOnScrollChangeListener { _, scrollX, _, _, _ ->
             val pageWidth = width.coerceAtLeast(1)
             val current = (scrollX.toFloat() / pageWidth).roundToInt().coerceIn(0, ws.pages() - 1)
+            ws.setCurrentPage(current)
             dots.text = List(ws.pages()) { if (it == current) "●" else "•" }.joinToString(" ")
         }
         pages.orientation = LinearLayout.HORIZONTAL
@@ -300,6 +301,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         AlertDialog.Builder(context).setView(box).setPositiveButton("Done", null).show()
     }
 
+    private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
+        val input = EditText(context).apply {
+            setSingleLine(true)
+            setText(folder.title)
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(context)
+            .setTitle("Rename folder")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val title = input.text.toString().trim().ifBlank { "Folder" }
+                ws.replaceFolders(ws.folders().map { if (it.id == folder.id) it.copy(title = title) else it })
+                rebuild()
+            }
+            .show()
+    }
+
     private fun renderDock() {
         dock.removeAllViews()
         val values = ws.dock()
@@ -351,7 +370,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         apps.filterNot { store.isHidden(it.packageName, it.className) }.filter {
             q.isEmpty() || it.label.lowercase(Locale.ROOT).contains(q) || it.packageName.lowercase(Locale.ROOT).contains(q)
         }.sortedBy { it.label.lowercase(Locale.ROOT) }.forEach {
-            drawerGrid.addView(tile(it), GridLayout.LayoutParams().apply {
+            val v = tile(it).apply {
+                setOnLongClickListener {
+                    dragged = OeaWorkspaceStore.key(it.packageName, it.className)
+                    startDragAndDrop(
+                        ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, dragged),
+                        View.DragShadowBuilder(this), dragged, View.DRAG_FLAG_GLOBAL,
+                    )
+                    true
+                }
+            }
+            drawerGrid.addView(v, GridLayout.LayoutParams().apply {
                 width = 0; height = dp(96)
                 columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1, 1f)
                 setMargins(dp(3), dp(3), dp(3), dp(3))
