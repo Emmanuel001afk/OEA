@@ -11,7 +11,7 @@ android {
         versionCode 4
         versionName "0.2.0-alpha4"
     }
-    buildTypes { release { minifyEnabled false } }
+    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.debug } }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
