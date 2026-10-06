@@ -6,6 +6,8 @@
     <uses-sdk android:targetSdkVersion="33" android:minSdkVersion="26"
         tools:overrideLibrary="com.kieronquinn.app.smartspacer.sdk.client"/>
 
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:node="remove"/>
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN"/>
