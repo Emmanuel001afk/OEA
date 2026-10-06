@@ -8,23 +8,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 object OeaRuntime {
-    data class RuntimeState(val initialized:Boolean=false)
+    data class RuntimeState(val initialized: Boolean = false)
 
-    private var application: Application? = null
     private var engine: OeaLauncherEngine? = null
     private val _state = MutableStateFlow(RuntimeState())
     val state: StateFlow<RuntimeState> = _state.asStateFlow()
 
     @Synchronized
     fun initialize(app: Application) {
-        if (application === app && engine != null) return
-        application = app
-        engine = OeaLauncherEngine(app)
+        if (engine != null) return
+        engine = OeaLauncherEngine(app.applicationContext)
         _state.value = RuntimeState(initialized = true)
     }
 
     fun engine(context: Context): OeaLauncherEngine =
         engine ?: synchronized(this) {
-            engine ?: OeaLauncherEngine(context.applicationContext).also { engine = it }
+            engine ?: OeaLauncherEngine(context.applicationContext).also { engine = it; _state.value = RuntimeState(initialized = true) }
         }
 }
