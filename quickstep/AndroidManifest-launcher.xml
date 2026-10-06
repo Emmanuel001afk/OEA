@@ -38,7 +38,6 @@
         <provider android:name="com.android.launcher3.graphics.LauncherCustomizationProvider" tools:node="remove"/>
         <receiver android:name="com.android.launcher3.SessionCommitReceiver" tools:node="remove"/>
         <receiver android:name="com.android.launcher3.AppWidgetsRestoredReceiver" tools:node="remove"/>
-        <activity android:name="com.android.launcher3.secondarydisplay.SecondaryDisplayLauncher" tools:node="remove"/>
 
         <!-- Remove legacy Quickstep runtime components from the OEA HOME variant. -->
         <service android:name="com.android.quickstep.TouchInteractionService" tools:node="remove"/>
