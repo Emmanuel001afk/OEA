@@ -43,6 +43,24 @@ class OeaDataStore private constructor(context: Context) {
         prefs.edit().putStringSet(KEY_FAVORITES, updated).apply()
     }
 
+    fun hiddenApps(): Set<String> = prefs.getStringSet(KEY_HIDDEN_APPS, emptySet())?.toSet() ?: emptySet()
+
+    fun isHidden(packageName: String, className: String): Boolean =
+        hiddenApps().contains(componentKey(packageName, className))
+
+    fun setHidden(packageName: String, className: String, hidden: Boolean) {
+        val updated = hiddenApps().toMutableSet()
+        val key = componentKey(packageName, className)
+        if (hidden) updated.add(key) else updated.remove(key)
+        prefs.edit().putStringSet(KEY_HIDDEN_APPS, updated).apply()
+    }
+
+    fun showAppLabels(): Boolean = prefs.getBoolean(KEY_SHOW_LABELS, true)
+
+    fun setShowAppLabels(show: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_LABELS, show).apply()
+    }
+
     fun gridColumns(): Int = prefs.getInt(KEY_GRID_COLUMNS, 4).coerceIn(3, 5)
 
     fun setGridColumns(columns: Int) {
@@ -93,6 +111,8 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_LAST_COMMAND = "last_command"
         private const val KEY_LAST_RESULT = "last_result"
         private const val KEY_FAVORITES = "favorite_apps"
+        private const val KEY_HIDDEN_APPS = "hidden_apps"
+        private const val KEY_SHOW_LABELS = "show_app_labels"
         private const val KEY_GRID_COLUMNS = "grid_columns"
         private const val KEY_SORT_MODE = "sort_mode"
         private const val KEY_RECENTS = "recent_launches"
