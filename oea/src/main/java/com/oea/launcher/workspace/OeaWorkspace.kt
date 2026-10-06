@@ -25,6 +25,7 @@ import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.interaction.OeaGestureController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.notifications.OeaNotificationState
+import com.oea.launcher.R
 import com.oea.launcher.shortcuts.OeaShortcutController
 import com.oea.launcher.applock.OeaAppFreezer
 import com.oea.launcher.applock.OeaDeviceAdminReceiver
@@ -68,11 +69,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         addView(root, FrameLayout.LayoutParams(-1, -1))
 
         val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        header.addView(ImageView(context).apply {
+            setImageResource(R.drawable.oea_logo)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            contentDescription = "OEA"
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
         header.addView(TextView(context).apply {
             text = "OEA"
             textSize = 28f
             setTextColor(themeText)
             setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(6), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, dp(52), 1f))
         header.addView(TextView(context).apply {
             text = "⋮"
