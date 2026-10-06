@@ -7,10 +7,7 @@
         tools:overrideLibrary="com.kieronquinn.app.smartspacer.sdk.client"/>
 
     <application
-        android:name="app.lawnchair.LawnchairApp"
-        android:backupAgent="com.android.launcher3.LauncherBackupAgent"
-        android:fullBackupOnly="true"
-        android:fullBackupContent="@xml/backupscheme"
+        android:name="app.lawnchair.oea.OeaApplication"
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_oea_logo"
         android:label="@string/derived_app_name"
