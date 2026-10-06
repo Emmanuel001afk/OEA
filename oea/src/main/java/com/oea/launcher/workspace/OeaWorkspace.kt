@@ -393,6 +393,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 drawerBody.addView(horizontal, FrameLayout.LayoutParams(-1, -2))
             }
             OeaDataStore.DrawerMode.GRID -> {
+                drawerGrid.removeAllViews()
                 drawerGrid.columnCount = cols()
                 visible.forEach { app ->
                     drawerGrid.addView(tile(app).apply {
