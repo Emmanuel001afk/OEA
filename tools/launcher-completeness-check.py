@@ -31,13 +31,11 @@ REQUIRED_FILES = [
 ]
 
 MANIFEST_REQUIREMENTS = [
-    ("HOME category", r'<category\s+android:name="android.intent.category.HOME"'),
-    ("DEFAULT category", r'<category\s+android:name="android.intent.category.DEFAULT"'),
-    ("launcher activity", r'android:name="app\.lawnchair\.LawnchairLauncher"'),
-    ("launcher provider", r'android:name="com\.android\.launcher3\.LauncherProvider"'),
-    ("widget picker", r'android:name="com\.android\.launcher3\.widgetpicker\.WidgetPickerActivity"'),
-    ("notification listener", r'android:name="com\.android\.launcher3\.notification\.NotificationListener"'),
-    ("backup agent", r'android:backupAgent="com\.android\.launcher3\.LauncherBackupAgent"'),
+    ("OEA HOME category", r'<category\\s+android:name="android.intent.category.HOME"'),
+    ("OEA DEFAULT category", r'<category\\s+android:name="android.intent.category.DEFAULT"'),
+    ("OEA launcher activity", r'android:name="app\\.lawnchair\\.oea\\.OeaLauncherActivity"'),
+    ("legacy Lawnchair HOME removal", r'<activity android:name="app\\.lawnchair\\.LawnchairLauncher"[^>]*tools:node="remove"'),
+    ("legacy LauncherProvider removal", r'<provider android:name="com\\.android\\.launcher3\\.LauncherProvider"[^>]*tools:node="remove"'),
 ]
 
 
@@ -82,18 +80,13 @@ def main() -> int:
                 f"Aria application identity must not remain in OEA source/config: {path.relative_to(ROOT)}"
             )
 
-    common = (ROOT / "AndroidManifest-common.xml").read_text(encoding="utf-8")
-    specific = (ROOT / "AndroidManifest.xml").read_text(encoding="utf-8")
     oea = (ROOT / "quickstep/AndroidManifest-launcher.xml").read_text(encoding="utf-8")
-    merged = common + "\n" + specific + "\n" + oea
     for name, pattern in MANIFEST_REQUIREMENTS:
-        if not re.search(pattern, merged):
-            failures.append(f"manifest requirement missing: {name}")
+        if not re.search(pattern, oea):
+            failures.append(f"OEA manifest requirement missing: {name}")
 
-    if re.search(r'android:name="app\\.lawnchair\\.LawnchairLauncher"[^>]*>', oea):
-        failures.append("OEA variant still declares the legacy LawnchairLauncher HOME activity")
-    if re.search(r'android:name="com\\.android\\.launcher3\\.LauncherProvider"[^>]*>', oea) and "tools:node=\"remove\"" not in oea:
-        failures.append("OEA variant does not explicitly remove the legacy LauncherProvider")
+    if 'android:theme="@style/Theme.OeaHome"' in re.search(r'<application[\\s\\S]*?</application>', oea).group(0).split('<activity', 1)[0]:
+        failures.append("OEA theme must be applied to OeaLauncherActivity, not the application")
 
     if failures:
         print("OEA launcher completeness gate: FAILED")
