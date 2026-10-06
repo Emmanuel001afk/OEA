@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
@@ -29,6 +30,7 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
     private val appGrid = GridLayout(context)
     private val search = EditText(context)
     private var allApps: List<OeaAppInfo> = emptyList()
+    private val iconCache = mutableMapOf<String, Drawable.ConstantState?>()
 
     init {
         isFillViewport = true
@@ -181,10 +183,7 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
         }
 
         val icon = ImageView(context).apply {
-            setImageDrawable(
-                runCatching { context.packageManager.getApplicationIcon(app.packageName) }
-                    .getOrNull()
-            )
+            setImageDrawable(loadIcon(app.packageName))
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
         tile.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -228,6 +227,17 @@ class OeaWorkspace(context: Context) : ScrollView(context) {
             return true
         }
         return true
+    }
+
+    private fun loadIcon(packageName: String): Drawable? {
+        if (iconCache.containsKey(packageName)) {
+            return iconCache[packageName]?.newDrawable(resources)
+        }
+        val state = runCatching {
+            context.packageManager.getApplicationIcon(packageName).constantState
+        }.getOrNull()
+        iconCache[packageName] = state
+        return state?.newDrawable(resources)
     }
 
     private fun rounded(color: Int, radiusDp: Int): GradientDrawable =
