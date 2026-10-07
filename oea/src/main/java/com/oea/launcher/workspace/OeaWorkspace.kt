@@ -242,7 +242,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
             }
             pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
-            pageScroll.addView(pageContent, ScrollView.LayoutParams(-1, -2))
+            pageScroll.addView(pageContent, FrameLayout.LayoutParams(-1, -2))
             pages.addView(pageScroll, LinearLayout.LayoutParams(pageWidth, -1))
             renderPage(grid, p)
             renderWidgets(widgetHost, p)
@@ -1477,15 +1477,25 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
     }
 
+    private fun updateWidgetSize(widget: android.appwidget.AppWidgetHostView, widthDp: Int, heightDp: Int) {
+        val options = android.os.Bundle().apply {
+            putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, widthDp)
+            putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, heightDp)
+            putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, widthDp)
+            putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp)
+        }
+        widget.updateAppWidgetSize(options)
+    }
+
     private fun widgetOptions(widget: android.appwidget.AppWidgetHostView) {
         val id = widget.appWidgetId
         AlertDialog.Builder(context)
             .setTitle("Widget")
             .setItems(arrayOf("Resize: compact", "Resize: medium", "Resize: large", "Remove widget")) { _, which ->
                 when (which) {
-                    0 -> widget.updateAppWidgetSize(120, 80)
-                    1 -> widget.updateAppWidgetSize(300, 160)
-                    2 -> widget.updateAppWidgetSize(420, 240)
+                    0 -> updateWidgetSize(widget, 120, 80)
+                    1 -> updateWidgetSize(widget, 300, 160)
+                    2 -> updateWidgetSize(widget, 420, 240)
                     3 -> widgetController.remove(id)
                 }
                 rebuild()
