@@ -1071,11 +1071,27 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
-        box.addView(TextView(context).apply { text = folder.title; textSize = 20f; setTextColor(themeText) })
-        val grid = GridLayout(context).apply { columnCount = 4 }
-        folder.members.mapNotNull(::find).forEach { grid.addView(tile(it), GridLayout.LayoutParams().apply { width = dp(78); height = dp(90) }) }
-        box.addView(grid)
-        AlertDialog.Builder(context).setView(box).setPositiveButton("Done", null).show()
+        box.addView(TextView(context).apply {
+            text = folder.title + "  •  " + folder.members.size + " apps"
+            textSize = 20f
+            setTextColor(themeText)
+            setPadding(0, 0, 0, dp(10))
+        })
+        val grid = GridLayout(context).apply { columnCount = 4; useDefaultMargins = false }
+        folder.members.mapNotNull(::find).forEach { app ->
+            val index = grid.childCount
+            grid.addView(tile(app), GridLayout.LayoutParams().apply {
+                width = 0
+                height = dp(88)
+                columnSpec = GridLayout.spec(index % 4, 1, 1f)
+                rowSpec = GridLayout.spec(index / 4)
+                setMargins(dp(3), dp(3), dp(3), dp(3))
+            })
+        }
+        box.addView(grid, LinearLayout.LayoutParams(-1, -2))
+        AlertDialog.Builder(context).setView(box)
+            .setNeutralButton("Rename") { _, _ -> showFolderRename(folder) }
+            .setPositiveButton("Done", null).show()
     }
 
     private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
@@ -1100,7 +1116,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             adjustViewBounds = true
-        }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
+        }, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER))
     }
 
     private fun renderDock() {
