@@ -121,6 +121,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(dp(6), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        header.addView(TextView(context).apply {
+            text = "⋮"
+            textSize = 26f
+            gravity = Gravity.CENTER
+            setTextColor(themeText)
+            background = rounded(themeSurface, 18)
+            contentDescription = "OEA home menu"
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { menu(this) }
+        }, LinearLayout.LayoutParams(dp(48), dp(44)).apply {
+            leftMargin = dp(6)
+        })
         root.addView(header)
 
         homeSearch = search
@@ -1579,13 +1592,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setPadding(0, dp(12), 0, dp(6))
             })
         }
+        var menuDialog: AlertDialog? = null
         fun action(title: String, subtitle: String = "", onClick: () -> Unit) {
             body.addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14), dp(10), dp(14), dp(10))
                 background = rounded(themeSurface, 14)
                 isClickable = true
-                setOnClickListener { onClick() }
+                isFocusable = true
+                setOnClickListener {
+                    onClick()
+                    menuDialog?.dismiss()
+                }
                 addView(TextView(context).apply {
                     text = title
                     textSize = 15f
@@ -1637,11 +1655,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         action("Notification access", "Required for notification badges and media integration") { openNotificationAccessSettings() }
 
         scroll.addView(body)
-        AlertDialog.Builder(hostActivity ?: context)
+        menuDialog = AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA")
             .setView(scroll)
             .setNegativeButton("Close", null)
-            .show()
+            .create()
+        menuDialog?.show()
     }
 
     private fun gridDialogFromHomeMenu() {
