@@ -33,7 +33,7 @@ class OeaNotificationListener:NotificationListenerService(){
   val wm=getSystemService(WINDOW_SERVICE) as WindowManager
   val n=sbn.notification
   val title=n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?:n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?:sbn.packageName.substringAfterLast('.')
-  val text=n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+  val mediaText=n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
   val controller=runCatching{
    val token=if(android.os.Build.VERSION.SDK_INT>=33)n.extras.getParcelable(Notification.EXTRA_MEDIA_SESSION,MediaSession.Token::class.java) else @Suppress("DEPRECATION") n.extras.getParcelable(Notification.EXTRA_MEDIA_SESSION) as? MediaSession.Token
    token?.let{MediaController(this,it)}
@@ -44,7 +44,7 @@ class OeaNotificationListener:NotificationListenerService(){
   }
   val top=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
   top.addView(TextView(this).apply{text="●";textSize=10f;setTextColor(Color.WHITE);setPadding(0,0,10,0)})
-  top.addView(TextView(this).apply{text=if(text.isBlank())title else "$title  •  $text";textSize=12f;setTextColor(Color.WHITE);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},LinearLayout.LayoutParams(0,34,1f))
+  top.addView(TextView(this).apply{text=if(mediaText.isBlank())title else "$title  •  $mediaText";textSize=12f;setTextColor(Color.WHITE);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},LinearLayout.LayoutParams(0,34,1f))
   root.addView(top)
   val controls=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER;visibility=View.GONE}
   fun ctl(label:String,action:()->Unit)=TextView(this).apply{text=label;textSize=11f;setTextColor(Color.WHITE);setPadding(12,8,12,8);setOnClickListener{action()}}
