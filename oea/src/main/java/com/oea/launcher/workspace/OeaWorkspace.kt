@@ -916,14 +916,39 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val t = ws.items().firstOrNull { it.id == target } ?: return
         val folders = ws.folders().toMutableList()
         val existing = folders.firstOrNull { it.page == t.page && it.cell == t.cell }
-        if (existing == null) folders.add(OeaWorkspaceStore.Folder(
-            "folder-" + System.currentTimeMillis(), "Folder", t.page, t.cell, listOf(target, source)
-        )) else folders[folders.indexOf(existing)] = existing.copy(members = folderController.mergeMembers(existing.members, source))
+        if (existing == null) {
+            val members = listOf(target, source)
+            folders.add(OeaWorkspaceStore.Folder(
+                "folder-" + System.currentTimeMillis(),
+                suggestFolderName(members),
+                t.page,
+                t.cell,
+                members,
+            ))
+        } else {
+            val members = folderController.mergeMembers(existing.members, source)
+            folders[folders.indexOf(existing)] = existing.copy(
+                members = members,
+                title = if (existing.title == "Folder") suggestFolderName(members) else existing.title,
+            )
+        }
         ws.replaceFolders(folders)
         ws.replaceItems(ws.items().filterNot { it.id == target || it.id == source })
         ws.setDock(ws.dock().filterNot { it == source || it == target })
         dragged = null
         rebuild()
+    }
+
+    private fun suggestFolderName(keys: List<String>): String {
+        val labels = keys.mapNotNull(::find).map { (it.label + " " + it.packageName).lowercase() }
+        return when {
+            labels.any { it.contains("game") || it.contains("pubg") || it.contains("free fire") || it.contains("codm") } -> "Games"
+            labels.any { it.contains("music") || it.contains("spotify") || it.contains("sound") } -> "Music"
+            labels.any { it.contains("chat") || it.contains("whatsapp") || it.contains("telegram") || it.contains("messenger") } -> "Social"
+            labels.any { it.contains("video") || it.contains("youtube") || it.contains("netflix") } -> "Video"
+            labels.any { it.contains("photo") || it.contains("gallery") || it.contains("camera") } -> "Photos"
+            else -> "Folder"
+        }
     }
 
     private fun openFolder(folder: OeaWorkspaceStore.Folder) {
