@@ -21,6 +21,7 @@ class OeaWidgetController(private val context: Context) {
     private var hostActivity: Activity? = null
     private var listening = false
     private var pendingPage = 0
+    private var pendingWidgetId = -1
 
     init { loadIds() }
 
@@ -40,6 +41,7 @@ class OeaWidgetController(private val context: Context) {
         hostActivity = activity
         pendingPage = page.coerceAtLeast(0)
         val id = host.allocateAppWidgetId()
+        pendingWidgetId = id
         activity.startActivityForResult(
             Intent(AppWidgetManager.ACTION_APPWIDGET_PICK)
                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
@@ -49,14 +51,17 @@ class OeaWidgetController(private val context: Context) {
 
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != REQUEST_PICK_WIDGET && requestCode != REQUEST_CONFIGURE_WIDGET) return false
-        val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
+        val returnedId = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
+        val id = if (returnedId > 0) returnedId else pendingWidgetId
         if (id <= 0 || resultCode != Activity.RESULT_OK) {
             if (id > 0 && (requestCode == REQUEST_PICK_WIDGET || requestCode == REQUEST_CONFIGURE_WIDGET)) host.deleteAppWidgetId(id)
+            pendingWidgetId = -1
             return true
         }
         val info = manager.getAppWidgetInfo(id)
         if (info == null) {
             host.deleteAppWidgetId(id)
+            pendingWidgetId = -1
             return true
         }
         if (requestCode == REQUEST_PICK_WIDGET && info.configure != null) {
@@ -72,12 +77,13 @@ class OeaWidgetController(private val context: Context) {
                         .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
                     REQUEST_CONFIGURE_WIDGET,
                 )
-            }.onFailure { host.deleteAppWidgetId(id) }
+            }.onFailure { host.deleteAppWidgetId(id); pendingWidgetId = -1 }
             return true
         }
         ids += id
         prefs.edit().putInt("page_$id", pendingPage).apply()
         saveIds()
+        pendingWidgetId = -1
         return true
     }
 
