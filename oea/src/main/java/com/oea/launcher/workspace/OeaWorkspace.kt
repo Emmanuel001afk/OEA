@@ -1020,6 +1020,20 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         background = ColorDrawable(Color.TRANSPARENT)
         setOnClickListener { openFolder(folder) }
         setOnLongClickListener { showFolderRename(folder); true }
+        setOnDragListener { _, event ->
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DROP -> {
+                    dragged?.let { addToFolder(folder.id, it) }
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    dragged = null
+                    false
+                }
+                else -> false
+            }
+        }
         val preview = GridLayout(context).apply {
             columnCount = 2
             useDefaultMargins = false
