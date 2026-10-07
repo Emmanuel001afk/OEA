@@ -30,6 +30,7 @@ import com.oea.launcher.widgets.OeaWidgetController
 import java.io.InputStream
 
 class OeaSystemToolsActivity : Activity() {
+    companion object { const val EXTRA_SCREEN = "oea_screen" }
     private val dataStore by lazy { OeaDataStore.get(this) }
     private val apps: List<OeaAppInfo> by lazy { OeaAppModel(this).also { it.load() }.apps }
     private val widgets by lazy { OeaWidgetController(this) }
@@ -51,11 +52,11 @@ class OeaSystemToolsActivity : Activity() {
         super.onCreate(state)
         widgets.setHostActivity(this)
         widgets.start()
-        when (intent.component?.className.orEmpty()) {
-            "com.oea.launcher.OeaAppFreezer" -> showFreezer()
-            "com.oea.launcher.OeaCallBlocker" -> showCallBlocker()
-            "com.oea.launcher.OeaGameBoost" -> showGameBoost()
-            "com.oea.launcher.OeaMultitask" -> showMultitask()
+        when (intent.getStringExtra(EXTRA_SCREEN)) {
+            "freezer" -> showFreezer()
+            "call_blocker" -> showCallBlocker()
+            "game_boost" -> showGameBoost()
+            "multitask" -> showMultitask()
             else -> showSettings()
         }
     }
@@ -91,7 +92,7 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Split Screen", "Choose two apps for Android adjacent-window mode") { chooseSplitApps() }
 
         section(box, "ANDROID INTEGRATION")
-        row(box, "Widgets", "OEA widget host is ready; add widgets from OEA Home") { returnToHomeForWidgets() }
+        row(box, "Widgets", "Pick a system widget and place it on OEA Home") { pickWidgetFromSettings() }
         row(box, "Notification access", notificationStatus()) { openNotificationAccess() }
         row(box, "Usage access", usageStatus()) { openUsageAccess() }
 
@@ -363,9 +364,8 @@ class OeaSystemToolsActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
     }
 
-    private fun returnToHomeForWidgets() {
-        Toast.makeText(this, "Open OEA Home, then use ⋮ > Add widget. The widget remains in the OEA workspace.", Toast.LENGTH_LONG).show()
-        finish()
+    private fun pickWidgetFromSettings() {
+        widgets.pickWidget(this)
     }
 
     private fun openPhone() {
