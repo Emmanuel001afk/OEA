@@ -795,7 +795,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun renderOeaTools() {
-        addSectionLabel(drawerBody, "OEA tools")
+        addSectionLabel(drawerBody, "OEA Systems")
         val row = GridLayout(context).apply {
             columnCount = 3
             useDefaultMargins = false
@@ -813,6 +813,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 background = rounded(themeSurface, 18)
+                isClickable = true
+                isFocusable = true
                 setOnClickListener {
                     when (title) {
                         "OEA Settings" -> openSystemsSettings()
@@ -845,7 +847,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setMargins(dp(3), dp(3), dp(3), dp(8))
             })
         }
-        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(184)))
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(274)))
     }
 
     private fun drawerRow(app: OeaAppInfo): View {
