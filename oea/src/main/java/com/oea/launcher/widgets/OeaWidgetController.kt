@@ -75,6 +75,16 @@ class OeaWidgetController(private val context: Context) {
         }
     }
 
+    fun moveBefore(id: Int, targetId: Int?) {
+        if (!ids.contains(id) || (targetId != null && !ids.contains(targetId))) return
+        val list = ids.toMutableList().apply { remove(id) }
+        val index = if (targetId == null) list.size else list.indexOf(targetId).coerceAtLeast(0)
+        list.add(index, id)
+        ids.clear()
+        ids.addAll(list)
+        saveIds()
+    }
+
     fun remove(id: Int) {
         ids.remove(id)
         host.deleteAppWidgetId(id)
@@ -84,12 +94,23 @@ class OeaWidgetController(private val context: Context) {
     fun providers(): List<AppWidgetProviderInfo> = ids.mapNotNull { manager.getAppWidgetInfo(it) }
 
     private fun loadIds() {
+        val ordered = prefs.getString("ordered_ids", null)
+            ?.split(",")
+            ?.mapNotNull { it.toIntOrNull() }
+            .orEmpty()
+        if (ordered.isNotEmpty()) {
+            ordered.forEach { ids += it }
+            return
+        }
         prefs.getStringSet("ids", emptySet()).orEmpty()
             .mapNotNull { it.toIntOrNull() }
             .forEach { ids += it }
     }
 
     private fun saveIds() {
-        prefs.edit().putStringSet("ids", ids.map(Int::toString).toSet()).apply()
+        prefs.edit()
+            .putString("ordered_ids", ids.joinToString(","))
+            .putStringSet("ids", ids.map(Int::toString).toSet())
+            .apply()
     }
 }
