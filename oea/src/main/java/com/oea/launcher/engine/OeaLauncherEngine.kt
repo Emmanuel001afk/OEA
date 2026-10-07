@@ -8,6 +8,6 @@ import com.oea.launcher.workspace.OeaWorkspace
 
 class OeaLauncherEngine(private val context: Context) {
     val model=OeaAppModel(context); val workspace=OeaWorkspace(context); private var lastBoundApps:List<OeaAppInfo> = emptyList()
-    fun start(){ model.load(); if(model.apps!=lastBoundApps){workspace.bind(model.apps);lastBoundApps=model.apps} }
+    fun start(){ model.load(); if(model.apps != lastBoundApps) { workspace.bind(model.apps); lastBoundApps = model.apps.toList() } }
     fun launchApp(packageName:String,className:String){context.startActivity(Intent(Intent.ACTION_MAIN).apply{addCategory(Intent.CATEGORY_LAUNCHER);setClassName(packageName,className);addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)})}
 }
