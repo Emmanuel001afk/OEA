@@ -19,15 +19,26 @@ class OeaWidgetController(private val context: Context) {
     private val host = AppWidgetHost(context, 0x4F4541)
     private val ids = LinkedHashSet<Int>()
     private var hostActivity: Activity? = null
+    private var listening = false
+    private var pendingPage = 0
 
     init { loadIds() }
 
     fun setHostActivity(activity: Activity?) { hostActivity = activity }
-    fun start() = runCatching { host.startListening() }
-    fun stop() = runCatching { host.stopListening() }
+    fun start() {
+        if (listening) return
+        runCatching { host.startListening(); listening = true }
+    }
 
-    fun pickWidget(activity: Activity) {
+    fun stop() {
+        if (!listening) return
+        runCatching { host.stopListening() }
+        listening = false
+    }
+
+    fun pickWidget(activity: Activity, page: Int = 0) {
         hostActivity = activity
+        pendingPage = page.coerceAtLeast(0)
         val id = host.allocateAppWidgetId()
         activity.startActivityForResult(
             Intent(AppWidgetManager.ACTION_APPWIDGET_PICK)
@@ -65,8 +76,15 @@ class OeaWidgetController(private val context: Context) {
             return true
         }
         ids += id
+        prefs.edit().putInt("page_$id", pendingPage).apply()
         saveIds()
         return true
+    }
+
+    fun pageFor(id: Int): Int = prefs.getInt("page_$id", 0).coerceAtLeast(0)
+
+    fun setPage(id: Int, page: Int) {
+        if (ids.contains(id)) prefs.edit().putInt("page_$id", page.coerceAtLeast(0)).apply()
     }
 
     fun views(): List<AppWidgetHostView> = ids.mapNotNull { id ->
@@ -88,7 +106,7 @@ class OeaWidgetController(private val context: Context) {
     fun remove(id: Int) {
         ids.remove(id)
         host.deleteAppWidgetId(id)
-        prefs.edit().remove("size_$id").apply()
+        prefs.edit().remove("size_$id").remove("page_$id").apply()
         saveIds()
     }
 
