@@ -1341,27 +1341,29 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             v.setOnDragListener { _, e ->
                 if (e.action == DragEvent.ACTION_DROP && dragged != null) {
                     val draggedKey = dragged!!
-                    if (values.contains(draggedKey)) {
-                        val list = values.filterNot { it == draggedKey }.toMutableList()
-                        val target = (page * OeaWorkspaceStore.DOCK_SLOTS + slot).coerceAtMost(list.size)
-                        list.add(target, draggedKey)
-                        ws.setDock(list)
-                    } else {
-                        val list = values.toMutableList()
-                        list.add(draggedKey)
-                        ws.setDock(list)
+                    val fromDock = values.contains(draggedKey)
+                    val list = values.filterNot { it == draggedKey }.toMutableList()
+                    val targetIndex = (page * OeaWorkspaceStore.DOCK_SLOTS + slot)
+                        .coerceIn(0, list.size)
+                    list.add(targetIndex, draggedKey)
+                    ws.setDock(list)
+
+                    if (!fromDock) {
                         val affectedPage = ws.items().firstOrNull { it.id == draggedKey }?.page
                         ws.replaceItems(ws.items().filterNot { it.id == draggedKey })
-                        ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == draggedKey }) }.filter { it.members.isNotEmpty() })
+                        ws.replaceFolders(
+                            ws.folders()
+                                .map { it.copy(members = it.members.filterNot { member -> member == draggedKey }) }
+                                .filter { it.members.isNotEmpty() }
+                        )
                         if (affectedPage != null) refreshPages(affectedPage)
                     }
+
                     dragged = null
-                    // A full dock creates the next page and immediately presents it,
-                    // rather than silently adding the app off-screen.
-                    val dockPage = if (values.size >= OeaWorkspaceStore.DOCK_SLOTS &&
-                        !values.contains(draggedKey)) {
-                        ws.dock().lastIndex / OeaWorkspaceStore.DOCK_SLOTS
-                    } else page
+                    // If the insertion pushed past the current page, show the page
+                    // containing the dropped app immediately instead of leaving it off-screen.
+                    val dockPage = ws.dock().indexOf(draggedKey)
+                        .coerceAtLeast(0) / OeaWorkspaceStore.DOCK_SLOTS
                     ws.setCurrentDockPage(dockPage)
                     renderDock()
                     true
