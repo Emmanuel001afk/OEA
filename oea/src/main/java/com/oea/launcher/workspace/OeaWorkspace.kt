@@ -39,6 +39,7 @@ import com.oea.launcher.callblocker.OeaCallBlockRules
 import com.oea.launcher.gameboost.OeaGameBoostService
 import com.oea.launcher.gameboost.OeaGameBoostStore
 import com.oea.launcher.split.OeaSplitLauncher
+import com.oea.launcher.multitask.OeaMultitaskLauncher
 import kotlin.math.roundToInt
 
 class OeaWorkspace(context: Context) : FrameLayout(context) {
@@ -527,6 +528,20 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }.show()
     }
 
+    private fun openMultitaskDialog() {
+        val choices = apps.filter { it.packageName != context.packageName }.distinctBy { it.packageName }
+        AlertDialog.Builder(context)
+            .setTitle("OEA Multitask")
+            .setMessage("Choose an app to open as a floating task over the current app. OEA uses a sensible starting size and does not add a manual drag-to-size control.")
+            .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
+                if (!OeaMultitaskLauncher.launchFloating(context, choices[which])) {
+                    Toast.makeText(context, "Android could not open that app as a floating task on this device.", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun openSplitPairDialog() {
         val choices = apps.filter { it.packageName != context.packageName }.distinctBy { it.packageName }
         val checked = BooleanArray(choices.size)
@@ -730,7 +745,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             "❄" to "App Freezer",
             "☎" to "Call Blocker",
             "🎮" to "Game Boost",
-            "▣" to "Multitask / Split",
+            "▣" to "Multitask",
+            "▤" to "Split Screen",
         ).forEach { (iconText, title) ->
             row.addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -743,6 +759,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Phone & Calls" -> openPhone()
                     "Call Blocker" -> openCallBlockerSettings()
                         "Game Boost" -> openGameBoostSettings()
+                        "Multitask" -> openMultitaskDialog()
                         "Split Screen" -> openSplitPairDialog()
                     }
                 }
@@ -1245,6 +1262,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Phone & Calls")
             menu.add("Call Blocker")
             menu.add("Game Boost")
+            menu.add("Multitask")
             menu.add("Split Screen")
             menu.add(if (store.showMostUsed()) "Hide most-used apps" else "Show most-used apps")
             menu.add("Icon shape")
@@ -1268,6 +1286,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Phone & Calls" -> openPhone()
                     "Call Blocker" -> openCallBlockerSettings()
                     "Game Boost" -> openGameBoostSettings()
+                    "Multitask" -> openMultitaskDialog()
                     "Split Screen" -> openSplitPairDialog()
                     "Hide most-used apps" -> { store.setShowMostUsed(false); renderDrawer(drawerSearch.text.toString()) }
                     "Show most-used apps" -> { store.setShowMostUsed(true); renderDrawer(drawerSearch.text.toString()) }
