@@ -18,7 +18,7 @@ class OeaCallScreeningService : CallScreeningService() {
             return
         }
         OeaCallBlockRules.recordBlocked(this, number)
-        respondToCall(callDetails, CallResponse.Builder().setDisallowCall(true).setRejectCall(true).setSkipNotification(true).setSkipCallLog(false).build())
+        respondToCall(callDetails, CallResponse.Builder().setDisallowCall(true).setRejectCall(true).setSkipNotification(true).setSkipCallLog(true).build())
     }
     private fun normalize(value: String): String = value.filter(Char::isDigit).takeLast(15)
 }
@@ -51,13 +51,15 @@ object OeaCallBlockRules {
     fun setAllowStarred(context: Context, value: Boolean) = prefs(context).edit().putBoolean(ALLOW_STARRED, value).apply()
     fun shouldBlock(context: Context, number: String): Boolean {
         if (!enabled(context)) return false
-        if (allowContacts(context) && isInContacts(context, number, false)) return false
-        if (allowStarred(context) && isInContacts(context, number, true)) return false
         val p = prefs(context)
         val exact = p.getStringSet(EXACT, emptySet()).orEmpty()
         val prefix = p.getStringSet(PREFIX, emptySet()).orEmpty()
         val suffix = p.getStringSet(SUFFIX, emptySet()).orEmpty()
-        return exact.contains(number) || prefix.any(number::startsWith) || suffix.any(number::endsWith)
+        val ruleMatch = exact.contains(number) || prefix.any(number::startsWith) || suffix.any(number::endsWith)
+        if (ruleMatch) return true
+        if (allowContacts(context) && isInContacts(context, number, false)) return false
+        if (allowStarred(context) && isInContacts(context, number, true)) return false
+        return false
     }
     fun recordBlocked(context: Context, number: String) {
         val old = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
