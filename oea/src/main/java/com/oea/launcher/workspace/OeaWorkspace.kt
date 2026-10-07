@@ -157,24 +157,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         dots.gravity = Gravity.CENTER
         dots.setTextColor(themeMuted)
         root.addView(dots, LinearLayout.LayoutParams(-1, dp(22)))
-        root.addView(TextView(context).apply {
-            text = "DOCK"
-            textSize = 10f
-            gravity = Gravity.CENTER
-            setTextColor(themeMuted)
-        }, LinearLayout.LayoutParams(-1, dp(18)))
         dock.columnCount = OeaWorkspaceStore.DOCK_SLOTS
         dock.setPadding(dp(4), dp(2), dp(4), dp(2))
         dock.setOnDragListener { _, e -> dockDrop(e) }
         root.addView(dock, LinearLayout.LayoutParams(-1, dp(64)))
-        root.addView(TextView(context).apply {
-            text = "All apps"
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(themeText)
-            background = rounded(themeSurface, 22)
-            setOnClickListener { openDrawer() }
-        }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(4) })
 
         buildDrawer()
         widgetController.start()
@@ -1344,11 +1330,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
         section("TOOLS")
         action("OEA Settings", "Open the complete OEA settings screen") { openSystemsSettings() }
-        action("App Freezer", "Suspend apps only when OEA has device-owner authority") { openFreezerSettings() }
+        action("App Freezer", "Suspend apps only when OEA has device-owner authority") { launchOeaTool("freezer") }
         action("App Lock", "PIN-protect selected apps") { openAppLockSettings() }
         action("Phone & Calls", "OEA dialer and call controls") { openPhone() }
-        action("Call Blocker", "Exact, prefix and suffix rules") { openCallBlockerSettings() }
-        action("Game Boost", "Game monitoring and in-game controls") { openGameBoostSettings() }
+        action("Call Blocker", "Exact, prefix and suffix rules") { launchOeaTool("call_blocker") }
+        action("Game Boost", "Game monitoring and in-game controls") { launchOeaTool("game_boost") }
         action("Multitask", "Floating task when Android/OEM supports freeform") { openMultitaskDialog() }
         action("Split Screen", "Two apps in Android adjacent-window mode") { openSplitPairDialog() }
 
