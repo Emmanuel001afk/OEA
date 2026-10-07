@@ -30,6 +30,13 @@ import com.oea.launcher.widgets.OeaWidgetController
 import java.io.InputStream
 
 class OeaSystemToolsActivity : Activity() {
+    override fun onBackPressed() {
+        if (isTaskRoot) {
+            super.onBackPressed()
+        } else {
+            finish()
+        }
+    }
     companion object { const val EXTRA_SCREEN = "oea_screen" }
     private val dataStore by lazy { OeaDataStore.get(this) }
     private val apps: List<OeaAppInfo> by lazy { OeaAppModel(this).also { it.load() }.apps }
@@ -394,7 +401,7 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun openPhone() {
-        runCatching { startActivity(Intent(this, Class.forName("com.oea.launcher.phone.OeaPhoneActivity"))) }
+        runCatching { startActivity(Intent(this, Class.forName("com.oea.launcher.phone.OeaPhoneActivity")).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }
             .onFailure { Toast.makeText(this, "OEA Phone could not be opened.", Toast.LENGTH_SHORT).show() }
     }
 
@@ -515,11 +522,11 @@ class OeaSystemToolsActivity : Activity() {
 
     private fun base(title: String, subtitle: String): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(24, 28, 24, 32)
+        setPadding(20, 24, 20, 28)
         setBackgroundColor(backgroundColor())
         addView(TextView(this@OeaSystemToolsActivity).apply {
             text = title
-            textSize = 29f
+            textSize = 27f
             setTextColor(textColor())
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 6 })
@@ -540,8 +547,11 @@ class OeaSystemToolsActivity : Activity() {
         box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(18, 14, 18, 14)
-            setBackgroundColor(surfaceColor())
+            setPadding(16, 13, 16, 13)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 20f
+                setColor(surfaceColor())
+            }
             isClickable = true
             setOnClickListener { action() }
             addView(TextView(this@OeaSystemToolsActivity).apply {
@@ -555,7 +565,7 @@ class OeaSystemToolsActivity : Activity() {
                 setTextColor(mutedColor())
                 maxLines = 2
             })
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 9 })
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 7 })
     }
 
     private fun addDivider(box: LinearLayout) {
