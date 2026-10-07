@@ -16,6 +16,7 @@ class OeaGestureController(
     private val onSwipeLeft: () -> Unit = {},
     private val onSwipeRight: () -> Unit = {},
     private val triggerDistanceDp: Float = 72f,
+    private val consumeTouchEvents: Boolean = true,
 ) : GestureDetector.SimpleOnGestureListener(), View.OnTouchListener {
 
     private val detector = GestureDetector(view.context, this)
@@ -44,6 +45,7 @@ class OeaGestureController(
     }
 
     override fun onTouch(view: View, event: MotionEvent): Boolean {
-        return detector.onTouchEvent(event)
+        val detected = detector.onTouchEvent(event)
+        return if (consumeTouchEvents) detected else false
     }
 }
