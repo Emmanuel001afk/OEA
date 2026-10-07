@@ -739,11 +739,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setOnClickListener {
                     when (title) {
                         "OEA Settings" -> openSystemsSettings()
-                        "App Freezer" -> openDeviceAdminSettings()
-                        "Phone & Calls" -> openPhone()
+                        "App Freezer" -> openFreezerSettings()
+                    "Phone & Calls" -> openPhone()
                     "Call Blocker" -> openCallBlockerSettings()
                         "Game Boost" -> openGameBoostSettings()
-                        "Multitask / Split" -> openSplitPairDialog()
+                        "Split Screen" -> openSplitPairDialog()
                     }
                 }
                 addView(TextView(context).apply {
