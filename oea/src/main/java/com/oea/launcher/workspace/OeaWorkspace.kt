@@ -237,6 +237,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun rebuild() {
         normalizeFolderNames()
+        normalizeHomeLayout()
         renderedPages.clear()
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
@@ -333,6 +334,57 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         renderDock()
     }
 
+
+    private fun normalizeHomeLayout() {
+        val capacity = cols() * 4
+        if (capacity <= 0) return
+
+        val folders = ws.folders().associateBy { it.id }
+        val all = ws.items().toMutableList()
+        val occupied = mutableMapOf<Int, MutableSet<Int>>()
+        folders.values.forEach { folder ->
+            occupied.getOrPut(folder.page) { mutableSetOf() }.add(folder.cell)
+        }
+
+        var changed = false
+        val ordered = all.withIndex()
+            .filter { it.value.folderId == null }
+            .sortedWith(compareBy({ it.value.page }, { it.value.cell }, { it.index }))
+
+        ordered.forEach { indexed ->
+            val item = indexed.value
+            val used = occupied.getOrPut(item.page) { mutableSetOf() }
+            if (item.page in 0 until ws.pages() && item.cell in 0 until capacity && used.add(item.cell)) {
+                return@forEach
+            }
+
+            var targetPage = item.page.coerceIn(0, OeaWorkspaceStore.MAX_PAGES - 1)
+            var targetCell: Int? = null
+            while (targetCell == null && targetPage < OeaWorkspaceStore.MAX_PAGES) {
+                val pageUsed = occupied.getOrPut(targetPage) { mutableSetOf() }
+                targetCell = (0 until capacity).firstOrNull { it !in pageUsed }
+                if (targetCell == null) targetPage++
+            }
+            if (targetCell != null) {
+                val index = all.indexOfFirst { it.id == item.id }
+                if (index >= 0) {
+                    all[index] = item.copy(page = targetPage, cell = targetCell)
+                    occupied.getOrPut(targetPage) { mutableSetOf() }.add(targetCell)
+                    changed = true
+                }
+            }
+        }
+
+        val highestPage = all.filter { it.folderId == null }.maxOfOrNull { it.page } ?: 0
+        val folderPage = folders.values.maxOfOrNull { it.page } ?: 0
+        val requiredPages = (maxOf(highestPage, folderPage) + 1).coerceIn(1, OeaWorkspaceStore.MAX_PAGES)
+        if (ws.pages() != requiredPages) {
+            ws.setPages(requiredPages)
+            ws.setCurrentPage(ws.getCurrentPage())
+            changed = true
+        }
+        if (changed) ws.replaceItems(all)
+    }
 
     private fun renderPage(grid: GridLayout, page: Int) {
         grid.removeAllViews()
