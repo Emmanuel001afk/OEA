@@ -382,10 +382,24 @@ class OeaSystemToolsActivity : Activity() {
                     val flags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                     if (flags != 0) contentResolver.takePersistableUriPermission(uri, flags)
                     dataStore.setWallpaperUri(uri.toString())
-                    contentResolver.openInputStream(uri)?.use { stream: InputStream ->
-                        android.app.WallpaperManager.getInstance(this).setStream(stream)
-                    }
-                    Toast.makeText(this, "OEA wallpaper applied.", Toast.LENGTH_SHORT).show()
+                    val selectedUri = uri
+                    Thread {
+                        runCatching {
+                            contentResolver.openInputStream(selectedUri)?.use { stream: InputStream ->
+                                android.app.WallpaperManager.getInstance(this).setStream(stream)
+                            }
+                        }.onSuccess {
+                            runOnUiThread {
+                                Toast.makeText(this, "OEA wallpaper applied.", Toast.LENGTH_SHORT).show()
+                                showSettings()
+                            }
+                        }.onFailure {
+                            runOnUiThread {
+                                Toast.makeText(this, "Wallpaper saved, but Android could not apply it.", Toast.LENGTH_LONG).show()
+                                showSettings()
+                            }
+                        }
+                    }.start()
                 }.onFailure {
                     Toast.makeText(this, "Could not apply that wallpaper.", Toast.LENGTH_LONG).show()
                 }
