@@ -59,23 +59,75 @@ class OeaGameBoostService : Service() {
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
         val nm = getSystemService(NotificationManager::class.java)
-        previousInterruptionFilter?.let { if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(it) }
-        previousInterruptionFilter = null
+        restoreDnd()
         removeOverlay()
     }
     private fun showOverlay(packageName: String) {
         if (overlay != null) return
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        val text = TextView(this).apply {
-            setTextColor(Color.WHITE); setBackgroundColor(0xCC202124.toInt()); setPadding(24, 12, 24, 12); textSize = 12f
-            text = "OEA BOOST • " + packageName.substringAfterLast('.') + "\nRAM focus: monitoring • apps remain open"
+        val panel = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(18, 12, 18, 12)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xEE202124.toInt())
+                cornerRadius = 28f
+            }
         }
-        val params = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+        val title = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            text = "OEA BOOST"
+            setPadding(0, 0, 0, 6)
+        }
+        val status = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 11f
+            text = packageName.substringAfterLast('.') + " • tap controls"
+        }
+        val controls = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            visibility = View.GONE
+        }
+        val dnd = TextView(this).apply {
+            text = if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("dnd", true)) "DND ON" else "DND OFF"
+            setTextColor(Color.WHITE)
+            textSize = 10f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener {
+                val next = !OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("dnd", true)
+                OeaGameBoostStore.prefs(this@OeaGameBoostService).edit().putBoolean("dnd", next).apply()
+                if (!next) restoreDnd()
+                text = if (next) "DND ON" else "DND OFF"
+            }
+        }
+        val close = TextView(this).apply {
+            text = "CLOSE"
+            setTextColor(Color.WHITE)
+            textSize = 10f
+            setPadding(12, 8, 12, 8)
+            setOnClickListener { removeOverlay() }
+        }
+        controls.addView(dnd)
+        controls.addView(close)
+        panel.addView(title)
+        panel.addView(status)
+        panel.addView(controls)
+        panel.setOnClickListener { controls.visibility = if (controls.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT)
-            .apply { gravity = Gravity.TOP or Gravity.END; x = 16; y = 96 }
-        runCatching { wm.addView(text, params); overlay = text }
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.END; x = 12; y = 96 }
+        runCatching { wm.addView(panel, params); overlay = panel }
     }
+
+    private fun restoreDnd() {
+        val nm = getSystemService(NotificationManager::class.java)
+        previousInterruptionFilter?.let { if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(it) }
+        previousInterruptionFilter = null
+    }
+
     private fun updateOverlay() {
         val view = overlay as? TextView ?: return
         val info = ActivityManager.MemoryInfo()
