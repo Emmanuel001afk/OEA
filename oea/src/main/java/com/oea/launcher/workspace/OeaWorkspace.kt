@@ -461,15 +461,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openSystemsSettings() {
-        val choices = arrayOf("Call blocker", "Split pair", "Game Boost", "App freezer authority")
-        AlertDialog.Builder(context).setTitle("OEA Systems").setItems(choices) { _, which ->
-            when (which) {
-                0 -> openCallBlockerSettings()
-                1 -> openSplitPairDialog()
-                2 -> openGameBoostSettings()
-                3 -> openDeviceAdminSettings()
-            }
-        }.show()
+        runCatching {
+            (hostActivity ?: context).startActivity(Intent().setComponent(
+                ComponentName(context, "com.oea.launcher.OeaSettings")
+            ))
+        }.onFailure {
+            Toast.makeText(context, "OEA Settings could not be opened.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun openCallBlockerSettings() {
