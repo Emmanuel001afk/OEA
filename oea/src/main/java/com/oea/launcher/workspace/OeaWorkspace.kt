@@ -307,6 +307,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ensurePageRendered(page)
         dots.text = List(ws.pages()) { if (it == ws.getCurrentPage()) "●" else "•" }.joinToString(" ")
     }
+    private fun refreshPages(vararg pageValues: Int) {
+        pageValues.distinct().forEach { refreshPage(it) }
+        renderDock()
+    }
+
 
     private fun renderPage(grid: GridLayout, page: Int) {
         grid.removeAllViews()
@@ -385,8 +390,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         values.add(key)
         ws.setDock(values)
         ws.replaceItems(ws.items().filterNot { it.id == key })
+        val affectedPage = ws.items().firstOrNull { it.id == key }?.page
         ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
-        rebuild()
+        if (affectedPage != null) refreshPages(affectedPage) else renderDock()
     }
 
     private fun addToHome(key: String) {
@@ -413,10 +419,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun removeFromHome(key: String) {
+        val affectedPage = ws.items().firstOrNull { it.id == key }?.page
         ws.replaceItems(ws.items().filterNot { it.id == key })
         ws.setDock(ws.dock().filterNot { it == key })
         ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
-        rebuild()
+        if (affectedPage != null) refreshPages(affectedPage) else renderDock()
     }
 
     private fun lockApp(itemId: String, app: OeaAppInfo) {
@@ -1031,13 +1038,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ws.setDock(values)
         ws.replaceItems(ws.items().filterNot { it.id == key })
         dragged = null
-        rebuild()
+        renderDock()
         return true
     }
 
     private fun move(key: String, page: Int, cell: Int) {
         val all = ws.items().toMutableList()
         val moving = all.firstOrNull { it.id == key } ?: return
+        val oldPage = moving.page
         val collision = all.firstOrNull { it.id != key && it.page == page && it.cell == cell && it.folderId == null }
         if (collision != null) {
             val next = firstFree(all, page, cell + 1)
@@ -1047,7 +1055,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ws.replaceItems(all)
         ws.setDock(ws.dock().filterNot { it == key })
         dragged = null
-        rebuild()
+        refreshPages(oldPage, page)
     }
 
     private fun folder(target: String, source: String) {
@@ -1074,7 +1082,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ws.replaceItems(ws.items().filterNot { it.id == target || it.id == source })
         ws.setDock(ws.dock().filterNot { it == source || it == target })
         dragged = null
-        rebuild()
+        refreshPages(t.page)
     }
 
     private fun suggestFolderName(keys: List<String>): String {
@@ -1109,7 +1117,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun openFolder(folder: OeaWorkspaceStore.Folder) {
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setPadding(dp(18), dp(14), dp(18), dp(8))
+            background = rounded(themeSurface, 24)
         }
         box.addView(TextView(context).apply {
             text = folder.title + "  •  " + folder.members.size + " apps"
@@ -1129,9 +1138,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             })
         }
         box.addView(grid, LinearLayout.LayoutParams(-1, -2))
-        AlertDialog.Builder(context).setView(box)
+        val dialog = AlertDialog.Builder(context).setView(box)
             .setNeutralButton("Rename") { _, _ -> showFolderRename(folder) }
-            .setPositiveButton("Done", null).show()
+            .setPositiveButton("Done", null).create()
+        dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            dialog.window?.setDimAmount(0.55f)
+        }
+        dialog.show()
     }
 
     private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
@@ -1141,7 +1155,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setPositiveButton("Save") { _, _ ->
                 val title = input.text.toString().trim().ifBlank { "Folder" }
                 ws.replaceFolders(ws.folders().map { if (it.id == folder.id) it.copy(title = title) else it })
-                rebuild()
+                refreshPages(folder.page)
             }.show()
     }
 
@@ -1183,10 +1197,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     val target = slot.coerceIn(0, list.size)
                     list.add(target, key)
                     ws.setDock(list.take(OeaWorkspaceStore.DOCK_SLOTS))
+                    val affectedPage = ws.items().firstOrNull { it.id == key }?.page
                     ws.replaceItems(ws.items().filterNot { it.id == key })
                     ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
                     dragged = null
-                    rebuild()
+                    if (affectedPage != null) refreshPages(affectedPage) else renderDock()
                     true
                 } else e.action == DragEvent.ACTION_DRAG_STARTED
             }
@@ -1202,7 +1217,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val target = (ws.getCurrentPage() + 1).coerceAtMost(ws.pages() - 1)
         if (target == ws.getCurrentPage()) return
         ws.setCurrentPage(target)
-        pager.post { pager.smoothScrollTo(target * pager.width, 0) }
+        pager.post { ensurePageRendered(target); pager.smoothScrollTo(target * pager.width, 0) }
         dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
     }
 
