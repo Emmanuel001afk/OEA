@@ -40,7 +40,7 @@ class OeaWidgetController(private val context: Context) {
         if (requestCode != REQUEST_PICK_WIDGET && requestCode != REQUEST_CONFIGURE_WIDGET) return false
         val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
         if (id <= 0 || resultCode != Activity.RESULT_OK) {
-            if (requestCode == REQUEST_PICK_WIDGET && id > 0) host.deleteAppWidgetId(id)
+            if (id > 0 && (requestCode == REQUEST_PICK_WIDGET || requestCode == REQUEST_CONFIGURE_WIDGET)) host.deleteAppWidgetId(id)
             return true
         }
         val info = manager.getAppWidgetInfo(id)
@@ -88,7 +88,19 @@ class OeaWidgetController(private val context: Context) {
     fun remove(id: Int) {
         ids.remove(id)
         host.deleteAppWidgetId(id)
+        prefs.edit().remove("size_$id").apply()
         saveIds()
+    }
+
+    fun sizeFor(id: Int): Pair<Int, Int> {
+        val raw = prefs.getString("size_$id", null)?.split(",")
+        val w = raw?.getOrNull(0)?.toIntOrNull()
+        val h = raw?.getOrNull(1)?.toIntOrNull()
+        return if (w != null && h != null && w > 0 && h > 0) w to h else 420 to 240
+    }
+
+    fun setSize(id: Int, widthDp: Int, heightDp: Int) {
+        prefs.edit().putString("size_$id", "$widthDp,$heightDp").apply()
     }
 
     fun providers(): List<AppWidgetProviderInfo> = ids.mapNotNull { manager.getAppWidgetInfo(it) }
