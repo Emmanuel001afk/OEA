@@ -478,16 +478,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         var page = ws.getCurrentPage()
         var cell = firstFree(items, page, 0)
         val capacity = cols() * 4
-        if (cell >= capacity && page + 1 < ws.pages()) {
+
+        while (cell == null && page + 1 < ws.pages()) {
             page += 1
             cell = firstFree(items, page, 0)
         }
-        if (cell >= capacity && page + 1 < OeaWorkspaceStore.MAX_PAGES) {
-            ws.setPages(page + 2)
+        if (cell == null && page + 1 < OeaWorkspaceStore.MAX_PAGES) {
             page += 1
-            cell = 0
+            ws.setPages(page + 1)
+            cell = firstFree(items, page, 0)
         }
-        items.add(OeaWorkspaceStore.Item(key, app.packageName, app.className, page, cell))
+        if (cell == null) {
+            Toast.makeText(context, "OEA home is full.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        items.add(OeaWorkspaceStore.Item(key, app.packageName, app.className, page, cell!!))
         ws.replaceItems(items)
         ws.setCurrentPage(page)
         rebuild()
@@ -1152,13 +1158,29 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun move(key: String, page: Int, cell: Int) {
         val all = ws.items().toMutableList()
         val moving = all.firstOrNull { it.id == key } ?: return
+        val capacity = cols() * 4
+        val targetCell = cell.coerceIn(0, capacity - 1)
+        val targetFolder = ws.folders().firstOrNull { it.page == page && it.cell == targetCell }
+        if (targetFolder != null) {
+            addToFolder(targetFolder.id, key)
+            return
+        }
+
         val oldPage = moving.page
-        val collision = all.firstOrNull { it.id != key && it.page == page && it.cell == cell && it.folderId == null }
+        val collision = all.firstOrNull {
+            it.id != key && it.page == page && it.cell == targetCell && it.folderId == null
+        }
         if (collision != null) {
-            val next = firstFree(all, page, cell + 1)
+            val next = firstFree(all, page, targetCell + 1)
+            if (next == null) {
+                Toast.makeText(context, "That home page is full.", Toast.LENGTH_SHORT).show()
+                dragged = null
+                return
+            }
             all[all.indexOf(collision)] = collision.copy(page = page, cell = next)
         }
-        all[all.indexOf(moving)] = moving.copy(page = page, cell = cell, folderId = null)
+
+        all[all.indexOf(moving)] = moving.copy(page = page, cell = targetCell, folderId = null)
         ws.replaceItems(all)
         ws.setDock(ws.dock().filterNot { it == key })
         dragged = null
@@ -1254,7 +1276,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setTextColor(themeText)
             setPadding(0, 0, 0, dp(10))
         })
-        val grid = GridLayout(context).apply { columnCount = 4; useDefaultMargins = false }
+        val grid = GridLayout(activity).apply { columnCount = 4; useDefaultMargins = false }
         folder.members.mapNotNull(::find).forEach { app ->
             val index = grid.childCount
             grid.addView(tile(app), GridLayout.LayoutParams().apply {
@@ -1739,10 +1761,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun find(key: String) = apps.firstOrNull { OeaWorkspaceStore.key(it.packageName, it.className) == key }
-    private fun firstFree(items: List<OeaWorkspaceStore.Item>, page: Int, start: Int): Int {
-        var n = start
-        while (items.any { it.page == page && it.cell == n && it.folderId == null }) n++
-        return n
+    private fun firstFree(items: List<OeaWorkspaceStore.Item>, page: Int, start: Int): Int? {
+        val capacity = cols() * 4
+        if (capacity <= 0) return null
+        val folderCells = ws.folders()
+            .filter { it.page == page }
+            .mapTo(mutableSetOf()) { it.cell }
+        var n = start.coerceAtLeast(0)
+        while (n < capacity) {
+            val occupied = items.any { it.page == page && it.cell == n && it.folderId == null }
+            if (!occupied && n !in folderCells) return n
+            n++
+        }
+        return null
     }
     private fun launch(app: OeaAppInfo) {
         unlockForLaunch(app) {
