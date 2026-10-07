@@ -79,6 +79,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private var themeMuted = Color.rgb(154, 162, 177)
     private var wallpaperLightHint: Boolean? = null
     private var wallpaperLoadToken = 0
+    private var renderedPages = mutableSetOf<Int>()
 
     fun attachHost(activity: Activity?) {
         hostActivity = activity
@@ -140,6 +141,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         root.addView(search, LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(8) })
 
         pager.isHorizontalScrollBarEnabled = false
+        pager.setOnScrollChangeListener { _, scrollX, _, _, _ ->
+            val pageWidth = pages.getChildAt(0)?.width ?: pager.width
+            if (pageWidth > 0) {
+                val page = (scrollX.toFloat() / pageWidth).roundToInt().coerceIn(0, ws.pages() - 1)
+                ensurePageRendered(page)
+                ensurePageRendered(page - 1)
+                ensurePageRendered(page + 1)
+            }
+        }
         pager.setOnTouchListener(OeaGestureController(
             pager,
             onSwipeUp = { openDrawer() },
@@ -213,6 +223,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun rebuild() {
         normalizeFolderNames()
+        renderedPages.clear()
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         for (p in 0 until ws.pages()) {
@@ -220,6 +231,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 isFillViewport = true
                 clipToPadding = false
                 setPadding(0, 0, 0, dp(10))
+                tag = p
             }
             val pageContent = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -230,10 +242,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 useDefaultMargins = false
                 setPadding(dp(3), dp(6), dp(3), dp(6))
                 setOnDragListener(pageDrop(p))
+                tag = "grid"
             }
             pageContent.addView(grid, LinearLayout.LayoutParams(-1, -2))
             val widgetHost = FrameLayout(context).apply {
                 setPadding(dp(4), dp(4), dp(4), dp(16))
+                tag = "widgets"
                 setOnLongClickListener {
                     hostActivity?.let { widgetController.pickWidget(it) }
                     true
@@ -242,24 +256,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     when (event.action) {
                         DragEvent.ACTION_DRAG_STARTED -> true
                         DragEvent.ACTION_DROP -> {
-                            val sourceId = (event.clipDescription?.let { event.clipData }?.getItemAt(0)?.text?.toString()?.toIntOrNull())
+                            val sourceId = event.clipData?.getItemAt(0)?.text?.toString()?.toIntOrNull()
                             if (sourceId != null) {
                                 val container = host as FrameLayout
                                 var targetId: Int? = null
                                 for (i in 0 until container.childCount) {
                                     val child = container.getChildAt(i)
-                                    if (child is android.appwidget.AppWidgetHostView && event.x >= child.left && event.x <= child.right &&
+                                    if (child is android.appwidget.AppWidgetHostView &&
+                                        event.x >= child.left && event.x <= child.right &&
                                         event.y >= child.top && event.y <= child.bottom) {
                                         targetId = child.appWidgetId
                                         break
                                     }
                                 }
                                 widgetController.moveBefore(sourceId, targetId)
-                                rebuild()
+                                refreshPage(p)
                             }
                             true
                         }
-                        DragEvent.ACTION_DRAG_ENDED -> false
                         else -> false
                     }
                 }
@@ -267,11 +281,31 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
             pageScroll.addView(pageContent, FrameLayout.LayoutParams(-1, -2))
             pages.addView(pageScroll, LinearLayout.LayoutParams(pageWidth, -1))
-            renderPage(grid, p)
-            renderWidgets(widgetHost, p)
         }
-        dots.text = List(ws.pages()) { if (it == ws.getCurrentPage()) "●" else "•" }.joinToString(" ")
+        val current = ws.getCurrentPage()
+        ensurePageRendered(current)
+        ensurePageRendered(current - 1)
+        ensurePageRendered(current + 1)
+        dots.text = List(ws.pages()) { if (it == current) "●" else "•" }.joinToString(" ")
         renderDock()
+    }
+
+    private fun ensurePageRendered(page: Int) {
+        if (page !in 0 until ws.pages() || renderedPages.contains(page)) return
+        val pageScroll = pages.getChildAt(page) as? ScrollView ?: return
+        val content = pageScroll.getChildAt(0) as? LinearLayout ?: return
+        val grid = content.findViewWithTag<GridLayout>("grid") ?: return
+        val widgetHost = content.findViewWithTag<FrameLayout>("widgets") ?: return
+        renderPage(grid, page)
+        renderWidgets(widgetHost, page)
+        renderedPages.add(page)
+    }
+
+    private fun refreshPage(page: Int) {
+        if (page !in 0 until ws.pages()) return
+        renderedPages.remove(page)
+        ensurePageRendered(page)
+        dots.text = List(ws.pages()) { if (it == ws.getCurrentPage()) "●" else "•" }.joinToString(" ")
     }
 
     private fun renderPage(grid: GridLayout, page: Int) {
@@ -375,7 +409,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ws.replaceItems(items)
         ws.setCurrentPage(page)
         rebuild()
-        pager.post { pager.smoothScrollTo(page * pager.width, 0) }
+        pager.post { ensurePageRendered(page); pager.smoothScrollTo(page * pager.width, 0) }
     }
 
     private fun removeFromHome(key: String) {
