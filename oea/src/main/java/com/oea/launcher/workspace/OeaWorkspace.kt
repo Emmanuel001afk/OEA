@@ -145,6 +145,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             val pageWidth = pages.getChildAt(0)?.width ?: pager.width
             if (pageWidth > 0) {
                 val page = (scrollX.toFloat() / pageWidth).roundToInt().coerceIn(0, ws.pages() - 1)
+                if (page != ws.getCurrentPage()) ws.setCurrentPage(page)
+                dots.text = List(ws.pages()) { if (it == page) "●" else "•" }.joinToString(" ")
                 ensurePageRendered(page)
                 ensurePageRendered(page - 1)
                 ensurePageRendered(page + 1)
