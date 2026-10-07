@@ -116,14 +116,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(dp(6), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        header.addView(TextView(context).apply {
-            text = "⋮"
-            textSize = 28f
-            gravity = Gravity.CENTER
-            setTextColor(themeText)
-            background = rounded(themeSurface, 18)
-            setOnClickListener { menu(it) }
-        }, LinearLayout.LayoutParams(dp(52), dp(52)))
         root.addView(header)
 
         homeSearch = search
