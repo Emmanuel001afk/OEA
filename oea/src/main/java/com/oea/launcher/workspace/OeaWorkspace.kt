@@ -862,12 +862,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 background = rounded(themeSurface, 18)
                 isClickable = true
                 isFocusable = true
+                setPadding(dp(4), dp(3), dp(4), dp(3))
                 setOnClickListener {
                     when (title) {
                         "OEA Settings" -> openSystemsSettings()
                         "App Freezer" -> openFreezerSettings()
-                    "Phone & Calls" -> openPhone()
-                    "Call Blocker" -> openCallBlockerSettings()
+                        "Phone & Calls" -> openPhone()
+                        "Call Blocker" -> openCallBlockerSettings()
                         "Game Boost" -> openGameBoostSettings()
                         "Multitask" -> openMultitaskDialog()
                         "Split Screen" -> openSplitPairDialog()
@@ -875,26 +876,27 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
                 addView(TextView(context).apply {
                     text = iconText
-                    textSize = 25f
+                    textSize = 22f
                     gravity = Gravity.CENTER
                     setTextColor(themeText)
-                }, LinearLayout.LayoutParams(-1, dp(42)))
+                }, LinearLayout.LayoutParams(-1, dp(34)))
                 addView(TextView(context).apply {
                     text = title
-                    textSize = 9f
+                    textSize = 10f
                     gravity = Gravity.CENTER
                     setTextColor(themeText)
                     maxLines = 2
-                }, LinearLayout.LayoutParams(-1, dp(32)))
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(-1, dp(30)))
             }, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(84)
+                height = dp(72)
                 columnSpec = GridLayout.spec(index % 3, 1, 1f)
                 rowSpec = GridLayout.spec(index / 3)
-                setMargins(dp(3), dp(3), dp(3), dp(8))
+                setMargins(dp(3), dp(3), dp(3), dp(5))
             })
         }
-        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(274)))
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(244)))
     }
 
     private fun drawerRow(app: OeaAppInfo): View {
@@ -1617,21 +1619,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun renderWidgets(host: FrameLayout, page: Int) {
         if (page != 0) return
         host.removeAllViews()
-        widgetController.views().forEach { widget ->
+        val widgets = widgetController.views()
+        widgets.forEach { widget ->
+            val (widthDp, heightDp) = widgetController.sizeFor(widget.appWidgetId)
+            val widthPx = minOf(dp(widthDp), (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(120)))
             widget.isLongClickable = true
             widget.tag = widget.appWidgetId
             widget.setOnLongClickListener {
                 widgetOptions(widget)
                 true
             }
-            host.addView(widget, FrameLayout.LayoutParams(-1, dp(156)).apply {
-                leftMargin = dp(6)
-                rightMargin = dp(6)
+            host.addView(widget, FrameLayout.LayoutParams(widthPx, dp(heightDp), Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(6)
                 bottomMargin = dp(6)
             })
         }
-        if (widgetController.views().isEmpty()) {
+        if (widgets.isEmpty()) {
             host.addView(TextView(context).apply {
                 text = "Long-press here to add a widget"
                 textSize = 12f
@@ -1649,6 +1652,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, widthDp)
             putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp)
         }
+        widgetController.setSize(widget.appWidgetId, widthDp, heightDp)
         widget.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp)
     }
 
@@ -1689,7 +1693,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
             return true
         }
-        return widgetController.handleActivityResult(requestCode, resultCode, data)
+        val handled = widgetController.handleActivityResult(requestCode, resultCode, data)
+        if (handled) rebuild()
+        return handled
     }
 
     fun handleBack(): Boolean {
