@@ -1062,18 +1062,32 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openWallpaperChooser() {
-        AlertDialog.Builder(context)
-            .setTitle("OEA Wallpaper")
-            .setMessage("Wallpaper selection is handled by Android, while OEA keeps its own theme and launcher appearance.")
-            .setPositiveButton("Choose wallpaper") { _, _ ->
-                runCatching {
-                    hostActivity?.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) ?: throw IllegalStateException("OEA Home activity unavailable")
+        val choices = arrayOf("Choose from gallery", "Use current system wallpaper", "Remove OEA wallpaper")
+        AlertDialog.Builder(context).setTitle("OEA Wallpaper").setItems(choices) { _, which ->
+            when (which) {
+                0 -> runCatching {
+                    hostActivity?.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                    }, wallpaperRequestCode) ?: throw IllegalStateException("OEA Home activity unavailable")
                 }.onFailure {
-                    Toast.makeText(context, "Android wallpaper picker is unavailable.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Image picker unavailable.", Toast.LENGTH_SHORT).show()
+                }
+                1 -> {
+                    store.setWallpaperUri(null)
+                    loadOeaWallpaper()
+                    applyThemeFromWallpaper()
+                    rebuild()
+                }
+                2 -> {
+                    store.setWallpaperUri(null)
+                    wallpaperView.setImageDrawable(null)
+                    applyThemeFromWallpaper()
+                    rebuild()
                 }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }.setNegativeButton("Cancel", null).show()
     }
 
     private fun openNotificationAccessSettings() {
@@ -1129,42 +1143,56 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun applyThemeFromWallpaper() {
-        runCatching {
-            val drawable = WallpaperManager.getInstance(context).drawable as? BitmapDrawable ?: return
-            val bitmap = drawable.bitmap
-            if (bitmap.width <= 0 || bitmap.height <= 0) return
-            val pixel = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
-            val lum = (Color.red(pixel) * 0.299 + Color.green(pixel) * 0.587 + Color.blue(pixel) * 0.114)
-            val mode = store.themeMode()
-            val light = when (mode) {
-                "light" -> true
-                "dark" -> false
-                else -> lum > 150
+        val mode = store.themeMode()
+        val light = when (mode) {
+            "light" -> true
+            "dark" -> false
+            else -> runCatching {
+                val d = WallpaperManager.getInstance(context).drawable as? BitmapDrawable
+                if (d != null && d.bitmap.width > 0 && d.bitmap.height > 0) {
+                    val b = d.bitmap
+                    val p = b.getPixel(b.width / 2, b.height / 2)
+                    (Color.red(p) * 0.299 + Color.green(p) * 0.587 + Color.blue(p) * 0.114) > 150
+                } else {
+                    (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_YES
+                }
+            }.getOrDefault(false)
+        }
+        if (light) {
+            themeBackground = Color.rgb(245, 246, 249)
+            themeSurface = Color.rgb(228, 231, 238)
+            themeText = Color.rgb(20, 24, 31)
+            themeMuted = Color.rgb(82, 89, 103)
+        } else {
+            themeBackground = Color.rgb(12, 15, 21)
+            themeSurface = Color.rgb(30, 36, 49)
+            themeText = Color.WHITE
+            themeMuted = Color.rgb(154, 162, 177)
+        }
+        setBackgroundColor(Color.TRANSPARENT)
+        search.setTextColor(themeText)
+        search.setHintTextColor(themeMuted)
+        drawerSearch.setTextColor(themeText)
+        drawerSearch.setHintTextColor(themeMuted)
+        drawer.setBackgroundColor(Color.TRANSPARENT)
+    }
+
+    private fun loadOeaWallpaper() {
+        val uri = store.wallpaperUri()?.let(Uri::parse)
+        if (uri != null) {
+            runCatching {
+                wallpaperView.setImageURI(uri)
+                wallpaperView.visibility = View.VISIBLE
+            }.onFailure {
+                store.setWallpaperUri(null)
+                wallpaperView.setImageDrawable(null)
             }
-            if (light) {
-                themeBackground = Color.rgb(245, 246, 249)
-                themeSurface = Color.rgb(228, 231, 238)
-                themeText = Color.rgb(20, 24, 31)
-                themeMuted = Color.rgb(82, 89, 103)
-            } else {
-                themeBackground = Color.rgb(12, 15, 21)
-                themeSurface = Color.rgb(30, 36, 49)
-                themeText = Color.WHITE
-                themeMuted = Color.rgb(154, 162, 177)
-            }
-            setBackgroundColor(themeBackground)
-            drawer.setBackgroundColor(themeBackground)
-            search.setTextColor(themeText)
-            search.setHintTextColor(themeMuted)
-            search.background = rounded(themeSurface, 28)
-            drawerSearch.setTextColor(themeText)
-            drawerSearch.setHintTextColor(themeMuted)
-            drawerSearch.background = rounded(themeSurface, 24)
-            (drawer.getChildAt(0) as? LinearLayout)?.let { header ->
-                header.setBackgroundColor(Color.TRANSPARENT)
-                (header.getChildAt(0) as? TextView)?.setTextColor(themeText)
-                (header.getChildAt(1) as? TextView)?.setTextColor(themeText)
-                (header.getChildAt(1) as? TextView)?.background = rounded(themeSurface, 18)
+        } else {
+            runCatching {
+                wallpaperView.setImageDrawable(WallpaperManager.getInstance(context).drawable)
+                wallpaperView.visibility = View.VISIBLE
+            }.onFailure {
+                wallpaperView.setImageDrawable(null)
             }
         }
     }
@@ -1214,7 +1242,23 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     fun refreshBadges() { rebuild(); renderDrawer(drawerSearch.text.toString()) }
 
-    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean = widgetController.handleActivityResult(requestCode, resultCode, data)
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == wallpaperRequestCode) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                runCatching {
+                    val flags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    if (flags != 0) context.contentResolver.takePersistableUriPermission(uri, flags)
+                }
+                store.setWallpaperUri(uri.toString())
+                loadOeaWallpaper()
+                applyThemeFromWallpaper()
+                rebuild()
+            }
+            return true
+        }
+        return widgetController.handleActivityResult(requestCode, resultCode, data)
+    }
 
     fun handleBack(): Boolean {
         if (drawerOpen) {
