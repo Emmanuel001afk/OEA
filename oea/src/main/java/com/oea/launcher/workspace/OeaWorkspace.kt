@@ -1141,7 +1141,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openFolder(folder: OeaWorkspaceStore.Folder) {
-        val activity = hostActivity ?: run {\n            Toast.makeText(context, "OEA Home is not ready for folders.", Toast.LENGTH_SHORT).show()\n            return\n        }\n        val box = LinearLayout(activity).apply {
+        val activity = hostActivity ?: run {
+            Toast.makeText(context, "OEA Home is not ready for folders.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val box = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(14), dp(18), dp(8))
             background = rounded(themeSurface, 24)
@@ -1175,7 +1179,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
-        val activity = hostActivity ?: run {\n            Toast.makeText(context, "OEA Home is not ready for folder editing.", Toast.LENGTH_SHORT).show()\n            return\n        }\n        val input = EditText(activity).apply { setSingleLine(true); setText(folder.title); setSelection(text.length) }
+        val activity = hostActivity ?: run {
+            Toast.makeText(context, "OEA Home is not ready for folder editing.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val input = EditText(activity).apply { setSingleLine(true); setText(folder.title); setSelection(text.length) }
         AlertDialog.Builder(activity).setTitle("Rename folder").setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
@@ -1239,7 +1247,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 columnSpec = GridLayout.spec(slot, 1, 1f)
             })
         }
-        dockIndicator.text = if (ws.dockPageCount() > 1)\n            List(ws.dockPageCount()) { if (it == page) "●" else "•" }.joinToString(" ")\n        else ""\n        dockIndicator.contentDescription = if (ws.dockPageCount() > 1)\n            "Dock page " + (page + 1) + " of " + ws.dockPageCount() + ". Tap to switch pages."\n        else "Dock"\n        dock.contentDescription = "Dock page " + (page + 1) + " of " + ws.dockPageCount()
+        dockIndicator.text = if (ws.dockPageCount() > 1)
+            List(ws.dockPageCount()) { if (it == page) "●" else "•" }.joinToString(" ")
+        else ""
+        dockIndicator.contentDescription = if (ws.dockPageCount() > 1)
+            "Dock page " + (page + 1) + " of " + ws.dockPageCount() + ". Tap to switch pages."
+        else "Dock"
+        dock.contentDescription = "Dock page " + (page + 1) + " of " + ws.dockPageCount()
     }
 
     private fun nextPage() {
