@@ -5,132 +5,284 @@ import android.app.AlertDialog
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
-import android.net.Uri
+import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.widget.*
-import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import com.oea.launcher.applock.OeaAppFreezer
+import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import com.oea.launcher.callblocker.OeaCallBlockRules
+import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.gameboost.OeaGameBoostService
 import com.oea.launcher.gameboost.OeaGameBoostStore
+import com.oea.launcher.model.OeaAppInfo
+import com.oea.launcher.model.OeaAppModel
 import com.oea.launcher.split.OeaSplitLauncher
 
 class OeaSystemToolsActivity : Activity() {
+    private val dataStore by lazy { OeaDataStore.get(this) }
+    private val apps: List<OeaAppInfo> by lazy { OeaAppModel(this).also { it.load() }.apps }
+
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         val key = intent.component?.className.orEmpty()
-        val title = when {
-            key.endsWith("OeaSettings") -> "OEA Settings"
-            key.endsWith("OeaAppFreezer") -> "App Freezer"
-            key.endsWith("OeaCallBlocker") -> "Call Blocker"
-            key.endsWith("OeaGameBoost") -> "Game Boost"
-            key.endsWith("OeaMultitask") -> "Multitask & Split Screen"
-            else -> "OEA Systems"
-        }
-        if (key.endsWith("OeaSettings")) showSettings(title) else showTool(title, key)
-    }
-
-    private fun showSettings(title: String) {
-        val box = base(title)
-        add(box, "Launcher settings") { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
-        add(box, "Wallpaper") { startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) }
-        add(box, "Notification access") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-        add(box, "Usage access") { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
-        add(box, "OEA Systems") { showTool("OEA Systems", "") }
-        setContentView(box)
-    }
-
-    private fun showTool(title: String, key: String) {
-        val box = base(title)
         when {
-            key.endsWith("OeaAppFreezer") -> {
-                add(box, "Freeze / unfreeze apps") {
-                    AlertDialog.Builder(this)
-                        .setTitle("App Freezer")
-                        .setMessage("OEA needs device-owner authority for real package suspension.")
-                        .setPositiveButton("Authority") { _, _ ->
-                            startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).putExtra(
-                                DevicePolicyManager.EXTRA_DEVICE_ADMIN,
-                                ComponentName(this, OeaDeviceAdminReceiver::class.java)
-                            ))
-                        }.setNegativeButton("Close", null).show()
-                }
-            }
-            key.endsWith("OeaCallBlocker") -> {
-                add(box, "Enable / disable call blocking") {
-                    OeaCallBlockRules.setEnabled(this, !OeaCallBlockRules.enabled(this))
-                    Toast.makeText(this, if (OeaCallBlockRules.enabled(this)) "Call blocking enabled" else "Call blocking disabled", Toast.LENGTH_SHORT).show()
-                }
-                add(box, "Call screening role") {
-                    if (android.os.Build.VERSION.SDK_INT >= 29) {
-                        getSystemService(android.app.role.RoleManager::class.java)?.let { rm ->
-                            if (rm.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) &&
-                                !rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING)) {
-                                startActivity(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING))
-                            }
-                        }
-                    }
-                }
-            }
-            key.endsWith("OeaGameBoost") -> {
-                add(box, "Enable / disable Game Boost") {
-                    val enabled = !OeaGameBoostStore.enabled(this)
-                    OeaGameBoostStore.setEnabled(this, enabled)
-                    if (enabled) {
-                        runCatching { startForegroundService(Intent(this, OeaGameBoostService::class.java)) }
-                    } else stopService(Intent(this, OeaGameBoostService::class.java))
-                    Toast.makeText(this, if (enabled) "Game Boost enabled" else "Game Boost disabled", Toast.LENGTH_SHORT).show()
-                }
-                add(box, "Usage / overlay permissions") {
-                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                }
-            }
-            key.endsWith("OeaMultitask") -> {
-                add(box, "Launch split pair") { splitDialog() }
-            }
-            else -> {
-                add(box, "App Freezer") { startAlias("OeaAppFreezer") }
-                add(box, "Call Blocker") { startAlias("OeaCallBlocker") }
-                add(box, "Game Boost") { startAlias("OeaGameBoost") }
-                add(box, "Multitask & Split Screen") { startAlias("OeaMultitask") }
-            }
+            key.endsWith("OeaSettings") -> showSettings()
+            key.endsWith("OeaAppFreezer") -> showFreezer()
+            key.endsWith("OeaCallBlocker") -> showCallBlocker()
+            key.endsWith("OeaGameBoost") -> showGameBoost()
+            key.endsWith("OeaMultitask") -> showSplitScreen()
+            else -> showSettings()
         }
-        setContentView(box)
     }
 
-    private fun splitDialog() {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(16, 0, 16, 0) }
-        val first = EditText(this).apply { hint = "First package name" }
-        val second = EditText(this).apply { hint = "Second package name" }
-        box.addView(first); box.addView(second)
-        AlertDialog.Builder(this).setTitle("Split pair").setView(box)
+    private fun showSettings() {
+        val box = base("OEA Settings", "Launcher controls and OEA system tools")
+        row(box, "Default launcher", "Choose OEA as Android Home") { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
+        row(box, "Wallpaper", "Change the Android home wallpaper") { startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) }
+        row(box, "Themes", "Choose System / Wallpaper, Dark, or Light") { themeDialog() }
+        row(box, "Hidden apps", "Review and restore apps hidden from the drawer") { hiddenAppsDialog() }
+        row(box, "App Freezer", "Freeze, review, and unfreeze suspended apps") { showFreezer() }
+        row(box, "App Lock", "Configure OEA launcher app protection") {
+            Toast.makeText(this, "Use an app's long-press menu on OEA Home to lock or unlock it.", Toast.LENGTH_LONG).show()
+        }
+        row(box, "Call Blocker", "Exact numbers, prefixes, suffixes, contacts, and history") { showCallBlocker() }
+        row(box, "Game Boost", "Choose games and control boost monitoring") { showGameBoost() }
+        row(box, "Split Screen", "Choose two apps and launch them side by side") { showSplitScreen() }
+        row(box, "Widgets", "Use ⋮ > Add widget on OEA Home") {
+            Toast.makeText(this, "The widget picker belongs to OEA Home so widgets return to OEA.", Toast.LENGTH_LONG).show()
+        }
+        row(box, "Notification access", "Allow OEA to show notification badges") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        row(box, "Usage access", "Required by Game Boost") { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+        setRoot(box)
+    }
+
+    private fun showFreezer() {
+        val box = base("App Freezer", "Freeze/unfreeze apps. Android requires OEA device-owner authority.")
+        val dpm = getSystemService(DevicePolicyManager::class.java)
+        val owner = dpm?.isDeviceOwnerApp(packageName) == true
+        row(box, if (owner) "Authority active" else "Enable freezer authority",
+            if (owner) "OEA can suspend packages." else "Android device-owner setup is required.") {
+            if (!owner) requestDeviceAdmin()
+        }
+        addDivider(box)
+        val frozen = OeaAppFreezer.frozenPackages(this)
+        val candidates = linkedMapOf<String, String>()
+        apps.forEach { candidates[it.packageName] = it.label }
+        frozen.forEach { pkg ->
+            if (!candidates.containsKey(pkg)) {
+                runCatching { candidates[pkg] = packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
+            }
+        }
+        candidates.entries.sortedBy { it.value.lowercase() }.forEach { (pkg, label) ->
+            val isFrozen = frozen.contains(pkg)
+            row(box, label, if (isFrozen) "FROZEN • tap to unfreeze" else "Tap to freeze") {
+                if (!owner) requestDeviceAdmin()
+                else {
+                    val result = OeaAppFreezer.setFrozen(this, pkg, !isFrozen)
+                    Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
+                    showFreezer()
+                }
+            }
+        }
+        setRoot(box)
+    }
+
+    private fun showCallBlocker() {
+        val box = base("Call Blocker", "Android call-screening rules")
+        val role = if (android.os.Build.VERSION.SDK_INT >= 29) {
+            getSystemService(android.app.role.RoleManager::class.java)?.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true
+        } else false
+        row(box, if (role) "Call-screening role active" else "Enable call-screening role",
+            if (role) "OEA can screen matching incoming calls." else "Android must grant OEA the call-screening role.") { requestCallRole() }
+        row(box, if (OeaCallBlockRules.enabled(this)) "Blocking enabled" else "Blocking disabled", "Tap to toggle the blocker") {
+            OeaCallBlockRules.setEnabled(this, !OeaCallBlockRules.enabled(this)); showCallBlocker()
+        }
+        row(box, "Contacts", if (OeaCallBlockRules.allowContacts(this)) "Allowed automatically" else "Not exempt") {
+            OeaCallBlockRules.setAllowContacts(this, !OeaCallBlockRules.allowContacts(this)); showCallBlocker()
+        }
+        row(box, "Starred contacts", if (OeaCallBlockRules.allowStarred(this)) "Allowed automatically" else "Not exempt") {
+            OeaCallBlockRules.setAllowStarred(this, !OeaCallBlockRules.allowStarred(this)); showCallBlocker()
+        }
+        addDivider(box)
+        ruleSection(box, "Exact numbers", OeaCallBlockRules.getExact(this).toList(), "exact")
+        ruleSection(box, "Prefixes", OeaCallBlockRules.getPrefix(this).toList(), "prefix")
+        ruleSection(box, "Suffixes", OeaCallBlockRules.getSuffix(this).toList(), "suffix")
+        setRoot(box)
+    }
+
+    private fun ruleSection(box: LinearLayout, title: String, values: List<String>, type: String) {
+        box.addView(TextView(this).apply {
+            text = title + " (" + values.size + ")"
+            textSize = 17f
+            setTextColor(Color.WHITE)
+            setPadding(0, 18, 0, 8)
+        })
+        values.forEach { value ->
+            row(box, value, "Tap to remove") {
+                val exact = OeaCallBlockRules.getExact(this).toMutableSet()
+                val prefix = OeaCallBlockRules.getPrefix(this).toMutableSet()
+                val suffix = OeaCallBlockRules.getSuffix(this).toMutableSet()
+                when (type) { "exact" -> exact.remove(value); "prefix" -> prefix.remove(value); "suffix" -> suffix.remove(value) }
+                OeaCallBlockRules.setRules(this, exact, prefix, suffix)
+                showCallBlocker()
+            }
+        }
+        row(box, "Add " + title + " rule", "Enter a new rule") { addCallRule(type) }
+    }
+
+    private fun addCallRule(type: String) {
+        val input = EditText(this).apply {
+            setSingleLine(true)
+            hint = when (type) { "prefix" -> "e.g. 0803"; "suffix" -> "e.g. 1234"; else -> "Full phone number" }
+            inputType = android.text.InputType.TYPE_CLASS_PHONE
+        }
+        AlertDialog.Builder(this).setTitle("Add " + type + " rule").setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text.toString().trim()
+                if (value.isNotEmpty()) {
+                    val exact = OeaCallBlockRules.getExact(this).toMutableSet()
+                    val prefix = OeaCallBlockRules.getPrefix(this).toMutableSet()
+                    val suffix = OeaCallBlockRules.getSuffix(this).toMutableSet()
+                    when (type) { "prefix" -> prefix.add(value); "suffix" -> suffix.add(value); else -> exact.add(value) }
+                    OeaCallBlockRules.setRules(this, exact, prefix, suffix)
+                    OeaCallBlockRules.setEnabled(this, true)
+                    showCallBlocker()
+                }
+            }.show()
+    }
+
+    private fun showGameBoost() {
+        val box = base("Game Boost", "Choose games, then enable monitoring")
+        row(box, if (OeaGameBoostStore.enabled(this)) "Game Boost enabled" else "Game Boost disabled", "Tap to toggle monitoring") {
+            val enabled = !OeaGameBoostStore.enabled(this)
+            OeaGameBoostStore.setEnabled(this, enabled)
+            if (enabled) startBoostService() else stopService(Intent(this, OeaGameBoostService::class.java))
+            showGameBoost()
+        }
+        row(box, "Choose games", OeaGameBoostStore.games(this).size.toString() + " selected") { chooseGames() }
+        row(box, "Usage access", "Required to detect the foreground game") { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+        row(box, "Overlay permission", "Required for the optional boost overlay") {
+            runCatching { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + packageName))) }
+        }
+        setRoot(box)
+    }
+
+    private fun chooseGames() {
+        val choices = apps.filter { it.packageName != packageName }
+        val selected = OeaGameBoostStore.games(this)
+        val checked = BooleanArray(choices.size) { selected.contains(choices[it].packageName) }
+        AlertDialog.Builder(this).setTitle("Select games")
+            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { _, which, value -> checked[which] = value }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                OeaGameBoostStore.setGames(this, choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }.toSet())
+                showGameBoost()
+            }.show()
+    }
+
+    private fun showSplitScreen() {
+        val box = base("Split Screen", "Select two apps. Android controls the final divider and orientation.")
+        row(box, "Choose two apps", "Use the Android app list, then launch both adjacent") { chooseSplitApps() }
+        setRoot(box)
+    }
+
+    private fun chooseSplitApps() {
+        val choices = apps.filter { it.packageName != packageName }
+        val checked = BooleanArray(choices.size)
+        AlertDialog.Builder(this).setTitle("Select two apps")
+            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { dialog, which, value ->
+                if (value && checked.count { it } >= 2) {
+                    (dialog as AlertDialog).listView.setItemChecked(which, false)
+                    Toast.makeText(this, "Select only two apps.", Toast.LENGTH_SHORT).show()
+                } else checked[which] = value
+            }
+            .setNegativeButton("Cancel", null)
             .setPositiveButton("Launch") { _, _ ->
-                if (!OeaSplitLauncher.launchPair(this, first.text.toString().trim(), second.text.toString().trim()))
-                    Toast.makeText(this, "Could not launch both apps", Toast.LENGTH_SHORT).show()
-            }.setNegativeButton("Cancel", null).show()
+                val picked = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }
+                if (picked.size == 2 && !OeaSplitLauncher.launchPair(this, picked[0], picked[1]))
+                    Toast.makeText(this, "Android could not start the pair in split screen.", Toast.LENGTH_LONG).show()
+            }.show()
     }
 
-    private fun startAlias(name: String) {
-        runCatching {
-            startActivity(Intent().setComponent(ComponentName(this, "com.oea.launcher.$name")))
+    private fun hiddenAppsDialog() {
+        val hidden = dataStore.hiddenApps()
+        val choices = apps
+        val checked = BooleanArray(choices.size) { hidden.contains(choices[it].packageName + "/" + choices[it].className) }
+        AlertDialog.Builder(this).setTitle("Hidden apps")
+            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { _, which, value ->
+                val app = choices[which]; dataStore.setHidden(app.packageName, app.className, value)
+            }
+            .setPositiveButton("Done", null).show()
+    }
+
+    private fun themeDialog() {
+        val choices = arrayOf("System / Wallpaper", "Dark", "Light")
+        val checked = when (dataStore.themeMode()) { "dark" -> 1; "light" -> 2; else -> 0 }
+        AlertDialog.Builder(this).setTitle("OEA Themes")
+            .setSingleChoiceItems(choices, checked) { dialog, which ->
+                dataStore.setThemeMode(when (which) { 1 -> "dark"; 2 -> "light"; else -> "system" })
+                dialog.dismiss()
+            }.show()
+    }
+
+    private fun requestDeviceAdmin() {
+        startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).putExtra(
+            DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(this, OeaDeviceAdminReceiver::class.java)))
+    }
+
+    private fun requestCallRole() {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val rm = getSystemService(android.app.role.RoleManager::class.java)
+            if (rm?.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true &&
+                !rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING))
+                startActivity(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING))
         }
     }
 
-    private fun base(title: String) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(28, 36, 28, 28)
-        setBackgroundColor(android.graphics.Color.rgb(12, 15, 21))
-        addView(TextView(this@OeaSystemToolsActivity).apply {
-            text = title; textSize = 28f; setTextColor(android.graphics.Color.WHITE)
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 24 })
+    private fun startBoostService() {
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(Intent(this, OeaGameBoostService::class.java))
+            else startService(Intent(this, OeaGameBoostService::class.java))
+        }
     }
 
-    private fun add(box: LinearLayout, label: String, action: () -> Unit) {
-        box.addView(Button(this).apply {
-            text = label; setOnClickListener { action() }
-            gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(-1, 54).apply { bottomMargin = 12 })
+    private fun base(title: String, subtitle: String): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(24, 28, 24, 32)
+        setBackgroundColor(Color.rgb(12, 15, 21))
+        addView(TextView(this@OeaSystemToolsActivity).apply {
+            text = title; textSize = 29f; setTextColor(Color.WHITE); setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 6 })
+        addView(TextView(this@OeaSystemToolsActivity).apply {
+            text = subtitle; textSize = 14f; setTextColor(Color.rgb(160, 170, 185))
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 18 })
+    }
+
+    private fun setRoot(box: LinearLayout) {
+        val scroll = ScrollView(this)
+        scroll.addView(box)
+        setContentView(scroll)
+    }
+
+    private fun row(box: LinearLayout, title: String, subtitle: String, action: () -> Unit) {
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(18, 14, 18, 14)
+            setBackgroundColor(Color.rgb(30, 36, 49))
+            isClickable = true
+            setOnClickListener { action() }
+            addView(TextView(this@OeaSystemToolsActivity).apply { text = title; textSize = 16f; setTextColor(Color.WHITE) })
+            addView(TextView(this@OeaSystemToolsActivity).apply {
+                text = subtitle; textSize = 12f; setTextColor(Color.rgb(160, 170, 185)); maxLines = 2
+            })
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 9 })
+    }
+
+    private fun addDivider(box: LinearLayout) {
+        box.addView(Space(this), LinearLayout.LayoutParams(1, 8))
     }
 }
