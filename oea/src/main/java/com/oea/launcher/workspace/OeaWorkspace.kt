@@ -958,8 +958,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openWallpaperChooser() {
-        runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) }
-            .onFailure { runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) } }
+        AlertDialog.Builder(context)
+            .setTitle("OEA Wallpaper")
+            .setMessage("Wallpaper selection is handled by Android, while OEA keeps its own theme and launcher appearance.")
+            .setPositiveButton("Choose wallpaper") { _, _ ->
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.onFailure {
+                    Toast.makeText(context, "Android wallpaper picker is unavailable.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun openNotificationAccessSettings() {
