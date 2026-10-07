@@ -1055,16 +1055,23 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (e.action != DragEvent.ACTION_DROP) return false
         val key = dragged ?: return true
         val values = ws.dock().filterNot { it == key }.toMutableList()
-        if (values.size >= OeaWorkspaceStore.DOCK_SLOTS) {
-            Toast.makeText(context, "Dock is full — drag an existing icon out first.", Toast.LENGTH_SHORT).show()
-            dragged = null
-            return true
-        }
         values.add(key)
         ws.setDock(values)
+        ws.setCurrentDockPage(values.lastIndex / OeaWorkspaceStore.DOCK_SLOTS)
         ws.replaceItems(ws.items().filterNot { it.id == key })
+        ws.replaceFolders(
+            ws.folders()
+                .map { it.copy(members = it.members.filterNot { member -> member == key }) }
+                .filter { it.members.isNotEmpty() }
+        )
         dragged = null
         renderDock()
+        rebuild()
+        pager.post {
+            val page = ws.getCurrentPage()
+            ensurePageRendered(page)
+            pager.smoothScrollTo(page * pager.width, 0)
+        }
         return true
     }
 
