@@ -131,8 +131,9 @@ class OeaSystemToolsActivity : Activity() {
             .forEach { app ->
                 val isFrozen = frozen.contains(app.packageName)
                 row(box, app.label, if (isFrozen) "FROZEN • tap to restore" else "Tap to freeze") {
-                    if (backend == OeaAppFreezer.Backend.NONE) requestDeviceOwner()
-                    else {
+                    if (backend == OeaAppFreezer.Backend.NONE) {
+                        Toast.makeText(this, "No freezer authority. Use the Authority row above to provision device-owner/root access.", Toast.LENGTH_LONG).show()
+                    } else {
                         val result = OeaAppFreezer.setFrozen(this, app.packageName, !isFrozen)
                         Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
                         showFreezer()
@@ -148,8 +149,21 @@ class OeaSystemToolsActivity : Activity() {
             getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true else false
         row(box, if (role) "Screening role active" else "Enable screening role",
             if (role) "OEA can screen matching incoming calls." else "Grant OEA the Android call-screening role.") { requestCallRole() }
-        row(box, if (OeaCallBlockRules.enabled(this)) "Blocking enabled" else "Blocking disabled", "Tap to toggle") {
-            OeaCallBlockRules.setEnabled(this, !OeaCallBlockRules.enabled(this)); showCallBlocker()
+        val blocking = OeaCallBlockRules.enabled(this)
+        row(box, if (blocking) "Blocking enabled" else "Blocking disabled",
+            if (role) "Tap to toggle" else "Enable the screening role first") {
+            if (!role) {
+                requestCallRole()
+            } else {
+                OeaCallBlockRules.setEnabled(this, !blocking)
+                showCallBlocker()
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 23 &&
+            checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            row(box, "Contacts permission required", "Needed for contact/starred exemptions") {
+                requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 9101)
+            }
         }
         row(box, "Contacts", if (OeaCallBlockRules.allowContacts(this)) "Allowed" else "Not exempt") {
             OeaCallBlockRules.setAllowContacts(this, !OeaCallBlockRules.allowContacts(this)); showCallBlocker()
