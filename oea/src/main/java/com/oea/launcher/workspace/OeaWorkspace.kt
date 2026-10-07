@@ -13,6 +13,8 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.Settings
 import android.view.DragEvent
@@ -75,6 +77,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private var themeSurface = Color.rgb(30, 36, 49)
     private var themeText = Color.WHITE
     private var themeMuted = Color.rgb(154, 162, 177)
+    private var wallpaperLightHint: Boolean? = null
+    private var wallpaperLoadToken = 0
 
     fun attachHost(activity: Activity?) {
         hostActivity = activity
@@ -1448,17 +1452,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val light = when (mode) {
             "light" -> true
             "dark" -> false
-            else -> runCatching {
-                val d = (wallpaperView.drawable as? BitmapDrawable)
-                    ?: (WallpaperManager.getInstance(context).drawable as? BitmapDrawable)
-                if (d != null && d.bitmap.width > 0 && d.bitmap.height > 0) {
-                    val b = d.bitmap
-                    val p = b.getPixel(b.width / 2, b.height / 2)
-                    (Color.red(p) * 0.299 + Color.green(p) * 0.587 + Color.blue(p) * 0.114) > 150
-                } else {
-                    (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_YES
-                }
-            }.getOrDefault(false)
+            else -> wallpaperLightHint ?: ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_YES)
         }
         if (light) {
             themeBackground = Color.rgb(245, 246, 249)
@@ -1480,23 +1474,72 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun loadOeaWallpaper() {
+        val token = ++wallpaperLoadToken
         val uri = store.wallpaperUri()?.let(Uri::parse)
-        if (uri != null) {
-            runCatching {
-                wallpaperView.setImageURI(uri)
-                wallpaperView.visibility = View.VISIBLE
-            }.onFailure {
-                store.setWallpaperUri(null)
-                wallpaperView.setImageDrawable(null)
+        wallpaperView.visibility = View.INVISIBLE
+        Thread {
+            val result = runCatching {
+                if (uri != null) decodeWallpaper(uri)
+                else {
+                    val drawable = WallpaperManager.getInstance(context).drawable as? BitmapDrawable
+                    drawable?.bitmap?.let { downsampleBitmap(it) }
+                }
+            }.getOrNull()
+            post {
+                if (token != wallpaperLoadToken) return@post
+                if (result != null) {
+                    wallpaperView.setImageBitmap(result)
+                    wallpaperView.visibility = View.VISIBLE
+                    wallpaperLightHint = isBitmapMostlyLight(result)
+                    applyThemeFromWallpaper()
+                    invalidate()
+                } else {
+                    if (uri != null) store.setWallpaperUri(null)
+                    wallpaperView.setImageDrawable(null)
+                    wallpaperView.visibility = View.VISIBLE
+                    wallpaperLightHint = null
+                    applyThemeFromWallpaper()
+                }
             }
-        } else {
-            runCatching {
-                wallpaperView.setImageDrawable(WallpaperManager.getInstance(context).drawable)
-                wallpaperView.visibility = View.VISIBLE
-            }.onFailure {
-                wallpaperView.setImageDrawable(null)
-            }
+        }.start()
+    }
+
+    private fun decodeWallpaper(uri: Uri): Bitmap? {
+        val resolver = context.contentResolver
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val sample = calculateWallpaperSample(bounds.outWidth, bounds.outHeight)
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.RGB_565
         }
+        return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+    }
+
+    private fun downsampleBitmap(source: Bitmap): Bitmap {
+        val sample = calculateWallpaperSample(source.width, source.height)
+        if (sample <= 1) return source
+        return Bitmap.createScaledBitmap(
+            source,
+            (source.width / sample).coerceAtLeast(1),
+            (source.height / sample).coerceAtLeast(1),
+            true
+        )
+    }
+
+    private fun calculateWallpaperSample(width: Int, height: Int): Int {
+        if (width <= 0 || height <= 0) return 1
+        val targetW = resources.displayMetrics.widthPixels.coerceAtLeast(720)
+        val targetH = resources.displayMetrics.heightPixels.coerceAtLeast(1280)
+        var sample = 1
+        while (width / (sample * 2) >= targetW && height / (sample * 2) >= targetH) sample *= 2
+        return sample.coerceAtMost(4)
+    }
+
+    private fun isBitmapMostlyLight(bitmap: Bitmap): Boolean {
+        if (bitmap.width == 0 || bitmap.height == 0) return false
+        val p = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
+        return (Color.red(p) * 0.299 + Color.green(p) * 0.587 + Color.blue(p) * 0.114) > 150
     }
 
     private fun find(key: String) = apps.firstOrNull { OeaWorkspaceStore.key(it.packageName, it.className) == key }
