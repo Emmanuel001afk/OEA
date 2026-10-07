@@ -1238,7 +1238,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
                 1 -> {
                     store.setWallpaperUri(null)
-                    loadOeaWallpaper()
+                    loadOeaWallpaper(true)
                 }
                 2 -> {
                     store.setWallpaperUri(null)
@@ -1636,7 +1636,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     if (flags != 0) context.contentResolver.takePersistableUriPermission(uri, flags)
                 }
                 store.setWallpaperUri(uri.toString())
-                loadOeaWallpaper()
+                loadOeaWallpaper(true)
             }
             return true
         }
