@@ -35,7 +35,7 @@ class OeaNotificationListener:NotificationListenerService(){
   val title=n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?:n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?:sbn.packageName.substringAfterLast('.')
   val text=n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
   val controller=runCatching{
-   val token=n.extras.getParcelable(Notification.EXTRA_MEDIA_SESSION,MediaSession.Token::class.java)
+   val token=if(android.os.Build.VERSION.SDK_INT>=33)n.extras.getParcelable(Notification.EXTRA_MEDIA_SESSION,MediaSession.Token::class.java) else @Suppress("DEPRECATION") n.extras.getParcelable(Notification.EXTRA_MEDIA_SESSION) as? MediaSession.Token
    token?.let{MediaController(this,it)}
   }.getOrNull()
   val root=LinearLayout(this).apply{
