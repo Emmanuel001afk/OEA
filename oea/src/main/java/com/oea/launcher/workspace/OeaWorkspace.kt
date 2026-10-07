@@ -156,8 +156,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             pager,
             onSwipeUp = { openDrawer() },
             onSwipeDown = { closeDrawer() },
-            onSwipeLeft = { nextPage() },
-            onSwipeRight = { previousPage() },
+            // Horizontal movement belongs to the native pager. The gesture layer
+            // must not steal it, otherwise page scrolling becomes inconsistent.
+            consumeTouchEvents = false,
         ))
         pages.orientation = LinearLayout.HORIZONTAL
         pager.addView(pages, FrameLayout.LayoutParams(-2, -1))
