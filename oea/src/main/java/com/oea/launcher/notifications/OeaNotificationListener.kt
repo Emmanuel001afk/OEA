@@ -61,7 +61,7 @@ class OeaNotificationListener : NotificationListenerService() {
                 cornerRadius = 60f
             }
             addView(TextView(this@OeaNotificationListener).apply {
-                text = "●"
+                this.text = "●"
                 textSize = 10f
                 setTextColor(Color.WHITE)
                 setPadding(0, 0, 10, 0)
