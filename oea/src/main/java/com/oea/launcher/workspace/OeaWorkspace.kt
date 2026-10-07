@@ -426,17 +426,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openDeviceAdminSettings() {
-        Toast.makeText(context, "True app freezing needs OEA to be provisioned as the device owner. This is an Android security requirement, not a normal permission.", Toast.LENGTH_LONG).show()
-        runCatching {
-            (hostActivity ?: context).startActivity(
-                Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-                    .putExtra(
-                        android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
-                        ComponentName(context, OeaDeviceAdminReceiver::class.java),
-                    )
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
+        val command = "adb shell dpm set-device-owner com.oea.launcher/com.oea.launcher.applock.OeaDeviceAdminReceiver"
+        getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
+            android.content.ClipData.newPlainText("OEA device-owner command", command)
+        )
+        AlertDialog.Builder(context)
+            .setTitle("Freezer authority")
+            .setMessage("Android does not grant true package freezing through the normal Device Admin screen. OEA must be provisioned as device owner.\n\nADB setup command:\n$command\n\nThe command was copied to your clipboard.")
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun openThemeSettings() {
