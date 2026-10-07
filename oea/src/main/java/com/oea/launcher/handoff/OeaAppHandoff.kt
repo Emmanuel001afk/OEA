@@ -16,7 +16,7 @@ object OeaAppHandoff {
         val uris = sourcePaths.mapIndexed { index, path ->
             val source = File(path)
             val safe = source.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
-            val target = File(dir, "${'$'}{index}_${'$'}{safe}")
+            val target = File(dir, index.toString() + "_" + safe)
             source.inputStream().use { input -> target.outputStream().use { output -> input.copyTo(output) } }
             FileProvider.getUriForFile(context, context.packageName + ".fileprovider", target)
         }
