@@ -394,14 +394,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun addToDock(key: String) {
-        if (ws.dock().contains(key)) return
-        val values = ws.dock().filterNot { it == key }.toMutableList()
+        val values = ws.dock().toMutableList()
+        if (values.contains(key)) {
+            val existingPage = values.indexOf(key) / OeaWorkspaceStore.DOCK_SLOTS
+            ws.setCurrentDockPage(existingPage)
+            renderDock()
+            return
+        }
         values.add(key)
         ws.setDock(values)
-        val affectedPage = ws.items().firstOrNull { it.id == key }?.page
-        ws.replaceItems(ws.items().filterNot { it.id == key })
-        ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
-        if (affectedPage != null) refreshPages(affectedPage) else renderDock()
+        ws.setCurrentDockPage(values.lastIndex / OeaWorkspaceStore.DOCK_SLOTS)
+        renderDock()
     }
 
     private fun addToHome(key: String) {
@@ -446,7 +449,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             setSingleLine(true)
         }
-        AlertDialog.Builder(context).setTitle("Set OEA App Lock PIN").setView(input)
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Set OEA App Lock PIN").setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Set PIN") { _, _ ->
                 val pin = input.text.toString()
@@ -469,7 +472,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             setSingleLine(true)
         }
-        AlertDialog.Builder(context).setTitle("Unlock " + app.label).setView(input)
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Unlock " + app.label).setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Unlock") { _, _ ->
                 if (OeaAppLockStore.verifyPin(context, input.text.toString())) onSuccess()
@@ -494,7 +497,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         } else {
             app.label + " is not frozen yet. Android only permits true package suspension to a device-owner app. OEA will not repeatedly prompt for authority."
         }
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("App Freezer")
             .setMessage(message)
             .setPositiveButton(if (owner) "Freeze" else "Close") { _, _ ->
@@ -520,7 +523,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
             android.content.ClipData.newPlainText("OEA device-owner command", command)
         )
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("Freezer authority")
             .setMessage("Android does not grant true package freezing through the normal Device Admin screen. OEA must be provisioned as device owner.\n\nADB setup command:\n$command\n\nThe command was copied to your clipboard.")
             .setPositiveButton("OK", null)
@@ -531,7 +534,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val choices = arrayOf("System / Wallpaper", "Dark", "Light")
         val current = store.themeMode()
         val checked = when (current) { "dark" -> 1; "light" -> 2; else -> 0 }
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Themes")
             .setSingleChoiceItems(choices, checked) { dialog, which ->
                 when (which) {
@@ -551,7 +554,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun openFocusSettings() {
         val choices = apps.filterNot { store.isHidden(it.packageName, it.className) }
         val checked = BooleanArray(choices.size) { focusStore.isFocused(OeaWorkspaceStore.key(choices[it].packageName, choices[it].className)) }
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Focus apps (max 7)")
             .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { dialog, which, selected ->
                 val key = OeaWorkspaceStore.key(choices[which].packageName, choices[which].className)
@@ -600,7 +603,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             hint = "Exact number to block (optional)"
             setSingleLine(true)
         }
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Call blocker")
             .setMessage("Add an exact number. Contacts remain allowed by default.")
             .setView(input)
@@ -624,7 +627,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun openMultitaskDialog() {
         val choices = apps.filter { it.packageName != context.packageName }.distinctBy { it.packageName }
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Multitask")
             .setMessage("Choose an app to open as a floating task over the current app. OEA uses a sensible starting size and does not add a manual drag-to-size control.")
             .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
@@ -640,7 +643,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun openSplitPairDialog() {
         val choices = apps.filter { it.packageName != context.packageName }.distinctBy { it.packageName }
         val checked = BooleanArray(choices.size)
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Split Screen")
             .setMessage("Choose exactly two apps. Android controls the final divider and orientation.")
             .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { dialog, which, value ->
@@ -664,7 +667,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             hint = "Game package name"
             setSingleLine(true)
         }
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Game Boost")
             .setMessage("Add a game package, then enable monitoring. Usage access and overlay permission are required for automatic detection/overlay.")
             .setView(input)
@@ -1149,7 +1152,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             })
         }
         box.addView(grid, LinearLayout.LayoutParams(-1, -2))
-        val dialog = AlertDialog.Builder(context).setView(box)
+        val dialog = AlertDialog.Builder(hostActivity ?: context).setView(box)
             .setNeutralButton("Rename") { _, _ -> showFolderRename(folder) }
             .setPositiveButton("Done", null).create()
         dialog.setOnShowListener {
@@ -1161,7 +1164,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
         val input = EditText(context).apply { setSingleLine(true); setText(folder.title); setSelection(text.length) }
-        AlertDialog.Builder(context).setTitle("Rename folder").setView(input)
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Rename folder").setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
                 val title = input.text.toString().trim().ifBlank { "Folder" }
@@ -1187,32 +1190,34 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun renderDock() {
         dock.removeAllViews()
         val values = ws.dock()
+        val page = ws.currentDockPage().coerceAtMost(ws.dockPageCount() - 1)
+        if (page != ws.currentDockPage()) ws.setCurrentDockPage(page)
+        val pageValues = ws.dockPageValues(page)
         repeat(OeaWorkspaceStore.DOCK_SLOTS) { slot ->
-            val app = values.getOrNull(slot)?.let(::find)
+            val key = pageValues.getOrNull(slot)
+            val app = key?.let(::find)
             val v = if (app == null) emptyCell() else dockTile(app)
-            if (app != null) {
-                v.setOnLongClickListener {
-                    showAppActions(app, v, values[slot])
-                    true
-                }
-            }
+            if (app != null) v.setOnLongClickListener { showAppActions(app, v, key); true }
             v.setOnDragListener { _, e ->
                 if (e.action == DragEvent.ACTION_DROP && dragged != null) {
-                    val key = dragged!!
-                    if (!values.contains(key) && values.size >= OeaWorkspaceStore.DOCK_SLOTS) {
-                        Toast.makeText(context, "Dock is full — drag an existing icon out first.", Toast.LENGTH_SHORT).show()
-                        dragged = null
-                        return@setOnDragListener true
+                    val draggedKey = dragged!!
+                    if (values.contains(draggedKey)) {
+                        val list = values.filterNot { it == draggedKey }.toMutableList()
+                        val target = (page * OeaWorkspaceStore.DOCK_SLOTS + slot).coerceAtMost(list.size)
+                        list.add(target, draggedKey)
+                        ws.setDock(list)
+                    } else {
+                        val list = values.toMutableList()
+                        list.add(draggedKey)
+                        ws.setDock(list)
+                        val affectedPage = ws.items().firstOrNull { it.id == draggedKey }?.page
+                        ws.replaceItems(ws.items().filterNot { it.id == draggedKey })
+                        ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == draggedKey }) }.filter { it.members.isNotEmpty() })
+                        if (affectedPage != null) refreshPages(affectedPage)
                     }
-                    val list = values.filterNot { it == key }.toMutableList()
-                    val target = slot.coerceIn(0, list.size)
-                    list.add(target, key)
-                    ws.setDock(list.take(OeaWorkspaceStore.DOCK_SLOTS))
-                    val affectedPage = ws.items().firstOrNull { it.id == key }?.page
-                    ws.replaceItems(ws.items().filterNot { it.id == key })
-                    ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
                     dragged = null
-                    if (affectedPage != null) refreshPages(affectedPage) else renderDock()
+                    ws.setCurrentDockPage(page)
+                    renderDock()
                     true
                 } else e.action == DragEvent.ACTION_DRAG_STARTED
             }
@@ -1222,6 +1227,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 columnSpec = GridLayout.spec(slot, 1, 1f)
             })
         }
+        dock.setOnTouchListener(OeaGestureController(
+            dock,
+            onSwipeLeft = {
+                if (ws.currentDockPage() + 1 < ws.dockPageCount()) {
+                    ws.setCurrentDockPage(ws.currentDockPage() + 1)
+                    renderDock()
+                }
+            },
+            onSwipeRight = {
+                if (ws.currentDockPage() > 0) {
+                    ws.setCurrentDockPage(ws.currentDockPage() - 1)
+                    renderDock()
+                }
+            },
+        ))
+        dock.contentDescription = if (ws.dockPageCount() > 1)
+            "Dock page ${page + 1} of ${ws.dockPageCount()}. Swipe left or right for more dock pages."
+        else "Dock"
     }
 
     private fun nextPage() {
@@ -1274,7 +1297,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun openIconShapeSettings() {
         val values = arrayOf("Rounded", "Circle", "Square")
         val current = when (store.iconShape()) { "circle" -> 1; "square" -> 2; else -> 0 }
-        AlertDialog.Builder(context).setTitle("Icon shape")
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Icon shape")
             .setSingleChoiceItems(values, current) { dialog, which ->
                 store.setIconShape(when (which) { 1 -> "circle"; 2 -> "square"; else -> "rounded" })
                 rebuild()
@@ -1285,7 +1308,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun openWallpaperChooser() {
         val choices = arrayOf("Choose from gallery", "Use current system wallpaper", "Remove OEA wallpaper")
-        AlertDialog.Builder(context).setTitle("OEA Wallpaper").setItems(choices) { _, which ->
+        AlertDialog.Builder(hostActivity ?: context).setTitle("OEA Wallpaper").setItems(choices) { _, which ->
             when (which) {
                 0 -> runCatching {
                     hostActivity?.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -1346,7 +1369,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }, LinearLayout.LayoutParams(-2, dp(48)))
             }, LinearLayout.LayoutParams(-1, dp(52)))
         }
-        AlertDialog.Builder(context).setTitle("Hidden apps").setView(box)
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Hidden apps").setView(box)
             .setPositiveButton("Done", null).show()
     }
 
@@ -1354,7 +1377,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val choices = apps.filterNot { it.packageName == context.packageName }
         val frozen = OeaAppFreezer.frozenPackages(context)
         val checked = BooleanArray(choices.size) { frozen.contains(choices[it].packageName) }
-        AlertDialog.Builder(context).setTitle("App Freezer")
+        AlertDialog.Builder(hostActivity ?: context).setTitle("App Freezer")
             .setMultiChoiceItems(choices.map { app ->
                 if (frozen.contains(app.packageName)) "❄ " + app.label + "  •  FROZEN" else app.label
             }.toTypedArray(), checked) { _, which, value ->
@@ -1371,7 +1394,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val checked = BooleanArray(choices.size) {
             OeaAppLockStore.isLocked(context, OeaWorkspaceStore.key(choices[it].packageName, choices[it].className))
         }
-        AlertDialog.Builder(context).setTitle("OEA App Lock")
+        AlertDialog.Builder(hostActivity ?: context).setTitle("OEA App Lock")
             .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { _, which, value ->
                 if (value && !OeaAppLockStore.hasPin(context)) {
                     Toast.makeText(context, "Set a PIN first from Lock app.", Toast.LENGTH_LONG).show()
@@ -1391,7 +1414,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             setSingleLine(true)
         }
-        AlertDialog.Builder(context).setTitle("Set OEA App Lock PIN").setView(input)
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Set OEA App Lock PIN").setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
                 val pin = input.text.toString()
@@ -1477,7 +1500,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         action("Notification access", "Required for notification badges and media integration") { openNotificationAccessSettings() }
 
         scroll.addView(body)
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA")
             .setView(scroll)
             .setNegativeButton("Close", null)
@@ -1487,7 +1510,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun gridDialogFromHomeMenu() {
         val values = arrayOf("3 columns", "4 columns", "5 columns")
         val current = (store.gridColumns() - 3).coerceIn(0, 2)
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("Home grid")
             .setSingleChoiceItems(values, current) { dialog, which ->
                 store.setGridColumns(which + 3)
@@ -1666,7 +1689,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun widgetOptions(widget: android.appwidget.AppWidgetHostView) {
         val id = widget.appWidgetId
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(hostActivity ?: context)
             .setTitle("Widget")
             .setItems(arrayOf("Resize: compact", "Resize: medium", "Resize: large", "Remove widget")) { _, which ->
                 when (which) {
