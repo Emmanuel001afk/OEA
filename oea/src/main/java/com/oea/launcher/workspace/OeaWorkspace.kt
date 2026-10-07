@@ -397,22 +397,36 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun freezeDialog(app: OeaAppInfo) {
+        val dpm = context.getSystemService(android.app.admin.DevicePolicyManager::class.java)
+        val owner = dpm?.isDeviceOwnerApp(context.packageName) == true
+        val message = if (owner) {
+            app.label + " can be frozen by OEA now."
+        } else {
+            app.label + " is not frozen yet. Android only permits true package suspension to a device-owner app. OEA will not repeatedly prompt for authority."
+        }
         AlertDialog.Builder(context)
             .setTitle("App Freezer")
-            .setMessage("Freeze or unfreeze " + app.label + ". OEA must be device owner for real package suspension.")
-            .setPositiveButton("Freeze") { _, _ ->
-                val result = OeaAppFreezer.setFrozen(context, app.packageName, true)
-                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            .setMessage(message)
+            .setPositiveButton(if (owner) "Freeze" else "Close") { _, _ ->
+                if (owner) {
+                    val result = OeaAppFreezer.setFrozen(context, app.packageName, true)
+                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                }
             }
-            .setNeutralButton("Unfreeze") { _, _ ->
-                val result = OeaAppFreezer.setFrozen(context, app.packageName, false)
-                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            .setNeutralButton(if (owner) "Unfreeze" else "How to enable") { _, _ ->
+                if (owner) {
+                    val result = OeaAppFreezer.setFrozen(context, app.packageName, false)
+                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                } else {
+                    openDeviceAdminSettings()
+                }
             }
-            .setNegativeButton("Authority") { _, _ -> openDeviceAdminSettings() }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun openDeviceAdminSettings() {
+        Toast.makeText(context, "True app freezing needs OEA to be provisioned as the device owner. This is an Android security requirement, not a normal permission.", Toast.LENGTH_LONG).show()
         runCatching {
             (hostActivity ?: context).startActivity(
                 Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
