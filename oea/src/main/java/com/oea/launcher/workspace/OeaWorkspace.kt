@@ -227,29 +227,34 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         for (p in 0 until ws.pages()) {
-            val pageScroll = ScrollView(context).apply {
-                isFillViewport = true
-                clipToPadding = false
-                setPadding(0, 0, 0, dp(10))
+            // Home pages are deliberately fixed-height: vertical scrolling belongs to
+            // the app drawer, not the desktop. Modern launchers keep the desktop bounded
+            // and use horizontal page navigation instead.
+            val pageFrame = FrameLayout(context).apply {
+                clipChildren = true
+                clipToPadding = true
                 tag = p
+                setBackgroundColor(Color.TRANSPARENT)
             }
             val pageContent = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(4), 0, dp(12))
+                setPadding(0, dp(4), 0, dp(4))
+                clipChildren = true
             }
             val grid = GridLayout(context).apply {
                 columnCount = cols()
                 useDefaultMargins = false
-                setPadding(dp(3), dp(6), dp(3), dp(6))
+                setPadding(dp(3), dp(4), dp(3), dp(2))
                 setOnDragListener(pageDrop(p))
                 tag = "grid"
             }
             pageContent.addView(grid, LinearLayout.LayoutParams(-1, -2))
             val widgetHost = FrameLayout(context).apply {
-                setPadding(dp(4), dp(4), dp(4), dp(16))
+                setPadding(dp(4), dp(2), dp(4), dp(6))
+                clipChildren = true
                 tag = "widgets"
                 setOnLongClickListener {
-                    hostActivity?.let { widgetController.pickWidget(it) }
+                    hostActivity?.let { widgetController.pickWidget(it, ws.getCurrentPage()) }
                     true
                 }
                 setOnDragListener { host, event ->
@@ -278,9 +283,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     }
                 }
             }
-            pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
-            pageScroll.addView(pageContent, FrameLayout.LayoutParams(-1, -2))
-            pages.addView(pageScroll, LinearLayout.LayoutParams(pageWidth, -1))
+            // The widget area takes only the space left after the icon grid. It never
+            // creates a vertical ScrollView, so the desktop cannot scroll off-screen.
+            pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, 0, 1f))
+            pageFrame.addView(pageContent, FrameLayout.LayoutParams(-1, -1))
+            pages.addView(pageFrame, LinearLayout.LayoutParams(pageWidth, -1))
         }
         val current = ws.getCurrentPage()
         ensurePageRendered(current)
@@ -292,8 +299,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun ensurePageRendered(page: Int) {
         if (page !in 0 until ws.pages() || renderedPages.contains(page)) return
-        val pageScroll = pages.getChildAt(page) as? ScrollView ?: return
-        val content = pageScroll.getChildAt(0) as? LinearLayout ?: return
+        val pageFrame = pages.getChildAt(page) as? FrameLayout ?: return
+        val content = pageFrame.getChildAt(0) as? LinearLayout ?: return
         val grid = content.findViewWithTag<GridLayout>("grid") ?: return
         val widgetHost = content.findViewWithTag<FrameLayout>("widgets") ?: return
         renderPage(grid, page)
@@ -1436,7 +1443,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         action("Add page", "Create another home page") { ws.setPages(ws.pages() + 1); rebuild() }
         if (ws.pages() > 1) action("Remove last page", "Removes only the last page") { removeLastPage() }
         action("Add widget", "Open the Android widget picker") {
-            hostActivity?.let { widgetController.pickWidget(it) }
+            hostActivity?.let { widgetController.pickWidget(it, ws.getCurrentPage()) }
                 ?: Toast.makeText(context, "OEA Home is not attached to an Activity.", Toast.LENGTH_SHORT).show()
         }
 
@@ -1619,7 +1626,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun renderWidgets(host: FrameLayout, page: Int) {
         if (page != 0) return
         host.removeAllViews()
-        val widgets = widgetController.views()
+        val widgets = widgetController.views().filter { widgetController.pageFor(it.appWidgetId) == page }
         widgets.forEach { widget ->
             val (widthDp, heightDp) = widgetController.sizeFor(widget.appWidgetId)
             val widthPx = minOf(dp(widthDp), (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(120)))
@@ -1640,7 +1647,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(themeMuted)
-                setOnClickListener { hostActivity?.let { widgetController.pickWidget(it) } }
+                setOnClickListener { hostActivity?.let { widgetController.pickWidget(it, ws.getCurrentPage()) } }
             }, FrameLayout.LayoutParams(-1, dp(56)))
         }
     }
