@@ -517,10 +517,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerBody.removeAllViews()
         val visible = drawerController.filter(apps, query)
             .filterNot { store.isHidden(it.packageName, it.className) }
-        if (query.isNotBlank()) {
-            addSectionLabel(drawerBody, "Apps · " + visible.size)
-        } else renderFocusStrip()
-        addSectionLabel(drawerBody, "All apps · " + visible.size)
+        if (query.isBlank()) renderFocusStrip()
+        addSectionLabel(drawerBody, "Apps · " + visible.size)
         when (store.drawerMode()) {
             OeaDataStore.DrawerMode.VERTICAL -> {
                 val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -532,11 +530,26 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
             OeaDataStore.DrawerMode.HORIZONTAL -> {
                 val horizontal = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
-                val strip = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                visible.forEach { app ->
-                    strip.addView(tile(app), LinearLayout.LayoutParams(dp(84), dp(92)).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) })
+                val pages = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                val rowsPerPage = 4
+                visible.chunked(rowsPerPage * cols()).forEach { pageApps ->
+                    val column = GridLayout(context).apply {
+                        columnCount = cols()
+                        rowCount = rowsPerPage
+                        setPadding(dp(2), dp(2), dp(2), dp(2))
+                    }
+                    pageApps.forEachIndexed { index, app ->
+                        column.addView(tile(app), GridLayout.LayoutParams().apply {
+                            width = dp(78)
+                            height = dp(88)
+                            columnSpec = GridLayout.spec(index % cols())
+                            rowSpec = GridLayout.spec(index / cols())
+                            setMargins(dp(3), dp(3), dp(3), dp(3))
+                        })
+                    }
+                    pages.addView(column, LinearLayout.LayoutParams(cols() * dp(84), rowsPerPage * dp(94)))
                 }
-                horizontal.addView(strip, FrameLayout.LayoutParams(-2, -2))
+                horizontal.addView(pages, FrameLayout.LayoutParams(-2, -2))
                 drawerBody.addView(horizontal, FrameLayout.LayoutParams(-1, -2))
             }
             OeaDataStore.DrawerMode.GRID -> {
@@ -556,6 +569,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 drawerBody.addView(drawerGrid, LinearLayout.LayoutParams(-1, -2))
             }
         }
+        if (query.isNotBlank()) renderSearchActions(query)
     }
 
     private fun renderSearchActions(query: String) {
