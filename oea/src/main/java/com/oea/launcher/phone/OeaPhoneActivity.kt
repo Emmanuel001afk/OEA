@@ -27,7 +27,7 @@ class OeaPhoneActivity : Activity() {
   val actions=LinearLayout(this).apply{gravity=Gravity.CENTER}
   actions.addView(button("Default Phone"){requestDefaultDialer()},LinearLayout.LayoutParams(0,dp(48),1f))
   actions.addView(button("Contacts"){openContacts()},LinearLayout.LayoutParams(0,dp(48),1f))
-  actions.addView(button("Blocker"){runCatching{startActivity(Intent().setClassName(this@OeaPhoneActivity,"com.oea.launcher.OeaCallBlocker"))}},LinearLayout.LayoutParams(0,dp(48),1f))
+  actions.addView(button("Blocker"){runCatching{startActivity(Intent(this@OeaPhoneActivity, com.oea.launcher.OeaSystemToolsActivity::class.java).putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "call_blocker"))}},LinearLayout.LayoutParams(0,dp(48),1f))
   root.addView(actions)
   root.addView(TextView(this).apply{text="Recent calls";textSize=19f;setTextColor(0xFFFFFFFF.toInt());setPadding(0,dp(18),0,dp(8))})
   list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
