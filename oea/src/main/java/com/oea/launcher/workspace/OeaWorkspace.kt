@@ -56,6 +56,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val search = EditText(context)
     private val dots = TextView(context)
     private val wallpaperView = ImageView(context)
+    private val homeRoot = LinearLayout(context)
+    private lateinit var homeHeader: View
+    private lateinit var homeSearch: EditText
     private val wallpaperRequestCode = 0x4F57
     private var apps: List<OeaAppInfo> = emptyList()
     private val drawerController = OeaAppDrawerController()
@@ -93,14 +96,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         wallpaperView.scaleType = ImageView.ScaleType.CENTER_CROP
         wallpaperView.alpha = 0.98f
         addView(wallpaperView, FrameLayout.LayoutParams(-1, -1))
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(8))
-        }
-        addView(root, FrameLayout.LayoutParams(-1, -1))
+        homeRoot.orientation = LinearLayout.VERTICAL
+        homeRoot.setPadding(dp(16), dp(12), dp(16), dp(8))
+        addView(homeRoot, FrameLayout.LayoutParams(-1, -1))
+        val root = homeRoot
         loadOeaWallpaper()
 
         val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        homeHeader = header
         header.addView(ImageView(context).apply {
             setImageResource(R.drawable.oea_logo)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -123,6 +126,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }, LinearLayout.LayoutParams(dp(52), dp(52)))
         root.addView(header)
 
+        homeSearch = search
         search.hint = "Search apps"
         search.setSingleLine(true)
         search.textSize = 16f
@@ -228,18 +232,37 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         for (p in 0 until ws.pages()) {
+            val pageScroll = ScrollView(context).apply {
+                isFillViewport = true
+                clipToPadding = false
+                setPadding(0, 0, 0, dp(10))
+            }
+            val pageContent = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(4), 0, dp(12))
+            }
             val grid = GridLayout(context).apply {
                 columnCount = cols()
                 useDefaultMargins = false
                 setPadding(dp(3), dp(6), dp(3), dp(6))
                 setOnDragListener(pageDrop(p))
             }
-            pages.addView(grid, LinearLayout.LayoutParams(pageWidth, -1))
+            pageContent.addView(grid, LinearLayout.LayoutParams(-1, -2))
+            val widgetHost = FrameLayout(context).apply {
+                setPadding(dp(4), dp(4), dp(4), dp(16))
+                setOnLongClickListener {
+                    hostActivity?.let { widgetController.pickWidget(it) }
+                    true
+                }
+            }
+            pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
+            pageScroll.addView(pageContent, ScrollView.LayoutParams(-1, -2))
+            pages.addView(pageScroll, LinearLayout.LayoutParams(pageWidth, -1))
             renderPage(grid, p)
+            renderWidgets(widgetHost, p)
         }
         dots.text = List(ws.pages()) { if (it == ws.getCurrentPage()) "●" else "•" }.joinToString(" ")
         renderDock()
-        renderWidgets()
     }
 
     private fun renderPage(grid: GridLayout, page: Int) {
@@ -707,7 +730,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val focused = focusStore.apps().mapNotNull(::find)
         val allKeys = apps.filterNot { store.isHidden(it.packageName, it.className) }
             .map { OeaWorkspaceStore.key(it.packageName, it.className) }
-        val used = store.mostUsed(allKeys, 8).mapNotNull(::find)
+        val used = store.mostUsed(allKeys, 8)
+            .filter { store.launchCount(it) >= 2 }
+            .mapNotNull(::find)
+            .take(8)
         if (focused.isEmpty() && used.isEmpty()) return
         val section = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         if (focused.isNotEmpty()) {
@@ -715,8 +741,21 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             section.addView(appStrip(focused), LinearLayout.LayoutParams(-1, dp(100)))
         }
         if (used.isNotEmpty() && store.showMostUsed()) {
-            addSectionLabel(section, "Most used")
-            section.addView(appStrip(used), LinearLayout.LayoutParams(-1, dp(100)))
+            addSectionLabel(section, "Most used · " + used.size)
+            val grid = GridLayout(context).apply {
+                columnCount = 4
+                useDefaultMargins = false
+            }
+            used.forEachIndexed { index, app ->
+                grid.addView(tile(app), GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = dp(92)
+                    columnSpec = GridLayout.spec(index % 4, 1, 1f)
+                    rowSpec = GridLayout.spec(index / 4)
+                    setMargins(dp(3), dp(3), dp(3), dp(3))
+                })
+            }
+            section.addView(grid, LinearLayout.LayoutParams(-1, dp(if (used.size > 4) 188 else 96)))
         }
         drawerBody.addView(section)
     }
@@ -871,6 +910,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setImageDrawable(icon(app.packageName))
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
+                alpha = if (OeaAppFreezer.frozenPackages(context).contains(app.packageName)) 0.45f else 1f
                 setPadding(0, 0, 0, 0)
             }
             addView(iconView, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
@@ -1080,8 +1120,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun openDrawer() {
         drawerOpen = true
-        pager.visibility = View.GONE
-        dock.visibility = View.GONE
+        homeRoot.visibility = View.GONE
         drawer.visibility = View.VISIBLE
         drawerSearch.setText(search.text.toString())
         drawerSearch.setSelection(drawerSearch.text.length)
@@ -1092,8 +1131,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun closeDrawer() {
         drawerOpen = false
         drawer.visibility = View.GONE
-        pager.visibility = View.VISIBLE
-        dock.visibility = View.VISIBLE
+        homeRoot.visibility = View.VISIBLE
         search.setText("")
         drawerSearch.setText("")
         search.clearFocus()
@@ -1384,17 +1422,46 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun selectable(): Drawable? = context.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).let { a ->
         a.getDrawable(0).also { a.recycle() }
     }
-    private fun renderWidgets() {
-        val grid = pages.getChildAt(0) as? GridLayout ?: return
-        widgetController.views().forEach { view ->
-            grid.addView(view, GridLayout.LayoutParams().apply {
-                width = 0
-                height = dp(220)
-                columnSpec = GridLayout.spec(0, cols(), 1f)
-                rowSpec = GridLayout.spec((grid.childCount / cols()) + 1)
-                setMargins(dp(6), dp(6), dp(6), dp(6))
+    private fun renderWidgets(host: FrameLayout, page: Int) {
+        if (page != 0) return
+        host.removeAllViews()
+        widgetController.views().forEach { widget ->
+            widget.isLongClickable = true
+            widget.setOnLongClickListener {
+                widgetOptions(widget)
+                true
+            }
+            host.addView(widget, FrameLayout.LayoutParams(-1, dp(220)).apply {
+                leftMargin = dp(6)
+                rightMargin = dp(6)
+                topMargin = dp(6)
+                bottomMargin = dp(6)
             })
         }
+        if (widgetController.views().isEmpty()) {
+            host.addView(TextView(context).apply {
+                text = "Long-press here to add a widget"
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(themeMuted)
+                setOnClickListener { hostActivity?.let { widgetController.pickWidget(it) } }
+            }, FrameLayout.LayoutParams(-1, dp(56)))
+        }
+    }
+
+    private fun widgetOptions(widget: android.appwidget.AppWidgetHostView) {
+        val id = widget.appWidgetId
+        AlertDialog.Builder(context)
+            .setTitle("Widget")
+            .setItems(arrayOf("Resize: compact", "Resize: medium", "Resize: large", "Remove widget")) { _, which ->
+                when (which) {
+                    0 -> widget.updateAppWidgetSize(120, 80)
+                    1 -> widget.updateAppWidgetSize(300, 160)
+                    2 -> widget.updateAppWidgetSize(420, 240)
+                    3 -> widgetController.remove(id)
+                }
+                rebuild()
+            }.show()
     }
 
     private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
