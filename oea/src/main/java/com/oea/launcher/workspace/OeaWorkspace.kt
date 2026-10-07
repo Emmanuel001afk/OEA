@@ -521,7 +521,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun launchOeaTool(screen: String?) {
         runCatching {
             val intent = Intent(context, com.oea.launcher.OeaSystemToolsActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             if (screen != null) intent.putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, screen)
             (hostActivity ?: context).startActivity(intent)
         }.onFailure {
@@ -530,7 +530,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openPhone() {
-        runCatching { (hostActivity ?: context).startActivity(Intent(context, com.oea.launcher.phone.OeaPhoneActivity::class.java)) }
+        runCatching { (hostActivity ?: context).startActivity(Intent(context, com.oea.launcher.phone.OeaPhoneActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }
             .onFailure { Toast.makeText(context, "OEA Phone could not be opened.", Toast.LENGTH_SHORT).show() }
     }
 
