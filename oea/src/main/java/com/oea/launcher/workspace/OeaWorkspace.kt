@@ -512,6 +512,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
         items.add(OeaWorkspaceStore.Item(key, app.packageName, app.className, page, cell!!))
         ws.replaceItems(items)
+        // An app has one home representation: moving it from a folder to Home
+        // removes its old folder membership instead of creating a duplicate.
+        ws.replaceFolders(
+            ws.folders()
+                .map { it.copy(members = it.members.filterNot { member -> member == key }) }
+                .filter { it.members.isNotEmpty() }
+        )
         ws.setCurrentPage(page)
         rebuild()
         pager.post { ensurePageRendered(page); pager.smoothScrollTo(page * pager.width, 0) }
