@@ -1472,7 +1472,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawer.setBackgroundColor(Color.TRANSPARENT)
     }
 
-    private fun loadOeaWallpaper() {
+    private fun loadOeaWallpaper(rebuildAfterLoad: Boolean = false) {
         val token = ++wallpaperLoadToken
         val uri = store.wallpaperUri()?.let(Uri::parse)
         wallpaperView.visibility = View.INVISIBLE
@@ -1491,13 +1491,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     wallpaperView.visibility = View.VISIBLE
                     wallpaperLightHint = isBitmapMostlyLight(result)
                     applyThemeFromWallpaper()
-                    invalidate()
+                    if (rebuildAfterLoad) rebuild() else invalidate()
                 } else {
                     if (uri != null) store.setWallpaperUri(null)
                     wallpaperView.setImageDrawable(null)
                     wallpaperView.visibility = View.VISIBLE
                     wallpaperLightHint = null
                     applyThemeFromWallpaper()
+                    if (rebuildAfterLoad) rebuild()
                 }
             }
         }.start()
