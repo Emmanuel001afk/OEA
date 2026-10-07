@@ -79,7 +79,7 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Hidden apps", hiddenCount() + " hidden") { hiddenAppsDialog() }
 
         section(box, "APP CONTROL")
-        val lockStatus = if (OeaAppLockStore.hasPin(this@OeaSystemToolsActivity)) "PIN configured • choose protected apps" else "No PIN yet • configure protection"
+        val lockStatus = if (OeaAppLockStore.hasPin(applicationContext)) "PIN configured • choose protected apps" else "No PIN yet • configure protection"
         row(box, "App Lock", lockStatus) { openAppLockSettings() }
         row(box, "App Freezer", freezerStatus()) { showFreezer() }
 
