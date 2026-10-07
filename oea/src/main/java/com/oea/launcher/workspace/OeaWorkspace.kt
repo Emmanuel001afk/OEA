@@ -1143,15 +1143,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         return n
     }
     private fun launch(app: OeaAppInfo) {
-        runCatching {
-            context.startActivity(Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
-                component = ComponentName(app.packageName, app.className)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
-            store.recordLaunch(app.packageName, app.className)
-        }.onFailure {
-            Toast.makeText(context, "Unable to open " + app.label, Toast.LENGTH_SHORT).show()
+        unlockForLaunch(app) {
+            runCatching {
+                (hostActivity ?: context).startActivity(Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    component = ComponentName(app.packageName, app.className)
+                })
+                store.recordLaunch(app.packageName, app.className)
+            }.onFailure {
+                Toast.makeText(context, "Unable to open " + app.label, Toast.LENGTH_SHORT).show()
+            }
         }
     }
     private fun icon(pkg: String): Drawable? = iconController.icon(pkg)
