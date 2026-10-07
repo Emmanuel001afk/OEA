@@ -264,7 +264,7 @@ class OeaSystemToolsActivity : Activity() {
         setPadding(24, 28, 24, 32)
         setBackgroundColor(backgroundColor())
         addView(TextView(this@OeaSystemToolsActivity).apply {
-            text = title; textSize = 29f; setTextColor(Color.WHITE); setTypeface(typeface, android.graphics.Typeface.BOLD)
+            text = title; textSize = 29f; setTextColor(textColor()); setTypeface(typeface, android.graphics.Typeface.BOLD)
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 6 })
         addView(TextView(this@OeaSystemToolsActivity).apply {
             text = subtitle; textSize = 14f; setTextColor(mutedColor())
@@ -285,9 +285,9 @@ class OeaSystemToolsActivity : Activity() {
             setBackgroundColor(surfaceColor())
             isClickable = true
             setOnClickListener { action() }
-            addView(TextView(this@OeaSystemToolsActivity).apply { text = title; textSize = 16f; setTextColor(Color.WHITE) })
+            addView(TextView(this@OeaSystemToolsActivity).apply { text = title; textSize = 16f; setTextColor(textColor()) })
             addView(TextView(this@OeaSystemToolsActivity).apply {
-                text = subtitle; textSize = 12f; setTextColor(Color.rgb(160, 170, 185)); maxLines = 2
+                text = subtitle; textSize = 12f; setTextColor(mutedColor()); maxLines = 2
             })
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 9 })
     }
