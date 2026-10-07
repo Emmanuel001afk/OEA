@@ -65,6 +65,19 @@ class OeaGameBoostService : Service() {
     private fun showOverlay(packageName: String) {
         if (overlay != null) return
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val root = android.widget.FrameLayout(this).apply {
+            setPadding(0, 0, 0, 0)
+        }
+        val pill = TextView(this).apply {
+            text = "OEA"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 11f
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xEE202124.toInt())
+                cornerRadius = 999f
+            }
+        }
         val panel = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(18, 12, 18, 12)
@@ -72,21 +85,27 @@ class OeaGameBoostService : Service() {
                 setColor(0xEE202124.toInt())
                 cornerRadius = 28f
             }
+            visibility = View.GONE
         }
         val title = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 12f
-            text = "OEA"
-            setPadding(0, 0, 0, 6)
+            text = "OEA Game Boost"
         }
         val status = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 11f
             text = packageName.substringAfterLast('.') + " • RAM"
+            setPadding(0, 6, 0, 8)
+        }
+        val focus = TextView(this).apply {
+            setTextColor(0xFFB9C7FF.toInt())
+            textSize = 10f
+            text = "Game focus active"
+            setPadding(0, 0, 0, 8)
         }
         val controls = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
-            visibility = View.GONE
         }
         val dnd = TextView(this).apply {
             text = if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("dnd", true)) "DND ON" else "DND OFF"
@@ -111,16 +130,22 @@ class OeaGameBoostService : Service() {
         controls.addView(close)
         panel.addView(title)
         panel.addView(status)
+        panel.addView(focus)
         panel.addView(controls)
-        panel.setOnClickListener { controls.visibility = if (controls.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        root.addView(panel, android.widget.FrameLayout.LayoutParams(dp(230), -2))
+        root.addView(pill, android.widget.FrameLayout.LayoutParams(dp(48), dp(48), Gravity.END))
+        pill.setOnClickListener { panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        root.setOnClickListener { }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.END; x = 12; y = 96 }
-        runCatching { wm.addView(panel, params); overlay = panel }
+        runCatching { wm.addView(root, params); overlay = root }
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun restoreDnd() {
         val nm = getSystemService(NotificationManager::class.java)
@@ -129,14 +154,16 @@ class OeaGameBoostService : Service() {
     }
 
     private fun updateOverlay() {
-        val panel = overlay as? android.widget.LinearLayout ?: return
+        val root = overlay as? android.widget.FrameLayout ?: return
+        val panel = root.getChildAt(0) as? android.widget.LinearLayout ?: return
         val status = panel.getChildAt(1) as? TextView ?: return
         val info = ActivityManager.MemoryInfo()
         getSystemService(ActivityManager::class.java).getMemoryInfo(info)
         val used = (info.totalMem - info.availMem) / (1024.0 * 1024.0)
         val total = info.totalMem / (1024.0 * 1024.0)
-        status.text = String.format(Locale.US, "%s • RAM %.0f / %.0f MB • tap controls",
-            activeGame?.substringAfterLast('.') ?: "game", used, total)
+        val state = if (info.lowMemory) " • LOW" else ""
+        status.text = String.format(Locale.US, "%s • RAM %.0f / %.0f MB%s",
+            activeGame?.substringAfterLast('.') ?: "game", used, total, state)
     }
 
     private fun removeOverlay() { overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }; overlay = null }
