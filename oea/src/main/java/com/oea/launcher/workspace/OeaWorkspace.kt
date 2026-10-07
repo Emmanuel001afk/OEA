@@ -968,14 +968,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         background = ColorDrawable(Color.TRANSPARENT)
         setOnClickListener { openFolder(folder) }
         setOnLongClickListener { showFolderRename(folder); true }
-        val preview = GridLayout(context).apply { columnCount = 2 }
+        val preview = GridLayout(context).apply {
+            columnCount = 2
+            useDefaultMargins = false
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = rounded(themeSurface, 16)
+        }
         folder.members.mapNotNull(::find).take(4).forEach { app ->
             preview.addView(ImageView(context).apply {
                 setImageDrawable(icon(app.packageName))
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, GridLayout.LayoutParams().apply {
                 width = dp(22); height = dp(22)
-                setMargins(dp(2), dp(2), dp(2), dp(2))
+                setMargins(dp(1), dp(1), dp(1), dp(1))
             })
         }
         addView(preview, LinearLayout.LayoutParams(dp(56), dp(56)))
