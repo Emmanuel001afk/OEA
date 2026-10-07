@@ -57,6 +57,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val drawerSearch = EditText(context)
     private val search = EditText(context)
     private val dots = TextView(context)
+    private val dockIndicator = TextView(context)
     private val wallpaperView = ImageView(context)
     private val homeRoot = LinearLayout(context)
     private lateinit var homeHeader: View
@@ -165,6 +166,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         dots.gravity = Gravity.CENTER
         dots.setTextColor(themeMuted)
         root.addView(dots, LinearLayout.LayoutParams(-1, dp(22)))
+        dockIndicator.gravity = Gravity.CENTER
+        dockIndicator.setTextColor(themeMuted)
+        dockIndicator.textSize = 10f
+        dockIndicator.setOnClickListener {
+            if (ws.dockPageCount() > 1) {
+                val next = (ws.currentDockPage() + 1) % ws.dockPageCount()
+                ws.setCurrentDockPage(next)
+                renderDock()
+            }
+        }
+        root.addView(dockIndicator, LinearLayout.LayoutParams(-1, dp(16)))
         dock.columnCount = OeaWorkspaceStore.DOCK_SLOTS
         dock.setUseDefaultMargins(false)
         dock.setPadding(dp(2), dp(2), dp(2), dp(2))
@@ -1129,7 +1141,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openFolder(folder: OeaWorkspaceStore.Folder) {
-        val box = LinearLayout(context).apply {
+        val activity = hostActivity ?: run {\n            Toast.makeText(context, "OEA Home is not ready for folders.", Toast.LENGTH_SHORT).show()\n            return\n        }\n        val box = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(14), dp(18), dp(8))
             background = rounded(themeSurface, 24)
@@ -1152,7 +1164,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             })
         }
         box.addView(grid, LinearLayout.LayoutParams(-1, -2))
-        val dialog = AlertDialog.Builder(hostActivity ?: context).setView(box)
+        val dialog = AlertDialog.Builder(activity).setView(box)
             .setNeutralButton("Rename") { _, _ -> showFolderRename(folder) }
             .setPositiveButton("Done", null).create()
         dialog.setOnShowListener {
@@ -1163,8 +1175,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
-        val input = EditText(context).apply { setSingleLine(true); setText(folder.title); setSelection(text.length) }
-        AlertDialog.Builder(hostActivity ?: context).setTitle("Rename folder").setView(input)
+        val activity = hostActivity ?: run {\n            Toast.makeText(context, "OEA Home is not ready for folder editing.", Toast.LENGTH_SHORT).show()\n            return\n        }\n        val input = EditText(activity).apply { setSingleLine(true); setText(folder.title); setSelection(text.length) }
+        AlertDialog.Builder(activity).setTitle("Rename folder").setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
                 val title = input.text.toString().trim().ifBlank { "Folder" }
@@ -1227,24 +1239,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 columnSpec = GridLayout.spec(slot, 1, 1f)
             })
         }
-        dock.setOnTouchListener(OeaGestureController(
-            dock,
-            onSwipeLeft = {
-                if (ws.currentDockPage() + 1 < ws.dockPageCount()) {
-                    ws.setCurrentDockPage(ws.currentDockPage() + 1)
-                    renderDock()
-                }
-            },
-            onSwipeRight = {
-                if (ws.currentDockPage() > 0) {
-                    ws.setCurrentDockPage(ws.currentDockPage() - 1)
-                    renderDock()
-                }
-            },
-        ))
-        dock.contentDescription = if (ws.dockPageCount() > 1)
-            "Dock page ${page + 1} of ${ws.dockPageCount()}. Swipe left or right for more dock pages."
-        else "Dock"
+        dockIndicator.text = if (ws.dockPageCount() > 1)\n            List(ws.dockPageCount()) { if (it == page) "●" else "•" }.joinToString(" ")\n        else ""\n        dockIndicator.contentDescription = if (ws.dockPageCount() > 1)\n            "Dock page " + (page + 1) + " of " + ws.dockPageCount() + ". Tap to switch pages."\n        else "Dock"\n        dock.contentDescription = "Dock page " + (page + 1) + " of " + ws.dockPageCount()
     }
 
     private fun nextPage() {
