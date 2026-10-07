@@ -1624,7 +1624,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
         section("LAYOUT")
         action("Grid", store.gridColumns().toString() + " columns") { gridDialogFromHomeMenu() }
-        action("Add page", "Create another home page") { ws.setPages(ws.pages() + 1); rebuild() }
+        action("Add page", "Create another home page") {
+            if (ws.pages() < OeaWorkspaceStore.MAX_PAGES) {
+                ws.setPages(ws.pages() + 1)
+                rebuild()
+            } else {
+                Toast.makeText(context, "OEA has reached the maximum home pages.", Toast.LENGTH_SHORT).show()
+            }
+        }
         if (ws.pages() > 1) action("Remove last page", "Removes only the last page") { removeLastPage() }
         action("Add widget", "Open the Android widget picker") {
             hostActivity?.let { widgetController.pickWidget(it, ws.getCurrentPage()) }
