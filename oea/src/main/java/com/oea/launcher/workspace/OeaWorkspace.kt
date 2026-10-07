@@ -283,7 +283,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 clipChildren = true
                 tag = "widgets"
                 setOnLongClickListener {
-                    hostActivity?.let { widgetController.pickWidget(it, ws.getCurrentPage()) }
+                    hostActivity?.let { widgetController.pickWidget(it, p) }
                     true
                 }
                 setOnDragListener { host, event ->
