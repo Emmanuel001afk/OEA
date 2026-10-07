@@ -107,12 +107,21 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun showFreezer() {
-        val box = base("App Freezer", "True package suspension requires OEA to be the Android device owner.")
-        val dpm = getSystemService(DevicePolicyManager::class.java)
-        val owner = dpm?.isDeviceOwnerApp(packageName) == true
-        row(box, if (owner) "Authority active" else "Authority required",
-            if (owner) "OEA can suspend and restore packages." else "Normal Device Admin cannot grant package-suspension authority.") {
-            if (!owner) requestDeviceOwner()
+        val box = base("App Freezer", "OEA uses Android package suspension when device-owner authority is available, with root as a fallback.")
+        OeaAppFreezer.syncActualState(this)
+        val backend = OeaAppFreezer.backend(this)
+        val authorityTitle = when (backend) {
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "Device-owner authority active"
+            OeaAppFreezer.Backend.ROOT -> "Root authority active"
+            OeaAppFreezer.Backend.NONE -> "Freezer authority required"
+        }
+        val authoritySubtitle = when (backend) {
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "Android package suspension is available."
+            OeaAppFreezer.Backend.ROOT -> "OEA can use root package suspension."
+            OeaAppFreezer.Backend.NONE -> "No real suspension authority is available on this device."
+        }
+        row(box, authorityTitle, authoritySubtitle) {
+            if (backend == OeaAppFreezer.Backend.NONE) requestDeviceOwner()
         }
         addDivider(box)
         val frozen = OeaAppFreezer.frozenPackages(this)
@@ -196,8 +205,10 @@ class OeaSystemToolsActivity : Activity() {
             .setPositiveButton("Launch") { _, _ ->
                 val picked = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }
                 if (picked.size != 2) Toast.makeText(this, "Choose two apps first.", Toast.LENGTH_SHORT).show()
-                else if (!OeaSplitLauncher.launchPair(this, picked[0], picked[1]))
-                    Toast.makeText(this, "Android could not start the pair in split screen.", Toast.LENGTH_LONG).show()
+                else {
+                    val result = OeaSplitLauncher.launchPair(this, picked[0], picked[1])
+                    if (!result.success) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                }
             }.show()
     }
 
@@ -451,7 +462,11 @@ class OeaSystemToolsActivity : Activity() {
 
     private fun freezerStatus(): String {
         val dpm = getSystemService(DevicePolicyManager::class.java)
-        return if (dpm?.isDeviceOwnerApp(packageName) == true) "Authority active" else "Authority not provisioned"
+        return when (OeaAppFreezer.backend(this)) {
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "Device-owner authority active"
+            OeaAppFreezer.Backend.ROOT -> "Root authority active"
+            OeaAppFreezer.Backend.NONE -> "No freezer authority"
+        }
     }
 
     private fun blockerStatus(): String {
