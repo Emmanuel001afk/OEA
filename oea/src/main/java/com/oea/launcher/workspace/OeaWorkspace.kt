@@ -240,6 +240,30 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     hostActivity?.let { widgetController.pickWidget(it) }
                     true
                 }
+                setOnDragListener { host, event ->
+                    when (event.action) {
+                        DragEvent.ACTION_DRAG_STARTED -> true
+                        DragEvent.ACTION_DROP -> {
+                            val sourceId = (event.clipDescription?.let { event.clipData }?.getItemAt(0)?.text?.toString()?.toIntOrNull())
+                            if (sourceId != null) {
+                                var targetId: Int? = null
+                                for (i in 0 until host.childCount) {
+                                    val child = host.getChildAt(i)
+                                    if (child is android.appwidget.AppWidgetHostView && event.x >= child.left && event.x <= child.right &&
+                                        event.y >= child.top && event.y <= child.bottom) {
+                                        targetId = child.appWidgetId
+                                        break
+                                    }
+                                }
+                                widgetController.moveBefore(sourceId, targetId)
+                                rebuild()
+                            }
+                            true
+                        }
+                        DragEvent.ACTION_DRAG_ENDED -> false
+                        else -> false
+                    }
+                }
             }
             pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
             pageScroll.addView(pageContent, FrameLayout.LayoutParams(-1, -2))
@@ -1455,9 +1479,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         host.removeAllViews()
         widgetController.views().forEach { widget ->
             widget.isLongClickable = true
+            widget.tag = widget.appWidgetId
             widget.setOnLongClickListener {
-                widgetOptions(widget)
-                true
+                val data = ClipData.newPlainText("OEA widget", widget.appWidgetId.toString())
+                startDragAndDrop(data, View.DragShadowBuilder(widget), widget.appWidgetId, View.DRAG_FLAG_GLOBAL)
             }
             host.addView(widget, FrameLayout.LayoutParams(-1, dp(220)).apply {
                 leftMargin = dp(6)
