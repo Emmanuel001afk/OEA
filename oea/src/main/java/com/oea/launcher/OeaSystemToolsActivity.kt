@@ -79,7 +79,8 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Hidden apps", hiddenCount() + " hidden") { hiddenAppsDialog() }
 
         section(box, "APP CONTROL")
-        row(box, "App Lock", if (OeaAppLockStore.hasPin(this)) "PIN configured • choose protected apps" else "No PIN yet • configure protection") { openAppLockSettings() }
+        val lockStatus = if (OeaAppLockStore.hasPin(this@OeaSystemToolsActivity)) "PIN configured • choose protected apps" else "No PIN yet • configure protection"
+        row(box, "App Lock", lockStatus) { openAppLockSettings() }
         row(box, "App Freezer", freezerStatus()) { showFreezer() }
 
         section(box, "PHONE & PERFORMANCE")
@@ -434,7 +435,9 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun notificationStatus(): String {
-        val enabled = android.service.notification.NotificationListenerService.getEnabledListenerPackages(this).contains(packageName)
+        val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            ?.split(":")
+            ?.any { it.startsWith(packageName + "/") } == true
         return if (enabled) "Enabled" else "Disabled • tap to grant Android access"
     }
 
