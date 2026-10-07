@@ -76,7 +76,7 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "App labels", if (dataStore.showAppLabels()) "Shown under app icons" else "Hidden") {
             dataStore.setShowAppLabels(!dataStore.showAppLabels()); showSettings()
         }
-        row(box, "Hidden apps", hiddenCount() + " hidden") { hiddenAppsDialog() }
+        row(box, "Hidden apps", hiddenCount().toString() + " hidden") { hiddenAppsDialog() }
 
         section(box, "APP CONTROL")
         val lockStatus = "Configure which OEA apps require a PIN"
