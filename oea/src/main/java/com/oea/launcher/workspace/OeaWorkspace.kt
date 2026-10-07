@@ -158,9 +158,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         dots.setTextColor(themeMuted)
         root.addView(dots, LinearLayout.LayoutParams(-1, dp(22)))
         dock.columnCount = OeaWorkspaceStore.DOCK_SLOTS
-        dock.setPadding(dp(4), dp(2), dp(4), dp(2))
+        dock.setUseDefaultMargins(false)
+        dock.setPadding(dp(2), dp(2), dp(2), dp(2))
         dock.setOnDragListener { _, e -> dockDrop(e) }
-        root.addView(dock, LinearLayout.LayoutParams(-1, dp(64)))
+        root.addView(dock, LinearLayout.LayoutParams(-1, dp(72)))
 
         buildDrawer()
         widgetController.start()
@@ -654,7 +655,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerBody.removeAllViews()
         val visible = drawerController.filter(apps, query)
             .filterNot { store.isHidden(it.packageName, it.className) }
-        if (query.isBlank()) renderFocusStrip()
+        if (query.isBlank()) { renderFocusStrip(); renderOeaTools() }
         addSectionLabel(drawerBody, "Apps · " + visible.size)
         when (store.drawerMode()) {
             OeaDataStore.DrawerMode.VERTICAL -> {
@@ -773,7 +774,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun appStrip(values: List<OeaAppInfo>): HorizontalScrollView {
         val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
-        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        val row = GridLayout(context).apply { columnCount = 3; useDefaultMargins = false }
         values.forEach { app ->
             row.addView(tile(app), LinearLayout.LayoutParams(dp(78), dp(88)).apply {
                 setMargins(dp(3), dp(3), dp(3), dp(3))
@@ -798,11 +799,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         listOf(
             "⚙" to "OEA Settings",
             "❄" to "App Freezer",
-            "☎" to "Call Blocker",
+            "☎" to "Phone & Calls",
+            "⛔" to "Call Blocker",
             "🎮" to "Game Boost",
             "▣" to "Multitask",
             "▤" to "Split Screen",
-        ).forEach { (iconText, title) ->
+        ).forEachIndexed { index, (iconText, title) ->
             row.addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -831,11 +833,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setTextColor(themeText)
                     maxLines = 2
                 }, LinearLayout.LayoutParams(-1, dp(32)))
-            }, LinearLayout.LayoutParams(0, dp(82), 1f).apply {
+            }, GridLayout.LayoutParams().apply {
+                width = 0
+                height = dp(84)
+                columnSpec = GridLayout.spec(index % 3, 1, 1f)
+                rowSpec = GridLayout.spec(index / 3)
                 setMargins(dp(3), dp(3), dp(3), dp(8))
             })
         }
-        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(94)))
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(184)))
     }
 
     private fun drawerRow(app: OeaAppInfo): View {
@@ -924,7 +930,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 alpha = if (OeaAppFreezer.frozenPackages(context).contains(app.packageName)) 0.45f else 1f
                 setPadding(0, 0, 0, 0)
             }
-            addView(iconView, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
+            addView(iconView, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER))
             val count = OeaNotificationState.countForPackage(app.packageName)
             if (count > 0) {
                 addView(TextView(context).apply {
@@ -1028,6 +1034,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun suggestFolderName(keys: List<String>): String {
         val labels = keys.mapNotNull(::find).map { (it.label + " " + it.packageName).lowercase() }
         return when {
+            labels.any { it.contains("ai") || it.contains("deepseek") || it.contains("claude") || it.contains("anthropic") || it.contains("openai") || it.contains("chatgpt") || it.contains("gemini") || it.contains("copilot") || it.contains("perplexity") } -> "AI"
             labels.any { it.contains("game") || it.contains("pubg") || it.contains("free fire") || it.contains("codm") } -> "Games"
             labels.any { it.contains("music") || it.contains("spotify") || it.contains("sound") } -> "Music"
             labels.any { it.contains("chat") || it.contains("whatsapp") || it.contains("telegram") || it.contains("messenger") } -> "Social"
@@ -1107,7 +1114,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
             dock.addView(v, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(58)
+                height = dp(68)
                 columnSpec = GridLayout.spec(slot, 1, 1f)
             })
         }
