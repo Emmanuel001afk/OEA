@@ -1090,6 +1090,95 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }.setNegativeButton("Cancel", null).show()
     }
 
+    private fun openHiddenAppsSettings() {
+        val hiddenApps = apps.filter { store.isHidden(it.packageName, it.className) }
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        box.addView(TextView(context).apply {
+            text = if (hiddenApps.isEmpty()) "No hidden apps." else "Hidden apps (" + hiddenApps.size + ")"
+            textSize = 16f
+            setTextColor(themeText)
+        })
+        hiddenApps.forEach { app ->
+            box.addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                addView(ImageView(context).apply {
+                    setImageDrawable(icon(app.packageName))
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }, LinearLayout.LayoutParams(dp(42), dp(42)))
+                addView(TextView(context).apply {
+                    text = app.label
+                    textSize = 15f
+                    setTextColor(themeText)
+                }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                addView(Button(context).apply {
+                    text = "Unhide"
+                    setOnClickListener {
+                        store.setHidden(app.packageName, app.className, false)
+                        rebuild()
+                        renderDrawer(drawerSearch.text.toString())
+                        openHiddenAppsSettings()
+                    }
+                }, LinearLayout.LayoutParams(-2, dp(48)))
+            }, LinearLayout.LayoutParams(-1, dp(52)))
+        }
+        AlertDialog.Builder(context).setTitle("Hidden apps").setView(box)
+            .setPositiveButton("Done", null).show()
+    }
+
+    private fun openFreezerSettings() {
+        val choices = apps.filterNot { it.packageName == context.packageName }
+        val frozen = OeaAppFreezer.frozenPackages(context)
+        val checked = BooleanArray(choices.size) { frozen.contains(choices[it].packageName) }
+        AlertDialog.Builder(context).setTitle("App Freezer")
+            .setMultiChoiceItems(choices.map { app ->
+                if (frozen.contains(app.packageName)) "❄ " + app.label + "  •  FROZEN" else app.label
+            }.toTypedArray(), checked) { _, which, value ->
+                val result = OeaAppFreezer.setFrozen(context, choices[which].packageName, value)
+                if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                else checked[which] = value
+            }
+            .setNeutralButton("Authority") { _, _ -> openDeviceAdminSettings() }
+            .setPositiveButton("Done", null).show()
+    }
+
+    private fun openAppLockSettings() {
+        val choices = apps.filterNot { it.packageName == context.packageName }
+        val checked = BooleanArray(choices.size) {
+            OeaAppLockStore.isLocked(context, OeaWorkspaceStore.key(choices[it].packageName, choices[it].className))
+        }
+        AlertDialog.Builder(context).setTitle("OEA App Lock")
+            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { _, which, value ->
+                if (value && !OeaAppLockStore.hasPin(context)) {
+                    Toast.makeText(context, "Set a PIN first from Lock app.", Toast.LENGTH_LONG).show()
+                    checked[which] = false
+                } else {
+                    OeaAppLockStore.setLocked(context, OeaWorkspaceStore.key(choices[which].packageName, choices[which].className), value)
+                    checked[which] = value
+                }
+            }
+            .setNeutralButton("Set PIN") { _, _ -> setAppLockPin() }
+            .setPositiveButton("Done", null).show()
+    }
+
+    private fun setAppLockPin() {
+        val input = EditText(context).apply {
+            hint = "4-8 digit PIN"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(context).setTitle("Set OEA App Lock PIN").setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val pin = input.text.toString()
+                if (pin.length in 4..8) OeaAppLockStore.setPin(context, pin)
+                else Toast.makeText(context, "PIN must be 4-8 digits.", Toast.LENGTH_SHORT).show()
+            }.show()
+    }
+
     private fun openNotificationAccessSettings() {
         runCatching { hostActivity?.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
     }
@@ -1107,6 +1196,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Wallpaper")
             menu.add("Notification access")
             menu.add("OEA Focus apps")
+            menu.add("Hidden apps")
+            menu.add("App Freezer")
+            menu.add("App Lock")
+            menu.add("Call Blocker")
+            menu.add("Game Boost")
+            menu.add("Split Screen")
             menu.add(if (store.showMostUsed()) "Hide most-used apps" else "Show most-used apps")
             menu.add("Icon shape")
             menu.add("OEA Systems")
@@ -1123,6 +1218,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Wallpaper" -> openWallpaperChooser()
                     "Notification access" -> openNotificationAccessSettings()
                     "OEA Focus apps" -> openFocusSettings()
+                    "Hidden apps" -> openHiddenAppsSettings()
+                    "App Freezer" -> openFreezerSettings()
+                    "App Lock" -> openAppLockSettings()
+                    "Call Blocker" -> openCallBlockerSettings()
+                    "Game Boost" -> openGameBoostSettings()
+                    "Split Screen" -> openSplitPairDialog()
                     "Hide most-used apps" -> { store.setShowMostUsed(false); renderDrawer(drawerSearch.text.toString()) }
                     "Show most-used apps" -> { store.setShowMostUsed(true); renderDrawer(drawerSearch.text.toString()) }
                     "Icon shape" -> openIconShapeSettings()
