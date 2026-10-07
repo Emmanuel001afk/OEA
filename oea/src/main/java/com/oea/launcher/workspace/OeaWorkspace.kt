@@ -389,8 +389,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val values = ws.dock().filterNot { it == key }.toMutableList()
         values.add(key)
         ws.setDock(values)
-        ws.replaceItems(ws.items().filterNot { it.id == key })
         val affectedPage = ws.items().firstOrNull { it.id == key }?.page
+        ws.replaceItems(ws.items().filterNot { it.id == key })
         ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
         if (affectedPage != null) refreshPages(affectedPage) else renderDock()
     }
@@ -1225,7 +1225,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val target = (ws.getCurrentPage() - 1).coerceAtLeast(0)
         if (target == ws.getCurrentPage()) return
         ws.setCurrentPage(target)
-        pager.post { pager.smoothScrollTo(target * pager.width, 0) }
+        pager.post { ensurePageRendered(target); pager.smoothScrollTo(target * pager.width, 0) }
         dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
     }
 
