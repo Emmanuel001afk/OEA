@@ -575,8 +575,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setTitle("OEA Multitask")
             .setMessage("Choose an app to open as a floating task over the current app. OEA uses a sensible starting size and does not add a manual drag-to-size control.")
             .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
-                if (!OeaMultitaskLauncher.launchFloating(context, choices[which])) {
-                    Toast.makeText(context, "Android could not open that app as a floating task on this device.", Toast.LENGTH_LONG).show()
+                val result = OeaMultitaskLauncher.launchFloating(context, choices[which])
+                if (!result.success) {
+                    Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -598,8 +599,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Launch") { _, _ ->
                 val picked = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }
-                if (picked.size == 2 && !OeaSplitLauncher.launchPair(context, picked[0], picked[1]))
-                    Toast.makeText(context, "Android could not start the pair in split screen.", Toast.LENGTH_LONG).show()
+                if (picked.size == 2) {
+                    val result = OeaSplitLauncher.launchPair(context, picked[0], picked[1])
+                    if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                }
             }.show()
     }
 
