@@ -1284,55 +1284,97 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun menu(anchor: View) {
-        PopupMenu(context, anchor).apply {
-            menu.add("Add page")
-            if (ws.pages() > 1) menu.add("Remove last page")
-            menu.add("Grid: 3 columns")
-            menu.add("Grid: 4 columns")
-            menu.add("Grid: 5 columns")
-            menu.add("Show / hide labels")
-            menu.add("OEA Themes")
-            menu.add("Add widget")
-            menu.add("Wallpaper")
-            menu.add("Notification access")
-            menu.add("OEA Focus apps")
-            menu.add("Hidden apps")
-            menu.add("App Freezer")
-            menu.add("App Lock")
-            menu.add("Phone & Calls")
-            menu.add("Call Blocker")
-            menu.add("Game Boost")
-            menu.add("Multitask")
-            menu.add("Split Screen")
-            menu.add(if (store.showMostUsed()) "Hide most-used apps" else "Show most-used apps")
-            setOnMenuItemClickListener {
-                when (it.title.toString()) {
-                    "Add page" -> { ws.setPages(ws.pages() + 1); rebuild() }
-                    "Remove last page" -> removeLastPage()
-                    "Grid: 3 columns" -> { store.setGridColumns(3); rebuild() }
-                    "Grid: 4 columns" -> { store.setGridColumns(4); rebuild() }
-                    "Grid: 5 columns" -> { store.setGridColumns(5); rebuild() }
-                    "Show / hide labels" -> { store.setShowAppLabels(!store.showAppLabels()); rebuild() }
-                    "OEA Themes" -> openThemeSettings()
-                    "Add widget" -> hostActivity?.let { widgetController.pickWidget(it) } ?: Toast.makeText(context, "OEA Home is not attached to an Activity.", Toast.LENGTH_SHORT).show()
-                    "Wallpaper" -> openWallpaperChooser()
-                    "Notification access" -> openNotificationAccessSettings()
-                    "OEA Focus apps" -> openFocusSettings()
-                    "Hidden apps" -> openHiddenAppsSettings()
-                    "App Freezer" -> openFreezerSettings()
-                    "App Lock" -> openAppLockSettings()
-                    "Phone & Calls" -> openPhone()
-                    "Call Blocker" -> openCallBlockerSettings()
-                    "Game Boost" -> openGameBoostSettings()
-                    "Multitask" -> openMultitaskDialog()
-                    "Split Screen" -> openSplitPairDialog()
-                    "Hide most-used apps" -> { store.setShowMostUsed(false); renderDrawer(drawerSearch.text.toString()) }
-                    "Show most-used apps" -> { store.setShowMostUsed(true); renderDrawer(drawerSearch.text.toString()) }
-                }
-                true
-            }
-            show()
+        val scroll = ScrollView(context)
+        val body = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(12))
         }
+        fun section(title: String) {
+            body.addView(TextView(context).apply {
+                text = title
+                textSize = 12f
+                setTextColor(themeMuted)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(0, dp(12), 0, dp(6))
+            })
+        }
+        fun action(title: String, subtitle: String = "", onClick: () -> Unit) {
+            body.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                background = rounded(themeSurface, 14)
+                isClickable = true
+                setOnClickListener { onClick() }
+                addView(TextView(context).apply {
+                    text = title
+                    textSize = 15f
+                    setTextColor(themeText)
+                })
+                if (subtitle.isNotBlank()) addView(TextView(context).apply {
+                    text = subtitle
+                    textSize = 11f
+                    setTextColor(themeMuted)
+                    maxLines = 2
+                })
+            }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+        }
+
+        section("LAYOUT")
+        action("Grid", store.gridColumns().toString() + " columns") { gridDialogFromHomeMenu() }
+        action("Add page", "Create another home page") { ws.setPages(ws.pages() + 1); rebuild() }
+        if (ws.pages() > 1) action("Remove last page", "Removes only the last page") { removeLastPage() }
+        action("Add widget", "Open the Android widget picker") {
+            hostActivity?.let { widgetController.pickWidget(it) }
+                ?: Toast.makeText(context, "OEA Home is not attached to an Activity.", Toast.LENGTH_SHORT).show()
+        }
+
+        section("APPEARANCE")
+        action("Labels", if (store.showAppLabels()) "Shown under app icons" else "Hidden") {
+            store.setShowAppLabels(!store.showAppLabels()); rebuild()
+        }
+        action("Theme", "System / wallpaper, dark, or light") { openThemeSettings() }
+        action("Wallpaper", "Change the OEA wallpaper") { openWallpaperChooser() }
+
+        section("APPS")
+        action("Hidden apps", store.hiddenApps().size.toString() + " hidden") { openHiddenAppsSettings() }
+        action("Most used", if (store.showMostUsed()) "Shown after repeated launches" else "Hidden") {
+            store.setShowMostUsed(!store.showMostUsed())
+            renderDrawer(drawerSearch.text.toString())
+        }
+
+        section("TOOLS")
+        action("OEA Settings", "Open the complete OEA settings screen") { openSystemsSettings() }
+        action("App Freezer", "Suspend apps only when OEA has device-owner authority") { openFreezerSettings() }
+        action("App Lock", "PIN-protect selected apps") { openAppLockSettings() }
+        action("Phone & Calls", "OEA dialer and call controls") { openPhone() }
+        action("Call Blocker", "Exact, prefix and suffix rules") { openCallBlockerSettings() }
+        action("Game Boost", "Game monitoring and in-game controls") { openGameBoostSettings() }
+        action("Multitask", "Floating task when Android/OEM supports freeform") { openMultitaskDialog() }
+        action("Split Screen", "Two apps in Android adjacent-window mode") { openSplitPairDialog() }
+
+        section("ANDROID ACCESS")
+        action("Notification access", "Required for notification badges and media integration") { openNotificationAccessSettings() }
+
+        scroll.addView(body)
+        AlertDialog.Builder(context)
+            .setTitle("OEA")
+            .setView(scroll)
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun gridDialogFromHomeMenu() {
+        val values = arrayOf("3 columns", "4 columns", "5 columns")
+        val current = (store.gridColumns() - 3).coerceIn(0, 2)
+        AlertDialog.Builder(context)
+            .setTitle("Home grid")
+            .setSingleChoiceItems(values, current) { dialog, which ->
+                store.setGridColumns(which + 3)
+                rebuild()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun removeLastPage() {
