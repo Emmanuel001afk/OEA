@@ -33,8 +33,12 @@
         <activity
             android:name=".OeaSystemToolsActivity"
             android:exported="false" />
-        <activity-alias android:name=".OeaSettings" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="OEA Settings" android:icon="@drawable/oea_logo">
-            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        <activity-alias android:name=".OeaSettings" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="OEA Additional Settings" android:icon="@drawable/oea_logo">
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.PREFERENCE" />
+            </intent-filter>
         </activity-alias>
         <activity-alias android:name=".OeaAppFreezer" android:targetActivity=".OeaSystemToolsActivity" android:exported="true" android:label="App Freezer" android:icon="@drawable/oea_logo">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
