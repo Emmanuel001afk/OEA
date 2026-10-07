@@ -855,24 +855,20 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
         isClickable = true
-        background = rounded(themeSurface, 18)
-        foreground = selectable()
+        background = ColorDrawable(Color.TRANSPARENT)
+        foreground = null
         contentDescription = "Open " + app.label
         setOnClickListener { launch(app) }
         addView(FrameLayout(context).apply {
             val iconView = ImageView(context).apply {
+                // Use the app's real launcher drawable as-is. OEA must not wrap, pad,
+                // clip, or paint a second rectangular/circular background around it.
                 setImageDrawable(icon(app.packageName))
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                clipToOutline = true
-                outlineProvider = object : android.view.ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: android.graphics.Outline) {
-                        if (store.iconShape() == "circle") outline.setOval(0, 0, view.width, view.height)
-                        else outline.setRoundRect(0, 0, view.width, view.height, dp(if (store.iconShape() == "square") 4 else 14).toFloat())
-                    }
-                }
-                setPadding(dp(3), dp(3), dp(3), dp(3))
+                adjustViewBounds = true
+                setPadding(0, 0, 0, 0)
             }
-            addView(iconView, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
+            addView(iconView, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
             val count = OeaNotificationState.countForPackage(app.packageName)
             if (count > 0) {
                 addView(TextView(context).apply {
@@ -886,7 +882,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setPadding(dp(3), 0, dp(3), 0)
                 }, FrameLayout.LayoutParams(-2, dp(18), Gravity.TOP or Gravity.END))
             }
-        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        }, LinearLayout.LayoutParams(dp(50), dp(50)))
         if (store.showAppLabels()) addView(TextView(context).apply {
             text = app.label
             textSize = 10.5f
@@ -1265,8 +1261,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Multitask")
             menu.add("Split Screen")
             menu.add(if (store.showMostUsed()) "Hide most-used apps" else "Show most-used apps")
-            menu.add("Icon shape")
-            menu.add("OEA Systems")
             setOnMenuItemClickListener {
                 when (it.title.toString()) {
                     "Add page" -> { ws.setPages(ws.pages() + 1); rebuild() }
@@ -1290,8 +1284,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Split Screen" -> openSplitPairDialog()
                     "Hide most-used apps" -> { store.setShowMostUsed(false); renderDrawer(drawerSearch.text.toString()) }
                     "Show most-used apps" -> { store.setShowMostUsed(true); renderDrawer(drawerSearch.text.toString()) }
-                    "Icon shape" -> openIconShapeSettings()
-                    "OEA Systems" -> openSystemsSettings()
                 }
                 true
             }
