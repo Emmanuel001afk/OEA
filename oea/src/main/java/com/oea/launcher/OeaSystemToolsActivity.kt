@@ -79,7 +79,7 @@ class OeaSystemToolsActivity : Activity() {
         addDivider(box)
         val frozen = OeaAppFreezer.frozenPackages(this)
         val candidates = linkedMapOf<String, String>()
-        apps.forEach { candidates[it.packageName] = it.label }
+        apps.filterNot { it.packageName == packageName }.forEach { candidates[it.packageName] = it.label }
         frozen.forEach { pkg ->
             if (!candidates.containsKey(pkg)) {
                 runCatching { candidates[pkg] = packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
