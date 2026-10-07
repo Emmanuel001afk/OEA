@@ -1098,8 +1098,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 val grid = view as GridLayout
                 val cw = (grid.width / cols()).coerceAtLeast(1)
                 val col = (e.x / cw).toInt().coerceIn(0, cols() - 1)
-                val row = (e.y / dp(96)).toInt().coerceAtLeast(0)
-                move(key, page, row * cols() + col)
+                val rowHeight = dp(90).coerceAtLeast(1)
+                val row = (e.y / rowHeight).toInt().coerceAtLeast(0)
+                val cell = row * cols() + col
+                val targetFolder = ws.folders().firstOrNull { it.page == page && it.cell == cell }
+                if (targetFolder != null) addToFolder(targetFolder.id, key) else move(key, page, cell)
                 true
             }
             DragEvent.ACTION_DRAG_ENDED -> { dragged = null; false }
@@ -1173,6 +1176,23 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ws.setDock(ws.dock().filterNot { it == source || it == target })
         dragged = null
         refreshPages(t.page)
+    }
+
+    private fun addToFolder(folderId: String, key: String) {
+        val folder = ws.folders().firstOrNull { it.id == folderId } ?: return
+        if (folder.members.contains(key)) {
+            dragged = null
+            return
+        }
+        val updated = folder.copy(
+            members = folder.members + key,
+            title = if (folder.title == "Folder") suggestFolderName(folder.members + key) else folder.title,
+        )
+        ws.replaceFolders(ws.folders().map { if (it.id == folderId) updated else it })
+        ws.replaceItems(ws.items().filterNot { it.id == key })
+        ws.setDock(ws.dock().filterNot { it == key })
+        dragged = null
+        refreshPages(folder.page)
     }
 
     private fun suggestFolderName(keys: List<String>): String {
