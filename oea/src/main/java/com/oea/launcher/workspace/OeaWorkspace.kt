@@ -1006,15 +1006,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun dockTile(app: OeaAppInfo) = FrameLayout(context).apply {
         isClickable = true
-        foreground = selectable()
+        foreground = null
         background = ColorDrawable(Color.TRANSPARENT)
         contentDescription = "Open " + app.label
         setOnClickListener { launch(app) }
         addView(ImageView(context).apply {
             setImageDrawable(icon(app.packageName))
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(dp(5), dp(5), dp(5), dp(5))
-        }, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
+            setPadding(0, 0, 0, 0)
+            adjustViewBounds = true
+        }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
     }
 
     private fun renderDock() {
