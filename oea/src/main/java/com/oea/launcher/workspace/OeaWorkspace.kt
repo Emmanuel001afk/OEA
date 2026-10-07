@@ -1484,7 +1484,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, widthDp)
             putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, heightDp)
         }
-        widget.updateAppWidgetSize(options)
+        widget.updateAppWidgetSize(options, widthDp, heightDp, widthDp, heightDp)
     }
 
     private fun widgetOptions(widget: android.appwidget.AppWidgetHostView) {
