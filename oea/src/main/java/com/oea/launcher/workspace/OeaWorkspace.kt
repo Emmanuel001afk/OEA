@@ -1,5 +1,6 @@
 package com.oea.launcher.workspace
 
+import android.app.Activity
 import android.app.AlertDialog
 import android.app.WallpaperManager
 import android.content.ClipData
@@ -60,11 +61,27 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val searchController = OeaSearchController(context)
     private val widgetController = OeaWidgetController(context)
     private var drawerOpen = false
+    private var hostActivity: Activity? = null
     private var dragged: String? = null
     private var themeBackground = Color.rgb(12, 15, 21)
     private var themeSurface = Color.rgb(30, 36, 49)
     private var themeText = Color.WHITE
     private var themeMuted = Color.rgb(154, 162, 177)
+
+    fun attachHost(activity: Activity?) {
+        hostActivity = activity
+        widgetController.setHostActivity(activity)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        widgetController.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        widgetController.stop()
+        super.onDetachedFromWindow()
+    }
 
     init {
         setBackgroundColor(themeBackground)
@@ -345,7 +362,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun openDeviceAdminSettings() {
         runCatching {
-            context.startActivity(
+            (hostActivity ?: context).startActivity(
                 Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                     .putExtra(
                         android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
@@ -971,7 +988,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setMessage("Wallpaper selection is handled by Android, while OEA keeps its own theme and launcher appearance.")
             .setPositiveButton("Choose wallpaper") { _, _ ->
                 runCatching {
-                    context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    hostActivity?.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) ?: throw IllegalStateException("OEA Home activity unavailable")
                 }.onFailure {
                     Toast.makeText(context, "Android wallpaper picker is unavailable.", Toast.LENGTH_SHORT).show()
                 }
@@ -981,7 +998,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openNotificationAccessSettings() {
-        runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        runCatching { hostActivity?.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
     }
 
     private fun menu(anchor: View) {
@@ -1009,7 +1026,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Grid: 5 columns" -> { store.setGridColumns(5); rebuild() }
                     "Show / hide labels" -> { store.setShowAppLabels(!store.showAppLabels()); rebuild() }
                     "OEA Themes" -> openThemeSettings()
-                    "Add widget" -> (context as? android.app.Activity)?.let { widgetController.pickWidget(it) }
+                    "Add widget" -> hostActivity?.let { widgetController.pickWidget(it) } ?: Toast.makeText(context, "OEA Home is not attached to an Activity.", Toast.LENGTH_SHORT).show()
                     "Wallpaper" -> openWallpaperChooser()
                     "Notification access" -> openNotificationAccessSettings()
                     "OEA Focus apps" -> openFocusSettings()
