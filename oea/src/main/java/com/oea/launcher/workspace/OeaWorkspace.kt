@@ -1250,7 +1250,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             "light" -> true
             "dark" -> false
             else -> runCatching {
-                val d = WallpaperManager.getInstance(context).drawable as? BitmapDrawable
+                val d = (wallpaperView.drawable as? BitmapDrawable)
+                    ?: (WallpaperManager.getInstance(context).drawable as? BitmapDrawable)
                 if (d != null && d.bitmap.width > 0 && d.bitmap.height > 0) {
                     val b = d.bitmap
                     val p = b.getPixel(b.width / 2, b.height / 2)
