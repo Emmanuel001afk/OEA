@@ -246,9 +246,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         DragEvent.ACTION_DROP -> {
                             val sourceId = (event.clipDescription?.let { event.clipData }?.getItemAt(0)?.text?.toString()?.toIntOrNull())
                             if (sourceId != null) {
+                                val container = host as FrameLayout
                                 var targetId: Int? = null
-                                for (i in 0 until host.childCount) {
-                                    val child = host.getChildAt(i)
+                                for (i in 0 until container.childCount) {
+                                    val child = container.getChildAt(i)
                                     if (child is android.appwidget.AppWidgetHostView && event.x >= child.left && event.x <= child.right &&
                                         event.y >= child.top && event.y <= child.bottom) {
                                         targetId = child.appWidgetId
