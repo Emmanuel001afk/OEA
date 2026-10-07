@@ -131,7 +131,7 @@ class OeaSystemToolsActivity : Activity() {
             .forEach { app ->
                 val isFrozen = frozen.contains(app.packageName)
                 row(box, app.label, if (isFrozen) "FROZEN • tap to restore" else "Tap to freeze") {
-                    if (!owner) requestDeviceOwner()
+                    if (backend == OeaAppFreezer.Backend.NONE) requestDeviceOwner()
                     else {
                         val result = OeaAppFreezer.setFrozen(this, app.packageName, !isFrozen)
                         Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
@@ -184,8 +184,8 @@ class OeaSystemToolsActivity : Activity() {
             .setTitle("OEA Multitask")
             .setMessage("Choose an app. OEA asks Android for a floating/freeform task with a sensible starting size. Android/OEM support determines whether it can actually float.")
             .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
-                if (!OeaMultitaskLauncher.launchFloating(this, choices[which]))
-                    Toast.makeText(this, "Android could not open that app as a floating task on this device.", Toast.LENGTH_LONG).show()
+                val result = OeaMultitaskLauncher.launchFloating(this, choices[which])
+                if (!result.success) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
             }
             .setNegativeButton("Cancel", null).show()
     }
