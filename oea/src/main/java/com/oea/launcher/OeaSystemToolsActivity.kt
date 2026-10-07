@@ -23,6 +23,16 @@ import com.oea.launcher.split.OeaSplitLauncher
 class OeaSystemToolsActivity : Activity() {
     private val dataStore by lazy { OeaDataStore.get(this) }
     private val apps: List<OeaAppInfo> by lazy { OeaAppModel(this).also { it.load() }.apps }
+    private val lightUi: Boolean
+        get() = when (dataStore.themeMode()) {
+            "light" -> true
+            "dark" -> false
+            else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_YES
+        }
+    private fun backgroundColor() = if (lightUi) Color.rgb(246, 247, 250) else Color.rgb(12, 15, 21)
+    private fun surfaceColor() = if (lightUi) Color.rgb(232, 235, 241) else Color.rgb(30, 36, 49)
+    private fun textColor() = if (lightUi) Color.rgb(22, 26, 34) else Color.WHITE
+    private fun mutedColor() = if (lightUi) Color.rgb(78, 87, 103) else Color.rgb(160, 170, 185)
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -116,7 +126,7 @@ class OeaSystemToolsActivity : Activity() {
         box.addView(TextView(this).apply {
             text = title + " (" + values.size + ")"
             textSize = 17f
-            setTextColor(Color.WHITE)
+            setTextColor(textColor())
             setPadding(0, 18, 0, 8)
         })
         values.forEach { value ->
@@ -252,12 +262,12 @@ class OeaSystemToolsActivity : Activity() {
     private fun base(title: String, subtitle: String): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(24, 28, 24, 32)
-        setBackgroundColor(Color.rgb(12, 15, 21))
+        setBackgroundColor(backgroundColor())
         addView(TextView(this@OeaSystemToolsActivity).apply {
             text = title; textSize = 29f; setTextColor(Color.WHITE); setTypeface(typeface, android.graphics.Typeface.BOLD)
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 6 })
         addView(TextView(this@OeaSystemToolsActivity).apply {
-            text = subtitle; textSize = 14f; setTextColor(Color.rgb(160, 170, 185))
+            text = subtitle; textSize = 14f; setTextColor(mutedColor())
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 18 })
     }
 
@@ -272,7 +282,7 @@ class OeaSystemToolsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(18, 14, 18, 14)
-            setBackgroundColor(Color.rgb(30, 36, 49))
+            setBackgroundColor(surfaceColor())
             isClickable = true
             setOnClickListener { action() }
             addView(TextView(this@OeaSystemToolsActivity).apply { text = title; textSize = 16f; setTextColor(Color.WHITE) })
