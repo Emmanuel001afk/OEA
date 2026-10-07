@@ -339,6 +339,48 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         rebuild()
     }
 
+    private fun lockApp(itemId: String, app: OeaAppInfo) {
+        if (OeaAppLockStore.hasPin(context)) {
+            OeaAppLockStore.setLocked(context, itemId, true)
+            Toast.makeText(context, app.label + " locked", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val input = EditText(context).apply {
+            hint = "4-8 digit PIN"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(context).setTitle("Set OEA App Lock PIN").setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Set PIN") { _, _ ->
+                val pin = input.text.toString()
+                if (pin.length in 4..8) {
+                    OeaAppLockStore.setPin(context, pin)
+                    OeaAppLockStore.setLocked(context, itemId, true)
+                    Toast.makeText(context, app.label + " locked", Toast.LENGTH_SHORT).show()
+                } else Toast.makeText(context, "PIN must be 4-8 digits.", Toast.LENGTH_SHORT).show()
+            }.show()
+    }
+
+    private fun unlockForLaunch(app: OeaAppInfo, onSuccess: () -> Unit) {
+        val key = OeaWorkspaceStore.key(app.packageName, app.className)
+        if (!OeaAppLockStore.isLocked(context, key)) {
+            onSuccess()
+            return
+        }
+        val input = EditText(context).apply {
+            hint = "PIN"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(context).setTitle("Unlock " + app.label).setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Unlock") { _, _ ->
+                if (OeaAppLockStore.verifyPin(context, input.text.toString())) onSuccess()
+                else Toast.makeText(context, "Incorrect PIN.", Toast.LENGTH_SHORT).show()
+            }.show()
+    }
+
     private fun openAppInfo(packageName: String) {
         runCatching {
             context.startActivity(
