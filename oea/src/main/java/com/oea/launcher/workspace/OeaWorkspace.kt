@@ -287,7 +287,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 "App info" -> { openAppInfo(app.packageName); true }
                 "Hide app" -> { store.setHidden(app.packageName, app.className, true); removeFromHome(itemId); renderDrawer(drawerSearch.text.toString()); true }
                 "Unhide app" -> { store.setHidden(app.packageName, app.className, false); renderDrawer(drawerSearch.text.toString()); true }
-                "Lock app" -> { OeaAppLockStore.setLocked(context, itemId, true); Toast.makeText(context, app.label + " locked", Toast.LENGTH_SHORT).show(); true }
+                "Lock app" -> { lockApp(itemId, app); true }
                 "Unlock app" -> { OeaAppLockStore.setLocked(context, itemId, false); Toast.makeText(context, app.label + " unlocked", Toast.LENGTH_SHORT).show(); true }
                 "Freeze / unfreeze" -> { freezeDialog(app); true }
                 "Drag to place" -> {
@@ -319,6 +319,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         values.add(0, key)
         ws.setDock(values)
         ws.replaceItems(ws.items().filterNot { it.id == key })
+        ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
         rebuild()
     }
 
@@ -873,6 +874,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (e.action != DragEvent.ACTION_DROP) return false
         val key = dragged ?: return true
         val values = ws.dock().filterNot { it == key }.toMutableList()
+        if (values.size >= OeaWorkspaceStore.DOCK_SLOTS) {
+            Toast.makeText(context, "Dock is full — drag an existing icon out first.", Toast.LENGTH_SHORT).show()
+            dragged = null
+            return true
+        }
         values.add(key)
         ws.setDock(values)
         ws.replaceItems(ws.items().filterNot { it.id == key })
@@ -963,8 +969,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     val list = values.filterNot { it == dragged }.toMutableList()
                     while (list.size < slot) list.add("")
                     list.add(slot, dragged!!)
-                    ws.setDock(list.filter { it.isNotBlank() })
+                    val cleaned = list.filter { it.isNotBlank() }.take(OeaWorkspaceStore.DOCK_SLOTS)
+                    if (cleaned.size >= OeaWorkspaceStore.DOCK_SLOTS && !cleaned.contains(dragged)) {
+                        Toast.makeText(context, "Dock is full — drag an existing icon out first.", Toast.LENGTH_SHORT).show()
+                        dragged = null
+                        rebuild()
+                        return@setOnDragListener true
+                    }
+                    ws.setDock(cleaned)
                     ws.replaceItems(ws.items().filterNot { it.id == dragged })
+                    ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == dragged }) }.filter { it.members.isNotEmpty() })
                     dragged = null
                     rebuild()
                     true
