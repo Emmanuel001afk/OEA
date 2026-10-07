@@ -129,13 +129,16 @@ class OeaGameBoostService : Service() {
     }
 
     private fun updateOverlay() {
-        val view = overlay as? TextView ?: return
+        val panel = overlay as? android.widget.LinearLayout ?: return
+        val status = panel.getChildAt(1) as? TextView ?: return
         val info = ActivityManager.MemoryInfo()
         getSystemService(ActivityManager::class.java).getMemoryInfo(info)
         val used = (info.totalMem - info.availMem) / (1024.0 * 1024.0)
         val total = info.totalMem / (1024.0 * 1024.0)
-        view.text = String.format(Locale.US, "OEA BOOST • %s\nRAM: %.0f / %.0f MB • other apps stay open", activeGame?.substringAfterLast('.') ?: "game", used, total)
+        status.text = String.format(Locale.US, "%s • RAM %.0f / %.0f MB • tap controls",
+            activeGame?.substringAfterLast('.') ?: "game", used, total)
     }
+
     private fun removeOverlay() { overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }; overlay = null }
     private fun foregroundPackage(): String? {
         val usm = getSystemService(UsageStatsManager::class.java) ?: return null
