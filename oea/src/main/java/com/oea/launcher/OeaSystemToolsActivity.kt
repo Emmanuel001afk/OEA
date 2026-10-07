@@ -239,8 +239,14 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun requestDeviceAdmin() {
-        startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).putExtra(
-            DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(this, OeaDeviceAdminReceiver::class.java)))
+        val command = "adb shell dpm set-device-owner com.oea.launcher/com.oea.launcher.applock.OeaDeviceAdminReceiver"
+        val clip = getSystemService(android.content.ClipboardManager::class.java)
+        clip?.setPrimaryClip(android.content.ClipData.newPlainText("OEA device-owner command", command))
+        AlertDialog.Builder(this)
+            .setTitle("Freezer authority")
+            .setMessage("OEA is not the device owner. A normal Device Admin prompt cannot grant the package-suspension authority. For a test/provisioned device, run this from ADB during setup:\n\n$command\n\nThe command was copied to your clipboard.")
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun requestCallRole() {
