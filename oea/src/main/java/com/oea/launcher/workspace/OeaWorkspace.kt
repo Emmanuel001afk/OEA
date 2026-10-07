@@ -1265,6 +1265,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Hidden apps" -> openHiddenAppsSettings()
                     "App Freezer" -> openFreezerSettings()
                     "App Lock" -> openAppLockSettings()
+                    "Phone & Calls" -> openPhone()
                     "Call Blocker" -> openCallBlockerSettings()
                     "Game Boost" -> openGameBoostSettings()
                     "Split Screen" -> openSplitPairDialog()
