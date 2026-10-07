@@ -490,6 +490,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
     }
 
+    private fun openPhone() {
+        runCatching { (hostActivity ?: context).startActivity(Intent().setClassName(context, "com.oea.launcher.phone.OeaPhoneActivity")) }
+            .onFailure { Toast.makeText(context, "OEA Phone could not be opened.", Toast.LENGTH_SHORT).show() }
+    }
+
     private fun openCallBlockerSettings() {
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             val rm = context.getSystemService(android.app.role.RoleManager::class.java)
@@ -525,23 +530,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openSplitPairDialog() {
-        val box = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), 0, dp(8), 0)
-        }
-        val first = EditText(context).apply { hint = "First package name"; setSingleLine(true) }
-        val second = EditText(context).apply { hint = "Second package name"; setSingleLine(true) }
-        box.addView(first)
-        box.addView(second, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        val choices = apps.filter { it.packageName != context.packageName }.distinctBy { it.packageName }
+        val checked = BooleanArray(choices.size)
         AlertDialog.Builder(context)
-            .setTitle("OEA Split pair")
-            .setMessage("OEA launches both activities with adjacent/multi-task flags. Android decides the final split presentation.")
-            .setView(box)
+            .setTitle("OEA Split Screen")
+            .setMessage("Choose exactly two apps. Android controls the final divider and orientation.")
+            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { dialog, which, value ->
+                if (value && checked.count { it } >= 2) {
+                    (dialog as AlertDialog).listView.setItemChecked(which, false)
+                    Toast.makeText(context, "Choose only two apps.", Toast.LENGTH_SHORT).show()
+                } else checked[which] = value
+            }
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Launch") { _, _ ->
-                if (!OeaSplitLauncher.launchPair(context, first.text.toString().trim(), second.text.toString().trim())) {
-                    Toast.makeText(context, "Could not launch both apps", Toast.LENGTH_LONG).show()
-                }
+                val picked = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }
+                if (picked.size == 2 && !OeaSplitLauncher.launchPair(context, picked[0], picked[1]))
+                    Toast.makeText(context, "Android could not start the pair in split screen.", Toast.LENGTH_LONG).show()
             }.show()
     }
 
@@ -738,7 +742,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     when (title) {
                         "OEA Settings" -> openSystemsSettings()
                         "App Freezer" -> openDeviceAdminSettings()
-                        "Call Blocker" -> openCallBlockerSettings()
+                        "Phone & Calls" -> openPhone()
+                    "Call Blocker" -> openCallBlockerSettings()
                         "Game Boost" -> openGameBoostSettings()
                         "Multitask / Split" -> openSplitPairDialog()
                     }
@@ -1239,6 +1244,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Hidden apps")
             menu.add("App Freezer")
             menu.add("App Lock")
+            menu.add("Phone & Calls")
             menu.add("Call Blocker")
             menu.add("Game Boost")
             menu.add("Split Screen")
