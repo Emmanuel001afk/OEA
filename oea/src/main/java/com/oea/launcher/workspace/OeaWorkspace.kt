@@ -1247,7 +1247,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         if (affectedPage != null) refreshPages(affectedPage)
                     }
                     dragged = null
-                    ws.setCurrentDockPage(page)
+                    // A full dock creates the next page and immediately presents it,
+                    // rather than silently adding the app off-screen.
+                    val dockPage = if (values.size >= OeaWorkspaceStore.DOCK_SLOTS &&
+                        !values.contains(draggedKey)) {
+                        ws.dock().lastIndex / OeaWorkspaceStore.DOCK_SLOTS
+                    } else page
+                    ws.setCurrentDockPage(dockPage)
                     renderDock()
                     true
                 } else e.action == DragEvent.ACTION_DRAG_STARTED
