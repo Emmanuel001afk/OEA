@@ -39,6 +39,7 @@ import com.oea.launcher.callblocker.OeaCallBlockRules
 import com.oea.launcher.gameboost.OeaGameBoostService
 import com.oea.launcher.gameboost.OeaGameBoostStore
 import com.oea.launcher.split.OeaSplitLauncher
+import com.oea.launcher.handoff.OeaAppHandoff
 import kotlin.math.roundToInt
 
 class OeaWorkspace(context: Context) : FrameLayout(context) {
@@ -285,6 +286,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (!ws.items().any { it.id == itemId && it.folderId == null }) popup.menu.add("Add to home")
         if (ws.items().any { it.id == itemId } || ws.dock().contains(itemId)) popup.menu.add("Remove from home")
         popup.menu.add("App info")
+popup.menu.add("Send app")
         popup.menu.add(if (store.isHidden(app.packageName, app.className)) "Unhide app" else "Hide app")
         popup.menu.add(if (OeaAppLockStore.isLocked(context, itemId)) "Unlock app" else "Lock app")
         popup.menu.add("Freeze / unfreeze")
@@ -298,6 +300,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 "Add to home" -> { addToHome(itemId); true }
                 "Remove from home" -> { removeFromHome(itemId); true }
                 "App info" -> { openAppInfo(app.packageName); true }
+                "Send app" -> { sendApp(app); true }
                 "Hide app" -> { store.setHidden(app.packageName, app.className, true); removeFromHome(itemId); renderDrawer(drawerSearch.text.toString()); true }
                 "Unhide app" -> { store.setHidden(app.packageName, app.className, false); renderDrawer(drawerSearch.text.toString()); true }
                 "Lock app" -> { lockApp(itemId, app); true }
@@ -312,6 +315,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
         }
         popup.show()
+    }
+
+    private fun sendApp(app: OeaAppInfo) {
+        runCatching {
+            val info = context.packageManager.getApplicationInfo(app.packageName, 0)
+            OeaAppHandoff.shareApp(context, info, app.label)
+        }.onFailure {
+            Toast.makeText(context, "Could not prepare ${app.label} for sharing.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun addToDock(key: String) {
