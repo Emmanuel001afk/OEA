@@ -58,6 +58,8 @@ class OeaDataStore private constructor(context: Context) {
     fun setShowMostUsed(v: Boolean) { prefs.edit().putBoolean(KEY_SHOW_MOST_USED, v).apply() }
     fun iconShape() = prefs.getString(KEY_ICON_SHAPE, "rounded") ?: "rounded"
     fun setIconShape(v: String) { prefs.edit().putString(KEY_ICON_SHAPE, v).apply() }
+    fun wallpaperUri() = prefs.getString(KEY_WALLPAPER_URI, null)
+    fun setWallpaperUri(v: String?) { prefs.edit().apply { if (v == null) remove(KEY_WALLPAPER_URI) else putString(KEY_WALLPAPER_URI, v) }.apply() }
 
     fun recordLaunch(p: String, c: String) {
         val k = componentKey(p, c)
@@ -95,6 +97,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_SHOW_MOST_USED = "show_most_used"
         private const val KEY_ICON_SHAPE = "icon_shape"
+        private const val KEY_WALLPAPER_URI = "wallpaper_uri"
         private const val KEY_RECENTS = "recent_launches"
         private const val KEY_LAUNCH_COUNT_PREFIX = "launch_count:"
         private const val SEP = "|"
