@@ -55,11 +55,12 @@ object OeaCallBlockRules {
         val exact = p.getStringSet(EXACT, emptySet()).orEmpty()
         val prefix = p.getStringSet(PREFIX, emptySet()).orEmpty()
         val suffix = p.getStringSet(SUFFIX, emptySet()).orEmpty()
-        val ruleMatch = exact.contains(number) || prefix.any(number::startsWith) || suffix.any(number::endsWith)
-        if (ruleMatch) return true
+        // Contact exemptions must be evaluated before the blocking rule.
+        // Otherwise an exact/prefix/suffix rule would always win and the exemption
+        // controls would appear to work while never actually exempting contacts.
         if (allowContacts(context) && isInContacts(context, number, false)) return false
         if (allowStarred(context) && isInContacts(context, number, true)) return false
-        return false
+        return exact.contains(number) || prefix.any(number::startsWith) || suffix.any(number::endsWith)
     }
     fun recordBlocked(context: Context, number: String) {
         val old = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
