@@ -757,8 +757,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             val iconView = ImageView(context).apply {
                 setImageDrawable(icon(app.packageName))
                 scaleType = ImageView.ScaleType.FIT_CENTER
+                clipToOutline = true
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) {
+                        if (store.iconShape() == "circle") outline.setOval(0, 0, view.width, view.height)
+                        else outline.setRoundRect(0, 0, view.width, view.height, dp(if (store.iconShape() == "square") 4 else 14).toFloat())
+                    }
+                }
+                setPadding(dp(3), dp(3), dp(3), dp(3))
             }
-            addView(iconView, FrameLayout.LayoutParams(dp(44), dp(46), Gravity.CENTER))
+            addView(iconView, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER))
             val count = OeaNotificationState.countForPackage(app.packageName)
             if (count > 0) {
                 addView(TextView(context).apply {
