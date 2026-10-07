@@ -53,6 +53,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val drawerSearch = EditText(context)
     private val search = EditText(context)
     private val dots = TextView(context)
+    private val wallpaperView = ImageView(context)
+    private val wallpaperRequestCode = 0x4F57
     private var apps: List<OeaAppInfo> = emptyList()
     private val drawerController = OeaAppDrawerController()
     private val folderController = OeaFolderController()
@@ -86,18 +88,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     init {
         setBackgroundColor(themeBackground)
+        wallpaperView.scaleType = ImageView.ScaleType.CENTER_CROP
+        wallpaperView.alpha = 0.98f
+        addView(wallpaperView, FrameLayout.LayoutParams(-1, -1))
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(8))
         }
         addView(root, FrameLayout.LayoutParams(-1, -1))
+        loadOeaWallpaper()
 
         val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(ImageView(context).apply {
             setImageResource(R.drawable.oea_logo)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             contentDescription = "OEA"
-        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        }, LinearLayout.LayoutParams(dp(50), dp(50)))
         header.addView(TextView(context).apply {
             text = "OEA"
             textSize = 28f
@@ -154,7 +160,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         dock.columnCount = OeaWorkspaceStore.DOCK_SLOTS
         dock.setPadding(dp(4), dp(2), dp(4), dp(2))
         dock.setOnDragListener { _, e -> dockDrop(e) }
-        root.addView(dock, LinearLayout.LayoutParams(-1, dp(78)))
+        root.addView(dock, LinearLayout.LayoutParams(-1, dp(64)))
         root.addView(TextView(context).apply {
             text = "All apps"
             textSize = 13f
@@ -784,15 +790,20 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun folderTile(folder: OeaWorkspaceStore.Folder) = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
-        background = rounded(themeSurface, 18)
+        background = ColorDrawable(Color.TRANSPARENT)
         setOnClickListener { openFolder(folder) }
         setOnLongClickListener { showFolderRename(folder); true }
-        addView(TextView(context).apply {
-            text = "▦"
-            textSize = 30f
-            gravity = Gravity.CENTER
-            setTextColor(themeText)
-        }, LinearLayout.LayoutParams(dp(54), dp(54)))
+        val preview = GridLayout(context).apply { columnCount = 2 }
+        folder.members.mapNotNull(::find).take(4).forEach { app ->
+            preview.addView(ImageView(context).apply {
+                setImageDrawable(icon(app.packageName))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }, GridLayout.LayoutParams().apply {
+                width = dp(22); height = dp(22)
+                setMargins(dp(2), dp(2), dp(2), dp(2))
+            })
+        }
+        addView(preview, LinearLayout.LayoutParams(dp(56), dp(56)))
         addView(TextView(context).apply {
             text = folder.title
             textSize = 11f
@@ -826,7 +837,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
                 setPadding(dp(3), dp(3), dp(3), dp(3))
             }
-            addView(iconView, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER))
+            addView(iconView, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
             val count = OeaNotificationState.countForPackage(app.packageName)
             if (count > 0) {
                 addView(TextView(context).apply {
@@ -940,14 +951,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun dockTile(app: OeaAppInfo) = FrameLayout(context).apply {
         isClickable = true
         foreground = selectable()
-        background = rounded(Color.TRANSPARENT, 18)
+        background = ColorDrawable(Color.TRANSPARENT)
         contentDescription = "Open " + app.label
         setOnClickListener { launch(app) }
         addView(ImageView(context).apply {
             setImageDrawable(icon(app.packageName))
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(dp(5), dp(5), dp(5), dp(5))
-        }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
+        }, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
     }
 
     private fun renderDock() {
@@ -983,7 +994,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
             dock.addView(v, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(70)
+                height = dp(58)
                 columnSpec = GridLayout.spec(slot, 1, 1f)
             })
         }
