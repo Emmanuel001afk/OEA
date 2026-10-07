@@ -427,7 +427,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun openDeviceAdminSettings() {
         val command = "adb shell dpm set-device-owner com.oea.launcher/com.oea.launcher.applock.OeaDeviceAdminReceiver"
-        getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
+        context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
             android.content.ClipData.newPlainText("OEA device-owner command", command)
         )
         AlertDialog.Builder(context)
