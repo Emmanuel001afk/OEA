@@ -9,8 +9,8 @@ object OeaSplitLauncher {
         val pm = context.packageManager
         val a = pm.getLaunchIntentForPackage(first)?.apply { addCategory(Intent.CATEGORY_LAUNCHER) } ?: return false
         val b = pm.getLaunchIntentForPackage(second)?.apply { addCategory(Intent.CATEGORY_LAUNCHER) } ?: return false
-        a.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-        b.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+        a.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        b.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
         return runCatching { context.startActivity(a); context.startActivity(b); true }.getOrDefault(false)
     }
 }
