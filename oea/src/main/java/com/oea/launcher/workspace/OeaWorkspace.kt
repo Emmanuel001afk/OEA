@@ -1624,7 +1624,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         a.getDrawable(0).also { a.recycle() }
     }
     private fun renderWidgets(host: FrameLayout, page: Int) {
-        if (page != 0) return
         host.removeAllViews()
         val widgets = widgetController.views().filter { widgetController.pageFor(it.appWidgetId) == page }
         widgets.forEach { widget ->
