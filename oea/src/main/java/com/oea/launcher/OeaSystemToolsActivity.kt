@@ -57,6 +57,7 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "App Lock", "Configure OEA launcher app protection") {
             Toast.makeText(this, "Use an app's long-press menu on OEA Home to lock or unlock it.", Toast.LENGTH_LONG).show()
         }
+        row(box, "Phone & Calls", "Dial, contacts, recent calls, default Phone, and in-call UI") { runCatching { startActivity(Intent(this, Class.forName("com.oea.launcher.phone.OeaPhoneActivity"))) } }
         row(box, "Call Blocker", "Exact numbers, prefixes, suffixes, contacts, and history") { showCallBlocker() }
         row(box, "Game Boost", "Choose games and control boost monitoring") { showGameBoost() }
         row(box, "Split Screen", "Choose two apps and launch them side by side") { showSplitScreen() }
