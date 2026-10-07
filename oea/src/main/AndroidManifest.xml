@@ -13,6 +13,7 @@
     </queries>
     <application
         android:name=".OeaApplication"
+        android:resizeableActivity="true"
         android:icon="@drawable/oea_logo"
         android:roundIcon="@drawable/oea_logo"
         android:theme="@style/OeaTheme"
