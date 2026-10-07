@@ -372,7 +372,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun showAppActions(app: OeaAppInfo, anchor: View, itemId: String) {
-        val popup = PopupMenu(context, anchor)
+        val popup = PopupMenu(hostActivity ?: return, anchor)
         popup.menu.add("Open")
         if (!ws.dock().contains(itemId)) popup.menu.add("Add to dock")
         if (ws.items().any { it.id == itemId } || ws.dock().contains(itemId)) popup.menu.add("Remove from home")
@@ -705,7 +705,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun drawerLayoutMenu(anchor: View) {
-        PopupMenu(context, anchor).apply {
+        PopupMenu(hostActivity ?: return, anchor).apply {
             menu.add("Grid")
             menu.add("Vertical list")
             menu.add("Horizontal")
