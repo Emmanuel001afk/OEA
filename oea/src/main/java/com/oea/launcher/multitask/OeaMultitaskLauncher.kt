@@ -1,7 +1,6 @@
 package com.oea.launcher.multitask
 
 import android.app.ActivityOptions
-import android.app.WindowConfiguration
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -32,7 +31,6 @@ object OeaMultitaskLauncher {
         return runCatching {
             val options = ActivityOptions.makeBasic()
             options.launchBounds = bounds
-            if (Build.VERSION.SDK_INT >= 26) options.setLaunchWindowingMode(WindowConfiguration.WINDOWING_MODE_FREEFORM)
             context.startActivity(intent, options.toBundle())
             Result(true, "Floating task requested.")
         }.getOrElse {
