@@ -438,9 +438,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun showAppActions(app: OeaAppInfo, anchor: View, itemId: String) {
         val popup = PopupMenu(hostActivity ?: return, anchor)
+        val inHome = ws.items().any { it.id == itemId }
+        val inDock = ws.dock().contains(itemId)
+        val inFolder = ws.folders().any { folder -> folder.members.contains(itemId) }
         popup.menu.add("Open")
-        if (!ws.dock().contains(itemId)) popup.menu.add("Add to dock")
-        if (ws.items().any { it.id == itemId } || ws.dock().contains(itemId)) popup.menu.add("Remove from home")
+        if (!inDock) popup.menu.add("Add to dock")
+        if (inHome || inDock || inFolder) popup.menu.add("Remove from home")
         popup.menu.add("App info")
         popup.menu.add(if (store.isHidden(app.packageName, app.className)) "Unhide app" else "Hide app")
         popup.menu.add(if (OeaAppLockStore.isLocked(context, itemId)) "Unlock app" else "Lock app")
