@@ -216,6 +216,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun rebuild() {
+        normalizeFolderNames()
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         for (p in 0 until ws.pages()) {
@@ -774,7 +775,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun appStrip(values: List<OeaAppInfo>): HorizontalScrollView {
         val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
-        val row = GridLayout(context).apply { columnCount = 3; useDefaultMargins = false }
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         values.forEach { app ->
             row.addView(tile(app), LinearLayout.LayoutParams(dp(78), dp(88)).apply {
                 setMargins(dp(3), dp(3), dp(3), dp(3))
@@ -795,7 +796,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun renderOeaTools() {
         addSectionLabel(drawerBody, "OEA tools")
-        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        val row = GridLayout(context).apply {
+            columnCount = 3
+            useDefaultMargins = false
+        }
         listOf(
             "⚙" to "OEA Settings",
             "❄" to "App Freezer",
@@ -1042,6 +1046,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             labels.any { it.contains("photo") || it.contains("gallery") || it.contains("camera") } -> "Photos"
             else -> "Folder"
         }
+    }
+
+    private fun normalizeFolderNames() {
+        val updated = ws.folders().map { folder ->
+            if (folder.title.equals("Social", ignoreCase = true)) {
+                val members = folder.members.mapNotNull(::find)
+                val allAi = members.isNotEmpty() && members.all { app ->
+                    val text = (app.label + " " + app.packageName).lowercase()
+                    text.contains("ai") || text.contains("deepseek") || text.contains("claude") ||
+                        text.contains("anthropic") || text.contains("openai") || text.contains("chatgpt") ||
+                        text.contains("gemini") || text.contains("copilot") || text.contains("perplexity")
+                }
+                if (allAi) folder.copy(title = "AI") else folder
+            } else folder
+        }
+        if (updated != ws.folders()) ws.replaceFolders(updated)
     }
 
     private fun openFolder(folder: OeaWorkspaceStore.Folder) {
