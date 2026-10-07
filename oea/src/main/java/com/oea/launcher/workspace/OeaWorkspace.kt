@@ -517,8 +517,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerBody.removeAllViews()
         val visible = drawerController.filter(apps, query)
             .filterNot { store.isHidden(it.packageName, it.className) }
-        if (query.isNotBlank()) renderSearchActions(query)
-        else renderFocusStrip()
+        if (query.isNotBlank()) {
+            addSectionLabel(drawerBody, "Apps · " + visible.size)
+        } else renderFocusStrip()
         addSectionLabel(drawerBody, "All apps · " + visible.size)
         when (store.drawerMode()) {
             OeaDataStore.DrawerMode.VERTICAL -> {
@@ -561,7 +562,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val actions = searchController.actions(query)
         if (actions.isEmpty()) return
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        addSectionLabel(list, "Search anywhere")
+        addSectionLabel(list, "Search providers")
         actions.forEach { action ->
             list.addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
@@ -596,7 +597,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             addSectionLabel(section, "OEA Focus · " + focused.size + "/" + OeaFocusStore.MAX_APPS)
             section.addView(appStrip(focused), LinearLayout.LayoutParams(-1, dp(100)))
         }
-        if (used.isNotEmpty()) {
+        if (used.isNotEmpty() && store.showMostUsed()) {
             addSectionLabel(section, "Most used")
             section.addView(appStrip(used), LinearLayout.LayoutParams(-1, dp(100)))
         }
@@ -607,7 +608,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         values.forEach { app ->
-            row.addView(tile(app), LinearLayout.LayoutParams(dp(84), dp(92)).apply {
+            row.addView(tile(app), LinearLayout.LayoutParams(dp(78), dp(88)).apply {
                 setMargins(dp(3), dp(3), dp(3), dp(3))
             })
         }
@@ -684,6 +685,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setPadding(dp(12), 0, 0, 0)
             }, LinearLayout.LayoutParams(0, -1, 1f))
             addView(TextView(context).apply {
+                text = if (ws.items().any { it.id == key }) "✓" else "+"
+                textSize = 20f
+                gravity = Gravity.CENTER
+                setTextColor(themeText)
+                contentDescription = "Add to home"
+                setOnClickListener {
+                    if (!ws.items().any { it.id == key }) addToHome(key)
+                    else removeFromHome(key)
+                }
+            }, LinearLayout.LayoutParams(dp(42), -1))
+            addView(TextView(context).apply {
                 text = "⋮"
                 textSize = 22f
                 gravity = Gravity.CENTER
@@ -746,7 +758,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setPadding(dp(3), 0, dp(3), 0)
                 }, FrameLayout.LayoutParams(-2, dp(18), Gravity.TOP or Gravity.END))
             }
-        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
         if (store.showAppLabels()) addView(TextView(context).apply {
             text = app.label
             textSize = 10.5f
@@ -909,6 +921,28 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
     }
 
+    private fun iconShapeBackground(): Drawable = GradientDrawable().apply {
+        val radius = when (store.iconShape()) {
+            "circle" -> 999f
+            "square" -> 4f
+            else -> 14f
+        }
+        setColor(themeSurface)
+        cornerRadius = dp(radius.toInt()).toFloat()
+    }
+
+    private fun openIconShapeSettings() {
+        val values = arrayOf("Rounded", "Circle", "Square")
+        val current = when (store.iconShape()) { "circle" -> 1; "square" -> 2; else -> 0 }
+        AlertDialog.Builder(context).setTitle("Icon shape")
+            .setSingleChoiceItems(values, current) { dialog, which ->
+                store.setIconShape(when (which) { 1 -> "circle"; 2 -> "square"; else -> "rounded" })
+                rebuild()
+                renderDrawer(drawerSearch.text.toString())
+                dialog.dismiss()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
     private fun openWallpaperChooser() {
         runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) }
             .onFailure { runCatching { context.startActivity(Intent(Intent.ACTION_SET_WALLPAPER)) } }
@@ -931,6 +965,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             menu.add("Wallpaper")
             menu.add("Notification access")
             menu.add("OEA Focus apps")
+            menu.add(if (store.showMostUsed()) "Hide most-used apps" else "Show most-used apps")
+            menu.add("Icon shape")
             menu.add("OEA Systems")
             setOnMenuItemClickListener {
                 when (it.title.toString()) {
@@ -945,6 +981,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     "Wallpaper" -> openWallpaperChooser()
                     "Notification access" -> openNotificationAccessSettings()
                     "OEA Focus apps" -> openFocusSettings()
+                    "Hide most-used apps" -> { store.setShowMostUsed(false); renderDrawer(drawerSearch.text.toString()) }
+                    "Show most-used apps" -> { store.setShowMostUsed(true); renderDrawer(drawerSearch.text.toString()) }
+                    "Icon shape" -> openIconShapeSettings()
                     "OEA Systems" -> openSystemsSettings()
                 }
                 true
