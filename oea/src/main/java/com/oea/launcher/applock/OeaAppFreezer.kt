@@ -44,7 +44,7 @@ object OeaAppFreezer {
             return Result(false, result.second.ifBlank { "Root package suspension failed" }, Backend.ROOT)
         }
 
-        return Result(false, "No freezer authority. Provision OEA as device owner or provide root/Shizuku authority.", Backend.NONE)
+        return Result(false, "No freezer authority. Provision OEA as device owner or provide root authority.", Backend.NONE)
     }
 
     fun frozenPackages(context: Context): Set<String> =
@@ -72,7 +72,7 @@ object OeaAppFreezer {
         val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
         val output = process.inputStream.bufferedReader().use { it.readText().trim() }
         val code = process.waitFor()
-        code == 0 to output
+        (code == 0) to output
     }.getOrElse { false to (it.message ?: "") }
 
     private const val PREFS = "oea_app_freezer"
