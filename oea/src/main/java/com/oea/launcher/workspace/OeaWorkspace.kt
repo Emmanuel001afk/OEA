@@ -1239,12 +1239,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 1 -> {
                     store.setWallpaperUri(null)
                     loadOeaWallpaper()
-                    applyThemeFromWallpaper()
-                    rebuild()
                 }
                 2 -> {
                     store.setWallpaperUri(null)
                     wallpaperView.setImageDrawable(null)
+                    wallpaperLightHint = null
                     applyThemeFromWallpaper()
                     rebuild()
                 }
@@ -1637,8 +1636,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
                 store.setWallpaperUri(uri.toString())
                 loadOeaWallpaper()
-                applyThemeFromWallpaper()
-                rebuild()
             }
             return true
         }
