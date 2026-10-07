@@ -18,6 +18,7 @@ import com.oea.launcher.gameboost.OeaGameBoostService
 import com.oea.launcher.gameboost.OeaGameBoostStore
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.model.OeaAppModel
+import com.oea.launcher.multitask.OeaMultitaskLauncher
 import com.oea.launcher.split.OeaSplitLauncher
 
 class OeaSystemToolsActivity : Activity() {
@@ -60,6 +61,7 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Phone & Calls", "Dial, contacts, recent calls, default Phone, and in-call UI") { runCatching { startActivity(Intent(this, Class.forName("com.oea.launcher.phone.OeaPhoneActivity"))) } }
         row(box, "Call Blocker", "Exact numbers, prefixes, suffixes, contacts, and history") { showCallBlocker() }
         row(box, "Game Boost", "Choose games and control boost monitoring") { showGameBoost() }
+        row(box, "Multitask", "Open one app as a floating window over the current app") { showMultitask() }
         row(box, "Split Screen", "Choose two apps and launch them side by side") { showSplitScreen() }
         row(box, "Widgets", "Use ⋮ > Add widget on OEA Home") {
             Toast.makeText(this, "The widget picker belongs to OEA Home so widgets return to OEA.", Toast.LENGTH_LONG).show()
@@ -192,6 +194,17 @@ class OeaSystemToolsActivity : Activity() {
                 OeaGameBoostStore.setGames(this, choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }.toSet())
                 showGameBoost()
             }.show()
+    }
+
+    private fun showMultitask() {
+        val choices = apps.filter { it.packageName != packageName }.distinctBy { it.packageName }
+        AlertDialog.Builder(this).setTitle("OEA Multitask")
+            .setMessage("Choose an app to open as a floating task over the current app. The window starts at a sensible size; Android/OEM controls whether freeform resizing is available.")
+            .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
+                if (!OeaMultitaskLauncher.launchFloating(this, choices[which])) {
+                    Toast.makeText(this, "Android could not open that app as a floating task on this device.", Toast.LENGTH_LONG).show()
+                }
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showSplitScreen() {
