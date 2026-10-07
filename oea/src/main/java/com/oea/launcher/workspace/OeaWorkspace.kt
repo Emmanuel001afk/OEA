@@ -935,12 +935,25 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }.show()
     }
 
+    private fun dockTile(app: OeaAppInfo) = FrameLayout(context).apply {
+        isClickable = true
+        foreground = selectable()
+        background = rounded(Color.TRANSPARENT, 18)
+        contentDescription = "Open " + app.label
+        setOnClickListener { launch(app) }
+        addView(ImageView(context).apply {
+            setImageDrawable(icon(app.packageName))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+        }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
+    }
+
     private fun renderDock() {
         dock.removeAllViews()
         val values = ws.dock()
         repeat(OeaWorkspaceStore.DOCK_SLOTS) { slot ->
             val app = values.getOrNull(slot)?.let(::find)
-            val v = if (app == null) emptyCell() else tile(app)
+            val v = if (app == null) emptyCell() else dockTile(app)
             if (app != null) {
                 v.setOnLongClickListener {
                     showAppActions(app, v, values[slot])
