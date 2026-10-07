@@ -287,7 +287,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             val view = folders[cell]?.let { folderTile(it) } ?: items[cell]?.let { homeTile(it) } ?: emptyCell()
             grid.addView(view, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(96)
+                height = dp(84)
                 columnSpec = GridLayout.spec(cell % cols(), 1, 1f)
                 rowSpec = GridLayout.spec(cell / cols())
                 setMargins(dp(3), dp(3), dp(3), dp(3))
@@ -319,7 +319,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val popup = PopupMenu(context, anchor)
         popup.menu.add("Open")
         if (!ws.dock().contains(itemId)) popup.menu.add("Add to dock")
-        if (!ws.items().any { it.id == itemId && it.folderId == null }) popup.menu.add("Add to home")
         if (ws.items().any { it.id == itemId } || ws.dock().contains(itemId)) popup.menu.add("Remove from home")
         popup.menu.add("App info")
         popup.menu.add(if (store.isHidden(app.packageName, app.className)) "Unhide app" else "Hide app")
@@ -332,7 +331,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             when (item.title.toString()) {
                 "Open" -> { launch(app); true }
                 "Add to dock" -> { addToDock(itemId); true }
-                "Add to home" -> { addToHome(itemId); true }
                 "Remove from home" -> { removeFromHome(itemId); true }
                 "App info" -> { openAppInfo(app.packageName); true }
                 "Hide app" -> { store.setHidden(app.packageName, app.className, true); removeFromHome(itemId); renderDrawer(drawerSearch.text.toString()); true }
@@ -354,11 +352,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun addToDock(key: String) {
         if (ws.dock().contains(key)) return
         val values = ws.dock().filterNot { it == key }.toMutableList()
-        if (values.size >= OeaWorkspaceStore.DOCK_SLOTS) {
-            Toast.makeText(context, "Dock is full — drag an existing icon out first.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        values.add(0, key)
+        values.add(key)
         ws.setDock(values)
         ws.replaceItems(ws.items().filterNot { it.id == key })
         ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
@@ -369,10 +363,23 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (ws.items().any { it.id == key }) return
         val app = find(key) ?: return
         val items = ws.items().toMutableList()
-        val cell = firstFree(items, ws.getCurrentPage(), 0)
-        items.add(OeaWorkspaceStore.Item(key, app.packageName, app.className, ws.getCurrentPage(), cell))
+        var page = ws.getCurrentPage()
+        var cell = firstFree(items, page, 0)
+        val capacity = cols() * 4
+        if (cell >= capacity && page + 1 < ws.pages()) {
+            page += 1
+            cell = firstFree(items, page, 0)
+        }
+        if (cell >= capacity && page + 1 < OeaWorkspaceStore.MAX_PAGES) {
+            ws.setPages(page + 2)
+            page += 1
+            cell = 0
+        }
+        items.add(OeaWorkspaceStore.Item(key, app.packageName, app.className, page, cell))
         ws.replaceItems(items)
+        ws.setCurrentPage(page)
         rebuild()
+        pager.post { pager.smoothScrollTo(page * pager.width, 0) }
     }
 
     private fun removeFromHome(key: String) {
@@ -718,26 +725,26 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val actions = searchController.actions(query)
         if (actions.isEmpty()) return
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        addSectionLabel(list, "Search providers")
+        addSectionLabel(list, "Search")
         actions.forEach { action ->
             list.addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(14), 0, dp(14), 0)
+                setPadding(dp(10), 0, dp(10), 0)
                 background = rounded(themeSurface, 16)
                 addView(TextView(context).apply {
                     text = action.title
-                    textSize = 14f
+                    textSize = 13f
                     setTextColor(themeText)
-                }, LinearLayout.LayoutParams(0, dp(56), 1f))
+                }, LinearLayout.LayoutParams(0, dp(46), 1f))
                 addView(TextView(context).apply {
                     text = action.subtitle
                     textSize = 11f
                     setTextColor(themeMuted)
-                }, LinearLayout.LayoutParams(-2, dp(56)))
+                }, LinearLayout.LayoutParams(-2, dp(46)))
                 setOnClickListener {
                     runCatching { context.startActivity(action.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
-            }, LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(5) })
+            }, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(2) })
         }
         drawerBody.addView(list)
     }
@@ -791,9 +798,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun addSectionLabel(parent: LinearLayout, title: String) {
         parent.addView(TextView(context).apply {
             text = title
-            textSize = 12f
+            textSize = 11f
             setTextColor(themeMuted)
-            setPadding(dp(4), dp(8), dp(4), dp(6))
+            setPadding(dp(4), dp(4), dp(4), dp(2))
         }, LinearLayout.LayoutParams(-1, dp(34)))
     }
 
@@ -1530,10 +1537,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             widget.isLongClickable = true
             widget.tag = widget.appWidgetId
             widget.setOnLongClickListener {
-                val data = ClipData.newPlainText("OEA widget", widget.appWidgetId.toString())
-                startDragAndDrop(data, View.DragShadowBuilder(widget), widget.appWidgetId, View.DRAG_FLAG_GLOBAL)
+                widgetOptions(widget)
+                true
             }
-            host.addView(widget, FrameLayout.LayoutParams(-1, dp(220)).apply {
+            host.addView(widget, FrameLayout.LayoutParams(-1, dp(156)).apply {
                 leftMargin = dp(6)
                 rightMargin = dp(6)
                 topMargin = dp(6)
