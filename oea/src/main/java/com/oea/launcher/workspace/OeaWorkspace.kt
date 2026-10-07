@@ -210,7 +210,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     fun bind(value: List<OeaAppInfo>) {
         apps = value
-        ws.ensureSeeded(apps.map { Triple(it.packageName, it.className, it.label) })
+        ws.ensureSeeded(apps.filterNot { it.packageName == context.packageName }.map { Triple(it.packageName, it.className, it.label) })
         ws.clearMissing(apps.map { OeaWorkspaceStore.key(it.packageName, it.className) }.toSet())
         rebuild()
         renderDrawer(drawerSearch.text.toString())
