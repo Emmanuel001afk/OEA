@@ -38,6 +38,7 @@ import com.oea.launcher.applock.OeaAppLockStore
 import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import com.oea.launcher.callblocker.OeaCallBlockRules
 import com.oea.launcher.gameboost.OeaGameBoostService
+import com.oea.launcher.interaction.OeaGestureController
 import com.oea.launcher.gameboost.OeaGameBoostStore
 import com.oea.launcher.split.OeaSplitLauncher
 import com.oea.launcher.multitask.OeaMultitaskLauncher
