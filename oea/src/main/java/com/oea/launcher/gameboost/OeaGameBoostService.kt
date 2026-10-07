@@ -76,13 +76,13 @@ class OeaGameBoostService : Service() {
         val title = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 12f
-            text = "OEA BOOST"
+            text = "OEA"
             setPadding(0, 0, 0, 6)
         }
         val status = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 11f
-            text = packageName.substringAfterLast('.') + " • tap controls"
+            text = packageName.substringAfterLast('.') + " • RAM"
         }
         val controls = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
