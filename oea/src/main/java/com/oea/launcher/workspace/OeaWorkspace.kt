@@ -32,6 +32,7 @@ import com.oea.launcher.shortcuts.OeaShortcutController
 import com.oea.launcher.focus.OeaFocusStore
 import com.oea.launcher.search.OeaSearchController
 import com.oea.launcher.applock.OeaAppFreezer
+import com.oea.launcher.applock.OeaAppLockStore
 import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import com.oea.launcher.callblocker.OeaCallBlockRules
 import com.oea.launcher.gameboost.OeaGameBoostService
@@ -271,6 +272,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (ws.items().any { it.id == itemId } || ws.dock().contains(itemId)) popup.menu.add("Remove from home")
         popup.menu.add("App info")
         popup.menu.add(if (store.isHidden(app.packageName, app.className)) "Unhide app" else "Hide app")
+        popup.menu.add(if (OeaAppLockStore.isLocked(context, itemId)) "Unlock app" else "Lock app")
         popup.menu.add("Freeze / unfreeze")
         popup.menu.add("Drag to place")
         shortcutController.shortcuts(app.packageName).take(5).forEach { shortcut ->
@@ -285,6 +287,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 "App info" -> { openAppInfo(app.packageName); true }
                 "Hide app" -> { store.setHidden(app.packageName, app.className, true); removeFromHome(itemId); renderDrawer(drawerSearch.text.toString()); true }
                 "Unhide app" -> { store.setHidden(app.packageName, app.className, false); renderDrawer(drawerSearch.text.toString()); true }
+                "Lock app" -> { OeaAppLockStore.setLocked(context, itemId, true); Toast.makeText(context, app.label + " locked", Toast.LENGTH_SHORT).show(); true }
+                "Unlock app" -> { OeaAppLockStore.setLocked(context, itemId, false); Toast.makeText(context, app.label + " unlocked", Toast.LENGTH_SHORT).show(); true }
                 "Freeze / unfreeze" -> { freezeDialog(app); true }
                 "Drag to place" -> {
                     dragged = itemId
