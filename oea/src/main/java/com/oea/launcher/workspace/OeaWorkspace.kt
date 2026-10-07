@@ -1877,7 +1877,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun cols() = store.gridColumns().coerceIn(3, 5)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    fun refreshBadges() { rebuild(); renderDrawer(drawerSearch.text.toString()) }
+    fun refreshBadges() {
+        // Resume is frequent (dialogs, permissions, other apps). Rebuild only the
+        // rendered surfaces so returning Home does not recreate every page.
+        renderedPages.toList().forEach { refreshPage(it) }
+        renderDock()
+        if (drawerOpen) renderDrawer(drawerSearch.text.toString())
+    }
 
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode == wallpaperRequestCode) {
