@@ -254,7 +254,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun homeTile(item: OeaWorkspaceStore.Item): View {
         val app = find(item.id) ?: return emptyCell()
         return tile(app).apply {
-            setOnLongClickListener { showAppActions(app, this, item.id); true }
+            setOnLongClickListener {
+                dragged = item.id
+                startDragAndDrop(
+                    ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, item.id),
+                    View.DragShadowBuilder(this), item.id, View.DRAG_FLAG_GLOBAL,
+                )
+                true
+            }
             setOnDragListener { _, e ->
                 if (e.action == DragEvent.ACTION_DROP && dragged != null && dragged != item.id) {
                     folder(item.id, dragged!!)
@@ -274,7 +281,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         popup.menu.add(if (store.isHidden(app.packageName, app.className)) "Unhide app" else "Hide app")
         popup.menu.add(if (OeaAppLockStore.isLocked(context, itemId)) "Unlock app" else "Lock app")
         popup.menu.add("Freeze / unfreeze")
-        popup.menu.add("Drag to place")
         shortcutController.shortcuts(app.packageName).take(5).forEach { shortcut ->
             popup.menu.add(shortcut.shortLabel ?: shortcut.longLabel ?: "Shortcut")
         }
@@ -290,14 +296,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 "Lock app" -> { lockApp(itemId, app); true }
                 "Unlock app" -> { OeaAppLockStore.setLocked(context, itemId, false); Toast.makeText(context, app.label + " unlocked", Toast.LENGTH_SHORT).show(); true }
                 "Freeze / unfreeze" -> { freezeDialog(app); true }
-                "Drag to place" -> {
-                    dragged = itemId
-                    startDragAndDrop(
-                        ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, itemId),
-                        View.DragShadowBuilder(anchor), itemId, View.DRAG_FLAG_GLOBAL,
-                    )
-                    true
-                }
                 else -> {
                     val shortcut = shortcutController.shortcuts(app.packageName)
                         .firstOrNull { (it.shortLabel ?: it.longLabel ?: "Shortcut") == item.title.toString() }
