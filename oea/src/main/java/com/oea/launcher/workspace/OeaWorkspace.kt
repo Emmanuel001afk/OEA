@@ -26,7 +26,6 @@ import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.drawer.OeaAppDrawerController
 import com.oea.launcher.folders.OeaFolderController
 import com.oea.launcher.icons.OeaIconController
-import com.oea.launcher.interaction.OeaGestureController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.notifications.OeaNotificationState
 import com.oea.launcher.R
