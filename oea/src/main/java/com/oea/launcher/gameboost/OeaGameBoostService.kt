@@ -32,54 +32,98 @@ class OeaGameBoostService : Service() {
             set(value) { field = value.coerceIn(0f, 1f); invalidate() }
         var virtualFraction = 0f
             set(value) { field = value.coerceIn(0f, 1f); invalidate() }
+        var ramUsedMb = 0.0
+            set(value) { field = value; invalidate() }
+        var ramTotalMb = 0.0
+            set(value) { field = value; invalidate() }
+        var virtualUsedMb = 0.0
+            set(value) { field = value; invalidate() }
+        var virtualTotalMb = 0.0
+            set(value) { field = value; invalidate() }
+        var lowMemory = false
+            set(value) { field = value; invalidate() }
 
         private val track = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(8).toFloat()
+            strokeCap = android.graphics.Paint.Cap.ROUND
             color = 0x55343A48
         }
-        private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val progress = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(8).toFloat()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+        }
+        private val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            color = Color.WHITE
+        }
+        private val percent = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            color = Color.WHITE
+        }
+        private val detail = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            color = 0xFFBFC6D8.toInt()
+        }
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-            val textBottom = (layout?.height ?: 0) + paddingTop
-            val barsHeight = dp(8) * 2 + dp(12)
-            val neededHeight = textBottom + dp(14) + barsHeight + paddingBottom
-            if (measuredHeight < neededHeight) {
-                setMeasuredDimension(measuredWidth, neededHeight)
-            }
+            val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(dp(220))
+            val desiredHeight = dp(154)
+            setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
         }
 
         override fun onDraw(canvas: android.graphics.Canvas) {
-            super.onDraw(canvas)
-            val left = paddingLeft.toFloat()
-            val right = (width - paddingRight).toFloat()
-            val barWidth = (right - left).coerceAtLeast(1f)
-            val barHeight = dp(8).toFloat()
-            val gap = dp(12).toFloat()
-            // Bars live strictly below the TextView's measured text block.
-            // The larger bottom reserve above guarantees they never paint over
-            // either memory label even on OEM font/scale differences.
-            val textBottom = (layout?.height ?: 0) + paddingTop
-            val top = maxOf(
-                textBottom + dp(14).toFloat(),
-                height - paddingBottom - barHeight * 2f - gap
+            val available = width - paddingLeft - paddingRight
+            val diameter = minOf(dp(104), ((available - dp(22)) / 2).coerceAtLeast(dp(82)))
+            val radius = diameter / 2f - dp(5)
+            val centerY = dp(58).toFloat()
+            val leftCenterX = paddingLeft + available / 4f
+            val rightCenterX = paddingLeft + available * 3f / 4f
+
+            drawGauge(
+                canvas, leftCenterX, centerY, radius,
+                ramFraction, "RAM",
+                String.format(Locale.US, "%.0f%%", ramFraction * 100.0),
+                String.format(Locale.US, "%.0f / %.0f MB", ramUsedMb, ramTotalMb),
+                0xFF4D7CFF.toInt()
             )
-            drawBar(canvas, left, top, barWidth, barHeight, ramFraction, 0xFF4D7CFF.toInt())
-            drawBar(canvas, left, top + barHeight + gap, barWidth, barHeight, virtualFraction, 0xFF27D9B7.toInt())
+            drawGauge(
+                canvas, rightCenterX, centerY, radius,
+                virtualFraction, "VIRTUAL RAM",
+                if (virtualTotalMb > 0) String.format(Locale.US, "%.0f%%", virtualFraction * 100.0) else "—",
+                if (virtualTotalMb > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsedMb, virtualTotalMb) else "not exposed",
+                0xFF27D9B7.toInt()
+            )
         }
 
-        private fun drawBar(
+        private fun drawGauge(
             canvas: android.graphics.Canvas,
-            left: Float,
-            top: Float,
-            width: Float,
-            height: Float,
+            cx: Float,
+            cy: Float,
+            radius: Float,
             fraction: Float,
+            name: String,
+            percentage: String,
+            value: String,
             color: Int
         ) {
-            val radius = height / 2f
-            canvas.drawRoundRect(left, top, left + width, top + height, radius, radius, track)
-            fill.color = color
-            canvas.drawRoundRect(left, top, left + width * fraction, top + height, radius, radius, fill)
+            canvas.drawCircle(cx, cy, radius, track)
+            progress.color = color
+            canvas.drawArc(cx - radius, cy - radius, cx + radius, cy + radius, -90f, fraction * 360f, false, progress)
+
+            label.textSize = dp(if (name.length > 6) 8 else 10).toFloat()
+            label.color = 0xFFCBD3E6.toInt()
+            canvas.drawText(name, cx, cy - dp(3).toFloat(), label)
+
+            percent.textSize = dp(20).toFloat()
+            percent.color = Color.WHITE
+            canvas.drawText(percentage, cx, cy + dp(19).toFloat(), percent)
+
+            detail.textSize = dp(9).toFloat()
+            canvas.drawText(value, cx, cy + radius + dp(22).toFloat(), detail)
         }
 
         private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -177,12 +221,8 @@ class OeaGameBoostService : Service() {
             setPadding(0, dp(3), 0, dp(9))
         }
         val metrics = MemoryMetricsView(this).apply {
-            setTextColor(Color.WHITE); textSize = 12f
-            setLineSpacing(dp(4).toFloat(), 1f)
-            text = "RAM • reading…"
-            // Reserve a dedicated lower zone for both bars so neither bar can
-            // overlap the RAM / Virtual RAM text above it.
-            setPadding(0, 0, 0, dp(62))
+            setPadding(dp(4), 0, dp(4), 0)
+            contentDescription = "Live RAM and virtual RAM circular gauges"
         }
         val device = TextView(this).apply {
             setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
@@ -586,12 +626,12 @@ class OeaGameBoostService : Service() {
         val virtual = virtualRamMb()
         val virtualUsed = virtual.first
         val virtualTotal = virtual.second
-        metrics.text = String.format(
-            Locale.US,
-            "RAM  %.0f / %.0f MB  •  %.0f%%%s\nVirtual RAM  %s",
-            usedMb, totalMb, usedPct, state, if (virtualTotal > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsed, virtualTotal) else "not exposed by Android"
-        )
         (metrics as? MemoryMetricsView)?.apply {
+            ramUsedMb = usedMb
+            ramTotalMb = totalMb
+            virtualUsedMb = virtualUsed
+            virtualTotalMb = virtualTotal
+            lowMemory = info.lowMemory
             ramFraction = (if (totalMb > 0) usedMb / totalMb else 0.0).toFloat()
             virtualFraction = (if (virtualTotal > 0) virtualUsed / virtualTotal else 0.0).toFloat()
         }
