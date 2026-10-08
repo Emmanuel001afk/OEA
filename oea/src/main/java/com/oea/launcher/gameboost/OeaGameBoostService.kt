@@ -256,7 +256,6 @@ class OeaGameBoostService : Service() {
         val screenshot = chip("▣  SHOT")
         val record = chip("●  RECORD")
         val cleanup = chip("↻  CLEAN RAM")
-        val hide = chip("⌄  HIDE")
         rowOne.addView(dnd, chipParams())
         rowOne.addView(boost, chipParams())
         rowOne.addView(screenshot, chipParams())
@@ -264,7 +263,6 @@ class OeaGameBoostService : Service() {
         rowOne.addView(wifi, chipParams())
         rowTwo.addView(record, chipParams())
         rowTwo.addView(cleanup, chipParams())
-        rowTwo.addView(hide, chipParams())
         controls.addView(rowOne)
         controls.addView(rowTwo, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply { topMargin = dp(4) })
         dnd.setOnClickListener { toggleDnd(dnd) }
@@ -281,7 +279,6 @@ class OeaGameBoostService : Service() {
             }.start()
             updateBoostButton(boost)
         }
-        hide.setOnClickListener { hidePanel(panel) }
         panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
 
         val handleSize = handleSizePx()
@@ -311,7 +308,7 @@ class OeaGameBoostService : Service() {
             gravity = Gravity.CENTER
         })
         handle.setOnClickListener {
-            if (panel.visibility == View.VISIBLE) hidePanel(panel) else showPanel(panel)
+            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
         }
         root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(286), -2))
         root.addView(handle, android.widget.LinearLayout.LayoutParams(handleSize, handleSize).apply {
@@ -894,7 +891,7 @@ class OeaGameBoostService : Service() {
             }.start()
     }
 
-    private fun hidePanel(panel: View) {
+    private fun closePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
