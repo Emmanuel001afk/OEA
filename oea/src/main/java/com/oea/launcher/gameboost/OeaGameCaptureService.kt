@@ -97,7 +97,16 @@ class OeaGameCaptureService : Service() {
 
         runCatching {
             if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
-        }.onFailure {
+        }.onFailure { error ->
+            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+                .putBoolean("recording", false)
+                .putBoolean("capture_active", false)
+                .apply()
+            Toast.makeText(
+                this,
+                "OEA capture failed: " + (error.message ?: error.javaClass.simpleName),
+                Toast.LENGTH_LONG
+            ).show()
             stopCapture()
             stopSelf()
         }
@@ -171,8 +180,7 @@ class OeaGameCaptureService : Service() {
             width,
             height,
             density(),
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             recorder!!.surface,
             null,
             null
@@ -209,8 +217,7 @@ class OeaGameCaptureService : Service() {
             width,
             height,
             density(),
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             captureReader.surface,
             null,
             Handler(Looper.getMainLooper())
