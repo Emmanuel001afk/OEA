@@ -123,14 +123,6 @@ class OeaGameCaptureService : Service() {
         return width to height
     }
 
-    private fun recordingSize(): Pair<Int, Int> {
-        val (sourceWidth, sourceHeight) = size()
-        val scale = minOf(1f, 1920f / sourceWidth.toFloat(), 1080f / sourceHeight.toFloat())
-        val width = ((sourceWidth * scale).toInt() and 1.inv()).coerceAtLeast(2)
-        val height = ((sourceHeight * scale).toInt() and 1.inv()).coerceAtLeast(2)
-        return width to height
-    }
-
     private fun startRecording() {
         // MediaRecorder and VirtualDisplay must use identical dimensions.
         // The previous implementation configured the encoder at <=1080p but
