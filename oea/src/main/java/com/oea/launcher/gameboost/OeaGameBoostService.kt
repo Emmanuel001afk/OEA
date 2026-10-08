@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -30,6 +31,7 @@ class OeaGameBoostService : Service() {
     private var overlay: View? = null
     private var activeGame: String? = null
     private var previousInterruptionFilter: Int? = null
+    private var previousKeepScreenOn = false
     private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
@@ -53,6 +55,9 @@ class OeaGameBoostService : Service() {
     override fun onDestroy() { handler.removeCallbacksAndMessages(null); activeGame?.let(::deactivate); removeOverlay(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun activate(packageName: String) {
+        if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) {
+            setKeepScreenOn(true)
+        }
         if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) {
             val nm = getSystemService(NotificationManager::class.java)
             if (nm.isNotificationPolicyAccessGranted) { previousInterruptionFilter = nm.currentInterruptionFilter; nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY) }
@@ -62,6 +67,7 @@ class OeaGameBoostService : Service() {
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
         val nm = getSystemService(NotificationManager::class.java)
         restoreDnd()
+        setKeepScreenOn(false)
         removeOverlay()
     }
     private fun showOverlay(packageName: String) {
@@ -83,7 +89,7 @@ class OeaGameBoostService : Service() {
         val title = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 13f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            text = "OEA Game Boost"
+            text = "OEA  •  GAME BOOST"
         }
         val gameName = TextView(this).apply {
             setTextColor(0xFFB9C7FF.toInt()); textSize = 11f
@@ -92,19 +98,27 @@ class OeaGameBoostService : Service() {
         }
         val metrics = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 12f
-            text = "RAM • reading…"; setPadding(0, 0, 0, dp(5))
+            text = "RAM • reading…"; setPadding(0, 0, 0, dp(4))
         }
         val device = TextView(this).apply {
             setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
-            text = "Battery • reading…"; setPadding(0, 0, 0, dp(10))
+            text = "Battery • reading…"; setPadding(0, 0, 0, dp(8))
         }
         val controls = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
         val dnd = chip("DND")
+        val boost = chip("BOOST")
         val hide = chip("HIDE")
-        controls.addView(dnd, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(6) })
+        controls.addView(dnd, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        controls.addView(boost, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
         controls.addView(hide, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f))
         dnd.setOnClickListener { toggleDnd(dnd) }
-        hide.setOnClickListener { panel.visibility = View.GONE }
+        boost.setOnClickListener {
+            val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
+            OeaGameBoostStore.prefs(this).edit().putBoolean("boost", next).apply()
+            setKeepScreenOn(next)
+            updateBoostButton(boost)
+        }
+        hide.setOnClickListener { hidePanel(panel) }
         panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
 
         val pill = TextView(this).apply {
@@ -116,9 +130,17 @@ class OeaGameBoostService : Service() {
             elevation = dp(4).toFloat()
             contentDescription = "Open OEA Game Boost controls"
         }
-        pill.setOnClickListener { panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
-        root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(250), -2))
-        root.addView(pill, android.widget.LinearLayout.LayoutParams(dp(76), dp(30)).apply { gravity = Gravity.END; topMargin = dp(2) })
+        pill.setOnClickListener {
+            if (panel.visibility == View.VISIBLE) hidePanel(panel) else {
+                panel.visibility = View.VISIBLE
+                panel.alpha = 0f
+                panel.scaleX = 0.96f
+                panel.scaleY = 0.96f
+                panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180L).start()
+            }
+        }
+        root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(274), -2))
+        root.addView(pill, android.widget.LinearLayout.LayoutParams(dp(92), dp(32)).apply { gravity = Gravity.END; topMargin = dp(3) })
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -176,6 +198,7 @@ class OeaGameBoostService : Service() {
         val device = panel.getChildAt(3) as? TextView ?: return
         val controls = panel.getChildAt(4) as? android.widget.LinearLayout ?: return
         val dnd = controls.getChildAt(0) as? TextView ?: return
+        val boost = controls.getChildAt(1) as? TextView ?: return
 
         val info = ActivityManager.MemoryInfo()
         getSystemService(ActivityManager::class.java).getMemoryInfo(info)
@@ -184,14 +207,59 @@ class OeaGameBoostService : Service() {
         val usedMb = (totalMb - availableMb).coerceAtLeast(0.0)
         val usedPct = if (totalMb > 0) usedMb / totalMb * 100.0 else 0.0
         val state = if (info.lowMemory) " • LOW MEMORY" else ""
-        metrics.text = String.format(Locale.US, "RAM %.0f / %.0f MB • %.0f%%%s", usedMb, totalMb, usedPct, state)
+        val gameRamMb = activeGame?.let { gameProcessRamMb(it) }
+        metrics.text = if (gameRamMb != null) {
+            String.format(Locale.US, "Device RAM %.0f / %.0f MB • %.0f%%%s\nGame RAM %.0f MB", usedMb, totalMb, usedPct, state, gameRamMb)
+        } else {
+            String.format(Locale.US, "Device RAM %.0f / %.0f MB • %.0f%%%s\nGame RAM • unavailable", usedMb, totalMb, usedPct, state)
+        }
 
         val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
         val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         device.text = if (level in 0..100) "Battery $level% • Game focus active" else "Game focus active"
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
+        updateBoostButton(boost)
         (root.getChildAt(1) as? TextView)?.text = String.format(Locale.US, "RAM %.0f%%", usedPct)
+    }
+
+    private fun updateBoostButton(button: TextView) {
+        button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
+    }
+
+    private fun hidePanel(panel: View) {
+        if (panel.visibility != View.VISIBLE) return
+        panel.animate().alpha(0f).scaleX(0.96f).scaleY(0.96f).setDuration(150L).withEndAction {
+            panel.visibility = View.GONE
+            panel.alpha = 1f
+            panel.scaleX = 1f
+            panel.scaleY = 1f
+        }.start()
+    }
+
+    private fun setKeepScreenOn(enabled: Boolean) {
+        val root = overlay as? android.widget.LinearLayout ?: return
+        val params = root.layoutParams as? WindowManager.LayoutParams ?: return
+        val wasOn = params.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
+        previousKeepScreenOn = wasOn
+        val nextFlags = if (enabled) {
+            params.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        } else {
+            params.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON.inv()
+        }
+        if (nextFlags != params.flags) {
+            params.flags = nextFlags
+            runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(root, params) }
+        }
+    }
+
+    private fun gameProcessRamMb(packageName: String): Double? {
+        val am = getSystemService(ActivityManager::class.java) ?: return null
+        val process = runCatching {
+            am.runningAppProcesses?.firstOrNull { it.pkgList?.contains(packageName) == true }
+        }.getOrNull() ?: return null
+        val memory = runCatching { am.getProcessMemoryInfo(intArrayOf(process.pid)).firstOrNull() }.getOrNull() ?: return null
+        return memory.totalPss / 1024.0
     }
 
     private fun restoreDnd() {
