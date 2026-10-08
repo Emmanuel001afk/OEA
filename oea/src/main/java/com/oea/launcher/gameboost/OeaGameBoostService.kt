@@ -32,6 +32,7 @@ class OeaGameBoostService : Service() {
     private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
+            OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService)
             val game = foregroundPackage()
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                 if (activeGame != game) { activeGame?.let(::deactivate); activeGame = game; activate(game) } else updateOverlay()
@@ -190,4 +191,33 @@ object OeaGameBoostStore {
     fun games(context: Context) = prefs(context).getStringSet("games", emptySet()).orEmpty()
     fun setGames(context: Context, games: Set<String>) = prefs(context).edit().putStringSet("games", games).apply()
     fun isGame(context: Context, packageName: String) = games(context).contains(packageName)
+
+    /** Uses Android's declared application category where available, with a conservative legacy fallback. */
+    fun detectedGames(context: Context): Set<String> {
+        val pm = context.packageManager
+        return pm.getInstalledApplications(0).asSequence()
+            .filter { it.packageName != context.packageName }
+            .filter {
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    it.category == android.content.pm.ApplicationInfo.CATEGORY_GAME
+                } else {
+                    pm.getApplicationLabel(it).toString().lowercase().let { label ->
+                        label.contains("game") || label.contains("arcade")
+                    }
+                }
+            }
+            .map { it.packageName }
+            .toSet()
+    }
+
+    fun syncDetectedGames(context: Context): Set<String> {
+        val detected = detectedGames(context)
+        val merged = games(context).toMutableSet().apply { addAll(detected) }
+        setGames(context, merged)
+        return merged
+    }
+
+    fun removeGame(context: Context, packageName: String) {
+        setGames(context, games(context).toMutableSet().apply { remove(packageName) })
+    }
 }
