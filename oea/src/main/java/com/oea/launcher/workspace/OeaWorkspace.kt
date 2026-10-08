@@ -1204,10 +1204,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             else -> false
         }
     }
-            DragEvent.ACTION_DRAG_ENDED -> { dragged = null; false }
-            else -> false
-        }
-    }
 
     private fun dockDrop(e: DragEvent): Boolean {
         if (e.action == DragEvent.ACTION_DRAG_STARTED) return true
@@ -1905,7 +1901,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 true
             }
             }
-            host.addView(widget, FrameLayout.LayoutParams(widthPx, dp(heightDp), Gravity.CENTER_HORIZONTAL).apply {
+            val wrapper = FrameLayout(context).apply {
+                clipChildren = false
+            }
+            wrapper.addView(widget, FrameLayout.LayoutParams(widthPx, dp(heightDp), Gravity.CENTER))
+            wrapper.addView(TextView(context).apply {
+                text = "⋮"
+                textSize = 16f
+                gravity = Gravity.CENTER
+                setTextColor(themeText)
+                background = rounded(themeSurface, 12)
+                contentDescription = "Widget options"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { widgetOptions(widget) }
+            }, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.TOP or Gravity.END))
+            host.addView(wrapper, FrameLayout.LayoutParams(widthPx, dp(heightDp), Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(6)
                 bottomMargin = dp(6)
             })
