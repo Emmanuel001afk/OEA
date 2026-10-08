@@ -511,6 +511,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                             .onFailure { Toast.makeText(context, "Unable to open " + app.label, Toast.LENGTH_SHORT).show() }
                     }
                     true
+                }
             }
         }
         popup.show()
