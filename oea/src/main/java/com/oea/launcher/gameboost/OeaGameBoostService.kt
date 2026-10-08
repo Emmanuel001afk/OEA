@@ -165,10 +165,12 @@ class OeaGameBoostService : Service() {
         }
         val handleText = TextView(this).apply {
             gravity = Gravity.CENTER
-            setTextColor(0xFF202124.toInt())
+            setTextColor(Color.WHITE)
             textSize = 9f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            text = "OEA RAM"
+            text = "OEA\nRAM"
+            includeFontPadding = false
+            setShadowLayer(dp(4).toFloat(), 0f, 0f, 0xCC6FB8FF.toInt())
         }
         handle.addView(handleText, android.widget.FrameLayout.LayoutParams(handleSize, handleSize).apply {
             gravity = Gravity.CENTER
@@ -519,12 +521,41 @@ class OeaGameBoostService : Service() {
             if (t != null) {
                 t.textSize = if (size <= dp(44)) 8f else 9f
                 t.text = String.format(Locale.US, "OEA\nRAM\n%.0f%%", usedPct)
+                val childLp = t.layoutParams as? android.widget.FrameLayout.LayoutParams
+                if (childLp != null && (childLp.width != size || childLp.height != size)) {
+                    childLp.width = size
+                    childLp.height = size
+                    t.layoutParams = childLp
+                }
+                if (handleVisible && t.visibility == View.VISIBLE) animateHandleText(t)
             }
         }
     }
 
     private fun updateBoostButton(button: TextView) {
         button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
+    }
+
+    private fun animateHandleText(text: TextView) {
+        text.animate().cancel()
+        text.scaleX = 0.96f
+        text.scaleY = 0.96f
+        text.alpha = 0.86f
+        text.animate()
+            .scaleX(1.04f)
+            .scaleY(1.04f)
+            .alpha(1f)
+            .setDuration(700L)
+            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+            .withEndAction {
+                if (overlay != null && text.visibility == View.VISIBLE) {
+                    text.animate().scaleX(0.96f).scaleY(0.96f).alpha(0.88f)
+                        .setDuration(700L)
+                        .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+                        .withEndAction { if (overlay != null && text.visibility == View.VISIBLE) animateHandleText(text) }
+                        .start()
+                }
+            }.start()
     }
 
     private fun animateHandle(handle: View) {
@@ -539,6 +570,8 @@ class OeaGameBoostService : Service() {
                 val accent = android.animation.ArgbEvaluator().evaluate(p, 0xFF2357FF.toInt(), 0xFF56B7FF.toInt()) as Int
                 val deep = android.animation.ArgbEvaluator().evaluate(p, 0xFF0A1020.toInt(), 0xFF102A5A.toInt()) as Int
                 bg?.setColors(intArrayOf(deep, accent, 0xFF0B1735.toInt()))
+                val text = (handle as? android.view.ViewGroup)?.getChildAt(0) as? TextView
+                text?.setShadowLayer(dp(3 + (p * 3).toInt()).toFloat(), 0f, 0f, accent)
                 bg?.setStroke(dp(1), android.animation.ArgbEvaluator().evaluate(p, 0x884D74FF.toInt(), 0xEE7BC8FF.toInt()) as Int)
             }
         }
@@ -646,7 +679,31 @@ class OeaGameBoostService : Service() {
     private fun foregroundPackage(): String? {
         val usm = getSystemService(UsageStatsManager::class.java) ?: return null
         val end = System.currentTimeMillis()
-        val stats = runCatching { usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, end - 10_000, end) }.getOrNull() ?: return null
+        val start = end - 30_000L
+
+        runCatching {
+            val events = usm.queryEvents(start, end)
+            val event = android.app.usage.UsageEvents.Event()
+            var latestPackage: String? = null
+            var latestTime = 0L
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val resumed = if (Build.VERSION.SDK_INT >= 29) {
+                    event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED
+                } else {
+                    event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND
+                }
+                if (resumed && event.timeStamp >= latestTime) {
+                    latestTime = event.timeStamp
+                    latestPackage = event.packageName
+                }
+            }
+            if (latestPackage != null) return latestPackage
+        }
+
+        val stats = runCatching {
+            usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
+        }.getOrNull() ?: return null
         return stats.maxByOrNull { it.lastTimeUsed }?.packageName
     }
     private fun isUsageAccessGranted() = runCatching {
