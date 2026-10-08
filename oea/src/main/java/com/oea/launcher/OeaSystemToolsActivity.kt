@@ -226,6 +226,11 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "DND access", dndAccessStatus()) { openDndAccess() }
         row(
             box,
+            "OEA RAM floating control",
+            ramOverlaySummary()
+        ) { showRamOverlaySettings() }
+        row(
+            box,
             "Performance boost",
             if (OeaGameBoostStore.prefs(this).getBoolean("boost", true))
                 "Boost session on • keeps the game screen awake"
@@ -531,6 +536,105 @@ class OeaSystemToolsActivity : Activity() {
     private fun dndAccessStatus(): String {
         val granted = getSystemService(android.app.NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
         return if (granted) "Granted • OEA can control session DND" else "Not granted • tap to show OEA in Android DND access"
+    }
+
+    private fun ramOverlaySummary(): String {
+        val prefs = OeaGameBoostStore.prefs(this)
+        val visible = prefs.getBoolean("ram_handle_visible", true)
+        if (!visible) return "Hidden during games"
+        val size = when (prefs.getString("ram_handle_size", "medium")) {
+            "small" -> "Small"
+            "large" -> "Large"
+            else -> "Medium"
+        }
+        val corner = when (prefs.getString("ram_handle_corner", "bottom_right")) {
+            "top_left" -> "Top-left"
+            "top_right" -> "Top-right"
+            "bottom_left" -> "Bottom-left"
+            else -> "Bottom-right"
+        }
+        return "$size • $corner • always available"
+    }
+
+    private fun showRamOverlaySettings() {
+        val prefs = OeaGameBoostStore.prefs(this)
+        val currentVisible = prefs.getBoolean("ram_handle_visible", true)
+        val currentSize = prefs.getString("ram_handle_size", "medium") ?: "medium"
+        val currentCorner = prefs.getString("ram_handle_corner", "bottom_right") ?: "bottom_right"
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 4)
+        }
+        val visible = CheckBox(this).apply {
+            text = "Keep OEA RAM visible in games"
+            isChecked = currentVisible
+            setTextColor(textColor())
+        }
+        container.addView(visible)
+
+        val sizeLabel = TextView(this).apply {
+            text = "Handle size"
+            textSize = 14f
+            setTextColor(mutedColor())
+            setPadding(0, 12, 0, 4)
+        }
+        container.addView(sizeLabel)
+        val sizes = arrayOf("Small", "Medium", "Large")
+        val sizeValues = arrayOf("small", "medium", "large")
+        var selectedSize = sizeValues.indexOf(currentSize).coerceAtLeast(0)
+        val sizeGroup = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
+        sizes.forEachIndexed { index, label ->
+            val radio = RadioButton(this).apply {
+                text = label
+                setTextColor(textColor())
+                isChecked = index == selectedSize
+            }
+            radio.setOnClickListener { selectedSize = index }
+            sizeGroup.addView(radio, RadioGroup.LayoutParams(0, -2, 1f))
+        }
+        container.addView(sizeGroup)
+
+        val cornerLabel = TextView(this).apply {
+            text = "Corner placement"
+            textSize = 14f
+            setTextColor(mutedColor())
+            setPadding(0, 12, 0, 4)
+        }
+        container.addView(cornerLabel)
+        val corners = arrayOf("Top-left", "Top-right", "Bottom-left", "Bottom-right")
+        val cornerValues = arrayOf("top_left", "top_right", "bottom_left", "bottom_right")
+        var selectedCorner = cornerValues.indexOf(currentCorner).coerceAtLeast(0)
+        val cornerGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        corners.forEachIndexed { index, label ->
+            val radio = RadioButton(this).apply {
+                text = label
+                setTextColor(textColor())
+                isChecked = index == selectedCorner
+            }
+            radio.setOnClickListener { selectedCorner = index }
+            cornerGroup.addView(radio)
+        }
+        container.addView(cornerGroup)
+
+        AlertDialog.Builder(this)
+            .setTitle("OEA RAM floating control")
+            .setMessage("The handle stays above the game when enabled. Put it in a quiet corner, resize it, or hide it completely. The control is still a real touch target when visible.")
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                prefs.edit()
+                    .putBoolean("ram_handle_visible", visible.isChecked)
+                    .putString("ram_handle_size", sizeValues[selectedSize])
+                    .putString("ram_handle_corner", cornerValues[selectedCorner])
+                    .apply()
+                if (OeaGameBoostStore.enabled(this)) {
+                    stopService(Intent(this, OeaGameBoostService::class.java))
+                    startBoostService()
+                }
+                showGameBoost()
+            }
+            .show()
     }
 
     private fun startBoostService() {
