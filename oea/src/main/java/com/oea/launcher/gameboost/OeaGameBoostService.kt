@@ -28,6 +28,8 @@ import java.util.Locale
 class OeaGameBoostService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var overlay: View? = null
+    private var wakeOverlay: View? = null
+    private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
     private var previousInterruptionFilter: Int? = null
     private var lastGameSeenAt: Long = 0L
@@ -57,7 +59,7 @@ class OeaGameBoostService : Service() {
         else startForeground(NOTIFICATION_ID, notification)
         handler.post(tick)
     }
-    override fun onDestroy() { handler.removeCallbacksAndMessages(null); activeGame?.let(::deactivate); removeOverlay(); super.onDestroy() }
+    override fun onDestroy() { handler.removeCallbacksAndMessages(null); activeGame?.let(::deactivate); removeWakeOverlay(); removeOverlay(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun activate(packageName: String) {
         if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) {
@@ -195,6 +197,55 @@ class OeaGameBoostService : Service() {
                 .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).withEndAction { animateHandle(handle) }.start()
             updateOverlay()
         }
+    }
+
+    private fun ensureWakeOverlay() {
+        if (wakeOverlay != null || !OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) return
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val wake = android.view.View(this).apply {
+            alpha = 0.01f
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastWakeTapAt in 1..380L) {
+                        lastWakeTapAt = 0L
+                        OeaGameBoostStore.prefs(this@OeaGameBoostService).edit().putBoolean("ram_handle_visible", true).apply()
+                        removeWakeOverlay()
+                        updateOverlay()
+                        val root = overlay
+                        val handle = (root as? android.widget.LinearLayout)?.getChildAt(1) as? android.widget.FrameLayout
+                        handle?.alpha = 0f
+                        handle?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.start()
+                    } else {
+                        lastWakeTapAt = now
+                    }
+                }
+                false
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            1, 1,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = overlayGravity()
+            x = if (gravity and Gravity.RIGHT == Gravity.RIGHT) dp(2) else 0
+            y = if (gravity and Gravity.BOTTOM == Gravity.BOTTOM) dp(2) else 0
+        }
+        runCatching {
+            wm.addView(wake, params)
+            wakeOverlay = wake
+        }
+    }
+
+    private fun removeWakeOverlay() {
+        val wake = wakeOverlay ?: return
+        runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(wake) }
+        wakeOverlay = null
+        lastWakeTapAt = 0L
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -346,7 +397,9 @@ class OeaGameBoostService : Service() {
         (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text = if (recording) "●  RECORDING" else "●  RECORD" }
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
-        handle?.visibility = if (OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) View.VISIBLE else View.GONE
+        val handleVisible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
+        handle?.visibility = if (handleVisible) View.VISIBLE else View.GONE
+        if (handleVisible) removeWakeOverlay() else ensureWakeOverlay()
         handle?.let { h ->
             val size = handleSizePx()
             val lp = h.layoutParams as? android.widget.LinearLayout.LayoutParams
