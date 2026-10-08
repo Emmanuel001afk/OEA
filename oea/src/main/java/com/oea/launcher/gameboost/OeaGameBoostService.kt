@@ -120,26 +120,34 @@ class OeaGameBoostService : Service() {
         hide.setOnClickListener { hidePanel(panel) }
         panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
 
-        val pill = TextView(this).apply {
-            gravity = Gravity.CENTER; setTextColor(0xFF202124.toInt()); textSize = 9f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        val handle = android.widget.FrameLayout(this).apply {
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFFF2F3F5.toInt()); cornerRadius = dp(999).toFloat()
+                setColor(0xF2F2F4F7.toInt())
+                cornerRadii = floatArrayOf(dp(18).toFloat(), dp(18).toFloat(), dp(6).toFloat(), dp(6).toFloat(), dp(6).toFloat(), dp(6).toFloat(), dp(18).toFloat(), dp(18).toFloat())
             }
-            elevation = dp(4).toFloat()
+            elevation = dp(7).toFloat()
             contentDescription = "Open OEA Game Boost controls"
+            isClickable = true
+            isFocusable = true
         }
-        pill.setOnClickListener {
-            if (panel.visibility == View.VISIBLE) hidePanel(panel) else {
-                panel.visibility = View.VISIBLE
-                panel.alpha = 0f
-                panel.scaleX = 0.96f
-                panel.scaleY = 0.96f
-                panel.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180L).start()
-            }
+        val handleText = TextView(this).apply {
+            gravity = Gravity.CENTER
+            setTextColor(0xFF202124.toInt())
+            textSize = 10f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            text = "OEA  •  RAM"
         }
-        root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(274), -2))
-        root.addView(pill, android.widget.LinearLayout.LayoutParams(dp(92), dp(32)).apply { gravity = Gravity.END; topMargin = dp(3) })
+        handle.addView(handleText, android.widget.FrameLayout.LayoutParams(dp(70), dp(44)).apply {
+            gravity = Gravity.CENTER
+        })
+        handle.setOnClickListener {
+            if (panel.visibility == View.VISIBLE) hidePanel(panel) else showPanel(panel)
+        }
+        root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(286), -2))
+        root.addView(handle, android.widget.LinearLayout.LayoutParams(dp(70), dp(44)).apply {
+            gravity = Gravity.END
+            topMargin = dp(5)
+        })
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -206,12 +214,14 @@ class OeaGameBoostService : Service() {
         val usedMb = (totalMb - availableMb).coerceAtLeast(0.0)
         val usedPct = if (totalMb > 0) usedMb / totalMb * 100.0 else 0.0
         val state = if (info.lowMemory) " • LOW MEMORY" else ""
-        val gameRamMb = activeGame?.let { gameProcessRamMb(it) }
-        metrics.text = if (gameRamMb != null) {
-            String.format(Locale.US, "Device RAM %.0f / %.0f MB • %.0f%%%s\nGame RAM %.0f MB", usedMb, totalMb, usedPct, state, gameRamMb)
-        } else {
-            String.format(Locale.US, "Device RAM %.0f / %.0f MB • %.0f%%%s\nGame RAM • unavailable", usedMb, totalMb, usedPct, state)
-        }
+        val virtual = virtualRamMb()
+        val virtualUsed = virtual.first
+        val virtualTotal = virtual.second
+        metrics.text = String.format(
+            Locale.US,
+            "RAM  %.0f / %.0f MB  •  %.0f%%%s\nVirtual RAM  %.0f / %.0f MB",
+            usedMb, totalMb, usedPct, state, virtualUsed, virtualTotal
+        )
 
         val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
         val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -220,21 +230,48 @@ class OeaGameBoostService : Service() {
         updateDndButton(dnd)
         updateBoostButton(boost)
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
-        (root.getChildAt(1) as? TextView)?.text = String.format(Locale.US, "RAM %.0f%%", usedPct)
+        val handle = root.getChildAt(1) as? android.widget.FrameLayout
+        val handleText = handle?.getChildAt(0) as? TextView
+        handleText?.text = String.format(Locale.US, "OEA  •  %.0f%%", usedPct)
     }
 
     private fun updateBoostButton(button: TextView) {
         button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
     }
 
+    private fun showPanel(panel: View) {
+        if (panel.visibility == View.VISIBLE) return
+        panel.visibility = View.VISIBLE
+        panel.alpha = 0f
+        panel.scaleX = 0.94f
+        panel.scaleY = 0.94f
+        panel.translationX = dp(10).toFloat()
+        panel.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .translationX(0f)
+            .setDuration(190L)
+            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .start()
+    }
+
     private fun hidePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
-        panel.animate().alpha(0f).scaleX(0.96f).scaleY(0.96f).setDuration(150L).withEndAction {
-            panel.visibility = View.GONE
-            panel.alpha = 1f
-            panel.scaleX = 1f
-            panel.scaleY = 1f
-        }.start()
+        panel.animate()
+            .alpha(0f)
+            .scaleX(0.94f)
+            .scaleY(0.94f)
+            .translationX(dp(10).toFloat())
+            .setDuration(150L)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction {
+                panel.visibility = View.GONE
+                panel.alpha = 1f
+                panel.scaleX = 1f
+                panel.scaleY = 1f
+                panel.translationX = 0f
+            }.start()
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
@@ -251,13 +288,20 @@ class OeaGameBoostService : Service() {
         }
     }
 
-    private fun gameProcessRamMb(packageName: String): Double? {
-        val am = getSystemService(ActivityManager::class.java) ?: return null
-        val process = runCatching {
-            am.runningAppProcesses?.firstOrNull { it.pkgList?.contains(packageName) == true }
-        }.getOrNull() ?: return null
-        val memory = runCatching { am.getProcessMemoryInfo(intArrayOf(process.pid)).firstOrNull() }.getOrNull() ?: return null
-        return memory.totalPss / 1024.0
+    /** Returns used and total swap/zRAM-backed virtual memory in MB. */
+    private fun virtualRamMb(): Pair<Double, Double> {
+        var totalKb = 0.0
+        var freeKb = 0.0
+        runCatching {
+            java.io.File("/proc/meminfo").forEachLine { line ->
+                when {
+                    line.startsWith("SwapTotal:") -> totalKb = line.filter { it.isDigit() }.toDoubleOrNull() ?: 0.0
+                    line.startsWith("SwapFree:") -> freeKb = line.filter { it.isDigit() }.toDoubleOrNull() ?: 0.0
+                }
+            }
+        }
+        val usedKb = (totalKb - freeKb).coerceAtLeast(0.0)
+        return Pair(usedKb / 1024.0, totalKb / 1024.0)
     }
 
     private fun restoreDnd() {
