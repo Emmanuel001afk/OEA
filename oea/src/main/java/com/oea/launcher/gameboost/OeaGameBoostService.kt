@@ -852,19 +852,28 @@ class OeaGameBoostService : Service() {
         }
     }
 
-    /** Returns used and total swap/zRAM-backed virtual memory in MB. */
+    /** Returns used and total swap/zRAM-backed virtual memory in MB.
+     * Uses the live swap capacity and, when exposed, the zRAM block capacity
+     * so the displayed virtual-memory percentage is based on real capacity.
+     */
     private fun virtualRamMb(): Pair<Double, Double> {
-        var totalKb = 0.0
-        var freeKb = 0.0
+        var swapTotalKb = 0.0
+        var swapFreeKb = 0.0
         runCatching {
             java.io.File("/proc/meminfo").forEachLine { line ->
                 when {
-                    line.startsWith("SwapTotal:") -> totalKb = line.filter { it.isDigit() }.toDoubleOrNull() ?: 0.0
-                    line.startsWith("SwapFree:") -> freeKb = line.filter { it.isDigit() }.toDoubleOrNull() ?: 0.0
+                    line.startsWith("SwapTotal:") -> swapTotalKb = line.filter { it.isDigit() }.toDoubleOrNull() ?: 0.0
+                    line.startsWith("SwapFree:") -> swapFreeKb = line.filter { it.isDigit() }.toDoubleOrNull() ?: 0.0
                 }
             }
         }
-        val usedKb = (totalKb - freeKb).coerceAtLeast(0.0)
+        var zramCapacityKb = 0.0
+        runCatching {
+            java.io.File("/sys/block/zram0/disksize").takeIf { it.exists() }?.readText()
+                ?.trim()?.toDoubleOrNull()?.let { zramCapacityKb = it / 1024.0 }
+        }
+        val totalKb = maxOf(swapTotalKb, zramCapacityKb)
+        val usedKb = (totalKb - swapFreeKb).coerceAtLeast(0.0)
         return Pair(usedKb / 1024.0, totalKb / 1024.0)
     }
 
