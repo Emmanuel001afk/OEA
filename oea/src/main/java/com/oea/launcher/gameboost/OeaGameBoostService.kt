@@ -302,7 +302,7 @@ class OeaGameBoostService : Service() {
         val virtualTotal = virtual.second
         metrics.text = String.format(
             Locale.US,
-            "RAM  %.0f / %.0f MB  •  %.0f%%%s\nVirtual RAM  %.0f / %.0f MB",
+            "RAM  %.0f / %.0f MB  •  %.0f%%%s\nVirtual RAM  %s",
             usedMb, totalMb, usedPct, state, if (virtualTotal > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsed, virtualTotal) else "not exposed by Android"
         )
 
@@ -320,8 +320,7 @@ class OeaGameBoostService : Service() {
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleText = handle?.getChildAt(0) as? TextView
-        handleText?.text = String.format(Locale.US, "OEA RAM
-%.0f%%", usedPct)
+        handleText?.text = String.format(Locale.US, "OEA RAM\\n%.0f%%", usedPct)
         animateHandleValue(handle)
     }
 
