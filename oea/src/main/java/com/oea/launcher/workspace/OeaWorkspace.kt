@@ -506,9 +506,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 else -> {
                     val shortcut = shortcutController.shortcuts(app.packageName)
                         .firstOrNull { (it.shortLabel ?: it.longLabel ?: "Shortcut") == item.title.toString() }
-                    runCatching { shortcut?.intent?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+                    unlockForLaunch(app) {
+                        runCatching { shortcut?.intent?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+                            .onFailure { Toast.makeText(context, "Unable to open " + app.label, Toast.LENGTH_SHORT).show() }
+                    }
                     true
-                }
             }
         }
         popup.show()
@@ -629,29 +631,36 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun freezeDialog(app: OeaAppInfo) {
-        val dpm = context.getSystemService(android.app.admin.DevicePolicyManager::class.java)
-        val owner = dpm?.isDeviceOwnerApp(context.packageName) == true
+        val backend = OeaAppFreezer.backend(context)
+        val authority = backend != OeaAppFreezer.Backend.NONE
         val frozen = OeaAppFreezer.frozenPackages(context).contains(app.packageName)
-        val message = if (owner) {
-            if (frozen) app.label + " is currently frozen by OEA." else app.label + " can be frozen by OEA now."
+        val authorityLabel = when (backend) {
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "device-owner"
+            OeaAppFreezer.Backend.ROOT -> "root"
+            OeaAppFreezer.Backend.NONE -> "none"
+        }
+        val message = if (authority) {
+            if (frozen) app.label + " is currently frozen by OEA (" + authorityLabel + " authority)."
+            else app.label + " can be frozen by OEA (" + authorityLabel + " authority)."
         } else {
-            app.label + " is not frozen yet. Android only permits true package suspension to a device-owner app. OEA will not repeatedly prompt for authority."
+            app.label + " is not frozen. True package suspension needs device-owner or root authority; OEA will not repeatedly prompt for unavailable authority."
         }
         AlertDialog.Builder(hostActivity ?: context)
             .setTitle("App Freezer")
             .setMessage(message)
-            .setPositiveButton(if (owner) (if (frozen) "Unfreeze" else "Freeze") else "Close") { _, _ ->
-                if (owner) {
+            .setPositiveButton(if (authority) (if (frozen) "Unfreeze" else "Freeze") else "Close") { _, _ ->
+                if (authority) {
                     val result = OeaAppFreezer.setFrozen(context, app.packageName, !frozen)
                     Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
                     if (result.success) refreshBadges()
                 }
             }
-            .setNeutralButton(if (owner) "Close" else "How to enable") { _, _ ->
-                if (!owner) openDeviceAdminSettings()
+            .setNeutralButton(if (authority) "Close" else "How to enable") { _, _ ->
+                if (!authority) openDeviceAdminSettings()
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
     }
 
     private fun openDeviceAdminSettings() {
