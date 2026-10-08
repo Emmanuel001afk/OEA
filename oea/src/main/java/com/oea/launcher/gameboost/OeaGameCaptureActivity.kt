@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.widget.Toast
 
 class OeaGameCaptureActivity : Activity() {
     companion object {
@@ -24,7 +25,10 @@ class OeaGameCaptureActivity : Activity() {
         window.decorView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         overridePendingTransition(0, 0)
         val manager = getSystemService(MediaProjectionManager::class.java)
-        startActivityForResult(manager.createScreenCaptureIntent(), REQ)
+        runCatching { startActivityForResult(manager.createScreenCaptureIntent(), REQ) }.onFailure {
+            Toast.makeText(this, "OEA could not start screen capture.", Toast.LENGTH_SHORT).show()
+            finishAndRemoveTask()
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
