@@ -186,16 +186,44 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun showGameBoost() {
-        val box = base("Game Boost", "OEA monitors selected games and provides a small in-game control pill.")
-        row(box, if (OeaGameBoostStore.enabled(this)) "Game Boost enabled" else "Game Boost disabled", "Tap to toggle monitoring") {
-            val enabled = !OeaGameBoostStore.enabled(this)
-            OeaGameBoostStore.setEnabled(this, enabled)
-            if (enabled) startBoostService() else stopService(Intent(this, OeaGameBoostService::class.java))
+        val usageGranted = isUsageAccessGranted()
+        val overlayGranted = Settings.canDrawOverlays(this)
+        val enabled = OeaGameBoostStore.enabled(this)
+        val games = OeaGameBoostStore.games(this)
+        val state = when {
+            !enabled -> "Monitoring disabled"
+            games.isEmpty() -> "Enabled • select games"
+            !usageGranted -> "Enabled • Usage access required"
+            else -> "Monitoring active • " + games.size + " game" + if (games.size == 1) "" else "s" + " selected"
+        }
+        val box = base(
+            "Game Boost",
+            "OEA detects selected games and activates a lightweight game-session layer: focus monitoring, optional Do Not Disturb, RAM telemetry and an in-game control pill. Android does not permit an ordinary launcher app to arbitrarily raise another app's CPU/GPU priority."
+        )
+        row(box, state, if (enabled) "Tap to disable monitoring" else "Tap to enable monitoring") {
+            if (!enabled) {
+                if (!usageGranted) {
+                    Toast.makeText(this, "Grant Usage access first so OEA can detect the active game.", Toast.LENGTH_LONG).show()
+                    openUsageAccess()
+                } else {
+                    OeaGameBoostStore.setEnabled(this, true)
+                    startBoostService()
+                    showGameBoost()
+                }
+            } else {
+                OeaGameBoostStore.setEnabled(this, false)
+                stopService(Intent(this, OeaGameBoostService::class.java))
+                showGameBoost()
+            }
+        }
+        row(box, "Selected games", games.size.toString() + " selected") { chooseGames() }
+        row(box, "Usage access", usageStatus()) { openUsageAccess() }
+        row(box, "Overlay permission", if (overlayGranted) "Granted" else "Required for the in-game control pill") { openOverlaySettings() }
+        row(box, "Game-session DND", if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) "On when a selected game is active" else "Off") {
+            val next = !OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
+            OeaGameBoostStore.prefs(this).edit().putBoolean("dnd", next).apply()
             showGameBoost()
         }
-        row(box, "Selected games", OeaGameBoostStore.games(this).size.toString() + " selected") { chooseGames() }
-        row(box, "Usage access", usageStatus()) { openUsageAccess() }
-        row(box, "Overlay permission", if (Settings.canDrawOverlays(this)) "Granted" else "Required for the overlay") { openOverlaySettings() }
         setRoot(box)
     }
 
@@ -456,9 +484,18 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun startBoostService() {
+        if (!isUsageAccessGranted()) {
+            OeaGameBoostStore.setEnabled(this, false)
+            Toast.makeText(this, "Usage access is required before Game Boost can monitor games.", Toast.LENGTH_LONG).show()
+            openUsageAccess()
+            return
+        }
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(Intent(this, OeaGameBoostService::class.java))
             else startService(Intent(this, OeaGameBoostService::class.java))
+        }.onFailure {
+            OeaGameBoostStore.setEnabled(this, false)
+            Toast.makeText(this, "Game Boost service could not start.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -487,10 +524,14 @@ class OeaSystemToolsActivity : Activity() {
         return if (enabled) "Enabled" else "Disabled • tap to grant Android access"
     }
 
-    private fun usageStatus(): String {
+    private fun isUsageAccessGranted(): Boolean {
         val ops = getSystemService(AppOpsManager::class.java)
         val mode = ops?.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
-        return if (mode == AppOpsManager.MODE_ALLOWED) "Enabled" else "Disabled • tap to grant Android access"
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun usageStatus(): String {
+        return if (isUsageAccessGranted()) "Enabled" else "Disabled • tap to grant Android access"
     }
 
     private fun hiddenCount() = dataStore.hiddenApps().size
