@@ -235,8 +235,8 @@ class OeaGameBoostService : Service() {
                                 val next = root.layoutParams as? WindowManager.LayoutParams ?: return true
                                 val bounds = screenBounds(root)
                                 next.gravity = Gravity.TOP or Gravity.START
-                                next.x = (startX + dx.toInt()).coerceIn(bounds.first, bounds.third)
-                                next.y = (startY + dy.toInt()).coerceIn(bounds.second, bounds.fourth)
+                                next.x = (startX + dx.toInt()).coerceIn(bounds[0], bounds[2])
+                                next.y = (startY + dy.toInt()).coerceIn(bounds[1], bounds[3])
                                 runCatching { wm.updateViewLayout(root, next) }
                             }
                             return true
