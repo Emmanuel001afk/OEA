@@ -32,6 +32,8 @@ class OeaGameBoostService : Service() {
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
     private var previousInterruptionFilter: Int? = null
+    private var handleColorAnimator: android.animation.ValueAnimator? = null
+    private var handleTextAnimator: android.animation.ValueAnimator? = null
         private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
@@ -129,6 +131,8 @@ class OeaGameBoostService : Service() {
         rowOne.addView(dnd, chipParams())
         rowOne.addView(boost, chipParams())
         rowOne.addView(screenshot, chipParams())
+        val wifi = chip("⌁  WI-FI")
+        rowOne.addView(wifi, chipParams())
         rowTwo.addView(record, chipParams())
         rowTwo.addView(cleanup, chipParams())
         rowTwo.addView(hide, chipParams())
@@ -137,6 +141,7 @@ class OeaGameBoostService : Service() {
         dnd.setOnClickListener { toggleDnd(dnd) }
         screenshot.setOnClickListener { launchCapture(OeaGameCaptureActivity.MODE_SCREENSHOT) }
         record.setOnClickListener { toggleRecording(record) }
+        wifi.setOnClickListener { openWifiPanel() }
         cleanup.setOnClickListener { cleanBackgroundMemory(cleanup) }
         boost.setOnClickListener {
             val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
@@ -259,7 +264,9 @@ class OeaGameBoostService : Service() {
             handle.alpha = 0f
             handle.translationX = dp(10).toFloat()
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
-                .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).withEndAction { animateHandle(handle) }.start()
+                .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).withEndAction {
+                    startHandleAnimations(handle)
+                }.start()
             updateOverlay()
         }
     }
@@ -376,12 +383,32 @@ class OeaGameBoostService : Service() {
         android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) }
 
     private fun launchCapture(mode: String) {
-        OeaGameBoostStore.prefs(this).edit().putBoolean("capture_active", true).putString("capture_mode", mode).apply()
-        overlay?.alpha = 0f
+        OeaGameBoostStore.prefs(this).edit()
+            .putBoolean("capture_active", true)
+            .putString("capture_mode", mode)
+            .apply()
+        // Keep the in-game OEA control alive. Recording must remain stoppable
+        // from the same floating control after the Android consent sheet closes.
+        overlay?.alpha = 1f
         val intent = Intent(this, OeaGameCaptureActivity::class.java).apply {
             putExtra(OeaGameCaptureActivity.EXTRA_MODE, mode)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         }
+        runCatching { startActivity(intent) }.onFailure {
+            OeaGameBoostStore.prefs(this).edit()
+                .putBoolean("capture_active", false)
+                .putBoolean("recording", false)
+                .apply()
+            updateOverlay()
+        }
+    }
+
+    private fun openWifiPanel() {
+        val intent = if (Build.VERSION.SDK_INT >= 29) {
+            Intent(Settings.Panel.ACTION_WIFI)
+        } else {
+            Intent(Settings.ACTION_WIFI_SETTINGS)
+        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { startActivity(intent) }
     }
 
@@ -502,8 +529,8 @@ class OeaGameBoostService : Service() {
         val captureActive = OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)
         val captureMode = OeaGameBoostStore.prefs(this).getString("capture_mode", "")
         val recording = OeaGameBoostStore.prefs(this).getBoolean("recording", false)
-        (controls.getChildAt(0) as? android.widget.LinearLayout)?.getChildAt(2)?.let { (it as? TextView)?.text = if (captureActive && captureMode == OeaGameCaptureActivity.MODE_SCREENSHOT) "SHOT…" else "▣  SHOT" }
-        (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text = if (recording) "●  RECORDING" else "●  RECORD" }
+        (controls.getChildAt(0) as? android.widget.LinearLayout)?.getChildAt(2)?.let { (it as? TextView)?.text = if (captureActive && captureMode == OeaGameCaptureActivity.MODE_SCREENSHOT) "▣  SAVING…" else "▣  SHOT" }
+        (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text = if (recording) "■  STOP REC" else "●  RECORD" }
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleVisible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
@@ -537,59 +564,75 @@ class OeaGameBoostService : Service() {
         button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
     }
 
-    private fun animateHandleText(text: TextView) {
-        text.animate().cancel()
-        text.scaleX = 0.96f
-        text.scaleY = 0.96f
-        text.alpha = 0.86f
-        text.animate()
-            .scaleX(1.04f)
-            .scaleY(1.04f)
-            .alpha(1f)
-            .setDuration(700L)
-            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-            .withEndAction {
-                if (overlay != null && text.visibility == View.VISIBLE) {
-                    text.animate().scaleX(0.96f).scaleY(0.96f).alpha(0.88f)
-                        .setDuration(700L)
-                        .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
-                        .withEndAction { if (overlay != null && text.visibility == View.VISIBLE) animateHandleText(text) }
-                        .start()
+    private fun startHandleAnimations(handle: View) {
+        val text = (handle as? android.view.ViewGroup)?.getChildAt(0) as? TextView ?: return
+        if (handleColorAnimator?.isRunning != true) {
+            handleColorAnimator?.cancel()
+            handleColorAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 2200L
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                addUpdateListener { animator ->
+                    val p = animator.animatedValue as Float
+                    val palette = handlePalette(p)
+                    val bg = handle.background as? android.graphics.drawable.GradientDrawable
+                    bg?.setColors(intArrayOf(palette[0], palette[1], palette[2]))
+                    bg?.setStroke(dp(1), palette[1].withAlpha(210))
+                    text.setShadowLayer(dp(4 + (p * 5).toInt()).toFloat(), 0f, 0f, palette[1])
+                    text.paint.shader = android.graphics.LinearGradient(
+                        -text.width.toFloat() * 0.8f + text.width * p,
+                        0f,
+                        text.width.toFloat() * 1.8f + text.width * p,
+                        0f,
+                        intArrayOf(palette[2], palette[1], palette[2]),
+                        null,
+                        android.graphics.Shader.TileMode.MIRROR
+                    )
+                    text.invalidate()
                 }
-            }.start()
+            }.also { it.start() }
+        }
+        if (handleTextAnimator?.isRunning != true) {
+            handleTextAnimator?.cancel()
+            handleTextAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 1700L
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                addUpdateListener { animator ->
+                    val p = animator.animatedValue as Float
+                    val pulse = 0.96f + (0.04f * kotlin.math.sin(p * Math.PI)).toFloat()
+                    text.scaleX = pulse
+                    text.scaleY = pulse
+                    text.alpha = 0.84f + (0.16f * kotlin.math.sin(p * Math.PI)).toFloat()
+                    text.translationY = ((kotlin.math.sin(p * Math.PI * 2.0) * dp(1.2)).toFloat())
+                    text.invalidate()
+                }
+            }.also { it.start() }
+        }
     }
 
-    private fun animateHandle(handle: View) {
-        handle.animate().cancel()
-        val bg = handle.background as? android.graphics.drawable.GradientDrawable
-        val pulse = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 1400L
-            repeatMode = android.animation.ValueAnimator.REVERSE
-            repeatCount = android.animation.ValueAnimator.INFINITE
-            addUpdateListener { animator ->
-                val p = animator.animatedValue as Float
-                val accent = android.animation.ArgbEvaluator().evaluate(p, 0xFF2357FF.toInt(), 0xFF56B7FF.toInt()) as Int
-                val deep = android.animation.ArgbEvaluator().evaluate(p, 0xFF0A1020.toInt(), 0xFF102A5A.toInt()) as Int
-                bg?.setColors(intArrayOf(deep, accent, 0xFF0B1735.toInt()))
-                val text = (handle as? android.view.ViewGroup)?.getChildAt(0) as? TextView
-                text?.setShadowLayer(dp(3 + (p * 3).toInt()).toFloat(), 0f, 0f, accent)
-                bg?.setStroke(dp(1), android.animation.ArgbEvaluator().evaluate(p, 0x884D74FF.toInt(), 0xEE7BC8FF.toInt()) as Int)
-            }
+    private fun handlePalette(progress: Float): IntArray {
+        val mode = OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue") ?: "blue"
+        if (mode == "rgb") {
+            val hue = ((progress * 360f) + 205f) % 360f
+            val accent = Color.HSVToColor(floatArrayOf(hue, 0.82f, 1f))
+            val secondary = Color.HSVToColor(floatArrayOf((hue + 55f) % 360f, 0.62f, 1f))
+            val deep = Color.HSVToColor(floatArrayOf(hue, 0.72f, 0.16f))
+            return intArrayOf(deep, accent, secondary)
         }
-        pulse.start()
-        handle.animate().scaleX(0.94f).scaleY(0.94f).setDuration(700L)
-            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).withEndAction {
-                handle.animate().scaleX(1f).scaleY(1f).setDuration(700L)
-                    .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).withEndAction {
-                        if (overlay != null && handle.visibility == View.VISIBLE) {
-                            pulse.cancel()
-                            animateHandle(handle)
-                        } else {
-                            pulse.cancel()
-                        }
-                    }.start()
-            }.start()
+        val pair = when (mode) {
+            "green" -> intArrayOf(0xFF0B281B.toInt(), 0xFF27E37A.toInt(), 0xFF9BFFC5.toInt())
+            "purple" -> intArrayOf(0xFF170B2C.toInt(), 0xFF9B5CFF.toInt(), 0xFFE1C4FF.toInt())
+            "cyan" -> intArrayOf(0xFF071F27.toInt(), 0xFF25D9FF.toInt(), 0xFFB9F5FF.toInt())
+            "red" -> intArrayOf(0xFF2B0B10.toInt(), 0xFFFF3D68.toInt(), 0xFFFFB3C2.toInt())
+            "amber" -> intArrayOf(0xFF2A1A05.toInt(), 0xFFFFB52E.toInt(), 0xFFFFE0A0.toInt())
+            else -> intArrayOf(0xFF0A1020.toInt(), 0xFF2E72FF.toInt(), 0xFF9DD4FF.toInt())
+        }
+        val accent = android.animation.ArgbEvaluator().evaluate(progress, pair[1], pair[2]) as Int
+        return intArrayOf(pair[0], accent, pair[2])
     }
+
+    private fun Int.withAlpha(alpha: Int): Int = (this and 0x00FFFFFF) or ((alpha.coerceIn(0, 255)) shl 24)
 
     private fun showPanel(panel: View) {
         if (panel.visibility == View.VISIBLE) return
@@ -676,7 +719,14 @@ class OeaGameBoostService : Service() {
         previousInterruptionFilter = null
     }
 
-    private fun removeOverlay() { overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }; overlay = null }
+    private fun removeOverlay() {
+        handleColorAnimator?.cancel()
+        handleColorAnimator = null
+        handleTextAnimator?.cancel()
+        handleTextAnimator = null
+        overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }
+        overlay = null
+    }
     private fun foregroundPackage(): String? {
         val usm = getSystemService(UsageStatsManager::class.java) ?: return null
         val end = System.currentTimeMillis()
