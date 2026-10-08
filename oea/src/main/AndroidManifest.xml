@@ -111,7 +111,6 @@
             android:name="com.oea.launcher.gameboost.OeaGameCaptureActivity"
             android:exported="false"
             android:theme="@style/OeaCaptureTheme"
-            android:noHistory="true"
             android:excludeFromRecents="true" />
         <service
             android:name="com.oea.launcher.gameboost.OeaGameCaptureService"
