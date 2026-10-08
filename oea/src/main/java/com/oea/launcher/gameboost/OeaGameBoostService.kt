@@ -103,14 +103,29 @@ class OeaGameBoostService : Service() {
             setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
             text = "Battery • reading…"; setPadding(0, 0, 0, dp(8))
         }
-        val controls = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
+        val controls = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        val rowOne = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
+        val rowTwo = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
         val dnd = chip("DND")
         val boost = chip("BOOST")
+        val screenshot = chip("SCREENSHOT")
+        val record = chip("RECORD")
+        val cleanup = chip("CLEAN RAM")
         val hide = chip("HIDE")
-        controls.addView(dnd, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
-        controls.addView(boost, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
-        controls.addView(hide, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f))
+        rowOne.addView(dnd, chipParams())
+        rowOne.addView(boost, chipParams())
+        rowOne.addView(screenshot, chipParams())
+        rowTwo.addView(record, chipParams())
+        rowTwo.addView(cleanup, chipParams())
+        rowTwo.addView(hide, chipParams())
+        controls.addView(rowOne)
+        controls.addView(rowTwo, android.widget.LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(5) })
         dnd.setOnClickListener { toggleDnd(dnd) }
+        screenshot.setOnClickListener { launchCapture(OeaGameCaptureActivity.MODE_SCREENSHOT) }
+        record.setOnClickListener { toggleRecording(record) }
+        cleanup.setOnClickListener { cleanBackgroundMemory(cleanup) }
         boost.setOnClickListener {
             val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
             OeaGameBoostStore.prefs(this).edit().putBoolean("boost", next).apply()
@@ -159,6 +174,50 @@ class OeaGameBoostService : Service() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun chipParams(): android.widget.LinearLayout.LayoutParams =
+        android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) }
+
+    private fun launchCapture(mode: String) {
+        val intent = Intent(this, OeaGameCaptureActivity::class.java).apply {
+            putExtra(OeaGameCaptureActivity.EXTRA_MODE, mode)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { startActivity(intent) }
+    }
+
+    private fun toggleRecording(button: TextView) {
+        val prefs = OeaGameBoostStore.prefs(this)
+        if (prefs.getBoolean("recording", false)) {
+            startService(Intent(this, OeaGameCaptureService::class.java).setAction(OeaGameCaptureService.ACTION_STOP))
+            prefs.edit().putBoolean("recording", false).apply()
+            button.text = "RECORD"
+        } else {
+            prefs.edit().putBoolean("recording", true).apply()
+            launchCapture(OeaGameCaptureActivity.MODE_RECORD)
+            button.text = "RECORDING"
+        }
+    }
+
+    private fun cleanBackgroundMemory(button: TextView) {
+        val am = getSystemService(ActivityManager::class.java)
+        val active = activeGame
+        var attempted = 0
+        runCatching {
+            am.runningAppProcesses.orEmpty()
+                .filter { it.importance >= ActivityManager.RunningAppProcessInfo.IMPORTANCE_BACKGROUND }
+                .filter { it.pkgList?.none { pkg -> pkg == packageName || pkg == active } == true }
+                .take(24)
+                .forEach { process ->
+                    process.pkgList.orEmpty().distinct().forEach { pkg ->
+                        runCatching { am.killBackgroundProcesses(pkg); attempted++ }
+                    }
+                }
+        }
+        button.text = if (attempted > 0) "CLEANED" else "CLEAN RAM"
+        handler.postDelayed({ button.text = "CLEAN RAM" }, 1200L)
+        updateOverlay()
+    }
 
     private fun chip(label: String): TextView = TextView(this).apply {
         text = label; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 10f
@@ -229,6 +288,10 @@ class OeaGameBoostService : Service() {
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
         updateBoostButton(boost)
+        val recording = OeaGameBoostStore.prefs(this).getBoolean("recording", false)
+        (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let {
+            (it as? TextView)?.text = if (recording) "RECORDING" else "RECORD"
+        }
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleText = handle?.getChildAt(0) as? TextView
