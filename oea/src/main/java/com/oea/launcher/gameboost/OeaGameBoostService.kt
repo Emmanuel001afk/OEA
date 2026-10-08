@@ -153,16 +153,17 @@ class OeaGameBoostService : Service() {
                     updateOverlay()
                 }
             } else if (activeGame != null) {
-                // Keep-visible is a persistent user preference, not a timer.
-                // OEA capture is also part of the same game session. Only the
-                // actual OEA launcher Home activity ends the session here;
-                // capture/system hosts must never tear down the in-game control.
+                // Once a game session is active, transient/unknown foreground
+                // samples must never destroy the floating control. This is
+                // especially important while Android switches activities,
+                // shows capture consent, opens a game lobby, or briefly gives
+                // UsageStats no foreground package.
                 val launcherHome = game == packageName &&
                     foregroundActivityClass == "com.oea.launcher.OeaLauncherActivity"
                 if (launcherHome && !captureActive) {
                     deactivate(activeGame!!)
                     activeGame = null
-                } else if (game == packageName || captureActive) {
+                } else if (game == null || game == packageName || captureActive) {
                     updateOverlay()
                 } else {
                     deactivate(activeGame!!)
