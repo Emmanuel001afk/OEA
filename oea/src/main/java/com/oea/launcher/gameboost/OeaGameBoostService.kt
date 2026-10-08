@@ -150,9 +150,16 @@ class OeaGameBoostService : Service() {
                 // alive and clears any transient transition samples.
                 nonGameForegroundSamples = 0
                 if (activeGame != game) {
-                    activeGame?.let(::deactivate)
+                    // Keep the floating OEA RAM control mounted while moving
+                    // directly from one recognized game to another. Removing
+                    // the whole overlay here creates a visible/lifecycle gap
+                    // and can leave the new game without its in-game button.
+                    restoreDnd()
+                    setKeepScreenOn(false)
                     activeGame = game
                     activate(game)
+                    updateOverlay()
+                    (overlay as? android.widget.LinearLayout)?.getChildAt(0)?.let(::closePanel)
                 } else {
                     updateOverlay()
                 }
