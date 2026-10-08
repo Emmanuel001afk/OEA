@@ -1900,7 +1900,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 )
                 true
             }
-            }
             val wrapper = FrameLayout(context).apply {
                 clipChildren = false
             }
