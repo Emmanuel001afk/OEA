@@ -235,6 +235,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     fun bind(value: List<OeaAppInfo>) {
         apps = value
+        OeaAppFreezer.syncActualState(context)
         ws.ensureSeeded(apps.filterNot { it.packageName == context.packageName }.map { Triple(it.packageName, it.className, it.label) })
         ws.clearMissing(apps.map { OeaWorkspaceStore.key(it.packageName, it.className) }.toSet())
         rebuild()
@@ -630,25 +631,26 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun freezeDialog(app: OeaAppInfo) {
         val dpm = context.getSystemService(android.app.admin.DevicePolicyManager::class.java)
         val owner = dpm?.isDeviceOwnerApp(context.packageName) == true
+        val frozen = OeaAppFreezer.frozenPackages(context).contains(app.packageName)
         val message = if (owner) {
-            app.label + " can be frozen by OEA now."
+            if (frozen) app.label + " is currently frozen by OEA." else app.label + " can be frozen by OEA now."
         } else {
             app.label + " is not frozen yet. Android only permits true package suspension to a device-owner app. OEA will not repeatedly prompt for authority."
         }
         AlertDialog.Builder(hostActivity ?: context)
             .setTitle("App Freezer")
             .setMessage(message)
-            .setPositiveButton(if (owner) "Freeze" else "Close") { _, _ ->
+            .setPositiveButton(if (owner) (if (frozen) "Unfreeze" else "Freeze") else "Close") { _, _ ->
                 if (owner) {
-                    val result = OeaAppFreezer.setFrozen(context, app.packageName, true)
+                    val result = OeaAppFreezer.setFrozen(context, app.packageName, !frozen)
                     Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                    if (result.success) refreshBadges()
                 }
             }
-            .setNeutralButton(if (owner) "Unfreeze" else "How to enable") { _, _ ->
-                if (owner) {
-                    val result = OeaAppFreezer.setFrozen(context, app.packageName, false)
-                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
-                } else {
+            .setNeutralButton(if (owner) "Close" else "How to enable") { _, _ ->
+                if (!owner) {
+                    openDeviceAdminSettings()
+                }
                     openDeviceAdminSettings()
                 }
             }
