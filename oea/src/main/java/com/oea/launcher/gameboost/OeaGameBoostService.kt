@@ -525,7 +525,8 @@ class OeaGameBoostService : Service() {
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
         updateBoostButton(boost)
-        root.alpha = if (OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)) 0f else 1f
+        // Capture consent/recording must never remove the in-game OEA controls.
+        root.alpha = 1f
         val captureActive = OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)
         val captureMode = OeaGameBoostStore.prefs(this).getString("capture_mode", "")
         val recording = OeaGameBoostStore.prefs(this).getBoolean("recording", false)
