@@ -772,6 +772,7 @@ class OeaGameBoostService : Service() {
 
     private fun hidePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
+        stopPanelColorAnimation(panel)
         panel.animate().cancel()
         panel.animate()
             .alpha(0f)
