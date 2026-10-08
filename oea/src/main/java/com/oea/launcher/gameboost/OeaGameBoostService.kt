@@ -143,7 +143,8 @@ class OeaGameBoostService : Service() {
         val handle = android.widget.FrameLayout(this).apply {
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(0xF2F2F4F7.toInt())
-                cornerRadii = floatArrayOf(dp(18).toFloat(), dp(18).toFloat(), dp(6).toFloat(), dp(6).toFloat(), dp(6).toFloat(), dp(6).toFloat(), dp(18).toFloat(), dp(18).toFloat())
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setStroke(dp(1), 0x663F51FF)
             }
             elevation = dp(7).toFloat()
             contentDescription = "Open OEA Game Boost controls"
@@ -155,18 +156,18 @@ class OeaGameBoostService : Service() {
             setTextColor(0xFF202124.toInt())
             textSize = 10f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            text = "OEA  •  RAM"
+            text = "OEA RAM"
         }
-        handle.addView(handleText, android.widget.FrameLayout.LayoutParams(dp(70), dp(44)).apply {
+        handle.addView(handleText, android.widget.FrameLayout.LayoutParams(dp(58), dp(58)).apply {
             gravity = Gravity.CENTER
         })
         handle.setOnClickListener {
             if (panel.visibility == View.VISIBLE) hidePanel(panel) else showPanel(panel)
         }
         root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(286), -2))
-        root.addView(handle, android.widget.LinearLayout.LayoutParams(dp(70), dp(44)).apply {
+        root.addView(handle, android.widget.LinearLayout.LayoutParams(dp(58), dp(58)).apply {
             gravity = Gravity.END
-            topMargin = dp(5)
+            topMargin = dp(6)
         })
 
         val params = WindowManager.LayoutParams(
@@ -174,13 +175,13 @@ class OeaGameBoostService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(8); y = dp(88) }
+        ).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; x = dp(2); y = 0 }
         runCatching {
             wm.addView(root, params)
             overlay = root
             handle.alpha = 0f
-            handle.translationX = dp(18).toFloat()
-            handle.animate().alpha(1f).translationX(0f).setDuration(240L)
+            handle.translationX = dp(10).toFloat()
+            handle.animate().alpha(1f).translationX(0f).setDuration(260L)
                 .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).start()
             updateOverlay()
         }
@@ -316,7 +317,17 @@ class OeaGameBoostService : Service() {
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleText = handle?.getChildAt(0) as? TextView
-        handleText?.text = String.format(Locale.US, "OEA  •  %.0f%%", usedPct)
+        handleText?.text = String.format(Locale.US, "OEA RAM
+%.0f%%", usedPct)
+        animateHandleValue(handle)
+    }
+
+    private fun animateHandleValue(handle: View?) {
+        handle?.animate()?.scaleX(0.97f)?.scaleY(0.97f)?.setDuration(70L)?.withEndAction {
+            handle.animate().scaleX(1.03f).scaleY(1.03f).setDuration(110L).withEndAction {
+                handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+            }.start()
+        }?.start()
     }
 
     private fun updateBoostButton(button: TextView) {
