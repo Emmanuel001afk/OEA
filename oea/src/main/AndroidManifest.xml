@@ -112,8 +112,8 @@
             android:exported="false"
             android:theme="@style/OeaCaptureTheme"
             android:excludeFromRecents="true"
-            android:taskAffinity="com.oea.launcher.gameboost.capture"
-            android:launchMode="singleTop" />
+            android:launchMode="singleTop"
+            android:noHistory="true" />
         <service
             android:name="com.oea.launcher.gameboost.OeaGameCaptureService"
             android:exported="false"
