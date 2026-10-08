@@ -194,6 +194,14 @@ class OeaGameBoostService : Service() {
         (root.getChildAt(1) as? TextView)?.text = String.format(Locale.US, "RAM %.0f%%", usedPct)
     }
 
+    private fun restoreDnd() {
+        val nm = getSystemService(NotificationManager::class.java)
+        previousInterruptionFilter?.let {
+            if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(it)
+        }
+        previousInterruptionFilter = null
+    }
+
     private fun removeOverlay() { overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }; overlay = null }
     private fun foregroundPackage(): String? {
         val usm = getSystemService(UsageStatsManager::class.java) ?: return null
