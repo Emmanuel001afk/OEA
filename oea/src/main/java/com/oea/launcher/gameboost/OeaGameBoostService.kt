@@ -30,14 +30,21 @@ class OeaGameBoostService : Service() {
     private var overlay: View? = null
     private var activeGame: String? = null
     private var previousInterruptionFilter: Int? = null
+    private var lastGameSeenAt: Long = 0L
     private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
             OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService)
             val game = foregroundPackage()
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
+                lastGameSeenAt = System.currentTimeMillis()
                 if (activeGame != game) { activeGame?.let(::deactivate); activeGame = game; activate(game) } else updateOverlay()
-            } else if (activeGame != null) { deactivate(activeGame!!); activeGame = null }
+            } else if (activeGame != null && System.currentTimeMillis() - lastGameSeenAt > 15_000L) {
+                deactivate(activeGame!!)
+                activeGame = null
+            } else if (activeGame != null) {
+                updateOverlay()
+            }
             handler.postDelayed(this, 1000)
         }
     }
@@ -288,8 +295,10 @@ class OeaGameBoostService : Service() {
         val device = panel.getChildAt(3) as? TextView ?: return
         val panelLayout = panel as? android.widget.LinearLayout
                 val controls = panelLayout?.getChildAt(4) as? android.widget.LinearLayout ?: return
-        val dnd = controls.getChildAt(0) as? TextView ?: return
-        val boost = controls.getChildAt(1) as? TextView ?: return
+        val rowOne = controls.getChildAt(0) as? android.widget.LinearLayout ?: return
+        val rowTwo = controls.getChildAt(1) as? android.widget.LinearLayout ?: return
+        val dnd = rowOne.getChildAt(0) as? TextView ?: return
+        val boost = rowOne.getChildAt(1) as? TextView ?: return
 
         val info = ActivityManager.MemoryInfo()
         getSystemService(ActivityManager::class.java).getMemoryInfo(info)
@@ -322,7 +331,7 @@ class OeaGameBoostService : Service() {
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleText = handle?.getChildAt(0) as? TextView
-        handleText?.text = String.format(Locale.US, "OEA RAM\\n%.0f%%", usedPct)
+        handleText?.text = String.format(Locale.US, "OEA\nRAM\n%.0f%%", usedPct)
     }
 
     private fun updateBoostButton(button: TextView) {
