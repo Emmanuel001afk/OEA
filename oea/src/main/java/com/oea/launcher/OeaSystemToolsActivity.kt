@@ -7,6 +7,7 @@ import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.appwidget.AppWidgetManager
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
