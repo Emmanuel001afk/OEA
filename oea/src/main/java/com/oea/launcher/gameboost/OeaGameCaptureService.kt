@@ -42,6 +42,7 @@ class OeaGameCaptureService : Service() {
     private var reader: ImageReader? = null
     private var recorder: MediaRecorder? = null
     private var outputFile: File? = null
+    private var outputUri: android.net.Uri? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -61,7 +62,7 @@ class OeaGameCaptureService : Service() {
         if (intent?.action != ACTION_START) return START_NOT_STICKY
         val mode = intent.getStringExtra(EXTRA_MODE) ?: OeaGameCaptureActivity.MODE_SCREENSHOT
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-        val data = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA) ?: return START_NOT_STICKY
+        val data = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_RESULT_DATA) ?: return START_NOT_STICKY
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
@@ -87,8 +88,18 @@ class OeaGameCaptureService : Service() {
         val (width, height) = size()
         val dir = File(getExternalFilesDir(Environment.DIRECTORY_MOVIES), "OEA")
         dir.mkdirs()
-        outputFile = File(dir, "OEA_RECORD_PLACEHOLDER.mp4")
-        outputFile = File(dir, "OEA_" + stamp() + ".mp4")
+        if (Build.VERSION.SDK_INT >= 29) {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, "OEA_" + stamp() + ".mp4")
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/OEA")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            outputUri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            if (outputUri == null) { stopCapture(); stopSelf(); return }
+        } else {
+            outputFile = File(dir, "OEA_" + stamp() + ".mp4")
+        }
         recorder = MediaRecorder(this).apply {
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
@@ -96,7 +107,11 @@ class OeaGameCaptureService : Service() {
             setVideoEncodingBitRate(8_000_000)
             setVideoFrameRate(30)
             setVideoSize(width.coerceAtMost(1920), height.coerceAtMost(1080))
-            setOutputFile(outputFile!!.absolutePath)
+            if (Build.VERSION.SDK_INT >= 29) {
+                setOutputFile(contentResolver.openFileDescriptor(outputUri!!, "w")!!.fileDescriptor)
+            } else {
+                setOutputFile(outputFile!!.absolutePath)
+            }
             prepare()
             start()
         }
@@ -146,18 +161,29 @@ class OeaGameCaptureService : Service() {
             values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         } else {
-            val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "OEA_" + name)
+            val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), name)
             FileOutputStream(file).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         }
     }
 
     private fun stopCapture() {
-        runCatching { recorder?.stop() }
+        val wasRecording = recorder != null
+        val stopped = runCatching { recorder?.stop(); true }.getOrDefault(false)
         runCatching { recorder?.reset() }
         recorder = null
         display?.release(); display = null
         reader?.close(); reader = null
         projection?.stop(); projection = null
+        if (Build.VERSION.SDK_INT >= 29 && outputUri != null) {
+            if (wasRecording && stopped) {
+                val values = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
+                runCatching { contentResolver.update(outputUri!!, values, null, null) }
+            } else {
+                runCatching { contentResolver.delete(outputUri!!, null, null) }
+            }
+        }
+        outputUri = null
+        getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
     }
 
     private fun notification(text: String): Notification =
