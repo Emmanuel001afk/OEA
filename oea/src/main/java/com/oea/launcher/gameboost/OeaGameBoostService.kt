@@ -24,6 +24,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import java.util.Locale
+import kotlin.math.max
 
 class OeaGameBoostService : Service() {
     private class MemoryMetricsView(context: Context) : TextView(context) {
@@ -43,8 +44,15 @@ class OeaGameBoostService : Service() {
             val right = (width - paddingRight).toFloat()
             val barWidth = (right - left).coerceAtLeast(1f)
             val barHeight = dp(8).toFloat()
-            val gap = dp(9).toFloat()
-            val top = height - paddingBottom - barHeight * 2f - gap
+            val gap = dp(12).toFloat()
+            // Bars live strictly below the TextView's measured text block.
+            // The larger bottom reserve above guarantees they never paint over
+            // either memory label even on OEM font/scale differences.
+            val textBottom = (layout?.height ?: 0) + paddingTop
+            val top = maxOf(
+                textBottom + dp(14).toFloat(),
+                height - paddingBottom - barHeight * 2f - gap
+            )
             drawBar(canvas, left, top, barWidth, barHeight, ramFraction, 0xFF4D7CFF.toInt())
             drawBar(canvas, left, top + barHeight + gap, barWidth, barHeight, virtualFraction, 0xFF27D9B7.toInt())
         }
@@ -162,7 +170,9 @@ class OeaGameBoostService : Service() {
             setTextColor(Color.WHITE); textSize = 12f
             setLineSpacing(dp(4).toFloat(), 1f)
             text = "RAM • reading…"
-            setPadding(0, 0, 0, dp(38))
+            // Reserve a dedicated lower zone for both bars so neither bar can
+            // overlap the RAM / Virtual RAM text above it.
+            setPadding(0, 0, 0, dp(62))
         }
         val device = TextView(this).apply {
             setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
