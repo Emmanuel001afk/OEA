@@ -327,14 +327,21 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun chooseGames() {
+        OeaGameBoostStore.syncDetectedGames(this)
         val choices = apps.filterNot { it.packageName == packageName }.distinctBy { it.packageName }
         val selected = OeaGameBoostStore.games(this)
         val checked = BooleanArray(choices.size) { selected.contains(choices[it].packageName) }
-        AlertDialog.Builder(this).setTitle("Select games")
+        AlertDialog.Builder(this).setTitle("Game Boost games")
+            .setMessage("OEA automatically detects Android-declared games. You can also add or remove any installed app.")
             .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { _, which, value -> checked[which] = value }
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
-                OeaGameBoostStore.setGames(this, choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }.toSet())
+                val next = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }.toSet()
+                choices.forEach { app ->
+                    if (app.packageName in next) OeaGameBoostStore.restoreGame(this, app.packageName)
+                    else if (app.packageName in selected) OeaGameBoostStore.removeGame(this, app.packageName)
+                }
+                OeaGameBoostStore.setGames(this, next)
                 showGameBoost()
             }.show()
     }
