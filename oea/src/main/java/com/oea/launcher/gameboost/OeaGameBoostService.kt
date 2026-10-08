@@ -324,14 +324,6 @@ class OeaGameBoostService : Service() {
         handleText?.text = String.format(Locale.US, "OEA RAM\\n%.0f%%", usedPct)
     }
 
-    private fun animateHandleValue(handle: View?) {
-        handle?.animate()?.scaleX(0.97f)?.scaleY(0.97f)?.setDuration(70L)?.withEndAction {
-            handle.animate().scaleX(1.03f).scaleY(1.03f).setDuration(110L).withEndAction {
-                handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
-            }.start()
-        }?.start()
-    }
-
     private fun updateBoostButton(button: TextView) {
         button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
     }
