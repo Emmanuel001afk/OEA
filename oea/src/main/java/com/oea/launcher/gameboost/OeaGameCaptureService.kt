@@ -76,7 +76,16 @@ class OeaGameCaptureService : Service() {
         } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
         val manager = getSystemService(MediaProjectionManager::class.java)
         projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
-        if (projection == null) { stopSelf(); return START_NOT_STICKY }
+        if (projection == null) {
+            // Never leave the Game Boost UI stuck in a capture/recording state
+            // when Android rejects or ends the projection before a session starts.
+            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+                .putBoolean("recording", false)
+                .putBoolean("capture_active", false)
+                .apply()
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         projectionCallback = object : MediaProjection.Callback() {
             override fun onStop() {
