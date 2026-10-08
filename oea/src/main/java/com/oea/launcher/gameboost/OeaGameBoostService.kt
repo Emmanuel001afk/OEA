@@ -26,6 +26,47 @@ import androidx.core.app.NotificationCompat
 import java.util.Locale
 
 class OeaGameBoostService : Service() {
+    private class MemoryMetricsView(context: Context) : TextView(context) {
+        var ramFraction = 0f
+            set(value) { field = value.coerceIn(0f, 1f); invalidate() }
+        var virtualFraction = 0f
+            set(value) { field = value.coerceIn(0f, 1f); invalidate() }
+
+        private val track = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x55343A48
+        }
+        private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            super.onDraw(canvas)
+            val left = paddingLeft.toFloat()
+            val right = (width - paddingRight).toFloat()
+            val barWidth = (right - left).coerceAtLeast(1f)
+            val barHeight = dp(4).toFloat()
+            val gap = dp(5).toFloat()
+            val top = height - paddingBottom - barHeight * 2f - gap
+            drawBar(canvas, left, top, barWidth, barHeight, ramFraction, 0xFF4D7CFF.toInt())
+            drawBar(canvas, left, top + barHeight + gap, barWidth, barHeight, virtualFraction, 0xFF27D9B7.toInt())
+        }
+
+        private fun drawBar(
+            canvas: android.graphics.Canvas,
+            left: Float,
+            top: Float,
+            width: Float,
+            height: Float,
+            fraction: Float,
+            color: Int
+        ) {
+            val radius = height / 2f
+            canvas.drawRoundRect(left, top, left + width, top + height, radius, radius, track)
+            fill.color = color
+            canvas.drawRoundRect(left, top, left + width * fraction, top + height, radius, radius, fill)
+        }
+
+        private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var overlay: View? = null
     private var wakeOverlay: View? = null
@@ -117,9 +158,10 @@ class OeaGameBoostService : Service() {
             text = packageName.substringAfterLast('.')
             setPadding(0, dp(3), 0, dp(9))
         }
-        val metrics = TextView(this).apply {
+        val metrics = MemoryMetricsView(this).apply {
             setTextColor(Color.WHITE); textSize = 12f
-            text = "RAM • reading…"; setPadding(0, 0, 0, dp(4))
+            text = "RAM • reading…"
+            setPadding(0, 0, 0, dp(22))
         }
         val device = TextView(this).apply {
             setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
@@ -528,6 +570,12 @@ class OeaGameBoostService : Service() {
             "RAM  %.0f / %.0f MB  •  %.0f%%%s\nVirtual RAM  %s",
             usedMb, totalMb, usedPct, state, if (virtualTotal > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsed, virtualTotal) else "not exposed by Android"
         )
+        (metrics as? MemoryMetricsView)?.apply {
+            ramFraction = if (totalMb > 0) usedMb / totalMb else 0.0
+                .toFloat()
+            virtualFraction = if (virtualTotal > 0) virtualUsed / virtualTotal else 0.0
+                .toFloat()
+        }
 
         val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
         val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
