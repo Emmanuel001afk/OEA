@@ -274,6 +274,8 @@ class OeaGameCaptureService : Service() {
                 .apply()
             stopCapture()
             stopSelf()
+        } else {
+            Toast.makeText(this, "OEA could not save the screenshot.", Toast.LENGTH_LONG).show()
         }
     }
 
