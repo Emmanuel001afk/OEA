@@ -161,28 +161,29 @@ class OeaGameBoostService : Service() {
         val handleText = TextView(this).apply {
             gravity = Gravity.CENTER
             setTextColor(0xFF202124.toInt())
-            textSize = 10f
+            textSize = 9f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             text = "OEA RAM"
         }
-        handle.addView(handleText, android.widget.FrameLayout.LayoutParams(dp(48), dp(48)).apply {
+        handle.addView(handleText, android.widget.FrameLayout.LayoutParams(handleSize, handleSize).apply {
             gravity = Gravity.CENTER
         })
         handle.setOnClickListener {
             if (panel.visibility == View.VISIBLE) hidePanel(panel) else showPanel(panel)
         }
         root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(286), -2))
-        root.addView(handle, android.widget.LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+        root.addView(handle, android.widget.LinearLayout.LayoutParams(handleSize, handleSize).apply {
             gravity = Gravity.END
             topMargin = dp(6)
         })
 
+        val handleSize = handleSizePx()
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; x = dp(2); y = 0 }
+        ).apply { gravity = overlayGravity(); x = dp(2); y = 0 }
         runCatching {
             wm.addView(root, params)
             overlay = root
@@ -195,6 +196,19 @@ class OeaGameBoostService : Service() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun handleSizePx(): Int = when (OeaGameBoostStore.prefs(this).getString("ram_handle_size", "medium")) {
+        "small" -> dp(40)
+        "large" -> dp(58)
+        else -> dp(48)
+    }
+
+    private fun overlayGravity(): Int = when (OeaGameBoostStore.prefs(this).getString("ram_handle_corner", "bottom_right")) {
+        "top_left" -> Gravity.TOP or Gravity.START
+        "top_right" -> Gravity.TOP or Gravity.END
+        "bottom_left" -> Gravity.BOTTOM or Gravity.START
+        else -> Gravity.BOTTOM or Gravity.END
+    }
 
     private fun chipParams(): android.widget.LinearLayout.LayoutParams =
         android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) }
@@ -330,8 +344,20 @@ class OeaGameBoostService : Service() {
         (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text = if (recording) "●  RECORDING" else "●  RECORD" }
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
-        val handleText = handle?.getChildAt(0) as? TextView
-        handleText?.text = String.format(Locale.US, "OEA\nRAM\n%.0f%%", usedPct)
+        handle?.visibility = if (OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) View.VISIBLE else View.GONE
+        handle?.let { h ->
+            val size = handleSizePx()
+            h.layoutParams = (h.layoutParams as? android.widget.LinearLayout.LayoutParams)?.apply { width = size; height = size }
+            h.removeAllViews()
+            val t = TextView(this).apply {
+                gravity = Gravity.CENTER
+                setTextColor(0xFF202124.toInt())
+                textSize = if (size <= dp(44)) 8f else 9f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                text = String.format(Locale.US, "OEA\nRAM\n%.0f%%", usedPct)
+            }
+            h.addView(t, android.widget.FrameLayout.LayoutParams(size, size).apply { gravity = Gravity.CENTER })
+        }
     }
 
     private fun updateBoostButton(button: TextView) {
