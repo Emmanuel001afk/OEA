@@ -789,6 +789,842 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         launchOeaTool("game_boost")
     }
 
+    private fun drawerLayoutMenu(anchor: View) {
+        PopupMenu(hostActivity ?: return, anchor).apply {
+            menu.add("Grid")
+            menu.add("Vertical list")
+            menu.add("Horizontal")
+            setOnMenuItemClickListener {
+                when (it.title.toString()) {
+                    "Grid" -> store.setDrawerMode(OeaDataStore.DrawerMode.GRID)
+                    "Vertical list" -> store.setDrawerMode(OeaDataStore.DrawerMode.VERTICAL)
+                    "Horizontal" -> store.setDrawerMode(OeaDataStore.DrawerMode.HORIZONTAL)
+                }
+                renderDrawer(drawerSearch.text.toString())
+                true
+            }
+            show()
+        }
+    }
+
+    private fun renderDrawer(query: String) {
+        if (!drawerOpen) return
+        drawerBody.removeAllViews()
+        val visible = drawerController.filter(apps, query)
+            .filterNot { store.isHidden(it.packageName, it.className) }
+        if (query.isBlank()) {
+            renderFocusStrip()
+            renderOeaTools()
+            addSectionLabel(drawerBody, "Apps · " + visible.size)
+        } else if (visible.isNotEmpty()) {
+            addSectionLabel(drawerBody, "Apps · " + visible.size)
+        }
+        when (store.drawerMode()) {
+            OeaDataStore.DrawerMode.VERTICAL -> {
+                val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+                visible.forEach { app ->
+                    val row = drawerRow(app)
+                    list.addView(row, LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(3) })
+                }
+                drawerBody.addView(list)
+            }
+            OeaDataStore.DrawerMode.HORIZONTAL -> {
+                val horizontal = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
+                val pages = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                val rowsPerPage = 4
+                visible.chunked(rowsPerPage * cols()).forEach { pageApps ->
+                    val column = GridLayout(context).apply {
+                        columnCount = cols()
+                        rowCount = rowsPerPage
+                        setPadding(dp(2), dp(2), dp(2), dp(2))
+                    }
+                    pageApps.forEachIndexed { index, app ->
+                        column.addView(drawerTile(app), GridLayout.LayoutParams().apply {
+                            width = dp(72)
+                            height = dp(72)
+                            columnSpec = GridLayout.spec(index % cols())
+                            rowSpec = GridLayout.spec(index / cols())
+                            setMargins(dp(1), dp(1), dp(1), dp(1))
+                        })
+                    }
+                    pages.addView(column, LinearLayout.LayoutParams(cols() * dp(84), rowsPerPage * dp(94)))
+                }
+                horizontal.addView(pages, FrameLayout.LayoutParams(-2, -2))
+                drawerBody.addView(horizontal, FrameLayout.LayoutParams(-1, -2))
+            }
+            OeaDataStore.DrawerMode.GRID -> {
+                drawerGrid.removeAllViews()
+                drawerGrid.columnCount = cols()
+                if (visible.isNotEmpty()) visible.forEachIndexed { index, app ->
+                    drawerGrid.addView(drawerTile(app).apply {
+                        setOnLongClickListener { showAppActions(app, this, OeaWorkspaceStore.key(app.packageName, app.className)); true }
+                    }, GridLayout.LayoutParams().apply {
+                        width = 0
+                        height = dp(68)
+                        columnSpec = GridLayout.spec(index % cols(), 1, 1f)
+                        rowSpec = GridLayout.spec(index / cols())
+                        setMargins(dp(1), dp(1), dp(1), dp(1))
+                    })
+                }
+                drawerBody.addView(drawerGrid, LinearLayout.LayoutParams(-1, -2))
+            }
+        }
+        if (query.isNotBlank()) renderSearchActions(query)
+    }
+
+    private fun renderSearchActions(query: String) {
+        val actions = searchController.actions(query)
+        if (actions.isEmpty()) return
+        val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        if (query.isNotBlank()) {
+            addSectionLabel(list, if (drawerController.filter(apps, query).none { !store.isHidden(it.packageName, it.className) }) "Search" else "Search actions")
+        }
+        actions.forEach { action ->
+            list.addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), 0, dp(10), 0)
+                background = rounded(themeSurface, 16)
+                addView(TextView(context).apply {
+                    text = action.title
+                    textSize = 13f
+                    setTextColor(themeText)
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
+                addView(TextView(context).apply {
+                    text = action.subtitle
+                    textSize = 10f
+                    setTextColor(themeMuted)
+                }, LinearLayout.LayoutParams(-2, dp(42)))
+                setOnClickListener {
+                    runCatching { context.startActivity(action.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(2) })
+        }
+        drawerBody.addView(list)
+    }
+
+    private fun renderFocusStrip() {
+        val focused = focusStore.apps().mapNotNull(::find)
+        val allKeys = apps.filterNot { store.isHidden(it.packageName, it.className) }
+            .map { OeaWorkspaceStore.key(it.packageName, it.className) }
+        val used = store.mostUsed(allKeys, 8)
+            .filter { store.launchCount(it) >= 2 }
+            .mapNotNull(::find)
+            .take(8)
+        if (focused.isEmpty() && used.isEmpty()) return
+        val section = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        if (focused.isNotEmpty()) {
+            addSectionLabel(section, "OEA Focus · " + focused.size + "/" + OeaFocusStore.MAX_APPS)
+            section.addView(appStrip(focused), LinearLayout.LayoutParams(-1, dp(82)))
+        }
+        if (used.isNotEmpty() && store.showMostUsed()) {
+            addSectionLabel(section, "Most used · " + used.size)
+            val grid = GridLayout(context).apply {
+                columnCount = 4
+                useDefaultMargins = false
+            }
+            used.forEachIndexed { index, app ->
+                grid.addView(drawerTile(app), GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = dp(68)
+                    columnSpec = GridLayout.spec(index % 4, 1, 1f)
+                    rowSpec = GridLayout.spec(index / 4)
+                    setMargins(dp(1), dp(1), dp(1), dp(1))
+                })
+            }
+            val rows = ((used.size + 3) / 4).coerceAtLeast(1)
+            section.addView(grid, LinearLayout.LayoutParams(-1, dp(rows * 68)))
+        }
+        drawerBody.addView(section)
+    }
+
+    private fun appStrip(values: List<OeaAppInfo>): HorizontalScrollView {
+        val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        values.forEach { app ->
+            row.addView(drawerTile(app), LinearLayout.LayoutParams(dp(68), dp(68)).apply {
+                setMargins(dp(1), dp(1), dp(1), dp(1))
+            })
+        }
+        strip.addView(row, FrameLayout.LayoutParams(-2, -2))
+        return strip
+    }
+
+    private fun addSectionLabel(parent: LinearLayout, title: String) {
+        parent.addView(TextView(context).apply {
+            text = title
+            textSize = 11f
+            setTextColor(themeMuted)
+            setPadding(dp(4), dp(4), dp(4), dp(2))
+        }, LinearLayout.LayoutParams(-1, dp(34)))
+    }
+
+    private fun renderOeaTools() {
+        addSectionLabel(drawerBody, "OEA Systems")
+        val row = GridLayout(context).apply {
+            columnCount = 3
+            useDefaultMargins = false
+        }
+        listOf(
+            "⚙" to "OEA Settings",
+            "❄" to "App Freezer",
+            "☎" to "Phone & Calls",
+            "⛔" to "Call Blocker",
+            "🎮" to "Game Boost",
+            "▣" to "Multitask",
+            "▤" to "Split Screen",
+        ).forEachIndexed { index, (iconText, title) ->
+            row.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = rounded(themeSurface, 18)
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(4), dp(3), dp(4), dp(3))
+                setOnClickListener {
+                    when (title) {
+                        "OEA Settings" -> openSystemsSettings()
+                        "App Freezer" -> openFreezerSettings()
+                        "Phone & Calls" -> openPhone()
+                        "Call Blocker" -> openCallBlockerSettings()
+                        "Game Boost" -> openGameBoostSettings()
+                        "Multitask" -> openMultitaskDialog()
+                        "Split Screen" -> openSplitPairDialog()
+                    }
+                }
+                addView(TextView(context).apply {
+                    text = iconText
+                    textSize = 22f
+                    gravity = Gravity.CENTER
+                    setTextColor(themeText)
+                }, LinearLayout.LayoutParams(-1, dp(34)))
+                addView(TextView(context).apply {
+                    text = title
+                    textSize = 10f
+                    gravity = Gravity.CENTER
+                    setTextColor(themeText)
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(-1, dp(30)))
+            }, GridLayout.LayoutParams().apply {
+                width = 0
+                height = dp(72)
+                columnSpec = GridLayout.spec(index % 3, 1, 1f)
+                rowSpec = GridLayout.spec(index / 3)
+                setMargins(dp(1), dp(1), dp(1), dp(3))
+            })
+        }
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(220)))
+    }
+
+    private fun drawerTile(app: OeaAppInfo) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        isClickable = true
+        background = ColorDrawable(Color.TRANSPARENT)
+        contentDescription = "Open " + app.label
+        setOnClickListener { launch(app) }
+        addView(FrameLayout(context).apply {
+            val iconView = ImageView(context).apply {
+                setImageDrawable(icon(app.packageName))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+            }
+            addView(iconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
+            val count = OeaNotificationState.countForPackage(app.packageName)
+            if (count > 0) {
+                addView(TextView(context).apply {
+                    text = if (count > 99) "99+" else count.toString()
+                    textSize = 7f
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    background = rounded(Color.rgb(210, 60, 70), 10)
+                    minWidth = dp(16)
+                    minHeight = dp(16)
+                    setPadding(dp(2), 0, dp(2), 0)
+                }, FrameLayout.LayoutParams(-2, dp(16), Gravity.TOP or Gravity.END))
+            }
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        if (store.showAppLabels()) addView(TextView(context).apply {
+            text = app.label
+            textSize = 9f
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(themeText)
+        }, LinearLayout.LayoutParams(-1, dp(20)))
+    }
+
+    private fun drawerRow(app: OeaAppInfo): View {
+        val key = OeaWorkspaceStore.key(app.packageName, app.className)
+        return LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, dp(8), 0)
+            background = rounded(themeSurface, 16)
+            addView(ImageView(context).apply {
+                setImageDrawable(icon(app.packageName))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }, LinearLayout.LayoutParams(dp(42), dp(42)))
+            addView(TextView(context).apply {
+                text = app.label
+                textSize = 15f
+                setTextColor(themeText)
+                setPadding(dp(12), 0, 0, 0)
+            }, LinearLayout.LayoutParams(0, -1, 1f))
+            addView(TextView(context).apply {
+                text = if (ws.items().any { it.id == key }) "✓" else "+"
+                textSize = 20f
+                gravity = Gravity.CENTER
+                setTextColor(themeText)
+                contentDescription = "Add to home"
+                setOnClickListener {
+                    if (!ws.items().any { it.id == key }) addToHome(key)
+                    else removeFromHome(key)
+                }
+            }, LinearLayout.LayoutParams(dp(42), -1))
+            addView(TextView(context).apply {
+                text = "⋮"
+                textSize = 22f
+                gravity = Gravity.CENTER
+                setTextColor(themeMuted)
+                setOnClickListener { showAppActions(app, this, key) }
+            }, LinearLayout.LayoutParams(dp(44), -1))
+            setOnClickListener { launch(app) }
+            setOnLongClickListener { showAppActions(app, this, key); true }
+        }
+    }
+
+    private fun folderTile(folder: OeaWorkspaceStore.Folder) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        background = ColorDrawable(Color.TRANSPARENT)
+        setOnClickListener { openFolder(folder) }
+        setOnLongClickListener { showFolderRename(folder); true }
+        setOnDragListener { _, event ->
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DROP -> {
+                    dragged?.let { addToFolder(folder.id, it) }
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    dragged = null
+                    false
+                }
+                else -> false
+            }
+        }
+        val preview = GridLayout(context).apply {
+            columnCount = 2
+            useDefaultMargins = false
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = rounded(themeSurface, 16)
+        }
+        folder.members.mapNotNull(::find).take(4).forEach { app ->
+            preview.addView(ImageView(context).apply {
+                setImageDrawable(icon(app.packageName))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }, GridLayout.LayoutParams().apply {
+                width = dp(22); height = dp(22)
+                setMargins(dp(1), dp(1), dp(1), dp(1))
+            })
+        }
+        addView(preview, LinearLayout.LayoutParams(dp(56), dp(56)))
+        addView(TextView(context).apply {
+            text = folder.title
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(themeText)
+        }, LinearLayout.LayoutParams(-1, dp(28)))
+    }
+
+    private fun emptyCell() = TextView(context).apply {
+        setOnLongClickListener { menu(this); true }
+    }
+
+    private fun tile(app: OeaAppInfo) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        isClickable = true
+        background = ColorDrawable(Color.TRANSPARENT)
+        foreground = null
+        contentDescription = "Open " + app.label
+        setOnClickListener { launch(app) }
+        addView(FrameLayout(context).apply {
+            val iconView = ImageView(context).apply {
+                // Use the app's real launcher drawable as-is. OEA must not wrap, pad,
+                // clip, or paint a second rectangular/circular background around it.
+                setImageDrawable(icon(app.packageName))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+                alpha = if (OeaAppFreezer.frozenPackages(context).contains(app.packageName)) 0.45f else 1f
+                setPadding(0, 0, 0, 0)
+            }
+            addView(iconView, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER))
+            val count = OeaNotificationState.countForPackage(app.packageName)
+            if (count > 0) {
+                addView(TextView(context).apply {
+                    text = if (count > 99) "99+" else count.toString()
+                    textSize = 8f
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    background = rounded(Color.rgb(210, 60, 70), 12)
+                    minWidth = dp(18)
+                    minHeight = dp(18)
+                    setPadding(dp(3), 0, dp(3), 0)
+                }, FrameLayout.LayoutParams(-2, dp(18), Gravity.TOP or Gravity.END))
+            }
+        }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        if (store.showAppLabels()) addView(TextView(context).apply {
+            text = app.label
+            textSize = 10f
+            gravity = Gravity.CENTER
+            maxLines = 2
+            setTextColor(themeText)
+        }, LinearLayout.LayoutParams(-1, dp(22)))
+    }
+
+    private fun pageDrop(page: Int) = View.OnDragListener { view, e ->
+        when (e.action) {
+            DragEvent.ACTION_DRAG_STARTED -> true
+            DragEvent.ACTION_DROP -> {
+                val widgetId = e.clipData?.getItemAt(0)?.text?.toString()
+                    ?.removePrefix("oea_widget:")?.toIntOrNull()
+                if (widgetId != null) {
+                    widgetController.setPage(widgetId, page)
+                    refreshPage(page)
+                    return@OnDragListener true
+                }
+                val key = dragged ?: return@OnDragListener true
+                val grid = view as GridLayout
+                val cw = (grid.width / cols()).coerceAtLeast(1)
+                val col = (e.x / cw).toInt().coerceIn(0, cols() - 1)
+                val rowHeight = dp(76).coerceAtLeast(1)
+                val row = (e.y / rowHeight).toInt().coerceAtLeast(0)
+                val cell = row * cols() + col
+                val targetFolder = ws.folders().firstOrNull { it.page == page && it.cell == cell }
+                if (targetFolder != null) addToFolder(targetFolder.id, key) else move(key, page, cell)
+                true
+            }
+            DragEvent.ACTION_DRAG_ENDED -> { dragged = null; false }
+            else -> false
+        }
+    }
+
+    private fun dockDrop(e: DragEvent): Boolean {
+        if (e.action == DragEvent.ACTION_DRAG_STARTED) return true
+        if (e.action != DragEvent.ACTION_DROP) return false
+        val key = dragged ?: return true
+        val values = ws.dock().filterNot { it == key }.toMutableList()
+        values.add(key)
+        ws.setDock(values)
+        ws.setCurrentDockPage(values.lastIndex / OeaWorkspaceStore.DOCK_SLOTS)
+        ws.replaceItems(ws.items().filterNot { it.id == key })
+        ws.replaceFolders(
+            ws.folders()
+                .map { it.copy(members = it.members.filterNot { member -> member == key }) }
+                .filter { it.members.isNotEmpty() }
+        )
+        dragged = null
+        renderDock()
+        rebuild()
+        pager.post {
+            val page = ws.getCurrentPage()
+            ensurePageRendered(page)
+            pager.smoothScrollTo(page * pager.width, 0)
+        }
+        return true
+    }
+
+    private fun move(key: String, page: Int, cell: Int) {
+        val all = ws.items().toMutableList()
+        val moving = all.firstOrNull { it.id == key } ?: return
+        val capacity = cols() * 4
+        val targetCell = cell.coerceIn(0, capacity - 1)
+        val targetFolder = ws.folders().firstOrNull { it.page == page && it.cell == targetCell }
+        if (targetFolder != null) {
+            addToFolder(targetFolder.id, key)
+            return
+        }
+
+        val oldPage = moving.page
+        val collision = all.firstOrNull {
+            it.id != key && it.page == page && it.cell == targetCell && it.folderId == null
+        }
+        var destinationPage = page
+        var destinationCell = targetCell
+        if (collision != null) {
+            val next = firstFree(all, destinationPage, targetCell + 1)
+            if (next != null) {
+                all[all.indexOf(collision)] = collision.copy(page = destinationPage, cell = next)
+            } else {
+                // A full target page should not dead-end a drag. Continue into the
+                // next available home page, creating one when capacity permits.
+                var foundPage = -1
+                var foundCell = -1
+                for (candidate in (page + 1) until OeaWorkspaceStore.MAX_PAGES) {
+                    val free = firstFree(all, candidate, 0)
+                    if (free != null) {
+                        foundPage = candidate
+                        foundCell = free
+                        break
+                    }
+                }
+                if (foundPage < 0) {
+                    Toast.makeText(context, "OEA home has no free space.", Toast.LENGTH_SHORT).show()
+                    dragged = null
+                    return
+                }
+                destinationPage = foundPage
+                destinationCell = foundCell
+                if (ws.pages() <= destinationPage) ws.setPages(destinationPage + 1)
+            }
+        }
+
+        all[all.indexOf(moving)] = moving.copy(page = destinationPage, cell = destinationCell, folderId = null)
+        ws.replaceItems(all)
+        ws.setDock(ws.dock().filterNot { it == key })
+        dragged = null
+        refreshPages(oldPage, destinationPage)
+        ws.setCurrentPage(destinationPage)
+        pager.post { ensurePageRendered(destinationPage); pager.smoothScrollTo(destinationPage * pager.width, 0) }
+    }
+
+    private fun folder(target: String, source: String) {
+        val t = ws.items().firstOrNull { it.id == target } ?: return
+        val folders = ws.folders().toMutableList()
+        val existing = folders.firstOrNull { it.page == t.page && it.cell == t.cell }
+        if (existing == null) {
+            val members = listOf(target, source)
+            folders.add(OeaWorkspaceStore.Folder(
+                "folder-" + System.currentTimeMillis(),
+                suggestFolderName(members),
+                t.page,
+                t.cell,
+                members,
+            ))
+        } else {
+            val members = folderController.mergeMembers(existing.members, source)
+            folders[folders.indexOf(existing)] = existing.copy(
+                members = members,
+                title = if (existing.title == "Folder") suggestFolderName(members) else existing.title,
+            )
+        }
+        ws.replaceFolders(folders)
+        ws.replaceItems(ws.items().filterNot { it.id == target || it.id == source })
+        ws.setDock(ws.dock().filterNot { it == source || it == target })
+        dragged = null
+        refreshPages(t.page)
+    }
+
+    private fun addToFolder(folderId: String, key: String) {
+        val folder = ws.folders().firstOrNull { it.id == folderId } ?: return
+        if (folder.members.contains(key)) {
+            dragged = null
+            return
+        }
+        val updated = folder.copy(
+            members = folder.members + key,
+            title = if (folder.title == "Folder") suggestFolderName(folder.members + key) else folder.title,
+        )
+        ws.replaceFolders(ws.folders().map { if (it.id == folderId) updated else it })
+        ws.replaceItems(ws.items().filterNot { it.id == key })
+        ws.setDock(ws.dock().filterNot { it == key })
+        dragged = null
+        refreshPages(folder.page)
+    }
+
+    private fun suggestFolderName(keys: List<String>): String {
+        val labels = keys.mapNotNull(::find).map { (it.label + " " + it.packageName).lowercase() }
+        return when {
+            labels.any { it.contains("ai") || it.contains("deepseek") || it.contains("claude") || it.contains("anthropic") || it.contains("openai") || it.contains("chatgpt") || it.contains("gemini") || it.contains("copilot") || it.contains("perplexity") } -> "AI"
+            labels.any { it.contains("game") || it.contains("pubg") || it.contains("free fire") || it.contains("codm") } -> "Games"
+            labels.any { it.contains("music") || it.contains("spotify") || it.contains("sound") } -> "Music"
+            labels.any { it.contains("chat") || it.contains("whatsapp") || it.contains("telegram") || it.contains("messenger") } -> "Social"
+            labels.any { it.contains("video") || it.contains("youtube") || it.contains("netflix") } -> "Video"
+            labels.any { it.contains("photo") || it.contains("gallery") || it.contains("camera") } -> "Photos"
+            else -> "Folder"
+        }
+    }
+
+    private fun normalizeFolderNames() {
+        val updated = ws.folders().map { folder ->
+            if (folder.title.equals("Social", ignoreCase = true)) {
+                val members = folder.members.mapNotNull(::find)
+                val allAi = members.isNotEmpty() && members.all { app ->
+                    val text = (app.label + " " + app.packageName).lowercase()
+                    text.contains("ai") || text.contains("deepseek") || text.contains("claude") ||
+                        text.contains("anthropic") || text.contains("openai") || text.contains("chatgpt") ||
+                        text.contains("gemini") || text.contains("copilot") || text.contains("perplexity")
+                }
+                if (allAi) folder.copy(title = "AI") else folder
+            } else folder
+        }
+        if (updated != ws.folders()) ws.replaceFolders(updated)
+    }
+
+    private fun openFolder(folder: OeaWorkspaceStore.Folder) {
+        val activity = hostActivity ?: run {
+            Toast.makeText(context, "OEA Home is not ready for folders.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val box = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(8))
+            background = rounded(themeSurface, 24)
+        }
+        box.addView(TextView(context).apply {
+            text = folder.title + "  •  " + folder.members.size + " apps"
+            textSize = 20f
+            setTextColor(themeText)
+            setPadding(0, 0, 0, dp(10))
+        })
+        val grid = GridLayout(activity).apply { columnCount = 4; useDefaultMargins = false }
+        folder.members.mapNotNull(::find).forEach { app ->
+            val index = grid.childCount
+            grid.addView(tile(app), GridLayout.LayoutParams().apply {
+                width = 0
+                height = dp(88)
+                columnSpec = GridLayout.spec(index % 4, 1, 1f)
+                rowSpec = GridLayout.spec(index / 4)
+                setMargins(dp(1), dp(1), dp(1), dp(1))
+            })
+        }
+        val folderScroll = ScrollView(activity).apply {
+            isVerticalScrollBarEnabled = false
+            addView(grid, FrameLayout.LayoutParams(-1, -2))
+        }
+        box.addView(folderScroll, LinearLayout.LayoutParams(-1, dp(260)))
+        val dialog = AlertDialog.Builder(activity).setView(box)
+            .setNeutralButton("Rename") { _, _ -> showFolderRename(folder) }
+            .setPositiveButton("Done", null).create()
+        dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            dialog.window?.setDimAmount(0.55f)
+        }
+        dialog.show()
+    }
+
+    private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
+        val activity = hostActivity ?: run {
+            Toast.makeText(context, "OEA Home is not ready for folder editing.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val input = EditText(activity).apply { setSingleLine(true); setText(folder.title); setSelection(text.length) }
+        AlertDialog.Builder(activity).setTitle("Rename folder").setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val title = input.text.toString().trim().ifBlank { "Folder" }
+                ws.replaceFolders(ws.folders().map { if (it.id == folder.id) it.copy(title = title) else it })
+                refreshPages(folder.page)
+            }.show()
+    }
+
+    private fun dockTile(app: OeaAppInfo) = FrameLayout(context).apply {
+        isClickable = true
+        foreground = null
+        background = ColorDrawable(Color.TRANSPARENT)
+        contentDescription = "Open " + app.label
+        setOnClickListener { launch(app) }
+        addView(ImageView(context).apply {
+            setImageDrawable(icon(app.packageName))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(0, 0, 0, 0)
+            adjustViewBounds = true
+        }, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER))
+    }
+
+    private fun renderDock() {
+        dock.removeAllViews()
+        val values = ws.dock()
+        val page = ws.currentDockPage().coerceAtMost(ws.dockPageCount() - 1)
+        if (page != ws.currentDockPage()) ws.setCurrentDockPage(page)
+        val pageValues = ws.dockPageValues(page)
+        repeat(OeaWorkspaceStore.DOCK_SLOTS) { slot ->
+            val key = pageValues.getOrNull(slot)
+            val app = key?.let(::find)
+            val v = if (app == null) emptyCell() else dockTile(app)
+            if (app != null) v.setOnLongClickListener {
+                dragged = key
+                v.startDragAndDrop(
+                    ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, key),
+                    View.DragShadowBuilder(v),
+                    key,
+                    View.DRAG_FLAG_GLOBAL,
+                )
+                true
+            }
+            v.setOnDragListener { _, e ->
+                if (e.action == DragEvent.ACTION_DROP && dragged != null) {
+                    val draggedKey = dragged!!
+                    val fromDock = values.contains(draggedKey)
+                    val list = values.filterNot { it == draggedKey }.toMutableList()
+                    val targetIndex = (page * OeaWorkspaceStore.DOCK_SLOTS + slot)
+                        .coerceIn(0, list.size)
+                    list.add(targetIndex, draggedKey)
+                    ws.setDock(list)
+
+                    if (!fromDock) {
+                        val affectedPage = ws.items().firstOrNull { it.id == draggedKey }?.page
+                        ws.replaceItems(ws.items().filterNot { it.id == draggedKey })
+                        ws.replaceFolders(
+                            ws.folders()
+                                .map { it.copy(members = it.members.filterNot { member -> member == draggedKey }) }
+                                .filter { it.members.isNotEmpty() }
+                        )
+                        if (affectedPage != null) refreshPages(affectedPage)
+                    }
+
+                    dragged = null
+                    // If the insertion pushed past the current page, show the page
+                    // containing the dropped app immediately instead of leaving it off-screen.
+                    val dockPage = ws.dock().indexOf(draggedKey)
+                        .coerceAtLeast(0) / OeaWorkspaceStore.DOCK_SLOTS
+                    ws.setCurrentDockPage(dockPage)
+                    renderDock()
+                    true
+                } else e.action == DragEvent.ACTION_DRAG_STARTED
+            }
+            dock.addView(v, GridLayout.LayoutParams().apply {
+                width = 0
+                height = dp(68)
+                columnSpec = GridLayout.spec(slot, 1, 1f)
+            })
+        }
+        dockIndicator.text = if (ws.dockPageCount() > 1)
+            List(ws.dockPageCount()) { if (it == page) "●" else "•" }.joinToString(" ")
+        else ""
+        dockIndicator.contentDescription = if (ws.dockPageCount() > 1)
+            "Dock page " + (page + 1) + " of " + ws.dockPageCount() + ". Tap to switch pages."
+        else "Dock"
+        dock.contentDescription = "Dock page " + (page + 1) + " of " + ws.dockPageCount()
+    }
+
+    private fun nextPage() {
+        val target = (ws.getCurrentPage() + 1).coerceAtMost(ws.pages() - 1)
+        if (target == ws.getCurrentPage()) return
+        ws.setCurrentPage(target)
+        pager.post { ensurePageRendered(target); pager.smoothScrollTo(target * pager.width, 0) }
+        dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
+    }
+
+    private fun previousPage() {
+        val target = (ws.getCurrentPage() - 1).coerceAtLeast(0)
+        if (target == ws.getCurrentPage()) return
+        ws.setCurrentPage(target)
+        pager.post { ensurePageRendered(target); pager.smoothScrollTo(target * pager.width, 0) }
+        dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
+    }
+
+    private fun openDrawer() {
+        drawerOpen = true
+        homeRoot.visibility = View.GONE
+        drawer.visibility = View.VISIBLE
+        drawerSearch.setText(search.text.toString())
+        drawerSearch.setSelection(drawerSearch.text.length)
+        renderDrawer(drawerSearch.text.toString())
+        drawerSearch.requestFocus()
+    }
+
+    private fun closeDrawer() {
+        drawerOpen = false
+        drawer.visibility = View.GONE
+        homeRoot.visibility = View.VISIBLE
+        search.setText("")
+        drawerSearch.setText("")
+        search.clearFocus()
+        drawerSearch.clearFocus()
+        context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
+    }
+
+    private fun iconShapeBackground(): Drawable = GradientDrawable().apply {
+        val radius = when (store.iconShape()) {
+            "circle" -> 999f
+            "square" -> 4f
+            else -> 14f
+        }
+        setColor(themeSurface)
+        cornerRadius = dp(radius.toInt()).toFloat()
+    }
+
+    private fun openIconShapeSettings() {
+        val values = arrayOf("Rounded", "Circle", "Square")
+        val current = when (store.iconShape()) { "circle" -> 1; "square" -> 2; else -> 0 }
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Icon shape")
+            .setSingleChoiceItems(values, current) { dialog, which ->
+                store.setIconShape(when (which) { 1 -> "circle"; 2 -> "square"; else -> "rounded" })
+                rebuild()
+                renderDrawer(drawerSearch.text.toString())
+                dialog.dismiss()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun openWallpaperChooser() {
+        val choices = arrayOf("Choose from gallery", "Use current system wallpaper", "Remove OEA wallpaper")
+        AlertDialog.Builder(hostActivity ?: context).setTitle("OEA Wallpaper").setItems(choices) { _, which ->
+            when (which) {
+                0 -> runCatching {
+                    hostActivity?.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                    }, wallpaperRequestCode) ?: throw IllegalStateException("OEA Home activity unavailable")
+                }.onFailure {
+                    Toast.makeText(context, "Image picker unavailable.", Toast.LENGTH_SHORT).show()
+                }
+                1 -> {
+                    store.setWallpaperUri(null)
+                    loadOeaWallpaper(true)
+                }
+                2 -> {
+                    store.setWallpaperUri(null)
+                    wallpaperView.setImageDrawable(null)
+                    wallpaperLightHint = null
+                    applyThemeFromWallpaper()
+                    rebuild()
+                }
+            }
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun openHiddenAppsSettings() {
+        val hiddenApps = apps.filter { store.isHidden(it.packageName, it.className) }
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        box.addView(TextView(context).apply {
+            text = if (hiddenApps.isEmpty()) "No hidden apps." else "Hidden apps (" + hiddenApps.size + ")"
+            textSize = 16f
+            setTextColor(themeText)
+        })
+        hiddenApps.forEach { app ->
+            box.addView(LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                addView(ImageView(context).apply {
+                    setImageDrawable(icon(app.packageName))
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }, LinearLayout.LayoutParams(dp(42), dp(42)))
+                addView(TextView(context).apply {
+                    text = app.label
+                    textSize = 15f
+                    setTextColor(themeText)
+                }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                addView(Button(context).apply {
+                    text = "Unhide"
+                    setOnClickListener {
+                        store.setHidden(app.packageName, app.className, false)
+                        rebuild()
+                        renderDrawer(drawerSearch.text.toString())
+                        openHiddenAppsSettings()
+                    }
+                }, LinearLayout.LayoutParams(-2, dp(48)))
+            }, LinearLayout.LayoutParams(-1, dp(52)))
+        }
+        AlertDialog.Builder(hostActivity ?: context).setTitle("Hidden apps").setView(box)
+            .setPositiveButton("Done", null).show()
+    }
+
     private fun openFreezerSettings() {
         launchOeaTool("freezer")
     }
