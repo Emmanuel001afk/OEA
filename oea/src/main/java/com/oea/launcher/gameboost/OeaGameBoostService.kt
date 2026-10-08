@@ -38,6 +38,16 @@ class OeaGameBoostService : Service() {
         }
         private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            val textBottom = (layout?.height ?: 0) + paddingTop
+            val barsHeight = dp(8) * 2 + dp(12)
+            val neededHeight = textBottom + dp(14) + barsHeight + paddingBottom
+            if (measuredHeight < neededHeight) {
+                setMeasuredDimension(measuredWidth, neededHeight)
+            }
+        }
+
         override fun onDraw(canvas: android.graphics.Canvas) {
             super.onDraw(canvas)
             val left = paddingLeft.toFloat()
