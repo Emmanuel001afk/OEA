@@ -45,6 +45,8 @@ class OeaGameCaptureService : Service() {
     private var outputUri: android.net.Uri? = null
     private var outputDescriptor: android.os.ParcelFileDescriptor? = null
     private var projectionCallback: MediaProjection.Callback? = null
+    private var cleaningProjection = false
+    private var projectionCallback: MediaProjection.Callback? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -163,6 +165,7 @@ class OeaGameCaptureService : Service() {
             image.close()
             saveScreenshot(cropped)
             cropped.recycle()
+            Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
             stopCapture()
             stopSelf()
         }, 500L)
@@ -213,7 +216,8 @@ class OeaGameCaptureService : Service() {
         runCatching { outputDescriptor?.close() }
         outputDescriptor = null
         outputUri = null
-        getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
+        getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).putBoolean("capture_active", false).apply()
+        getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
     }
 
     private fun notification(text: String): Notification =
