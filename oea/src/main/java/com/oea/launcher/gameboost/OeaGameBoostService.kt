@@ -45,7 +45,7 @@ class OeaGameBoostService : Service() {
         super.onCreate()
         createChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.sym_def_app_icon)
-            .setContentTitle("OEA Game Boost").setContentText("Monitoring selected games").setOngoing(true).build()
+            .setContentTitle("OEA RAM").setContentText("Game session active").setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
         else startForeground(NOTIFICATION_ID, notification)
         handler.post(tick)
@@ -89,7 +89,7 @@ class OeaGameBoostService : Service() {
         val title = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 13f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            text = "OEA  •  GAME BOOST"
+            text = "OEA RAM"
         }
         val gameName = TextView(this).apply {
             setTextColor(0xFFB9C7FF.toInt()); textSize = 11f
@@ -182,7 +182,7 @@ class OeaGameBoostService : Service() {
             handle.alpha = 0f
             handle.translationX = dp(10).toFloat()
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
-                .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).start()
+                .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).withEndAction { animateHandle(handle) }.start()
             updateOverlay()
         }
     }
@@ -301,7 +301,7 @@ class OeaGameBoostService : Service() {
         metrics.text = String.format(
             Locale.US,
             "RAM  %.0f / %.0f MB  •  %.0f%%%s\nVirtual RAM  %.0f / %.0f MB",
-            usedMb, totalMb, usedPct, state, virtualUsed, virtualTotal
+            usedMb, totalMb, usedPct, state, if (virtualTotal > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsed, virtualTotal) else "not exposed by Android"
         )
 
         val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
@@ -334,6 +334,17 @@ class OeaGameBoostService : Service() {
         button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
     }
 
+    private fun animateHandle(handle: View) {
+        handle.animate().cancel()
+        handle.animate().scaleX(0.94f).scaleY(0.94f).setDuration(700L)
+            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).withEndAction {
+                handle.animate().scaleX(1f).scaleY(1f).setDuration(700L)
+                    .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).withEndAction {
+                        if (overlay != null) animateHandle(handle)
+                    }.start()
+            }.start()
+    }
+
     private fun showPanel(panel: View) {
         if (panel.visibility == View.VISIBLE) return
         panel.animate().cancel()
@@ -341,13 +352,13 @@ class OeaGameBoostService : Service() {
         panel.alpha = 0f
         panel.scaleX = 0.96f
         panel.scaleY = 0.96f
-        panel.translationX = dp(12).toFloat()
+        panel.translationX = dp(20).toFloat()
         panel.animate()
             .alpha(1f)
             .scaleX(1f)
             .scaleY(1f)
             .translationX(0f)
-            .setDuration(210L)
+            .setDuration(280L)
             .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
             .start()
     }
