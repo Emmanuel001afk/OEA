@@ -149,10 +149,12 @@ class OeaGameBoostService : Service() {
 
         val handleSize = handleSizePx()
         val handle = android.widget.FrameLayout(this).apply {
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xF2F2F4F7.toInt())
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF0A1020.toInt(), 0xFF2357FF.toInt(), 0xFF0B1735.toInt())
+            ).apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
-                setStroke(dp(1), 0x663F51FF)
+                setStroke(dp(1), 0xAA4D74FF.toInt())
             }
             elevation = dp(7).toFloat()
             contentDescription = "Open OEA RAM controls"
@@ -347,16 +349,18 @@ class OeaGameBoostService : Service() {
         handle?.visibility = if (OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) View.VISIBLE else View.GONE
         handle?.let { h ->
             val size = handleSizePx()
-            h.layoutParams = (h.layoutParams as? android.widget.LinearLayout.LayoutParams)?.apply { width = size; height = size }
-            h.removeAllViews()
-            val t = TextView(this).apply {
-                gravity = Gravity.CENTER
-                setTextColor(0xFF202124.toInt())
-                textSize = if (size <= dp(44)) 8f else 9f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                text = String.format(Locale.US, "OEA\nRAM\n%.0f%%", usedPct)
+            val lp = h.layoutParams as? android.widget.LinearLayout.LayoutParams
+            if (lp != null && (lp.width != size || lp.height != size)) {
+                lp.width = size
+                lp.height = size
+                h.layoutParams = lp
+                h.requestLayout()
             }
-            h.addView(t, android.widget.FrameLayout.LayoutParams(size, size).apply { gravity = Gravity.CENTER })
+            val t = h.getChildAt(0) as? TextView
+            if (t != null) {
+                t.textSize = if (size <= dp(44)) 8f else 9f
+                t.text = String.format(Locale.US, "OEA\nRAM\n%.0f%%", usedPct)
+            }
         }
     }
 
@@ -366,11 +370,30 @@ class OeaGameBoostService : Service() {
 
     private fun animateHandle(handle: View) {
         handle.animate().cancel()
+        val bg = handle.background as? android.graphics.drawable.GradientDrawable
+        val pulse = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1400L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            addUpdateListener { animator ->
+                val p = animator.animatedValue as Float
+                val accent = android.animation.ArgbEvaluator().evaluate(p, 0xFF2357FF.toInt(), 0xFF56B7FF.toInt()) as Int
+                val deep = android.animation.ArgbEvaluator().evaluate(p, 0xFF0A1020.toInt(), 0xFF102A5A.toInt()) as Int
+                bg?.setColors(intArrayOf(deep, accent, 0xFF0B1735.toInt()))
+                bg?.setStroke(dp(1), android.animation.ArgbEvaluator().evaluate(p, 0x884D74FF.toInt(), 0xEE7BC8FF.toInt()) as Int)
+            }
+        }
+        pulse.start()
         handle.animate().scaleX(0.94f).scaleY(0.94f).setDuration(700L)
             .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).withEndAction {
                 handle.animate().scaleX(1f).scaleY(1f).setDuration(700L)
                     .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator()).withEndAction {
-                        if (overlay != null) animateHandle(handle)
+                        if (overlay != null && handle.visibility == View.VISIBLE) {
+                            pulse.cancel()
+                            animateHandle(handle)
+                        } else {
+                            pulse.cancel()
+                        }
                     }.start()
             }.start()
     }
