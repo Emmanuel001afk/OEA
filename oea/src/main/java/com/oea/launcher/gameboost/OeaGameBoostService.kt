@@ -79,8 +79,9 @@ class OeaGameBoostService : Service() {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(16), dp(13), dp(16), dp(13))
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xF2212328.toInt())
+                setColor(0xF21B1D22.toInt())
                 cornerRadius = dp(24).toFloat()
+                setStroke(dp(1), 0x553F51FF)
             }
             elevation = dp(10).toFloat()
             visibility = View.GONE
@@ -105,15 +106,16 @@ class OeaGameBoostService : Service() {
         }
         val controls = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
+            alpha = 0.98f
         }
         val rowOne = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
         val rowTwo = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
-        val dnd = chip("DND")
-        val boost = chip("BOOST")
-        val screenshot = chip("SCREENSHOT")
-        val record = chip("RECORD")
-        val cleanup = chip("CLEAN RAM")
-        val hide = chip("HIDE")
+        val dnd = chip("◉  DND")
+        val boost = chip("⚡  BOOST")
+        val screenshot = chip("▣  SHOT")
+        val record = chip("●  RECORD")
+        val cleanup = chip("↻  CLEAN RAM")
+        val hide = chip("⌄  HIDE")
         rowOne.addView(dnd, chipParams())
         rowOne.addView(boost, chipParams())
         rowOne.addView(screenshot, chipParams())
@@ -130,6 +132,9 @@ class OeaGameBoostService : Service() {
             val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
             OeaGameBoostStore.prefs(this).edit().putBoolean("boost", next).apply()
             setKeepScreenOn(next)
+            boost.animate().scaleX(0.94f).scaleY(0.94f).setDuration(70L).withEndAction {
+                boost.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+            }.start()
             updateBoostButton(boost)
         }
         hide.setOnClickListener { hidePanel(panel) }
@@ -170,7 +175,15 @@ class OeaGameBoostService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(8); y = dp(88) }
-        runCatching { wm.addView(root, params); overlay = root; updateOverlay() }
+        runCatching {
+            wm.addView(root, params)
+            overlay = root
+            handle.alpha = 0f
+            handle.translationX = dp(18).toFloat()
+            handle.animate().alpha(1f).translationX(0f).setDuration(240L)
+                .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).start()
+            updateOverlay()
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -214,7 +227,7 @@ class OeaGameBoostService : Service() {
                     }
                 }
         }
-        button.text = if (attempted > 0) "CLEANED" else "CLEAN RAM"
+        button.text = if (attempted > 0) "✓ CLEANED" else "CLEAN RAM"
         handler.postDelayed({ button.text = "CLEAN RAM" }, 1200L)
         updateOverlay()
     }
@@ -223,7 +236,8 @@ class OeaGameBoostService : Service() {
         text = label; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 10f
         typeface = android.graphics.Typeface.DEFAULT_BOLD
         background = android.graphics.drawable.GradientDrawable().apply {
-            setColor(0xFF34363A.toInt()); cornerRadius = dp(12).toFloat()
+            setColor(0xFF2B2E35.toInt()); cornerRadius = dp(13).toFloat()
+            setStroke(dp(1), 0x223F51FF)
         }
         isClickable = true; isFocusable = true
     }
@@ -232,7 +246,14 @@ class OeaGameBoostService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         if (!nm.isNotificationPolicyAccessGranted) {
             button.text = "DND ACCESS"
-            runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            val detail = if (Build.VERSION.SDK_INT >= 30) Intent("android.settings.NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS").apply {
+                data = android.net.Uri.parse("package:$packageName")
+            } else null
+            runCatching {
+                startActivity((detail ?: Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure {
+                runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
             return
         }
         val next = !OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
@@ -304,30 +325,32 @@ class OeaGameBoostService : Service() {
 
     private fun showPanel(panel: View) {
         if (panel.visibility == View.VISIBLE) return
+        panel.animate().cancel()
         panel.visibility = View.VISIBLE
         panel.alpha = 0f
-        panel.scaleX = 0.94f
-        panel.scaleY = 0.94f
-        panel.translationX = dp(10).toFloat()
+        panel.scaleX = 0.96f
+        panel.scaleY = 0.96f
+        panel.translationX = dp(12).toFloat()
         panel.animate()
             .alpha(1f)
             .scaleX(1f)
             .scaleY(1f)
             .translationX(0f)
-            .setDuration(190L)
-            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .setDuration(210L)
+            .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
             .start()
     }
 
     private fun hidePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
+        panel.animate().cancel()
         panel.animate()
             .alpha(0f)
-            .scaleX(0.94f)
-            .scaleY(0.94f)
-            .translationX(dp(10).toFloat())
-            .setDuration(150L)
-            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .scaleX(0.96f)
+            .scaleY(0.96f)
+            .translationX(dp(12).toFloat())
+            .setDuration(145L)
+            .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
             .withEndAction {
                 panel.visibility = View.GONE
                 panel.alpha = 1f
