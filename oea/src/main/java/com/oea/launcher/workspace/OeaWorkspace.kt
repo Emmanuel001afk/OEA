@@ -1859,7 +1859,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(themeMuted)
-                setOnClickListener { hostActivity?.let { widgetController.pickWidget(it, ws.getCurrentPage()) } }
+                // This placeholder belongs to the page being rendered; never use the
+                // globally selected page here because adjacent pages can already be rendered.
+                setOnClickListener { hostActivity?.let { widgetController.pickWidget(it, page) } }
             }, FrameLayout.LayoutParams(-1, dp(56)))
         }
     }
