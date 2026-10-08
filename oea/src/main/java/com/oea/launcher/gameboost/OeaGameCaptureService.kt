@@ -171,8 +171,7 @@ class OeaGameCaptureService : Service() {
             width,
             height,
             density(),
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             recorder!!.surface,
             null,
             null
@@ -209,8 +208,7 @@ class OeaGameCaptureService : Service() {
             width,
             height,
             density(),
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             captureReader.surface,
             null,
             Handler(Looper.getMainLooper())
