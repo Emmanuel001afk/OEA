@@ -605,7 +605,7 @@ class OeaGameBoostService : Service() {
                     text.scaleX = pulse
                     text.scaleY = pulse
                     text.alpha = 0.84f + (0.16f * kotlin.math.sin(p * Math.PI)).toFloat()
-                    text.translationY = ((kotlin.math.sin(p * Math.PI * 2.0) * dp(1.2)).toFloat())
+                    text.translationY = (kotlin.math.sin(p * Math.PI * 2.0) * dp(1).toDouble()).toFloat()
                     text.invalidate()
                 }
             }.also { it.start() }
