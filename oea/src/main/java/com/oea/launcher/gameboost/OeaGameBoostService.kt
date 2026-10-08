@@ -359,7 +359,7 @@ class OeaGameBoostService : Service() {
                 val controls = (panel as? android.widget.LinearLayout)?.getChildAt(4) as? android.widget.LinearLayout
                 if (controls != null) {
                     for (index in 0 until controls.childCount) {
-                        val child = controls.getChildAt(index)
+                        val child = (controls as android.view.ViewGroup).getChildAt(index)
                         child.alpha = 0f
                         child.translationY = dp(8).toFloat()
                         child.animate().alpha(1f).translationY(0f).setStartDelay(index * 45L).setDuration(180L).start()
