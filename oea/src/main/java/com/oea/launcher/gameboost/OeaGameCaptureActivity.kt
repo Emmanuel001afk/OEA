@@ -16,12 +16,13 @@ class OeaGameCaptureActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // This Activity is only the host for Android's MediaProjection consent UI.
+        // Keep it a real, focusable translucent Activity until the user answers.
+        // The system consent dialog must not be launched from a disposable
+        // trampoline, otherwise Android/OEM task handling can expose OEA instead
+        // of the game underneath.
         window.setBackgroundDrawableResource(android.R.color.transparent)
         window.setDimAmount(0f)
-        window.addFlags(
-            android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        )
         window.decorView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         overridePendingTransition(0, 0)
         val manager = getSystemService(MediaProjectionManager::class.java)
