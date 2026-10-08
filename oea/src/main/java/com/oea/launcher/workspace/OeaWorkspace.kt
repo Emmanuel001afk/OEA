@@ -608,17 +608,58 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             onSuccess()
             return
         }
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(8), dp(24), dp(4))
+        }
+        val iconView = ImageView(context).apply {
+            setImageDrawable(icon(app.packageName))
+            contentDescription = app.label + " locked"
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+        }
+        card.addView(iconView, LinearLayout.LayoutParams(dp(64), dp(64)).apply { bottomMargin = dp(8) })
+        card.addView(TextView(context).apply {
+            text = app.label
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(themeText)
+        }, LinearLayout.LayoutParams(-1, -2))
+        card.addView(TextView(context).apply {
+            text = "App locked • enter your PIN to continue"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(themeMuted)
+            setPadding(0, dp(4), 0, dp(12))
+        }, LinearLayout.LayoutParams(-1, -2))
         val input = EditText(context).apply {
             hint = "PIN"
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            gravity = Gravity.CENTER
             setSingleLine(true)
+            textSize = 20f
+            contentDescription = "OEA App Lock PIN"
         }
-        AlertDialog.Builder(hostActivity ?: context).setTitle("Unlock " + app.label).setView(input)
+        card.addView(input, LinearLayout.LayoutParams(-1, dp(52)))
+        val dialog = AlertDialog.Builder(hostActivity ?: context)
+            .setTitle("OEA App Lock")
+            .setView(card)
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Unlock") { _, _ ->
-                if (OeaAppLockStore.verifyPin(context, input.text.toString())) onSuccess()
-                else Toast.makeText(context, "Incorrect PIN.", Toast.LENGTH_SHORT).show()
-            }.show()
+            .setPositiveButton("Unlock", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (OeaAppLockStore.verifyPin(context, input.text.toString())) {
+                    dialog.dismiss()
+                    onSuccess()
+                } else {
+                    input.text?.clear()
+                    input.error = "Incorrect PIN"
+                    input.requestFocus()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun openAppInfo(packageName: String) {
