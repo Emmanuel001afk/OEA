@@ -1430,7 +1430,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setMargins(dp(1), dp(1), dp(1), dp(1))
             })
         }
-        box.addView(grid, LinearLayout.LayoutParams(-1, -2))
+        val folderScroll = ScrollView(activity).apply {
+            isVerticalScrollBarEnabled = false
+            addView(grid, FrameLayout.LayoutParams(-1, -2))
+        }
+        box.addView(folderScroll, LinearLayout.LayoutParams(-1, dp(260)))
         val dialog = AlertDialog.Builder(activity).setView(box)
             .setNeutralButton("Rename") { _, _ -> showFolderRename(folder) }
             .setPositiveButton("Done", null).create()
@@ -1480,7 +1484,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             val key = pageValues.getOrNull(slot)
             val app = key?.let(::find)
             val v = if (app == null) emptyCell() else dockTile(app)
-            if (app != null) v.setOnLongClickListener { showAppActions(app, v, key); true }
+            if (app != null) v.setOnLongClickListener {
+                dragged = key
+                v.startDragAndDrop(
+                    ClipData.newPlainText(ClipDescription.MIMETYPE_TEXT_PLAIN, key),
+                    View.DragShadowBuilder(v),
+                    key,
+                    View.DRAG_FLAG_GLOBAL,
+                )
+                true
+            }
             v.setOnDragListener { _, e ->
                 if (e.action == DragEvent.ACTION_DROP && dragged != null) {
                     val draggedKey = dragged!!
