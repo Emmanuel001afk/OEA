@@ -582,17 +582,17 @@ class OeaSystemToolsActivity : Activity() {
         container.addView(sizeLabel)
         val sizes = arrayOf("Small", "Medium", "Large")
         val sizeValues = arrayOf("small", "medium", "large")
-        var selectedSize = sizeValues.indexOf(currentSize).coerceAtLeast(0)
         val sizeGroup = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
         sizes.forEachIndexed { index, label ->
             val radio = RadioButton(this).apply {
                 text = label
                 setTextColor(textColor())
-                isChecked = index == selectedSize
+                id = 30_000 + index
             }
-            radio.setOnClickListener { selectedSize = index }
+            radio.setOnClickListener { sizeGroup.check(radio.id) }
             sizeGroup.addView(radio, RadioGroup.LayoutParams(0, -2, 1f))
         }
+        sizeGroup.check(30_000 + sizeValues.indexOf(currentSize).coerceAtLeast(0))
         container.addView(sizeGroup)
 
         val cornerLabel = TextView(this).apply {
@@ -604,17 +604,17 @@ class OeaSystemToolsActivity : Activity() {
         container.addView(cornerLabel)
         val corners = arrayOf("Top-left", "Top-right", "Bottom-left", "Bottom-right")
         val cornerValues = arrayOf("top_left", "top_right", "bottom_left", "bottom_right")
-        var selectedCorner = cornerValues.indexOf(currentCorner).coerceAtLeast(0)
         val cornerGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
         corners.forEachIndexed { index, label ->
             val radio = RadioButton(this).apply {
                 text = label
                 setTextColor(textColor())
-                isChecked = index == selectedCorner
+                id = 31_000 + index
             }
-            radio.setOnClickListener { selectedCorner = index }
+            radio.setOnClickListener { cornerGroup.check(radio.id) }
             cornerGroup.addView(radio)
         }
+        cornerGroup.check(31_000 + cornerValues.indexOf(currentCorner).coerceAtLeast(0))
         container.addView(cornerGroup)
 
         AlertDialog.Builder(this)
@@ -625,8 +625,8 @@ class OeaSystemToolsActivity : Activity() {
             .setPositiveButton("Save") { _, _ ->
                 prefs.edit()
                     .putBoolean("ram_handle_visible", visible.isChecked)
-                    .putString("ram_handle_size", sizeValues[selectedSize])
-                    .putString("ram_handle_corner", cornerValues[selectedCorner])
+                    .putString("ram_handle_size", sizeValues[(sizeGroup.checkedRadioButtonId - 30_000).coerceIn(0, sizeValues.lastIndex)])
+                    .putString("ram_handle_corner", cornerValues[(cornerGroup.checkedRadioButtonId - 31_000).coerceIn(0, cornerValues.lastIndex)])
                     .putBoolean("ram_handle_dragged", false)
                     .apply()
                 if (OeaGameBoostStore.enabled(this)) {
