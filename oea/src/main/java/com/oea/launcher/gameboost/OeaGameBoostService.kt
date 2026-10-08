@@ -193,7 +193,7 @@ class OeaGameBoostService : Service() {
         android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) }
 
     private fun launchCapture(mode: String) {
-        OeaGameBoostStore.prefs(this).edit().putBoolean("capture_active", true).apply()
+        OeaGameBoostStore.prefs(this).edit().putBoolean("capture_active", true).putString("capture_mode", mode).apply()
         overlay?.alpha = 0f
         val intent = Intent(this, OeaGameCaptureActivity::class.java).apply {
             putExtra(OeaGameCaptureActivity.EXTRA_MODE, mode)
@@ -313,10 +313,11 @@ class OeaGameBoostService : Service() {
         updateDndButton(dnd)
         updateBoostButton(boost)
         root.alpha = if (OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)) 0f else 1f
+        val captureActive = OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)
+        val captureMode = OeaGameBoostStore.prefs(this).getString("capture_mode", "")
         val recording = OeaGameBoostStore.prefs(this).getBoolean("recording", false)
-        (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let {
-            (it as? TextView)?.text = if (recording) "RECORDING" else "RECORD"
-        }
+        (controls.getChildAt(0) as? android.widget.LinearLayout)?.getChildAt(2)?.let { (it as? TextView)?.text = if (captureActive && captureMode == OeaGameCaptureActivity.MODE_SCREENSHOT) "SHOT…" else "▣  SHOT" }
+        (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text = if (recording) "●  RECORDING" else "●  RECORD" }
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleText = handle?.getChildAt(0) as? TextView
@@ -362,7 +363,14 @@ class OeaGameBoostService : Service() {
             .translationX(0f)
             .setDuration(280L)
             .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
-            .start()
+            .withEndAction {
+                val controls = panel.getChildAt(4) as? android.widget.LinearLayout
+                controls?.children?.forEachIndexed { index, child ->
+                    child.alpha = 0f
+                    child.translationY = dp(8).toFloat()
+                    child.animate().alpha(1f).translationY(0f).setStartDelay((index * 45L)).setDuration(180L).start()
+                }
+            }.start()
     }
 
     private fun hidePanel(panel: View) {
