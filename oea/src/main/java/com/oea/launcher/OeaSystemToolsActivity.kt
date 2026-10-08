@@ -233,8 +233,10 @@ class OeaSystemToolsActivity : Activity() {
             .setTitle("OEA Multitask")
             .setMessage("Choose an app. OEA asks Android for a floating/freeform task with a sensible starting size. Android/OEM support determines whether it can actually float.")
             .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
-                val result = OeaMultitaskLauncher.launchFloating(this, choices[which])
-                if (!result.success) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                protectedLaunch(choices[which]) {
+                    val result = OeaMultitaskLauncher.launchFloating(this, choices[which])
+                    if (!result.success) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                }
             }
             .setNegativeButton("Cancel", null).show()
     }
@@ -255,8 +257,14 @@ class OeaSystemToolsActivity : Activity() {
                 val picked = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }
                 if (picked.size != 2) Toast.makeText(this, "Choose two apps first.", Toast.LENGTH_SHORT).show()
                 else {
-                    val result = OeaSplitLauncher.launchPair(this, picked[0], picked[1])
-                    if (!result.success) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                    val first = choices.first { it.packageName == picked[0] }
+                    val second = choices.first { it.packageName == picked[1] }
+                    protectedLaunch(first) {
+                        protectedLaunch(second) {
+                            val result = OeaSplitLauncher.launchPair(this, first.packageName, second.packageName)
+                            if (!result.success) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
             }.show()
     }
@@ -557,6 +565,28 @@ class OeaSystemToolsActivity : Activity() {
         "dark" -> "Dark"
         "light" -> "Light"
         else -> "System / Wallpaper"
+    }
+
+    private fun protectedLaunch(app: OeaAppInfo, onSuccess: () -> Unit) {
+        val key = app.packageName + "/" + app.className
+        if (!OeaAppLockStore.isLocked(this, key)) {
+            onSuccess()
+            return
+        }
+        val input = pinInput()
+        AlertDialog.Builder(this)
+            .setTitle("Unlock " + app.label)
+            .setMessage("This app is protected by OEA App Lock.")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Unlock") { _, _ ->
+                if (OeaAppLockStore.verifyPin(this, input.text.toString())) {
+                    onSuccess()
+                } else {
+                    Toast.makeText(this, "Incorrect PIN.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .show()
     }
 
     private fun pinInput() = EditText(this).apply {
