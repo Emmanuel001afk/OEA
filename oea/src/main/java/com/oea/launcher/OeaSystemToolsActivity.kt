@@ -139,7 +139,7 @@ class OeaSystemToolsActivity : Activity() {
             .sortedBy { it.label.lowercase() }
             .forEach { app ->
                 val isFrozen = frozen.contains(app.packageName)
-                row(box, app.label, if (isFrozen) "FROZEN • tap to restore" else "Tap to freeze") {
+                freezerRow(box, app, isFrozen) {
                     if (backend == OeaAppFreezer.Backend.NONE) {
                         Toast.makeText(this, "No freezer authority. Use the Authority row above to provision device-owner/root access.", Toast.LENGTH_LONG).show()
                     } else {
@@ -607,6 +607,43 @@ class OeaSystemToolsActivity : Activity() {
         hint = "4-8 digit PIN"
         inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
         setSingleLine(true)
+    }
+
+    private fun freezerRow(box: LinearLayout, app: OeaAppInfo, frozen: Boolean, action: () -> Unit) {
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(14, 10, 14, 10)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 20f
+                setColor(surfaceColor())
+            }
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (frozen) app.label + " frozen, tap to restore" else app.label + " not frozen, tap to freeze"
+            setOnClickListener { action() }
+
+            val iconView = ImageView(this@OeaSystemToolsActivity).apply {
+                setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                contentDescription = app.label + " icon"
+            }
+            addView(iconView, LinearLayout.LayoutParams(dp(46), dp(46)).apply { rightMargin = dp(12) })
+
+            addView(LinearLayout(this@OeaSystemToolsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(this@OeaSystemToolsActivity).apply {
+                    text = app.label
+                    textSize = 16f
+                    setTextColor(textColor())
+                })
+                addView(TextView(this@OeaSystemToolsActivity).apply {
+                    text = if (frozen) "FROZEN • tap to restore" else "Tap to freeze"
+                    textSize = 12f
+                    setTextColor(if (frozen) textColor() else mutedColor())
+                })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
     }
 
     private fun section(box: LinearLayout, title: String) {
