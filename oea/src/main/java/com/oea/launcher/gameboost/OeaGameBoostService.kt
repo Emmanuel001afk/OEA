@@ -144,21 +144,17 @@ class OeaGameBoostService : Service() {
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                 if (activeGame != game) { activeGame?.let(::deactivate); activeGame = game; activate(game) } else updateOverlay()
             } else if (activeGame != null && game != null) {
-                // The transparent capture-consent activity is OEA itself, not an
-                // exit from the selected game. Keep the same in-game controls
-                // alive while screenshot/recording is being started or stopped.
-                val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
-                    .getBoolean("capture_active", false)
-                // OEA's transparent capture host temporarily becomes the
-                // resumed activity while Android asks for MediaProjection consent.
-                // Treat it as part of the same game session so the floating OEA
-                // control is not torn down during capture setup/return.
-                if (game == packageName && (captureActive || foregroundActivityClass == OeaGameCaptureActivity::class.java.name)) {
+                // OEA's own activities can legitimately become the foreground
+                // package while the user interacts with the Game Boost panel,
+                // opens capture consent, or briefly enters an OEA system page.
+                // That is NOT the game ending. Never tear down the in-game
+                // floating control merely because an OEA activity is resumed.
+                if (game == packageName) {
                     updateOverlay()
                 } else {
-                    // Only a positively identified non-OEA foreground app ends
-                    // the selected game's session. Null/uncertain results never
-                    // remove OEA RAM while the player may still be in the game.
+                    // A positively identified non-OEA foreground package means
+                    // the selected game has actually lost focus. Only then end
+                    // the game session and remove the floating control.
                     deactivate(activeGame!!)
                     activeGame = null
                 }
