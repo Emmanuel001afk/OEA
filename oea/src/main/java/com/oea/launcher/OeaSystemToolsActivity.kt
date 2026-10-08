@@ -123,12 +123,14 @@ class OeaSystemToolsActivity : Activity() {
             OeaAppFreezer.Backend.NONE -> "Freezer authority required"
         }
         val authoritySubtitle = when (backend) {
-            OeaAppFreezer.Backend.DEVICE_OWNER -> "Android package suspension is available."
-            OeaAppFreezer.Backend.ROOT -> "OEA can use root package suspension."
-            OeaAppFreezer.Backend.NONE -> "No real suspension authority is available on this device."
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "Android package suspension is available. Tap any app below to freeze or restore it."
+            OeaAppFreezer.Backend.ROOT -> "OEA can use root package suspension. Tap any app below to freeze or restore it."
+            OeaAppFreezer.Backend.NONE -> "Not approved. OEA cannot freeze apps until Android grants device-owner/root authority."
         }
         row(box, authorityTitle, authoritySubtitle) {
-            if (backend == OeaAppFreezer.Backend.NONE) requestDeviceOwner()
+            if (backend == OeaAppFreezer.Backend.NONE) {
+                requestDeviceOwner()
+            }
         }
         addDivider(box)
         val frozen = OeaAppFreezer.frozenPackages(this)
