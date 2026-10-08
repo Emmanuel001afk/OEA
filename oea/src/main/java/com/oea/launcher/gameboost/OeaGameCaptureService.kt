@@ -106,8 +106,16 @@ class OeaGameCaptureService : Service() {
 
     private fun density(): Int = resources.displayMetrics.densityDpi
 
+    private fun recordingSize(): Pair<Int, Int> {
+        val (sourceWidth, sourceHeight) = size()
+        val scale = minOf(1f, 1920f / sourceWidth.toFloat(), 1080f / sourceHeight.toFloat())
+        val width = ((sourceWidth * scale).toInt() and 1.inv()).coerceAtLeast(2)
+        val height = ((sourceHeight * scale).toInt() and 1.inv()).coerceAtLeast(2)
+        return width to height
+    }
+
     private fun startRecording() {
-        val (width, height) = size()
+        val (width, height) = recordingSize()
         val dir = File(getExternalFilesDir(Environment.DIRECTORY_MOVIES), "OEA")
         dir.mkdirs()
         if (Build.VERSION.SDK_INT >= 29) {
@@ -135,6 +143,11 @@ class OeaGameCaptureService : Service() {
             } else {
                 setOutputFile(outputFile!!.absolutePath)
             }
+            setOnErrorListener { _, _, _ ->
+                getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
+                stopCapture()
+                stopSelf()
+            }
             prepare()
             start()
         }
@@ -143,51 +156,76 @@ class OeaGameCaptureService : Service() {
 
     private fun captureScreenshot() {
         val (width, height) = size()
-        reader = ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2)
+        reader = ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 3)
         display = projection!!.createVirtualDisplay("OEA Screenshot", width, height, density(), DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, null)
-        Handler(Looper.getMainLooper()).postDelayed({
+        val deadline = android.os.SystemClock.uptimeMillis() + 2500L
+        fun tryRead() {
             val image = reader?.acquireLatestImage()
             if (image == null) {
-                stopCapture()
-                stopSelf()
-                return@postDelayed
+                if (android.os.SystemClock.uptimeMillis() < deadline) {
+                    Handler(Looper.getMainLooper()).postDelayed({ tryRead() }, 120L)
+                } else {
+                    Toast.makeText(this, "OEA could not capture the screen.", Toast.LENGTH_SHORT).show()
+                    stopCapture()
+                    stopSelf()
+                }
+                return
             }
-            val plane = image.planes[0]
-            val buffer = plane.buffer
-            val rowStride = plane.rowStride
-            val pixelStride = plane.pixelStride
-            val rowPadding = rowStride - pixelStride * width
-            val padded = android.graphics.Bitmap.createBitmap(width + rowPadding / pixelStride, height, android.graphics.Bitmap.Config.ARGB_8888)
-            padded.copyPixelsFromBuffer(buffer)
-            val cropped = android.graphics.Bitmap.createBitmap(padded, 0, 0, width, height)
-            padded.recycle()
-            image.close()
-            saveScreenshot(cropped)
-            cropped.recycle()
-            Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
+            runCatching {
+                val plane = image.planes[0]
+                val buffer = plane.buffer
+                val rowStride = plane.rowStride
+                val pixelStride = plane.pixelStride
+                val rowPadding = rowStride - pixelStride * width
+                val paddedWidth = width + rowPadding / pixelStride
+                val padded = android.graphics.Bitmap.createBitmap(paddedWidth, height, android.graphics.Bitmap.Config.ARGB_8888)
+                padded.copyPixelsFromBuffer(buffer)
+                val cropped = android.graphics.Bitmap.createBitmap(padded, 0, 0, width, height)
+                padded.recycle()
+                image.close()
+                val saved = saveScreenshot(cropped)
+                cropped.recycle()
+                if (!saved) throw IllegalStateException("Screenshot save failed")
+                Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                runCatching { image.close() }
+                Toast.makeText(this, "OEA could not save the screenshot.", Toast.LENGTH_SHORT).show()
+            }
             stopCapture()
             stopSelf()
-        }, 500L)
+        }
+        Handler(Looper.getMainLooper()).postDelayed({ tryRead() }, 180L)
     }
 
-    private fun saveScreenshot(bitmap: android.graphics.Bitmap) {
+    private fun saveScreenshot(bitmap: android.graphics.Bitmap): Boolean {
         val name = "OEA_" + stamp() + ".png"
         val resolver = contentResolver
-        if (Build.VERSION.SDK_INT >= 29) {
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/OEA")
-                put(MediaStore.Images.Media.IS_PENDING, 1)
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/OEA")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: return@runCatching false
+                val wrote = resolver.openOutputStream(uri)?.use {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                } == true
+                if (!wrote) {
+                    resolver.delete(uri, null, null)
+                    return@runCatching false
+                }
+                val published = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+                resolver.update(uri, published, null, null) > 0
+            } else {
+                val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), name)
+                FileOutputStream(file).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                android.media.MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf("image/png"), null)
+                true
             }
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return
-            resolver.openOutputStream(uri)?.use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-            values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-        } else {
-            val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), name)
-            FileOutputStream(file).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-        }
+        }.getOrDefault(false)
     }
 
     private fun stopCapture(stopProjection: Boolean = true) {
