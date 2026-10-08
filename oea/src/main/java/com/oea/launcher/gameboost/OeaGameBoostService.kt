@@ -45,7 +45,7 @@ class OeaGameBoostService : Service() {
 
         private val track = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
-            strokeWidth = dp(8).toFloat()
+            strokeWidth = dp(6).toFloat()
             strokeCap = android.graphics.Paint.Cap.ROUND
             color = 0x55343A48
         }
@@ -71,15 +71,15 @@ class OeaGameBoostService : Service() {
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(dp(220))
-            val desiredHeight = dp(154)
+            val desiredHeight = dp(96)
             setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
         }
 
         override fun onDraw(canvas: android.graphics.Canvas) {
             val available = width - paddingLeft - paddingRight
-            val diameter = minOf(dp(104), ((available - dp(22)) / 2).coerceAtLeast(dp(82)))
-            val radius = diameter / 2f - dp(5)
-            val centerY = dp(58).toFloat()
+            val diameter = minOf(dp(72), ((available - dp(18)) / 2).coerceAtLeast(dp(64)))
+            val radius = diameter / 2f - dp(4)
+            val centerY = dp(36).toFloat()
             val leftCenterX = paddingLeft + available / 4f
             val rightCenterX = paddingLeft + available * 3f / 4f
 
@@ -114,16 +114,16 @@ class OeaGameBoostService : Service() {
             progress.color = color
             canvas.drawArc(cx - radius, cy - radius, cx + radius, cy + radius, -90f, fraction * 360f, false, progress)
 
-            label.textSize = dp(if (name.length > 6) 8 else 10).toFloat()
+            label.textSize = dp(if (name.length > 6) 7 else 9).toFloat()
             label.color = 0xFFCBD3E6.toInt()
             canvas.drawText(name, cx, cy - dp(3).toFloat(), label)
 
-            percent.textSize = dp(20).toFloat()
+            percent.textSize = dp(17).toFloat()
             percent.color = Color.WHITE
-            canvas.drawText(percentage, cx, cy + dp(19).toFloat(), percent)
+            canvas.drawText(percentage, cx, cy + dp(15).toFloat(), percent)
 
             detail.textSize = dp(9).toFloat()
-            canvas.drawText(value, cx, cy + radius + dp(22).toFloat(), detail)
+            canvas.drawText(value, cx, cy + radius + dp(15).toFloat(), detail)
         }
 
         private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -134,6 +134,7 @@ class OeaGameBoostService : Service() {
     private var wakeOverlay: View? = null
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
+    private var foregroundActivityClass: String? = null
     private var previousInterruptionFilter: Int? = null
         private val tick = object : Runnable {
         override fun run() {
@@ -148,12 +149,16 @@ class OeaGameBoostService : Service() {
                 // alive while screenshot/recording is being started or stopped.
                 val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
                     .getBoolean("capture_active", false)
+                // OEA's transparent capture host temporarily becomes the
+                // resumed activity while Android asks for MediaProjection consent.
+                // Treat it as part of the same game session so the floating OEA
+                // control is not torn down during capture setup/return.
                 if (game == packageName && captureActive) {
                     updateOverlay()
                 } else {
-                    // A positively identified non-selected foreground app means
-                    // the game was actually left. Unknown/null results still do
-                    // not hide OEA RAM while the player may still be in the game.
+                    // Only a positively identified non-OEA foreground app ends
+                    // the selected game's session. Null/uncertain results never
+                    // remove OEA RAM while the player may still be in the game.
                     deactivate(activeGame!!)
                     activeGame = null
                 }
@@ -199,7 +204,7 @@ class OeaGameBoostService : Service() {
         }
         val panel = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(16), dp(13), dp(16), dp(13))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xF21B1D22.toInt(), 0xF21B1D22.toInt())
@@ -218,7 +223,7 @@ class OeaGameBoostService : Service() {
         val gameName = TextView(this).apply {
             setTextColor(0xFFB9C7FF.toInt()); textSize = 11f
             text = packageName.substringAfterLast('.')
-            setPadding(0, dp(3), 0, dp(9))
+            setPadding(0, dp(2), 0, dp(5))
         }
         val metrics = MemoryMetricsView(this).apply {
             setPadding(dp(4), 0, dp(4), 0)
@@ -226,7 +231,7 @@ class OeaGameBoostService : Service() {
         }
         val device = TextView(this).apply {
             setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
-            text = "Battery • reading…"; setPadding(0, 0, 0, dp(8))
+            text = "Battery • reading…"; setPadding(0, 0, 0, dp(5))
         }
         val controls = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
@@ -249,7 +254,7 @@ class OeaGameBoostService : Service() {
         rowTwo.addView(cleanup, chipParams())
         rowTwo.addView(hide, chipParams())
         controls.addView(rowOne)
-        controls.addView(rowTwo, android.widget.LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(5) })
+        controls.addView(rowTwo, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply { topMargin = dp(4) })
         dnd.setOnClickListener { toggleDnd(dnd) }
         screenshot.setOnClickListener { launchCapture(OeaGameCaptureActivity.MODE_SCREENSHOT) }
         record.setOnClickListener { toggleRecording(record) }
@@ -492,7 +497,7 @@ class OeaGameBoostService : Service() {
     }
 
     private fun chipParams(): android.widget.LinearLayout.LayoutParams =
-        android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) }
+        android.widget.LinearLayout.LayoutParams(0, dp(36), 1f).apply { rightMargin = dp(4) }
 
     private fun launchCapture(mode: String) {
         OeaGameBoostStore.prefs(this).edit()
@@ -968,6 +973,7 @@ class OeaGameBoostService : Service() {
                 if (resumed && event.timeStamp >= latestTime) {
                     latestTime = event.timeStamp
                     latestPackage = event.packageName
+                    foregroundActivityClass = event.className
                 }
             }
             if (latestPackage != null) return latestPackage
