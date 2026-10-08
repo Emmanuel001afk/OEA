@@ -522,15 +522,10 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun requestDeviceOwner() {
-        val command = "adb shell dpm set-device-owner com.oea.launcher/com.oea.launcher.applock.OeaDeviceAdminReceiver"
-        getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
-            ClipData.newPlainText("OEA device-owner command", command)
-        )
-        AlertDialog.Builder(this).setTitle("Freezer authority")
-            .setMessage("OEA is not the device owner. Android does not grant true package suspension through the normal Device Admin screen. Provision a test device during setup, then run:\n\n$command\n\nThe command was copied to the clipboard.")
+        AlertDialog.Builder(this).setTitle("Freezer authority not approved")
+            .setMessage("Android has not approved device-owner or root authority for OEA. True package freezing is unavailable until that authority is provisioned. OEA will not repeatedly request an unavailable permission.")
             .setPositiveButton("OK", null).show()
     }
-
     private fun homeRoleStatus(): String {
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             val rm = getSystemService(RoleManager::class.java)
