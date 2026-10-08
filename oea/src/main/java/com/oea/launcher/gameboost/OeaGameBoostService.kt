@@ -604,7 +604,10 @@ class OeaGameBoostService : Service() {
         if (next) {
             if (previousInterruptionFilter == null) previousInterruptionFilter = nm.currentInterruptionFilter
             nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-        } else restoreDnd()
+        } else {
+            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+            previousInterruptionFilter = null
+        }
         updateDndButton(button)
     }
 
