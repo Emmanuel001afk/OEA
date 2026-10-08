@@ -190,6 +190,7 @@ object OeaGameBoostStore {
     fun setEnabled(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean("enabled", enabled).apply()
     fun games(context: Context) = prefs(context).getStringSet("games", emptySet()).orEmpty()
     fun setGames(context: Context, games: Set<String>) = prefs(context).edit().putStringSet("games", games).apply()
+    fun dismissedGames(context: Context) = prefs(context).getStringSet("dismissed_games", emptySet()).orEmpty()
     fun isGame(context: Context, packageName: String) = games(context).contains(packageName)
 
     /** Uses Android's declared application category where available, with a conservative legacy fallback. */
@@ -212,12 +213,18 @@ object OeaGameBoostStore {
 
     fun syncDetectedGames(context: Context): Set<String> {
         val detected = detectedGames(context)
-        val merged = games(context).toMutableSet().apply { addAll(detected) }
+        val dismissed = dismissedGames(context)
+        val merged = games(context).toMutableSet().apply { addAll(detected.filterNot(dismissed::contains)) }
         setGames(context, merged)
         return merged
     }
 
     fun removeGame(context: Context, packageName: String) {
         setGames(context, games(context).toMutableSet().apply { remove(packageName) })
+        prefs(context).edit().putStringSet("dismissed_games", dismissedGames(context).toMutableSet().apply { add(packageName) }).apply()
+    }
+
+    fun restoreGame(context: Context, packageName: String) {
+        prefs(context).edit().putStringSet("dismissed_games", dismissedGames(context).toMutableSet().apply { remove(packageName) }).apply()
     }
 }
