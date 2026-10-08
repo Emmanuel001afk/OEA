@@ -286,7 +286,8 @@ class OeaGameBoostService : Service() {
         val gameName = panel.getChildAt(1) as? TextView ?: return
         val metrics = panel.getChildAt(2) as? TextView ?: return
         val device = panel.getChildAt(3) as? TextView ?: return
-        val controls = panel.getChildAt(4) as? android.widget.LinearLayout ?: return
+        val panelLayout = panel as? android.widget.LinearLayout
+                val controls = panelLayout?.getChildAt(4) as? android.widget.LinearLayout ?: return
         val dnd = controls.getChildAt(0) as? TextView ?: return
         val boost = controls.getChildAt(1) as? TextView ?: return
 
