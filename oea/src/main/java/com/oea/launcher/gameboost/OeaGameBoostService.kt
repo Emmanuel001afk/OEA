@@ -118,7 +118,15 @@ class OeaGameBoostService : Service() {
             setOnClickListener {
                 val next = !OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("dnd", true)
                 OeaGameBoostStore.prefs(this@OeaGameBoostService).edit().putBoolean("dnd", next).apply()
-                if (!next) restoreDnd()
+                if (next) {
+                    val nm = getSystemService(NotificationManager::class.java)
+                    if (nm.isNotificationPolicyAccessGranted) {
+                        previousInterruptionFilter = nm.currentInterruptionFilter
+                        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                    }
+                } else {
+                    restoreDnd()
+                }
                 text = if (next) "DND ON" else "DND OFF"
             }
         }
@@ -157,6 +165,9 @@ class OeaGameBoostService : Service() {
     }
 
     private fun updateOverlay() {
+        if (overlay == null) {
+            activeGame?.let { if (Settings.canDrawOverlays(this)) showOverlay(it) }
+        }
         val root = overlay as? android.widget.FrameLayout ?: return
         val panel = root.getChildAt(0) as? android.widget.LinearLayout ?: return
         val status = panel.getChildAt(1) as? TextView ?: return
