@@ -27,7 +27,7 @@ class OeaGameCaptureActivity : Activity() {
         val manager = getSystemService(MediaProjectionManager::class.java)
         runCatching { startActivityForResult(manager.createScreenCaptureIntent(), REQ) }.onFailure {
             Toast.makeText(this, "OEA could not start screen capture.", Toast.LENGTH_SHORT).show()
-            finishAndRemoveTask()
+            finish()
         }
     }
 
@@ -52,7 +52,7 @@ class OeaGameCaptureActivity : Activity() {
         }.onFailure {
             getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).putBoolean("capture_active", false).apply()
         }
-        finishAndRemoveTask()
+        finish()
         overridePendingTransition(0, 0)
     }
 }
