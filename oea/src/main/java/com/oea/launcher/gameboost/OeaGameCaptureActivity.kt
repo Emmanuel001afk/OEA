@@ -36,6 +36,8 @@ class OeaGameCaptureActivity : Activity() {
         }
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent) else startService(serviceIntent)
+        }.onFailure {
+            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
         }
         finish()
     }
