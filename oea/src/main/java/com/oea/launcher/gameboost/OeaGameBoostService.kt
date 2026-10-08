@@ -554,7 +554,7 @@ class OeaGameBoostService : Service() {
                     childLp.height = size
                     t.layoutParams = childLp
                 }
-                if (handleVisible && t.visibility == View.VISIBLE) startHandleAnimations(h)
+                if (handleVisible && t.visibility == View.VISIBLE) applyHandlePalette(h)
             }
         }
     }
