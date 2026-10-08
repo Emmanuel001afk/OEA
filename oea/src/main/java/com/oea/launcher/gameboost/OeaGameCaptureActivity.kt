@@ -16,7 +16,13 @@ class OeaGameCaptureActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setBackgroundDrawableResource(android.R.color.transparent)
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+        window.setDimAmount(0f)
+        window.addFlags(
+            android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        window.decorView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        overridePendingTransition(0, 0)
         val manager = getSystemService(MediaProjectionManager::class.java)
         startActivityForResult(manager.createScreenCaptureIntent(), REQ)
     }
@@ -39,6 +45,7 @@ class OeaGameCaptureActivity : Activity() {
         }.onFailure {
             getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
         }
-        finish()
+        finishAndRemoveTask()
+        overridePendingTransition(0, 0)
     }
 }
