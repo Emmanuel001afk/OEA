@@ -702,7 +702,6 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setNegativeButton("Cancel", null)
             .show()
     }
-    }
 
     private fun openDeviceAdminSettings() {
         val command = "adb shell dpm set-device-owner com.oea.launcher/com.oea.launcher.applock.OeaDeviceAdminReceiver"
