@@ -44,6 +44,7 @@ class OeaGameCaptureService : Service() {
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
     private var outputDescriptor: android.os.ParcelFileDescriptor? = null
+    private var projectionCallback: MediaProjection.Callback? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -75,7 +76,21 @@ class OeaGameCaptureService : Service() {
         val manager = getSystemService(MediaProjectionManager::class.java)
         projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
         if (projection == null) { stopSelf(); return START_NOT_STICKY }
-        if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
+
+        projectionCallback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                stopCapture(stopProjection = false)
+                stopSelf()
+            }
+        }
+        projection?.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))
+
+        runCatching {
+            if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
+        }.onFailure {
+            stopCapture()
+            stopSelf()
+        }
         return START_NOT_STICKY
     }
 
@@ -173,14 +188,20 @@ class OeaGameCaptureService : Service() {
         }
     }
 
-    private fun stopCapture() {
+    private fun stopCapture(stopProjection: Boolean = true) {
         val wasRecording = recorder != null
         val stopped = runCatching { recorder?.stop(); true }.getOrDefault(false)
         runCatching { recorder?.reset() }
         recorder = null
         display?.release(); display = null
         reader?.close(); reader = null
-        projection?.stop(); projection = null
+        val currentProjection = projection
+        projection = null
+        projectionCallback?.let { callback ->
+            runCatching { currentProjection?.unregisterCallback(callback) }
+        }
+        projectionCallback = null
+        if (stopProjection) runCatching { currentProjection?.stop() }
         if (Build.VERSION.SDK_INT >= 29 && outputUri != null) {
             if (wasRecording && stopped) {
                 val values = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
