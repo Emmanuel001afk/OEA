@@ -176,54 +176,100 @@ class OeaGameCaptureService : Service() {
             null,
             null
         )
-        runCatching { recorder!!.start() }.onFailure {
-            stopCapture()
-            stopSelf()
-            throw it
-        }
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (recorder != null && display != null && projection != null) {
+                runCatching { recorder!!.start() }.onFailure {
+                    getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+                        .putBoolean("recording", false)
+                        .putBoolean("capture_active", false)
+                        .apply()
+                    stopCapture()
+                    stopSelf()
+                }
+            }
+        }, 250L)
     }
 
     private fun captureScreenshot() {
         val (width, height) = size()
-        reader = ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 3)
-        display = projection!!.createVirtualDisplay("OEA Screenshot", width, height, density(), DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, null)
-        val deadline = android.os.SystemClock.uptimeMillis() + 2500L
-        fun tryRead() {
-            val image = reader?.acquireLatestImage()
-            if (image == null) {
-                if (android.os.SystemClock.uptimeMillis() < deadline) {
-                    Handler(Looper.getMainLooper()).postDelayed({ tryRead() }, 120L)
-                } else {
-                    Toast.makeText(this, "OEA could not capture the screen.", Toast.LENGTH_SHORT).show()
-                    stopCapture()
-                    stopSelf()
-                }
-                return
-            }
-            runCatching {
-                val plane = image.planes[0]
-                val buffer = plane.buffer
-                val rowStride = plane.rowStride
-                val pixelStride = plane.pixelStride
-                val rowPadding = rowStride - pixelStride * width
-                val paddedWidth = width + rowPadding / pixelStride
-                val padded = android.graphics.Bitmap.createBitmap(paddedWidth, height, android.graphics.Bitmap.Config.ARGB_8888)
-                padded.copyPixelsFromBuffer(buffer)
-                val cropped = android.graphics.Bitmap.createBitmap(padded, 0, 0, width, height)
-                padded.recycle()
-                image.close()
-                val saved = saveScreenshot(cropped)
-                cropped.recycle()
-                if (!saved) throw IllegalStateException("Screenshot save failed")
-                Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
-            }.onFailure {
-                runCatching { image.close() }
-                Toast.makeText(this, "OEA could not save the screenshot.", Toast.LENGTH_SHORT).show()
+        val captureReader = ImageReader.newInstance(
+            width,
+            height,
+            android.graphics.PixelFormat.RGBA_8888,
+            3
+        )
+        reader = captureReader
+        display = projection!!.createVirtualDisplay(
+            "OEA Screenshot",
+            width,
+            height,
+            density(),
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            captureReader.surface,
+            null,
+            null
+        )
+
+        val deadline = android.os.SystemClock.uptimeMillis() + 4000L
+        var completed = false
+
+        fun finishCapture(success: Boolean) {
+            if (completed) return
+            completed = true
+            captureReader.setOnImageAvailableListener(null, null)
+            if (!success) {
+                Toast.makeText(this, "OEA could not capture the screen.", Toast.LENGTH_SHORT).show()
             }
             stopCapture()
             stopSelf()
         }
-        Handler(Looper.getMainLooper()).postDelayed({ tryRead() }, 180L)
+
+        captureReader.setOnImageAvailableListener({ ir ->
+            if (completed) return@setOnImageAvailableListener
+            val image = runCatching { ir.acquireLatestImage() }.getOrNull()
+            if (image == null) {
+                if (android.os.SystemClock.uptimeMillis() >= deadline) finishCapture(false)
+                return@setOnImageAvailableListener
+            }
+
+            val saved = runCatching {
+                val plane = image.planes[0]
+                val buffer = plane.buffer
+                val rowStride = plane.rowStride
+                val pixelStride = plane.pixelStride
+                if (pixelStride <= 0 || rowStride < pixelStride * width) {
+                    throw IllegalStateException("Invalid screen image stride")
+                }
+                val rowPadding = rowStride - pixelStride * width
+                val paddedWidth = width + rowPadding / pixelStride
+                val padded = android.graphics.Bitmap.createBitmap(
+                    paddedWidth,
+                    height,
+                    android.graphics.Bitmap.Config.ARGB_8888
+                )
+                padded.copyPixelsFromBuffer(buffer)
+                val cropped = android.graphics.Bitmap.createBitmap(padded, 0, 0, width, height)
+                padded.recycle()
+                val result = saveScreenshot(cropped)
+                cropped.recycle()
+                result
+            }.getOrDefault(false)
+
+            runCatching { image.close() }
+
+            if (saved) {
+                Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
+                finishCapture(true)
+            } else {
+                finishCapture(false)
+            }
+        }, Handler(Looper.getMainLooper()))
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!completed && android.os.SystemClock.uptimeMillis() >= deadline) {
+                finishCapture(false)
+            }
+        }, 4200L)
     }
 
     private fun saveScreenshot(bitmap: android.graphics.Bitmap): Boolean {
