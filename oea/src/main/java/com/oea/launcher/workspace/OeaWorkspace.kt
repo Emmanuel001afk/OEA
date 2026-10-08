@@ -648,11 +648,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
             }
             .setNeutralButton(if (owner) "Close" else "How to enable") { _, _ ->
-                if (!owner) {
-                    openDeviceAdminSettings()
-                }
-                    openDeviceAdminSettings()
-                }
+                if (!owner) openDeviceAdminSettings()
             }
             .setNegativeButton("Cancel", null)
             .show()
