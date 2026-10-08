@@ -158,14 +158,14 @@ class OeaGameBoostService : Service() {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             text = "OEA RAM"
         }
-        handle.addView(handleText, android.widget.FrameLayout.LayoutParams(dp(58), dp(58)).apply {
+        handle.addView(handleText, android.widget.FrameLayout.LayoutParams(dp(48), dp(48)).apply {
             gravity = Gravity.CENTER
         })
         handle.setOnClickListener {
             if (panel.visibility == View.VISIBLE) hidePanel(panel) else showPanel(panel)
         }
         root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(286), -2))
-        root.addView(handle, android.widget.LinearLayout.LayoutParams(dp(58), dp(58)).apply {
+        root.addView(handle, android.widget.LinearLayout.LayoutParams(dp(48), dp(48)).apply {
             gravity = Gravity.END
             topMargin = dp(6)
         })
@@ -197,7 +197,7 @@ class OeaGameBoostService : Service() {
         overlay?.alpha = 0f
         val intent = Intent(this, OeaGameCaptureActivity::class.java).apply {
             putExtra(OeaGameCaptureActivity.EXTRA_MODE, mode)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         }
         runCatching { startActivity(intent) }
     }
@@ -322,7 +322,6 @@ class OeaGameBoostService : Service() {
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleText = handle?.getChildAt(0) as? TextView
         handleText?.text = String.format(Locale.US, "OEA RAM\\n%.0f%%", usedPct)
-        animateHandleValue(handle)
     }
 
     private fun animateHandleValue(handle: View?) {
