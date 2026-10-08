@@ -219,6 +219,7 @@ class OeaGameBoostService : Service() {
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
         updateBoostButton(boost)
+        setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         (root.getChildAt(1) as? TextView)?.text = String.format(Locale.US, "RAM %.0f%%", usedPct)
     }
 
