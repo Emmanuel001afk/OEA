@@ -153,7 +153,7 @@ class OeaGameBoostService : Service() {
                 // resumed activity while Android asks for MediaProjection consent.
                 // Treat it as part of the same game session so the floating OEA
                 // control is not torn down during capture setup/return.
-                if (game == packageName && captureActive) {
+                if (game == packageName && (captureActive || foregroundActivityClass == OeaGameCaptureActivity::class.java.name)) {
                     updateOverlay()
                 } else {
                     // Only a positively identified non-OEA foreground app ends
