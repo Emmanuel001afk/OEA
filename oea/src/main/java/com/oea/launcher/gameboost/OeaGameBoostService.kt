@@ -147,6 +147,7 @@ class OeaGameBoostService : Service() {
         hide.setOnClickListener { hidePanel(panel) }
         panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
 
+        val handleSize = handleSizePx()
         val handle = android.widget.FrameLayout(this).apply {
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(0xF2F2F4F7.toInt())
@@ -177,7 +178,6 @@ class OeaGameBoostService : Service() {
             topMargin = dp(6)
         })
 
-        val handleSize = handleSizePx()
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
