@@ -775,10 +775,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Multitask")
             .setMessage("Choose an app to open as a floating task over the current app. OEA uses a sensible starting size and does not add a manual drag-to-size control.")
-            .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
-                val result = OeaMultitaskLauncher.launchFloating(context, choices[which])
-                if (!result.success) {
-                    Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                val app = choices[which]
+                unlockForLaunch(app) {
+                    val result = OeaMultitaskLauncher.launchFloating(context, app)
+                    if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -800,9 +801,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Launch") { _, _ ->
                 val picked = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }
-                if (picked.size == 2) {
-                    val result = OeaSplitLauncher.launchPair(context, picked[0], picked[1])
-                    if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                    val first = choices.first { it.packageName == picked[0] }
+                    val second = choices.first { it.packageName == picked[1] }
+                    unlockForLaunch(first) {
+                        unlockForLaunch(second) {
+                            val result = OeaSplitLauncher.launchPair(context, first.packageName, second.packageName)
+                            if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
             }.show()
     }
