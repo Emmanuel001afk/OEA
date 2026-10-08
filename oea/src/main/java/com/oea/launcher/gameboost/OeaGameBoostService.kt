@@ -204,7 +204,20 @@ class OeaGameBoostService : Service() {
             if (nm.isNotificationPolicyAccessGranted) { previousInterruptionFilter = nm.currentInterruptionFilter; nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY) }
         }
         if (Settings.canDrawOverlays(this)) {
+            // The RAM control is a persistent part of the in-game overlay.
+            // A previous game/session may have removed the WindowManager view
+            // while leaving a stale reference behind. Rebuild that detached
+            // overlay instead of treating the stale reference as valid.
+            val currentOverlay = overlay
+            if (currentOverlay != null && currentOverlay.parent == null) {
+                overlay = null
+            }
             showOverlay(packageName)
+            (overlay as? android.widget.LinearLayout)?.getChildAt(1)?.let { handle ->
+                val visible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
+                handle.visibility = if (visible) View.VISIBLE else View.GONE
+                if (visible) removeWakeOverlay() else ensureWakeOverlay()
+            }
             if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) setKeepScreenOn(true)
         }
     }
@@ -215,7 +228,14 @@ class OeaGameBoostService : Service() {
         removeOverlay()
     }
     private fun showOverlay(packageName: String) {
-        if (overlay != null) return
+        val existing = overlay
+        if (existing != null) {
+            // Only reuse the overlay while it is actually attached to the
+            // WindowManager. A stale View reference must never suppress
+            // recreation of the OEA RAM button.
+            if (existing.parent != null) return
+            overlay = null
+        }
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val root = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
