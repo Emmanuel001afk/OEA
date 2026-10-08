@@ -605,6 +605,7 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun freezerRow(box: LinearLayout, app: OeaAppInfo, frozen: Boolean, action: () -> Unit) {
+        fun px(v: Int) = (v * resources.displayMetrics.density).toInt()
         box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -623,7 +624,7 @@ class OeaSystemToolsActivity : Activity() {
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 contentDescription = app.label + " icon"
             }
-            addView(iconView, LinearLayout.LayoutParams(dp(46), dp(46)).apply { rightMargin = dp(12) })
+            addView(iconView, LinearLayout.LayoutParams(px(46), px(46)).apply { rightMargin = px(12) })
 
             addView(LinearLayout(this@OeaSystemToolsActivity).apply {
                 orientation = LinearLayout.VERTICAL
@@ -638,7 +639,7 @@ class OeaSystemToolsActivity : Activity() {
                     setTextColor(if (frozen) textColor() else mutedColor())
                 })
             }, LinearLayout.LayoutParams(0, -2, 1f))
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(7) })
     }
 
     private fun section(box: LinearLayout, title: String) {
