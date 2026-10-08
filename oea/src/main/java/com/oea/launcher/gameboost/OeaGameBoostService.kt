@@ -40,11 +40,20 @@ class OeaGameBoostService : Service() {
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                 if (activeGame != game) { activeGame?.let(::deactivate); activeGame = game; activate(game) } else updateOverlay()
             } else if (activeGame != null && game != null) {
-                // A positively identified non-selected foreground app means the
-                // game was actually left. A null/unknown result is not allowed
-                // to hide OEA RAM while the player may still be in the game.
-                deactivate(activeGame!!)
-                activeGame = null
+                // The transparent capture-consent activity is OEA itself, not an
+                // exit from the selected game. Keep the same in-game controls
+                // alive while screenshot/recording is being started or stopped.
+                val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
+                    .getBoolean("capture_active", false)
+                if (game == packageName && captureActive) {
+                    updateOverlay()
+                } else {
+                    // A positively identified non-selected foreground app means
+                    // the game was actually left. Unknown/null results still do
+                    // not hide OEA RAM while the player may still be in the game.
+                    deactivate(activeGame!!)
+                    activeGame = null
+                }
             } else if (activeGame != null) {
                 updateOverlay()
             }
@@ -88,8 +97,10 @@ class OeaGameBoostService : Service() {
         val panel = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(16), dp(13), dp(16), dp(13))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xF21B1D22.toInt())
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xF21B1D22.toInt(), 0xF21B1D22.toInt())
+            ).apply {
                 cornerRadius = dp(24).toFloat()
                 setStroke(dp(1), 0x553F51FF)
             }
@@ -264,6 +275,7 @@ class OeaGameBoostService : Service() {
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
                 .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).start()
             applyHandlePalette(handle)
+            applyPanelPalette(panel)
             updateOverlay()
         }
     }
@@ -564,9 +576,11 @@ class OeaGameBoostService : Service() {
     }
 
     private fun applyHandlePalette(handle: View) {
+        // The floating handle stays calm/readable. Palette animation belongs
+        // to the opened Game Boost panel, not to this button.
         val palette = handlePalette()
         val bg = handle.background as? android.graphics.drawable.GradientDrawable ?: return
-        bg.setColors(palette)
+        bg.setColors(intArrayOf(palette[0], palette[1], palette[0]))
         bg.setStroke(dp(1), palette[1].withAlpha(170))
         val text = (handle as? android.view.ViewGroup)?.getChildAt(0) as? TextView
         text?.setShadowLayer(dp(3).toFloat(), 0f, 0f, palette[1])
@@ -575,6 +589,73 @@ class OeaGameBoostService : Service() {
         text?.scaleX = 1f
         text?.scaleY = 1f
         text?.translationY = 0f
+    }
+
+    private fun applyPanelPalette(panel: View) {
+        val content = panel as? android.widget.LinearLayout ?: return
+        val palette = handlePalette()
+        val bg = content.background as? android.graphics.drawable.GradientDrawable
+        bg?.setColors(intArrayOf(palette[0], palette[0], palette[1].withAlpha(75)))
+        bg?.setStroke(dp(1), palette[1].withAlpha(150))
+
+        val controls = content.getChildAt(4) as? android.widget.LinearLayout ?: return
+        for (rowIndex in 0 until controls.childCount) {
+            val row = controls.getChildAt(rowIndex) as? android.view.ViewGroup ?: continue
+            for (index in 0 until row.childCount) {
+                val chip = row.getChildAt(index) as? TextView ?: continue
+                (chip.background as? android.graphics.drawable.GradientDrawable)?.apply {
+                    setColor(palette[0].withAlpha(235))
+                    setStroke(dp(1), palette[1].withAlpha(95))
+                }
+            }
+        }
+    }
+
+    private fun startPanelColorAnimation(panel: View) {
+        val content = panel as? android.widget.LinearLayout ?: return
+        val palette = handlePalette()
+        val bg = content.background as? android.graphics.drawable.GradientDrawable ?: return
+        val controls = content.getChildAt(4) as? android.widget.LinearLayout
+
+        val start = palette[0]
+        val accent = palette[1]
+        val end = palette[2]
+        val isRgb = OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue") == "rgb"
+
+        content.getTag(android.R.id.custom)?.let { (it as? android.animation.ValueAnimator)?.cancel() }
+        val animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = if (isRgb) 1800L else 1500L
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            addUpdateListener { value ->
+                val t = value.animatedFraction
+                val middle = android.animation.ArgbEvaluator().evaluate(t, start, if (isRgb) accent else start) as Int
+                val highlight = android.animation.ArgbEvaluator().evaluate(t, accent, end) as Int
+                bg.setColors(intArrayOf(middle, middle, highlight.withAlpha(if (isRgb) 105 else 70)))
+                bg.setStroke(dp(1), highlight.withAlpha(170))
+                if (controls != null) {
+                    for (rowIndex in 0 until controls.childCount) {
+                        val row = controls.getChildAt(rowIndex) as? android.view.ViewGroup ?: continue
+                        for (index in 0 until row.childCount) {
+                            val chip = row.getChildAt(index) as? TextView ?: continue
+                            (chip.background as? android.graphics.drawable.GradientDrawable)?.apply {
+                                setColor(middle.withAlpha(235))
+                                setStroke(dp(1), highlight.withAlpha(110))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        content.setTag(android.R.id.custom, animator)
+        animator.start()
+    }
+
+    private fun stopPanelColorAnimation(panel: View) {
+        val content = panel as? android.widget.LinearLayout ?: return
+        (content.getTag(android.R.id.custom) as? android.animation.ValueAnimator)?.cancel()
+        content.setTag(android.R.id.custom, null)
+        applyPanelPalette(content)
     }
 
     private fun handlePalette(): IntArray {
@@ -596,6 +677,8 @@ class OeaGameBoostService : Service() {
         if (panel.visibility == View.VISIBLE) return
         panel.animate().cancel()
         panel.visibility = View.VISIBLE
+        applyPanelPalette(panel)
+        startPanelColorAnimation(panel)
         panel.alpha = 0f
         panel.scaleX = 0.96f
         panel.scaleY = 0.96f
