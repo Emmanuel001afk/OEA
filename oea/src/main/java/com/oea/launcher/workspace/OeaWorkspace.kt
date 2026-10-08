@@ -216,15 +216,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             textSize = 20f
             setTextColor(themeText)
             setOnClickListener { closeDrawer() }
-        }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        header.addView(TextView(context).apply {
-            text = "Layout"
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(themeText)
-            background = rounded(themeSurface, 18)
-            setOnClickListener { drawerLayoutMenu(it) }
-        }, LinearLayout.LayoutParams(dp(82), dp(44)))
+        }, LinearLayout.LayoutParams(-1, dp(52)))
         drawer.addView(header)
         drawerSearch.hint = "Search all apps"
         drawerSearch.setSingleLine(true)
@@ -256,18 +248,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         for (p in 0 until ws.pages()) {
-            // Home pages are deliberately fixed-height: vertical scrolling belongs to
-            // the app drawer, not the desktop. Modern launchers keep the desktop bounded
-            // and use horizontal page navigation instead.
+            // Each OEA home page has its own vertical scroll surface. Horizontal
+            // paging remains the page-to-page navigation; vertical scrolling is reserved
+            // for a page whose icons/widgets extend beyond the visible viewport.
             val pageFrame = FrameLayout(context).apply {
                 clipChildren = true
                 clipToPadding = true
                 tag = p
                 setBackgroundColor(Color.TRANSPARENT)
             }
+            val pageScroll = ScrollView(context).apply {
+                isFillViewport = false
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                tag = "pageScroll"
+            }
             val pageContent = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(4), 0, dp(4))
+                setPadding(0, dp(4), 0, dp(12))
                 clipChildren = true
             }
             val grid = GridLayout(context).apply {
@@ -279,8 +277,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
             pageContent.addView(grid, LinearLayout.LayoutParams(-1, -2))
             val widgetHost = FrameLayout(context).apply {
-                setPadding(dp(4), dp(2), dp(4), dp(6))
-                clipChildren = true
+                setPadding(dp(4), dp(6), dp(4), dp(10))
+                clipChildren = false
                 tag = "widgets"
                 setOnLongClickListener {
                     hostActivity?.let { widgetController.pickWidget(it, p) }
@@ -313,10 +311,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     }
                 }
             }
-            // The widget area takes only the space left after the icon grid. It never
-            // creates a vertical ScrollView, so the desktop cannot scroll off-screen.
-            pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, 0, 1f))
-            pageFrame.addView(pageContent, FrameLayout.LayoutParams(-1, -1))
+            // Widgets are content on the page, not a weighted remainder. This prevents
+            // their size from being forced by the viewport and lets the page scroll.
+            pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
+            pageScroll.addView(pageContent, FrameLayout.LayoutParams(-1, -2))
+            pageFrame.addView(pageScroll, FrameLayout.LayoutParams(-1, -1))
             pages.addView(pageFrame, LinearLayout.LayoutParams(pageWidth, -1))
         }
         val current = ws.getCurrentPage()
@@ -330,7 +329,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun ensurePageRendered(page: Int) {
         if (page !in 0 until ws.pages() || renderedPages.contains(page)) return
         val pageFrame = pages.getChildAt(page) as? FrameLayout ?: return
-        val content = pageFrame.getChildAt(0) as? LinearLayout ?: return
+        val pageScroll = pageFrame.getChildAt(0) as? ScrollView ?: return
+        val content = pageScroll.getChildAt(0) as? LinearLayout ?: return
         val grid = content.findViewWithTag<GridLayout>("grid") ?: return
         val widgetHost = content.findViewWithTag<FrameLayout>("widgets") ?: return
         renderPage(grid, page)
@@ -853,8 +853,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerBody.removeAllViews()
         val visible = drawerController.filter(apps, query)
             .filterNot { store.isHidden(it.packageName, it.className) }
-        if (query.isBlank()) { renderFocusStrip(); renderOeaTools() }
-        addSectionLabel(drawerBody, "Apps · " + visible.size)
+        if (query.isBlank()) {
+            renderFocusStrip()
+            renderOeaTools()
+            addSectionLabel(drawerBody, "Apps · " + visible.size)
+        } else if (visible.isNotEmpty()) {
+            addSectionLabel(drawerBody, "Apps · " + visible.size)
+        }
         when (store.drawerMode()) {
             OeaDataStore.DrawerMode.VERTICAL -> {
                 val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -912,7 +917,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val actions = searchController.actions(query)
         if (actions.isEmpty()) return
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        addSectionLabel(list, "Search")
+        if (query.isNotBlank()) {
+            addSectionLabel(list, if (drawerController.filter(apps, query).none { !store.isHidden(it.packageName, it.className) }) "Search" else "Search actions")
+        }
         actions.forEach { action ->
             list.addView(LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
@@ -922,16 +929,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     text = action.title
                     textSize = 13f
                     setTextColor(themeText)
-                }, LinearLayout.LayoutParams(0, dp(46), 1f))
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
                 addView(TextView(context).apply {
                     text = action.subtitle
-                    textSize = 11f
+                    textSize = 10f
                     setTextColor(themeMuted)
-                }, LinearLayout.LayoutParams(-2, dp(46)))
+                }, LinearLayout.LayoutParams(-2, dp(42)))
                 setOnClickListener {
                     runCatching { context.startActivity(action.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
-            }, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(2) })
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(2) })
         }
         drawerBody.addView(list)
     }
@@ -1245,21 +1252,43 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val collision = all.firstOrNull {
             it.id != key && it.page == page && it.cell == targetCell && it.folderId == null
         }
+        var destinationPage = page
+        var destinationCell = targetCell
         if (collision != null) {
-            val next = firstFree(all, page, targetCell + 1)
-            if (next == null) {
-                Toast.makeText(context, "That home page is full.", Toast.LENGTH_SHORT).show()
-                dragged = null
-                return
+            val next = firstFree(all, destinationPage, targetCell + 1)
+            if (next != null) {
+                all[all.indexOf(collision)] = collision.copy(page = destinationPage, cell = next)
+            } else {
+                // A full target page should not dead-end a drag. Continue into the
+                // next available home page, creating one when capacity permits.
+                var foundPage = -1
+                var foundCell = -1
+                for (candidate in (page + 1) until OeaWorkspaceStore.MAX_PAGES) {
+                    val free = firstFree(all, candidate, 0)
+                    if (free != null) {
+                        foundPage = candidate
+                        foundCell = free
+                        break
+                    }
+                }
+                if (foundPage < 0) {
+                    Toast.makeText(context, "OEA home has no free space.", Toast.LENGTH_SHORT).show()
+                    dragged = null
+                    return
+                }
+                destinationPage = foundPage
+                destinationCell = foundCell
+                if (ws.pages() <= destinationPage) ws.setPages(destinationPage + 1)
             }
-            all[all.indexOf(collision)] = collision.copy(page = page, cell = next)
         }
 
-        all[all.indexOf(moving)] = moving.copy(page = page, cell = targetCell, folderId = null)
+        all[all.indexOf(moving)] = moving.copy(page = destinationPage, cell = destinationCell, folderId = null)
         ws.replaceItems(all)
         ws.setDock(ws.dock().filterNot { it == key })
         dragged = null
-        refreshPages(oldPage, page)
+        refreshPages(oldPage, destinationPage)
+        ws.setCurrentPage(destinationPage)
+        pager.post { ensurePageRendered(destinationPage); pager.smoothScrollTo(destinationPage * pager.width, 0) }
     }
 
     private fun folder(target: String, source: String) {
