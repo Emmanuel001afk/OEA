@@ -114,7 +114,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setImageResource(R.drawable.oea_logo)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             contentDescription = "OEA"
-        }, LinearLayout.LayoutParams(dp(50), dp(50)))
+        }, LinearLayout.LayoutParams(dp(46), dp(46)))
         header.addView(TextView(context).apply {
             text = "OEA"
             textSize = 28f
@@ -451,7 +451,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 height = dp(84)
                 columnSpec = GridLayout.spec(cell % cols(), 1, 1f)
                 rowSpec = GridLayout.spec(cell / cols())
-                setMargins(dp(3), dp(3), dp(3), dp(3))
+                setMargins(dp(1), dp(1), dp(1), dp(1))
             })
         }
     }
@@ -860,7 +860,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
                 visible.forEach { app ->
                     val row = drawerRow(app)
-                    list.addView(row, LinearLayout.LayoutParams(-1, dp(64)).apply { bottomMargin = dp(4) })
+                    list.addView(row, LinearLayout.LayoutParams(-1, dp(58)).apply { bottomMargin = dp(4) })
                 }
                 drawerBody.addView(list)
             }
@@ -880,7 +880,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                             height = dp(88)
                             columnSpec = GridLayout.spec(index % cols())
                             rowSpec = GridLayout.spec(index / cols())
-                            setMargins(dp(3), dp(3), dp(3), dp(3))
+                            setMargins(dp(1), dp(1), dp(1), dp(1))
                         })
                     }
                     pages.addView(column, LinearLayout.LayoutParams(cols() * dp(84), rowsPerPage * dp(94)))
@@ -896,10 +896,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         setOnLongClickListener { showAppActions(app, this, OeaWorkspaceStore.key(app.packageName, app.className)); true }
                     }, GridLayout.LayoutParams().apply {
                         width = 0
-                        height = dp(92)
+                        height = dp(78)
                         columnSpec = GridLayout.spec(index % cols(), 1, 1f)
                         rowSpec = GridLayout.spec(index / cols())
-                        setMargins(dp(3), dp(3), dp(3), dp(3))
+                        setMargins(dp(1), dp(1), dp(1), dp(1))
                     })
                 }
                 drawerBody.addView(drawerGrid, LinearLayout.LayoutParams(-1, -2))
@@ -948,7 +948,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val section = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         if (focused.isNotEmpty()) {
             addSectionLabel(section, "OEA Focus · " + focused.size + "/" + OeaFocusStore.MAX_APPS)
-            section.addView(appStrip(focused), LinearLayout.LayoutParams(-1, dp(100)))
+            section.addView(appStrip(focused), LinearLayout.LayoutParams(-1, dp(82)))
         }
         if (used.isNotEmpty() && store.showMostUsed()) {
             addSectionLabel(section, "Most used · " + used.size)
@@ -959,13 +959,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             used.forEachIndexed { index, app ->
                 grid.addView(tile(app), GridLayout.LayoutParams().apply {
                     width = 0
-                    height = dp(92)
+                    height = dp(78)
                     columnSpec = GridLayout.spec(index % 4, 1, 1f)
                     rowSpec = GridLayout.spec(index / 4)
-                    setMargins(dp(3), dp(3), dp(3), dp(3))
+                    setMargins(dp(1), dp(1), dp(1), dp(1))
                 })
             }
-            section.addView(grid, LinearLayout.LayoutParams(-1, dp(if (used.size > 4) 188 else 96)))
+            section.addView(grid, LinearLayout.LayoutParams(-1, dp(if (used.size > 4) 158 else 80)))
         }
         drawerBody.addView(section)
     }
@@ -974,8 +974,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         values.forEach { app ->
-            row.addView(tile(app), LinearLayout.LayoutParams(dp(78), dp(88)).apply {
-                setMargins(dp(3), dp(3), dp(3), dp(3))
+            row.addView(tile(app), LinearLayout.LayoutParams(dp(72), dp(78)).apply {
+                setMargins(dp(1), dp(1), dp(1), dp(1))
             })
         }
         strip.addView(row, FrameLayout.LayoutParams(-2, -2))
@@ -1043,10 +1043,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 height = dp(72)
                 columnSpec = GridLayout.spec(index % 3, 1, 1f)
                 rowSpec = GridLayout.spec(index / 3)
-                setMargins(dp(3), dp(3), dp(3), dp(5))
+                setMargins(dp(1), dp(1), dp(1), dp(3))
             })
         }
-        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(244)))
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(220)))
     }
 
     private fun drawerRow(app: OeaAppInfo): View {
@@ -1168,31 +1168,42 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setPadding(dp(3), 0, dp(3), 0)
                 }, FrameLayout.LayoutParams(-2, dp(18), Gravity.TOP or Gravity.END))
             }
-        }, LinearLayout.LayoutParams(dp(50), dp(50)))
+        }, LinearLayout.LayoutParams(dp(46), dp(46)))
         if (store.showAppLabels()) addView(TextView(context).apply {
             text = app.label
-            textSize = 10.5f
+            textSize = 10f
             gravity = Gravity.CENTER
             maxLines = 2
             setTextColor(themeText)
-        }, LinearLayout.LayoutParams(-1, dp(30)))
+        }, LinearLayout.LayoutParams(-1, dp(22)))
     }
 
     private fun pageDrop(page: Int) = View.OnDragListener { view, e ->
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> true
             DragEvent.ACTION_DROP -> {
+                val widgetId = e.clipData?.getItemAt(0)?.text?.toString()
+                    ?.removePrefix("oea_widget:")?.toIntOrNull()
+                if (widgetId != null) {
+                    widgetController.setPage(widgetId, page)
+                    refreshPage(page)
+                    return@OnDragListener true
+                }
                 val key = dragged ?: return@OnDragListener true
                 val grid = view as GridLayout
                 val cw = (grid.width / cols()).coerceAtLeast(1)
                 val col = (e.x / cw).toInt().coerceIn(0, cols() - 1)
-                val rowHeight = dp(90).coerceAtLeast(1)
+                val rowHeight = dp(76).coerceAtLeast(1)
                 val row = (e.y / rowHeight).toInt().coerceAtLeast(0)
                 val cell = row * cols() + col
                 val targetFolder = ws.folders().firstOrNull { it.page == page && it.cell == cell }
                 if (targetFolder != null) addToFolder(targetFolder.id, key) else move(key, page, cell)
                 true
             }
+            DragEvent.ACTION_DRAG_ENDED -> { dragged = null; false }
+            else -> false
+        }
+    }
             DragEvent.ACTION_DRAG_ENDED -> { dragged = null; false }
             else -> false
         }
@@ -1352,7 +1363,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 height = dp(88)
                 columnSpec = GridLayout.spec(index % 4, 1, 1f)
                 rowSpec = GridLayout.spec(index / 4)
-                setMargins(dp(3), dp(3), dp(3), dp(3))
+                setMargins(dp(1), dp(1), dp(1), dp(1))
             })
         }
         box.addView(grid, LinearLayout.LayoutParams(-1, -2))
@@ -1884,8 +1895,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             widget.isLongClickable = true
             widget.tag = widget.appWidgetId
             widget.setOnLongClickListener {
-                widgetOptions(widget)
+                val clip = ClipData.newPlainText("oea_widget", "oea_widget:${widget.appWidgetId}")
+                widget.startDragAndDrop(
+                    clip,
+                    View.DragShadowBuilder(widget),
+                    widget.appWidgetId,
+                    View.DRAG_FLAG_GLOBAL,
+                )
                 true
+            }
             }
             host.addView(widget, FrameLayout.LayoutParams(widthPx, dp(heightDp), Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(6)
