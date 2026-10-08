@@ -273,10 +273,11 @@ class OeaSystemToolsActivity : Activity() {
         if (!OeaAppLockStore.hasPin(this)) {
             val input = pinInput()
             AlertDialog.Builder(this).setTitle("Set OEA App Lock PIN").setView(input)
+                .setMessage("Create one 4-8 digit PIN. You can later unlock, remove locks, or change the PIN here.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Save") { _, _ ->
                     val pin = input.text.toString()
-                    if (pin.length in 4..8) {
+                    if (pin.length in 4..8 && pin.all(Char::isDigit)) {
                         OeaAppLockStore.setPin(this, pin)
                         openAppLockSettings()
                     } else Toast.makeText(this, "PIN must be 4-8 digits.", Toast.LENGTH_SHORT).show()
@@ -298,12 +299,16 @@ class OeaSystemToolsActivity : Activity() {
 
     private fun changePin() {
         val input = pinInput()
-        AlertDialog.Builder(this).setTitle("Change OEA App Lock PIN").setView(input)
+        AlertDialog.Builder(this).setTitle("Change OEA App Lock PIN")
+            .setMessage("Changing the PIN does not remove existing app locks.")
+            .setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
                 val pin = input.text.toString()
-                if (pin.length in 4..8) OeaAppLockStore.setPin(this, pin)
-                else Toast.makeText(this, "PIN must be 4-8 digits.", Toast.LENGTH_SHORT).show()
+                if (pin.length in 4..8 && pin.all(Char::isDigit)) {
+                    OeaAppLockStore.setPin(this, pin)
+                    Toast.makeText(this, "App Lock PIN changed.", Toast.LENGTH_SHORT).show()
+                } else Toast.makeText(this, "PIN must be 4-8 digits.", Toast.LENGTH_SHORT).show()
             }.show()
     }
 
