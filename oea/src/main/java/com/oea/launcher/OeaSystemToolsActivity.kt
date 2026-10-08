@@ -523,10 +523,35 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun requestDeviceOwner() {
-        AlertDialog.Builder(this).setTitle("Freezer authority not approved")
-            .setMessage("Android has not approved device-owner or root authority for OEA. True package freezing is unavailable until that authority is provisioned. OEA will not repeatedly request an unavailable permission.")
-            .setPositiveButton("OK", null).show()
+        val admin = ComponentName(this, OeaDeviceAdminReceiver::class.java)
+        val command = "adb shell dpm set-device-owner " + packageName + "/" + OeaDeviceAdminReceiver::class.java.name
+        AlertDialog.Builder(this)
+            .setTitle("Enable OEA Freezer")
+            .setMessage(
+                "Android does not expose app-freezing as a normal runtime permission. " +
+                "OEA needs device-owner authority (or root) for true package suspension. " +
+                "You can enable OEA's device-admin component first, then provision device-owner authority from a computer."
+            )
+            .setNeutralButton("Device admin") { _, _ ->
+                runCatching {
+                    startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                        putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                        putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "OEA uses this authority as the administrator component required for its freezer backend.")
+                    })
+                }.onFailure {
+                    Toast.makeText(this, "Android could not open device-admin setup.", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setPositiveButton("Copy ADB command") { _, _ ->
+                getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
+                    ClipData.newPlainText("OEA device-owner command", command)
+                )
+                Toast.makeText(this, "ADB command copied. Run it while OEA is the intended device-owner app.", Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
+
     private fun homeRoleStatus(): String {
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             val rm = getSystemService(RoleManager::class.java)
