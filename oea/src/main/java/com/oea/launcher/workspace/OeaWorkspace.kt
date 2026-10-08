@@ -528,10 +528,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         // A foldered app is represented by the folder tile, not by an Item row.
         // Capture that folder page before removing membership so the visible folder
         // surface is refreshed immediately instead of leaving a stale tile behind.
-        val affectedPages = buildSet {
-            ws.items().firstOrNull { it.id == key }?.page?.let(::add)
-            ws.folders().firstOrNull { it.members.contains(key) }?.page?.let(::add)
-        }
+        val affectedPages = mutableSetOf<Int>()
+        ws.items().firstOrNull { it.id == key }?.page?.let { affectedPages.add(it) }
+        ws.folders().firstOrNull { it.members.contains(key) }?.page?.let { affectedPages.add(it) }
         ws.replaceItems(ws.items().filterNot { it.id == key })
         ws.setDock(ws.dock().filterNot { it == key })
         ws.replaceFolders(ws.folders().map { it.copy(members = it.members.filterNot { m -> m == key }) }.filter { it.members.isNotEmpty() })
