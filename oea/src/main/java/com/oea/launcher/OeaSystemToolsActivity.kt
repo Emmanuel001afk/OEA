@@ -64,6 +64,7 @@ class OeaSystemToolsActivity : Activity() {
             "call_blocker" -> showCallBlocker()
             "game_boost" -> showGameBoost()
             "multitask" -> showMultitask()
+            "split" -> chooseSplitApps()
             else -> showSettings()
         }
     }
