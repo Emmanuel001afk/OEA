@@ -43,6 +43,7 @@ class OeaGameCaptureService : Service() {
     private var recorder: MediaRecorder? = null
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
+    private var outputDescriptor: android.os.ParcelFileDescriptor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -108,7 +109,8 @@ class OeaGameCaptureService : Service() {
             setVideoFrameRate(30)
             setVideoSize(width.coerceAtMost(1920), height.coerceAtMost(1080))
             if (Build.VERSION.SDK_INT >= 29) {
-                setOutputFile(contentResolver.openFileDescriptor(outputUri!!, "w")!!.fileDescriptor)
+                outputDescriptor = contentResolver.openFileDescriptor(outputUri!!, "w")
+                setOutputFile(outputDescriptor!!.fileDescriptor)
             } else {
                 setOutputFile(outputFile!!.absolutePath)
             }
@@ -182,6 +184,8 @@ class OeaGameCaptureService : Service() {
                 runCatching { contentResolver.delete(outputUri!!, null, null) }
             }
         }
+        runCatching { outputDescriptor?.close() }
+        outputDescriptor = null
         outputUri = null
         getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
     }
