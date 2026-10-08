@@ -19,6 +19,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.DisplayMetrics
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileOutputStream
@@ -44,8 +45,6 @@ class OeaGameCaptureService : Service() {
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
     private var outputDescriptor: android.os.ParcelFileDescriptor? = null
-    private var projectionCallback: MediaProjection.Callback? = null
-    private var cleaningProjection = false
     private var projectionCallback: MediaProjection.Callback? = null
 
     override fun onCreate() {
@@ -223,7 +222,7 @@ class OeaGameCaptureService : Service() {
     private fun notification(text: String): Notification =
         NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("OEA Game Boost")
+            .setContentTitle("OEA RAM")
             .setContentText(text)
             .setOngoing(true)
             .addAction(android.R.drawable.ic_media_pause, "Stop", android.app.PendingIntent.getService(this, 1, Intent(this, OeaGameCaptureService::class.java).setAction(ACTION_STOP), android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
