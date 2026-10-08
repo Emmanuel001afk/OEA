@@ -72,12 +72,14 @@ class OeaGameBoostService : Service() {
         val pill = TextView(this).apply {
             text = "OEA"
             gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            textSize = 11f
+            setTextColor(0xFF202124.toInt())
+            textSize = 9f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xEE202124.toInt())
-                cornerRadius = 999f
+                setColor(0xFFF2F3F5.toInt())
+                cornerRadius = dp(999).toFloat()
             }
+            elevation = dp(4).toFloat()
         }
         val panel = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
@@ -133,8 +135,8 @@ class OeaGameBoostService : Service() {
         panel.addView(status)
         panel.addView(focus)
         panel.addView(controls)
-        root.addView(panel, android.widget.FrameLayout.LayoutParams(dp(230), -2))
-        root.addView(pill, android.widget.FrameLayout.LayoutParams(dp(48), dp(48), Gravity.END))
+        root.addView(panel, android.widget.FrameLayout.LayoutParams(dp(236), -2).apply { gravity = Gravity.TOP or Gravity.END })
+        root.addView(pill, android.widget.FrameLayout.LayoutParams(dp(62), dp(28), Gravity.END).apply { topMargin = dp(2) })
         pill.setOnClickListener { panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
         root.setOnClickListener { }
         val params = WindowManager.LayoutParams(
