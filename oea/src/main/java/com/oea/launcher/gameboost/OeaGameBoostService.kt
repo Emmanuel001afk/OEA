@@ -571,10 +571,8 @@ class OeaGameBoostService : Service() {
             usedMb, totalMb, usedPct, state, if (virtualTotal > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsed, virtualTotal) else "not exposed by Android"
         )
         (metrics as? MemoryMetricsView)?.apply {
-            ramFraction = if (totalMb > 0) usedMb / totalMb else 0.0
-                .toFloat()
-            virtualFraction = if (virtualTotal > 0) virtualUsed / virtualTotal else 0.0
-                .toFloat()
+            ramFraction = (if (totalMb > 0) usedMb / totalMb else 0.0).toFloat()
+            virtualFraction = (if (virtualTotal > 0) virtualUsed / virtualTotal else 0.0).toFloat()
         }
 
         val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
