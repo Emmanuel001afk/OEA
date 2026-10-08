@@ -304,6 +304,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                                     }
                                 }
                                 widgetController.moveBefore(sourceId, targetId)
+                                widgetController.setPage(sourceId, p)
                                 refreshPage(p)
                             }
                             true
