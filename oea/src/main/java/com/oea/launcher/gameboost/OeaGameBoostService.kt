@@ -42,8 +42,8 @@ class OeaGameBoostService : Service() {
             val left = paddingLeft.toFloat()
             val right = (width - paddingRight).toFloat()
             val barWidth = (right - left).coerceAtLeast(1f)
-            val barHeight = dp(4).toFloat()
-            val gap = dp(5).toFloat()
+            val barHeight = dp(8).toFloat()
+            val gap = dp(9).toFloat()
             val top = height - paddingBottom - barHeight * 2f - gap
             drawBar(canvas, left, top, barWidth, barHeight, ramFraction, 0xFF4D7CFF.toInt())
             drawBar(canvas, left, top + barHeight + gap, barWidth, barHeight, virtualFraction, 0xFF27D9B7.toInt())
@@ -160,8 +160,9 @@ class OeaGameBoostService : Service() {
         }
         val metrics = MemoryMetricsView(this).apply {
             setTextColor(Color.WHITE); textSize = 12f
+            setLineSpacing(dp(4).toFloat(), 1f)
             text = "RAM • reading…"
-            setPadding(0, 0, 0, dp(22))
+            setPadding(0, 0, 0, dp(38))
         }
         val device = TextView(this).apply {
             setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
