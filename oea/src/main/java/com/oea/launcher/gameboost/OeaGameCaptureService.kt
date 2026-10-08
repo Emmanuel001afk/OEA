@@ -171,7 +171,8 @@ class OeaGameCaptureService : Service() {
             width,
             height,
             density(),
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
             recorder!!.surface,
             null,
             null
@@ -199,15 +200,20 @@ class OeaGameCaptureService : Service() {
             3
         )
         reader = captureReader
+        captureReader.setOnImageAvailableListener({ ir ->
+            handleScreenshotFrame(ir, width, height)
+        }, Handler(Looper.getMainLooper()))
+
         display = projection!!.createVirtualDisplay(
             "OEA Screenshot",
             width,
             height,
             density(),
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
             captureReader.surface,
             null,
-            null
+            Handler(Looper.getMainLooper())
         )
 
         val deadline = android.os.SystemClock.uptimeMillis() + 4000L
@@ -224,16 +230,22 @@ class OeaGameCaptureService : Service() {
             stopSelf()
         }
 
-        captureReader.setOnImageAvailableListener({ ir ->
-            if (completed) return@setOnImageAvailableListener
-            val image = runCatching { ir.acquireLatestImage() }.getOrNull()
-            if (image == null) {
-                if (android.os.SystemClock.uptimeMillis() >= deadline) finishCapture(false)
-                return@setOnImageAvailableListener
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!completed && android.os.SystemClock.uptimeMillis() >= deadline) {
+                finishCapture(false)
             }
+        }, 4200L)
+    }
 
-            val saved = runCatching {
-                val plane = image.planes[0]
+    private fun handleScreenshotFrame(
+        ir: ImageReader,
+        width: Int,
+        height: Int
+    ) {
+        val image = runCatching { ir.acquireLatestImage() }.getOrNull() ?: return
+        val saved = runCatching {
+            image.use {
+                val plane = it.planes[0]
                 val buffer = plane.buffer
                 val rowStride = plane.rowStride
                 val pixelStride = plane.pixelStride
@@ -248,28 +260,23 @@ class OeaGameCaptureService : Service() {
                     android.graphics.Bitmap.Config.ARGB_8888
                 )
                 padded.copyPixelsFromBuffer(buffer)
-                val cropped = android.graphics.Bitmap.createBitmap(padded, 0, 0, width, height)
+                val cropped = android.graphics.Bitmap.createBitmap(
+                    padded, 0, 0, width, height
+                )
                 padded.recycle()
                 val result = saveScreenshot(cropped)
                 cropped.recycle()
                 result
-            }.getOrDefault(false)
-
-            runCatching { image.close() }
-
-            if (saved) {
-                Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
-                finishCapture(true)
-            } else {
-                finishCapture(false)
             }
-        }, Handler(Looper.getMainLooper()))
-
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (!completed && android.os.SystemClock.uptimeMillis() >= deadline) {
-                finishCapture(false)
-            }
-        }, 4200L)
+        }.getOrDefault(false)
+        if (saved) {
+            Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
+            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+                .putBoolean("capture_active", false)
+                .apply()
+            stopCapture()
+            stopSelf()
+        }
     }
 
     private fun saveScreenshot(bitmap: android.graphics.Bitmap): Boolean {
