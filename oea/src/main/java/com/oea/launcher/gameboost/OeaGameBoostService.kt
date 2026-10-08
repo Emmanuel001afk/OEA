@@ -135,6 +135,7 @@ class OeaGameBoostService : Service() {
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
+    private var nonGameForegroundSamples = 0
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -145,6 +146,9 @@ class OeaGameBoostService : Service() {
                 .getBoolean("capture_active", false)
 
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
+                // A confirmed game foreground sample keeps the floating control
+                // alive and clears any transient transition samples.
+                nonGameForegroundSamples = 0
                 if (activeGame != game) {
                     activeGame?.let(::deactivate)
                     activeGame = game
@@ -153,21 +157,24 @@ class OeaGameBoostService : Service() {
                     updateOverlay()
                 }
             } else if (activeGame != null) {
-                // Once a game session is active, transient/unknown foreground
-                // samples must never destroy the floating control. This is
-                // especially important while Android switches activities,
-                // shows capture consent, opens a game lobby, or briefly gives
-                // UsageStats no foreground package.
-                val launcherHome = game == packageName &&
-                    foregroundActivityClass == "com.oea.launcher.OeaLauncherActivity"
-                if (launcherHome && !captureActive) {
-                    deactivate(activeGame!!)
-                    activeGame = null
-                } else if (game == null || game == packageName || captureActive) {
+                // Capture consent/host transitions are allowed to keep the
+                // button alive. For every other positively identified
+                // non-game foreground package, require two consecutive samples
+                // before ending the session. This prevents one UsageStats
+                // transition from killing the button, while still ensuring the
+                // button disappears after the user actually leaves the game.
+                if (captureActive || game == null) {
+                    nonGameForegroundSamples = 0
                     updateOverlay()
                 } else {
-                    deactivate(activeGame!!)
-                    activeGame = null
+                    nonGameForegroundSamples++
+                    if (nonGameForegroundSamples >= 2) {
+                        deactivate(activeGame!!)
+                        activeGame = null
+                        nonGameForegroundSamples = 0
+                    } else {
+                        updateOverlay()
+                    }
                 }
             }
             handler.postDelayed(this, 1000)
@@ -982,12 +989,16 @@ class OeaGameBoostService : Service() {
                 }
             }
             if (latestPackage != null) return latestPackage
+            // queryEvents succeeded but supplied no resumed/foreground event.
+            // Do not replace that authoritative "unknown" state with a stale
+            // UsageStats result, which can keep the button visible after exit.
+            return null
+        }.getOrElse {
+            val stats = runCatching {
+                usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
+            }.getOrNull() ?: return null
+            stats.maxByOrNull { it.lastTimeUsed }?.packageName
         }
-
-        val stats = runCatching {
-            usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
-        }.getOrNull() ?: return null
-        return stats.maxByOrNull { it.lastTimeUsed }?.packageName
     }
     private fun isUsageAccessGranted() = runCatching {
         val appOps = getSystemService(AppOpsManager::class.java)
