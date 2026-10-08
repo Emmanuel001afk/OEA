@@ -45,13 +45,13 @@ class OeaGameBoostService : Service() {
 
         private val track = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
-            strokeWidth = dp(6).toFloat()
+            strokeWidth = dp(5).toFloat()
             strokeCap = android.graphics.Paint.Cap.ROUND
             color = 0x55343A48
         }
         private val progress = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
-            strokeWidth = dp(8).toFloat()
+            strokeWidth = dp(6).toFloat()
             strokeCap = android.graphics.Paint.Cap.ROUND
         }
         private val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -71,15 +71,15 @@ class OeaGameBoostService : Service() {
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(dp(220))
-            val desiredHeight = dp(96)
+            val desiredHeight = dp(72)
             setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
         }
 
         override fun onDraw(canvas: android.graphics.Canvas) {
             val available = width - paddingLeft - paddingRight
-            val diameter = minOf(dp(72), ((available - dp(18)) / 2).coerceAtLeast(dp(64)))
-            val radius = diameter / 2f - dp(4)
-            val centerY = dp(36).toFloat()
+            val diameter = minOf(dp(58), ((available - dp(14)) / 2).coerceAtLeast(dp(52)))
+            val radius = diameter / 2f - dp(3)
+            val centerY = dp(29).toFloat()
             val leftCenterX = paddingLeft + available / 4f
             val rightCenterX = paddingLeft + available * 3f / 4f
 
@@ -114,16 +114,16 @@ class OeaGameBoostService : Service() {
             progress.color = color
             canvas.drawArc(cx - radius, cy - radius, cx + radius, cy + radius, -90f, fraction * 360f, false, progress)
 
-            label.textSize = dp(if (name.length > 6) 7 else 9).toFloat()
+            label.textSize = dp(if (name.length > 6) 6 else 8).toFloat()
             label.color = 0xFFCBD3E6.toInt()
             canvas.drawText(name, cx, cy - dp(3).toFloat(), label)
 
-            percent.textSize = dp(17).toFloat()
+            percent.textSize = dp(14).toFloat()
             percent.color = Color.WHITE
             canvas.drawText(percentage, cx, cy + dp(15).toFloat(), percent)
 
-            detail.textSize = dp(9).toFloat()
-            canvas.drawText(value, cx, cy + radius + dp(15).toFloat(), detail)
+            detail.textSize = dp(8).toFloat()
+            canvas.drawText(value, cx, cy + radius + dp(11).toFloat(), detail)
         }
 
         private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
