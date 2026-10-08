@@ -970,7 +970,7 @@ class OeaGameBoostService : Service() {
         val end = System.currentTimeMillis()
         val start = end - 30_000L
 
-        runCatching {
+        return runCatching {
             val events = usm.queryEvents(start, end)
             val event = android.app.usage.UsageEvents.Event()
             var latestPackage: String? = null
