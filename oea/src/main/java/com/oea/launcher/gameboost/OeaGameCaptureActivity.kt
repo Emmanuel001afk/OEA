@@ -26,7 +26,17 @@ class OeaGameCaptureActivity : Activity() {
         window.decorView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         overridePendingTransition(0, 0)
         val manager = getSystemService(MediaProjectionManager::class.java)
-        runCatching { startActivityForResult(manager.createScreenCaptureIntent(), REQ) }.onFailure {
+        // Game Boost is a full-screen recorder/screenshot tool, not an app-window
+        // picker. On Android 14+ explicitly request the default display so the
+        // consent sheet follows the game/display capture flow used by recorders.
+        val consentIntent = if (android.os.Build.VERSION.SDK_INT >= 34) {
+            manager.createScreenCaptureIntent(
+                android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
+            )
+        } else {
+            manager.createScreenCaptureIntent()
+        }
+        runCatching { startActivityForResult(consentIntent, REQ) }.onFailure {
             Toast.makeText(this, "OEA could not start screen capture.", Toast.LENGTH_SHORT).show()
             finish()
         }
