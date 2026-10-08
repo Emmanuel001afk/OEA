@@ -24,6 +24,7 @@ class OeaGameCaptureActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQ || resultCode != RESULT_OK || data == null) {
+            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
             finish()
             return
         }
