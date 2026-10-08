@@ -556,6 +556,36 @@ class OeaSystemToolsActivity : Activity() {
         return "$size • $corner • always available"
     }
 
+    private fun ramColorSummary(): String {
+        return when (OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue")) {
+            "green" -> "Green pulse"
+            "purple" -> "Purple pulse"
+            "cyan" -> "Cyan pulse"
+            "red" -> "Red pulse"
+            "amber" -> "Amber pulse"
+            "rgb" -> "RGB spectrum cycle"
+            else -> "Blue pulse"
+        }
+    }
+
+    private fun showRamColorSettings() {
+        val prefs = OeaGameBoostStore.prefs(this)
+        val values = arrayOf("blue", "green", "purple", "cyan", "red", "amber", "rgb")
+        val labels = arrayOf("Blue pulse", "Green pulse", "Purple pulse", "Cyan pulse", "Red pulse", "Amber pulse", "RGB spectrum cycle")
+        val current = prefs.getString("ram_color_mode", "blue") ?: "blue"
+        val checked = values.indexOf(current).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("OEA RAM color palette")
+            .setMessage("Choose the accent family used by the outer ring, glow and animated OEA RAM text. RGB cycles through the spectrum.")
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                prefs.edit().putString("ram_color_mode", values[which]).apply()
+                dialog.dismiss()
+                showGameBoost()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showRamOverlaySettings() {
         val prefs = OeaGameBoostStore.prefs(this)
         val currentVisible = prefs.getBoolean("ram_handle_visible", true)
