@@ -136,42 +136,40 @@ class OeaGameBoostService : Service() {
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
     private var previousInterruptionFilter: Int? = null
-    private var oeaForegroundSince: Long = 0L
-        private val tick = object : Runnable {
+    private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
             OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService)
             val game = foregroundPackage()
+            val keepVisible = OeaGameBoostStore.prefs(this@OeaGameBoostService)
+                .getBoolean("ram_handle_visible", true)
+            val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
+                .getBoolean("capture_active", false)
+
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
-                oeaForegroundSince = 0L
-                if (activeGame != game) { activeGame?.let(::deactivate); activeGame = game; activate(game) } else updateOverlay()
-            } else if (activeGame != null && game != null) {
-                // OEA's own activities can legitimately become the foreground
-                // package while the user interacts with the Game Boost panel,
-                // opens capture consent, or briefly enters an OEA system page.
-                // That is NOT the game ending. Never tear down the in-game
-                // floating control merely because an OEA activity is resumed.
-                if (game == packageName) {
-                    // OEA capture/panel activities are transient hosts. Keep the
-                    // in-game control alive briefly while Android moves through
-                    // the capture transition, but do not keep a stale Game Boost
-                    // session alive after the game is actually left.
-                    if (oeaForegroundSince == 0L) oeaForegroundSince = System.currentTimeMillis()
-                    if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("capture_active", false) ||
-                        System.currentTimeMillis() - oeaForegroundSince < OEA_TRANSITION_GRACE_MS) {
-                        updateOverlay()
-                    } else {
-                        deactivate(activeGame!!)
-                        activeGame = null
-                        oeaForegroundSince = 0L
-                    }
+                if (activeGame != game) {
+                    activeGame?.let(::deactivate)
+                    activeGame = game
+                    activate(game)
                 } else {
-                    oeaForegroundSince = 0L
+                    updateOverlay()
+                }
+            } else if (activeGame != null) {
+                // Keep-visible is a persistent user preference, not a timer.
+                // OEA capture is also part of the same game session. Only the
+                // actual OEA launcher Home activity ends the session here;
+                // capture/system hosts must never tear down the in-game control.
+                val launcherHome = game == packageName &&
+                    foregroundActivityClass == "com.oea.launcher.OeaLauncherActivity"
+                if (launcherHome && !captureActive) {
+                    deactivate(activeGame!!)
+                    activeGame = null
+                } else if (game == packageName || captureActive || keepVisible) {
+                    updateOverlay()
+                } else {
                     deactivate(activeGame!!)
                     activeGame = null
                 }
-            } else if (activeGame != null) {
-                updateOverlay()
             }
             handler.postDelayed(this, 1000)
         }
@@ -999,7 +997,7 @@ class OeaGameBoostService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL, "OEA Game Boost", NotificationManager.IMPORTANCE_LOW))
     }
-    companion object { private const val CHANNEL = "oea_game_boost"; private const val NOTIFICATION_ID = 4107; private const val OEA_TRANSITION_GRACE_MS = 5000L }
+    companion object { private const val CHANNEL = "oea_game_boost"; private const val NOTIFICATION_ID = 4107 }
 }
 object OeaGameBoostStore {
     private const val PREFS = "oea_game_boost"
