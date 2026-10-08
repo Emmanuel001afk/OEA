@@ -32,16 +32,17 @@ class OeaGameBoostService : Service() {
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
     private var previousInterruptionFilter: Int? = null
-    private var lastGameSeenAt: Long = 0L
-    private val tick = object : Runnable {
+        private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
             OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService)
             val game = foregroundPackage()
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
-                lastGameSeenAt = System.currentTimeMillis()
                 if (activeGame != game) { activeGame?.let(::deactivate); activeGame = game; activate(game) } else updateOverlay()
-            } else if (activeGame != null && System.currentTimeMillis() - lastGameSeenAt > 15_000L) {
+            } else if (activeGame != null && game != null) {
+                // A positively identified non-selected foreground app means the
+                // game was actually left. A null/unknown result is not allowed
+                // to hide OEA RAM while the player may still be in the game.
                 deactivate(activeGame!!)
                 activeGame = null
             } else if (activeGame != null) {
