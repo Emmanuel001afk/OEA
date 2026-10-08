@@ -896,7 +896,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             OeaDataStore.DrawerMode.GRID -> {
                 drawerGrid.removeAllViews()
                 drawerGrid.columnCount = cols()
-                visible.forEachIndexed { index, app ->
+                if (visible.isNotEmpty()) visible.forEachIndexed { index, app ->
                     drawerGrid.addView(drawerTile(app).apply {
                         setOnLongClickListener { showAppActions(app, this, OeaWorkspaceStore.key(app.packageName, app.className)); true }
                     }, GridLayout.LayoutParams().apply {
@@ -972,7 +972,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setMargins(dp(1), dp(1), dp(1), dp(1))
                 })
             }
-            section.addView(grid, LinearLayout.LayoutParams(-1, dp(if (used.size > 4) 158 else 80)))
+            val rows = ((used.size + 3) / 4).coerceAtLeast(1)
+            section.addView(grid, LinearLayout.LayoutParams(-1, dp(rows * 68)))
         }
         drawerBody.addView(section)
     }
