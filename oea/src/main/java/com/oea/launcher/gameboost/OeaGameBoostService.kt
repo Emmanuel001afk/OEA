@@ -136,12 +136,14 @@ class OeaGameBoostService : Service() {
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
     private var previousInterruptionFilter: Int? = null
+    private var oeaForegroundSince: Long = 0L
         private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
             OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService)
             val game = foregroundPackage()
             if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
+                oeaForegroundSince = 0L
                 if (activeGame != game) { activeGame?.let(::deactivate); activeGame = game; activate(game) } else updateOverlay()
             } else if (activeGame != null && game != null) {
                 // OEA's own activities can legitimately become the foreground
@@ -150,11 +152,21 @@ class OeaGameBoostService : Service() {
                 // That is NOT the game ending. Never tear down the in-game
                 // floating control merely because an OEA activity is resumed.
                 if (game == packageName) {
-                    updateOverlay()
+                    // OEA capture/panel activities are transient hosts. Keep the
+                    // in-game control alive briefly while Android moves through
+                    // the capture transition, but do not keep a stale Game Boost
+                    // session alive after the game is actually left.
+                    if (oeaForegroundSince == 0L) oeaForegroundSince = System.currentTimeMillis()
+                    if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("capture_active", false) ||
+                        System.currentTimeMillis() - oeaForegroundSince < OEA_TRANSITION_GRACE_MS) {
+                        updateOverlay()
+                    } else {
+                        deactivate(activeGame!!)
+                        activeGame = null
+                        oeaForegroundSince = 0L
+                    }
                 } else {
-                    // A positively identified non-OEA foreground package means
-                    // the selected game has actually lost focus. Only then end
-                    // the game session and remove the floating control.
+                    oeaForegroundSince = 0L
                     deactivate(activeGame!!)
                     activeGame = null
                 }
@@ -987,7 +999,7 @@ class OeaGameBoostService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL, "OEA Game Boost", NotificationManager.IMPORTANCE_LOW))
     }
-    companion object { private const val CHANNEL = "oea_game_boost"; private const val NOTIFICATION_ID = 4107 }
+    companion object { private const val CHANNEL = "oea_game_boost"; private const val NOTIFICATION_ID = 4107; private const val OEA_TRANSITION_GRACE_MS = 5000L }
 }
 object OeaGameBoostStore {
     private const val PREFS = "oea_game_boost"
