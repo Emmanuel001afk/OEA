@@ -17,7 +17,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
-import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -31,7 +30,6 @@ class OeaGameBoostService : Service() {
     private var overlay: View? = null
     private var activeGame: String? = null
     private var previousInterruptionFilter: Int? = null
-    private var previousKeepScreenOn = false
     private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
@@ -55,14 +53,14 @@ class OeaGameBoostService : Service() {
     override fun onDestroy() { handler.removeCallbacksAndMessages(null); activeGame?.let(::deactivate); removeOverlay(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun activate(packageName: String) {
-        if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) {
-            setKeepScreenOn(true)
-        }
         if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) {
             val nm = getSystemService(NotificationManager::class.java)
             if (nm.isNotificationPolicyAccessGranted) { previousInterruptionFilter = nm.currentInterruptionFilter; nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY) }
         }
-        if (Settings.canDrawOverlays(this)) showOverlay(packageName)
+        if (Settings.canDrawOverlays(this)) {
+            showOverlay(packageName)
+            if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) setKeepScreenOn(true)
+        }
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
         val nm = getSystemService(NotificationManager::class.java)
@@ -81,9 +79,10 @@ class OeaGameBoostService : Service() {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(16), dp(13), dp(16), dp(13))
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xEE202124.toInt())
-                cornerRadius = dp(22).toFloat()
+                setColor(0xF2212328.toInt())
+                cornerRadius = dp(24).toFloat()
             }
+            elevation = dp(10).toFloat()
             visibility = View.GONE
         }
         val title = TextView(this).apply {
@@ -240,8 +239,6 @@ class OeaGameBoostService : Service() {
     private fun setKeepScreenOn(enabled: Boolean) {
         val root = overlay as? android.widget.LinearLayout ?: return
         val params = root.layoutParams as? WindowManager.LayoutParams ?: return
-        val wasOn = params.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
-        previousKeepScreenOn = wasOn
         val nextFlags = if (enabled) {
             params.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         } else {
