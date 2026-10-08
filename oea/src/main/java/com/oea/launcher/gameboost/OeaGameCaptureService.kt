@@ -63,7 +63,12 @@ class OeaGameCaptureService : Service() {
         if (intent?.action != ACTION_START) return START_NOT_STICKY
         val mode = intent.getStringExtra(EXTRA_MODE) ?: OeaGameCaptureActivity.MODE_SCREENSHOT
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-        val data = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_RESULT_DATA) ?: return START_NOT_STICKY
+        val data: Intent = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java) ?: return START_NOT_STICKY
+        } else {
+            @Suppress("DEPRECATION")
+            (intent.getParcelableExtra(EXTRA_RESULT_DATA) ?: return START_NOT_STICKY)
+        }
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
