@@ -336,11 +336,6 @@ class OeaGameBoostService : Service() {
             wm.addView(root, params)
             overlay = root
 
-            // Use the handle's normal click path for the panel toggle. Dragging
-            // remains handled here, but a tap always becomes exactly one click.
-            handle.setOnClickListener {
-                if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
-            }
             handle.setOnTouchListener(object : View.OnTouchListener {
                 private var downRawX = 0f
                 private var downRawY = 0f
@@ -381,7 +376,7 @@ class OeaGameBoostService : Service() {
                             if (dragging) {
                                 snapHandleToEdge(root, handle, wm)
                             } else {
-                                v.performClick()
+                                if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
                             }
                             return true
                         }
