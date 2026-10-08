@@ -187,10 +187,72 @@ class OeaGameBoostService : Service() {
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = overlayGravity(); x = dp(2); y = 0 }
+        ).apply {
+            gravity = if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("ram_handle_dragged", false)) {
+                Gravity.TOP or Gravity.START
+            } else {
+                overlayGravity()
+            }
+            if (gravity == (Gravity.TOP or Gravity.START)) {
+                x = OeaGameBoostStore.prefs(this@OeaGameBoostService).getInt("ram_handle_x", dp(8))
+                y = OeaGameBoostStore.prefs(this@OeaGameBoostService).getInt("ram_handle_y", dp(8))
+            } else {
+                x = dp(2)
+                y = 0
+            }
+        }
         runCatching {
             wm.addView(root, params)
             overlay = root
+
+            handle.setOnTouchListener(object : View.OnTouchListener {
+                private var downRawX = 0f
+                private var downRawY = 0f
+                private var startX = 0
+                private var startY = 0
+                private var dragging = false
+
+                override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
+                    when (event.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> {
+                            downRawX = event.rawX
+                            downRawY = event.rawY
+                            val current = root.layoutParams as? WindowManager.LayoutParams ?: return false
+                            startX = current.x
+                            startY = current.y
+                            dragging = false
+                            return true
+                        }
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            val dx = event.rawX - downRawX
+                            val dy = event.rawY - downRawY
+                            if (!dragging && (kotlin.math.abs(dx) > dp(6) || kotlin.math.abs(dy) > dp(6))) {
+                                dragging = true
+                                handle.animate().cancel()
+                                handle.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90L).start()
+                            }
+                            if (dragging) {
+                                val next = root.layoutParams as? WindowManager.LayoutParams ?: return true
+                                val bounds = screenBounds(root)
+                                next.gravity = Gravity.TOP or Gravity.START
+                                next.x = (startX + dx.toInt()).coerceIn(bounds.first, bounds.third)
+                                next.y = (startY + dy.toInt()).coerceIn(bounds.second, bounds.fourth)
+                                runCatching { wm.updateViewLayout(root, next) }
+                            }
+                            return true
+                        }
+                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                            if (dragging) {
+                                snapHandleToEdge(root, handle, wm)
+                                return true
+                            }
+                            v.performClick()
+                            return true
+                        }
+                    }
+                    return false
+                }
+            })
             handle.alpha = 0f
             handle.translationX = dp(10).toFloat()
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
@@ -249,6 +311,50 @@ class OeaGameBoostService : Service() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    /** Returns left, top, maxLeft and maxTop bounds for the overlay window. */
+    private fun screenBounds(root: View): IntArray {
+        val metrics = resources.displayMetrics
+        val width = root.width.takeIf { it > 0 } ?: handleSizePx()
+        val height = root.height.takeIf { it > 0 } ?: handleSizePx()
+        return intArrayOf(
+            0,
+            0,
+            (metrics.widthPixels - width).coerceAtLeast(0),
+            (metrics.heightPixels - height).coerceAtLeast(0)
+        )
+    }
+
+    private fun snapHandleToEdge(root: View, handle: View, wm: WindowManager) {
+        val params = root.layoutParams as? WindowManager.LayoutParams ?: return
+        val bounds = screenBounds(root)
+        val currentX = params.x.coerceIn(bounds[0], bounds[2])
+        val currentY = params.y.coerceIn(bounds[1], bounds[3])
+        val distances = intArrayOf(
+            currentX,
+            bounds[2] - currentX,
+            currentY,
+            bounds[3] - currentY
+        )
+        val nearest = distances.indices.minByOrNull { distances[it] } ?: 3
+        when (nearest) {
+            0 -> params.x = 0
+            1 -> params.x = bounds[2]
+            2 -> params.y = 0
+            else -> params.y = bounds[3]
+        }
+        params.x = params.x.coerceIn(bounds[0], bounds[2])
+        params.y = params.y.coerceIn(bounds[1], bounds[3])
+        params.gravity = Gravity.TOP or Gravity.START
+        runCatching { wm.updateViewLayout(root, params) }
+        OeaGameBoostStore.prefs(this).edit()
+            .putBoolean("ram_handle_dragged", true)
+            .putInt("ram_handle_x", params.x)
+            .putInt("ram_handle_y", params.y)
+            .apply()
+        handle.animate().cancel()
+        handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+    }
 
     private fun handleSizePx(): Int = when (OeaGameBoostStore.prefs(this).getString("ram_handle_size", "medium")) {
         "small" -> dp(40)
