@@ -336,6 +336,11 @@ class OeaGameBoostService : Service() {
             wm.addView(root, params)
             overlay = root
 
+            // Use the handle's normal click path for the panel toggle. Dragging
+            // remains handled here, but a tap always becomes exactly one click.
+            handle.setOnClickListener {
+                if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+            }
             handle.setOnTouchListener(object : View.OnTouchListener {
                 private var downRawX = 0f
                 private var downRawY = 0f
@@ -372,12 +377,19 @@ class OeaGameBoostService : Service() {
                             }
                             return true
                         }
-                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        android.view.MotionEvent.ACTION_UP -> {
                             if (dragging) {
                                 snapHandleToEdge(root, handle, wm)
-                                return true
+                            } else {
+                                v.performClick()
                             }
-                            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+                            return true
+                        }
+                        android.view.MotionEvent.ACTION_CANCEL -> {
+                            if (dragging) {
+                                handle.animate().cancel()
+                                handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+                            }
                             return true
                         }
                     }
@@ -596,8 +608,13 @@ class OeaGameBoostService : Service() {
         OeaGameBoostStore.prefs(this).edit().putBoolean("dnd", next).apply()
         if (next) {
             if (previousInterruptionFilter == null) previousInterruptionFilter = nm.currentInterruptionFilter
-            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-        } else restoreDnd()
+            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY) }
+        } else {
+            // "DND OFF" means restore normal notification delivery, not the
+            // filter that happened to be active when the game session began.
+            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
+            previousInterruptionFilter = null
+        }
         updateDndButton(button)
     }
 
