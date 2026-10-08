@@ -54,4 +54,5 @@ jobs:
         with:
           name: oea-launcher-apk
           path: oea/build/outputs/apk/**/*.apk
+          retention-days: 1
           if-no-files-found: error
