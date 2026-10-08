@@ -32,8 +32,6 @@ class OeaGameBoostService : Service() {
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
     private var previousInterruptionFilter: Int? = null
-    private var handleColorAnimator: android.animation.ValueAnimator? = null
-    private var handleTextAnimator: android.animation.ValueAnimator? = null
         private val tick = object : Runnable {
         override fun run() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
@@ -264,9 +262,8 @@ class OeaGameBoostService : Service() {
             handle.alpha = 0f
             handle.translationX = dp(10).toFloat()
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
-                .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).withEndAction {
-                    startHandleAnimations(handle)
-                }.start()
+                .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).start()
+            applyHandlePalette(handle)
             updateOverlay()
         }
     }
@@ -488,6 +485,7 @@ class OeaGameBoostService : Service() {
     }
 
     private fun updateOverlay() {
+        (overlay as? android.widget.LinearLayout)?.getChildAt(1)?.let { applyHandlePalette(it) }
         val root = overlay as? android.widget.LinearLayout ?: run {
             activeGame?.let { if (Settings.canDrawOverlays(this)) showOverlay(it) }
             return
@@ -565,75 +563,34 @@ class OeaGameBoostService : Service() {
         button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
     }
 
-    private fun startHandleAnimations(handle: View) {
-        val text = (handle as? android.view.ViewGroup)?.getChildAt(0) as? TextView ?: return
-        if (handleColorAnimator?.isRunning != true) {
-            handleColorAnimator?.cancel()
-            handleColorAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 2200L
-                repeatMode = android.animation.ValueAnimator.REVERSE
-                repeatCount = android.animation.ValueAnimator.INFINITE
-                addUpdateListener { animator ->
-                    val p = animator.animatedValue as Float
-                    val palette = handlePalette(p)
-                    val bg = handle.background as? android.graphics.drawable.GradientDrawable
-                    bg?.setColors(intArrayOf(palette[0], palette[1], palette[2]))
-                    bg?.setStroke(dp(1), palette[1].withAlpha(210))
-                    text.setShadowLayer(dp(4 + (p * 5).toInt()).toFloat(), 0f, 0f, palette[1])
-                    text.paint.shader = android.graphics.LinearGradient(
-                        -text.width.toFloat() * 0.8f + text.width * p,
-                        0f,
-                        text.width.toFloat() * 1.8f + text.width * p,
-                        0f,
-                        intArrayOf(palette[2], palette[1], palette[2]),
-                        null,
-                        android.graphics.Shader.TileMode.MIRROR
-                    )
-                    text.invalidate()
-                }
-            }.also { it.start() }
-        }
-        if (handleTextAnimator?.isRunning != true) {
-            handleTextAnimator?.cancel()
-            handleTextAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 1700L
-                repeatMode = android.animation.ValueAnimator.REVERSE
-                repeatCount = android.animation.ValueAnimator.INFINITE
-                addUpdateListener { animator ->
-                    val p = animator.animatedValue as Float
-                    val pulse = 0.96f + (0.04f * kotlin.math.sin(p * Math.PI)).toFloat()
-                    text.scaleX = pulse
-                    text.scaleY = pulse
-                    text.alpha = 0.84f + (0.16f * kotlin.math.sin(p * Math.PI)).toFloat()
-                    text.translationY = (kotlin.math.sin(p * Math.PI * 2.0) * dp(1).toDouble()).toFloat()
-                    text.invalidate()
-                }
-            }.also { it.start() }
-        }
+    private fun applyHandlePalette(handle: View) {
+        val palette = handlePalette()
+        val bg = handle.background as? android.graphics.drawable.GradientDrawable ?: return
+        bg.setColors(palette)
+        bg.setStroke(dp(1), palette[1].withAlpha(170))
+        val text = (handle as? android.view.ViewGroup)?.getChildAt(0) as? TextView
+        text?.setShadowLayer(dp(3).toFloat(), 0f, 0f, palette[1])
+        text?.paint?.shader = null
+        text?.alpha = 1f
+        text?.scaleX = 1f
+        text?.scaleY = 1f
+        text?.translationY = 0f
     }
 
-    private fun handlePalette(progress: Float): IntArray {
-        val mode = OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue") ?: "blue"
-        if (mode == "rgb") {
-            val hue = ((progress * 360f) + 205f) % 360f
-            val accent = Color.HSVToColor(floatArrayOf(hue, 0.82f, 1f))
-            val secondary = Color.HSVToColor(floatArrayOf((hue + 55f) % 360f, 0.62f, 1f))
-            val deep = Color.HSVToColor(floatArrayOf(hue, 0.72f, 0.16f))
-            return intArrayOf(deep, accent, secondary)
-        }
-        val pair = when (mode) {
+    private fun handlePalette(): IntArray {
+        return when (OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue") ?: "blue") {
             "green" -> intArrayOf(0xFF0B281B.toInt(), 0xFF27E37A.toInt(), 0xFF9BFFC5.toInt())
             "purple" -> intArrayOf(0xFF170B2C.toInt(), 0xFF9B5CFF.toInt(), 0xFFE1C4FF.toInt())
             "cyan" -> intArrayOf(0xFF071F27.toInt(), 0xFF25D9FF.toInt(), 0xFFB9F5FF.toInt())
             "red" -> intArrayOf(0xFF2B0B10.toInt(), 0xFFFF3D68.toInt(), 0xFFFFB3C2.toInt())
             "amber" -> intArrayOf(0xFF2A1A05.toInt(), 0xFFFFB52E.toInt(), 0xFFFFE0A0.toInt())
-            else -> intArrayOf(0xFF0A1020.toInt(), 0xFF2E72FF.toInt(), 0xFF9DD4FF.toInt())
+            "rgb" -> intArrayOf(0xFF171126.toInt(), 0xFF9C55FF.toInt(), 0xFF31D8FF.toInt())
+            else -> intArrayOf(0xFF0A1020.toInt(), 0xFF2357FF.toInt(), 0xFF78B9FF.toInt())
         }
-        val accent = android.animation.ArgbEvaluator().evaluate(progress, pair[1], pair[2]) as Int
-        return intArrayOf(pair[0], accent, pair[2])
     }
 
-    private fun Int.withAlpha(alpha: Int): Int = (this and 0x00FFFFFF) or ((alpha.coerceIn(0, 255)) shl 24)
+    private fun Int.withAlpha(alpha: Int): Int =
+        (this and 0x00FFFFFF) or ((alpha.coerceIn(0, 255)) shl 24)
 
     private fun showPanel(panel: View) {
         if (panel.visibility == View.VISIBLE) return
@@ -651,14 +608,81 @@ class OeaGameBoostService : Service() {
             .setDuration(280L)
             .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
             .withEndAction {
-                val controls = (panel as? android.widget.LinearLayout)?.getChildAt(4) as? android.widget.LinearLayout
-                if (controls != null) {
-                    for (index in 0 until controls.childCount) {
-                        val child = (controls as android.view.ViewGroup).getChildAt(index)
-                        child.alpha = 0f
-                        child.translationY = dp(8).toFloat()
-                        child.animate().alpha(1f).translationY(0f).setStartDelay(index * 45L).setDuration(180L).start()
-                    }
+                animateGameBoostPanel(panel)
+            }.start()
+    }
+
+    private fun animateGameBoostPanel(panel: View) {
+        val content = panel as? android.widget.LinearLayout ?: return
+        val title = content.getChildAt(0) as? TextView
+        val game = content.getChildAt(1) as? TextView
+        val metrics = content.getChildAt(2) as? TextView
+        val battery = content.getChildAt(3) as? TextView
+        val controls = content.getChildAt(4) as? android.widget.LinearLayout
+
+        listOf(title, game, metrics, battery).forEachIndexed { index, view ->
+            view ?: return@forEachIndexed
+            view.animate().cancel()
+            view.alpha = 0f
+            view.translationY = dp(5).toFloat()
+            view.animate().alpha(1f).translationY(0f)
+                .setStartDelay(index * 45L)
+                .setDuration(220L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        }
+
+        listOf(metrics, battery).forEach { view ->
+            view ?: return@forEach
+            view.animate().cancel()
+            view.animate().alpha(0.72f).translationX(dp(2).toFloat())
+                .setDuration(520L)
+                .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+                .withEndAction {
+                    view.animate().alpha(1f).translationX(0f)
+                        .setDuration(520L)
+                        .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+                        .withEndAction {
+                            if (panel.visibility == View.VISIBLE) animateGameBoostTelemetry(view)
+                        }.start()
+                }.start()
+        }
+
+        if (controls != null) {
+            for (rowIndex in 0 until controls.childCount) {
+                val row = controls.getChildAt(rowIndex) as? android.view.ViewGroup ?: continue
+                for (index in 0 until row.childCount) {
+                    val child = row.getChildAt(index)
+                    child.animate().cancel()
+                    child.alpha = 0f
+                    child.scaleX = 0.88f
+                    child.scaleY = 0.88f
+                    child.translationY = dp(10).toFloat()
+                    child.animate()
+                        .alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+                        .setStartDelay((rowIndex * 90L) + (index * 55L))
+                        .setDuration(260L)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(1.1f))
+                        .start()
+                }
+            }
+        }
+    }
+
+    private fun animateGameBoostTelemetry(view: View) {
+        if (view.visibility != View.VISIBLE) return
+        view.animate().cancel()
+        view.animate().alpha(0.82f).translationX(dp(2).toFloat())
+            .setDuration(650L)
+            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+            .withEndAction {
+                if (view.visibility == View.VISIBLE) {
+                    view.animate().alpha(1f).translationX(0f)
+                        .setDuration(650L)
+                        .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+                        .withEndAction {
+                            if (overlay != null && view.visibility == View.VISIBLE) animateGameBoostTelemetry(view)
+                        }.start()
                 }
             }.start()
     }
@@ -721,10 +745,6 @@ class OeaGameBoostService : Service() {
     }
 
     private fun removeOverlay() {
-        handleColorAnimator?.cancel()
-        handleColorAnimator = null
-        handleTextAnimator?.cancel()
-        handleTextAnimator = null
         overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }
         overlay = null
     }
