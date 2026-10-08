@@ -223,6 +223,19 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Selected games", games.size.toString() + " selected") { chooseGames() }
         row(box, "Usage access", usageStatus()) { openUsageAccess() }
         row(box, "Overlay permission", if (overlayGranted) "Granted" else "Required for the in-game control pill") { openOverlaySettings() }
+        row(box, "DND access", dndAccessStatus()) { openDndAccess() }
+        row(
+            box,
+            "Performance boost",
+            if (OeaGameBoostStore.prefs(this).getBoolean("boost", true))
+                "Boost session on • keeps the game screen awake"
+            else
+                "Off"
+        ) {
+            val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
+            OeaGameBoostStore.prefs(this).edit().putBoolean("boost", next).apply()
+            showGameBoost()
+        }
         row(box, "Game-session DND", if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) "On when a selected game is active" else "Off") {
             val next = !OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
             OeaGameBoostStore.prefs(this).edit().putBoolean("dnd", next).apply()
@@ -505,6 +518,19 @@ class OeaSystemToolsActivity : Activity() {
 
     private fun openOverlaySettings() {
         runCatching { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName))) }
+    }
+
+    private fun openDndAccess() {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+        }.onFailure {
+            Toast.makeText(this, "Android did not expose the DND access page.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun dndAccessStatus(): String {
+        val granted = getSystemService(android.app.NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
+        return if (granted) "Granted • OEA can control session DND" else "Not granted • tap to show OEA in Android DND access"
     }
 
     private fun startBoostService() {
