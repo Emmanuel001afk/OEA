@@ -307,9 +307,6 @@ class OeaGameBoostService : Service() {
         handle.addView(handleText, android.widget.FrameLayout.LayoutParams(handleSize, handleSize).apply {
             gravity = Gravity.CENTER
         })
-        handle.setOnClickListener {
-            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
-        }
         root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(286), -2))
         root.addView(handle, android.widget.LinearLayout.LayoutParams(handleSize, handleSize).apply {
             gravity = Gravity.END
@@ -380,7 +377,7 @@ class OeaGameBoostService : Service() {
                                 snapHandleToEdge(root, handle, wm)
                                 return true
                             }
-                            v.performClick()
+                            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
                             return true
                         }
                     }
