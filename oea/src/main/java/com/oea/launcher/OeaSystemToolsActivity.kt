@@ -627,6 +627,7 @@ class OeaSystemToolsActivity : Activity() {
                     .putBoolean("ram_handle_visible", visible.isChecked)
                     .putString("ram_handle_size", sizeValues[selectedSize])
                     .putString("ram_handle_corner", cornerValues[selectedCorner])
+                    .putBoolean("ram_handle_dragged", false)
                     .apply()
                 if (OeaGameBoostStore.enabled(this)) {
                     stopService(Intent(this, OeaGameBoostService::class.java))
