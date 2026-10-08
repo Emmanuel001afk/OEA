@@ -123,7 +123,18 @@ class OeaGameCaptureService : Service() {
         return width to height
     }
 
+    private fun recordingSize(): Pair<Int, Int> {
+        val (sourceWidth, sourceHeight) = size()
+        val scale = minOf(1f, 1920f / sourceWidth.toFloat(), 1080f / sourceHeight.toFloat())
+        val width = ((sourceWidth * scale).toInt() and 1.inv()).coerceAtLeast(2)
+        val height = ((sourceHeight * scale).toInt() and 1.inv()).coerceAtLeast(2)
+        return width to height
+    }
+
     private fun startRecording() {
+        // MediaRecorder and VirtualDisplay must use identical dimensions.
+        // The previous implementation configured the encoder at <=1080p but
+        // fed it a full-resolution VirtualDisplay, which can yield black video.
         val (width, height) = recordingSize()
         val dir = File(getExternalFilesDir(Environment.DIRECTORY_MOVIES), "OEA")
         dir.mkdirs()
@@ -139,13 +150,14 @@ class OeaGameCaptureService : Service() {
         } else {
             outputFile = File(dir, "OEA_" + stamp() + ".mp4")
         }
+
         recorder = MediaRecorder(this).apply {
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
             setVideoEncodingBitRate(8_000_000)
             setVideoFrameRate(30)
-            setVideoSize(width.coerceAtMost(1920), height.coerceAtMost(1080))
+            setVideoSize(width, height)
             if (Build.VERSION.SDK_INT >= 29) {
                 outputDescriptor = contentResolver.openFileDescriptor(outputUri!!, "w")
                 setOutputFile(outputDescriptor!!.fileDescriptor)
@@ -158,9 +170,25 @@ class OeaGameCaptureService : Service() {
                 stopSelf()
             }
             prepare()
-            start()
         }
-        display = projection!!.createVirtualDisplay("OEA Game Record", width, height, density(), DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, recorder!!.surface, null, null)
+
+        // Attach the recorder surface before starting the encoder so frames
+        // have a live consumer from the first frame onward.
+        display = projection!!.createVirtualDisplay(
+            "OEA Game Record",
+            width,
+            height,
+            density(),
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            recorder!!.surface,
+            null,
+            null
+        )
+        runCatching { recorder!!.start() }.onFailure {
+            stopCapture()
+            stopSelf()
+            throw it
+        }
     }
 
     private fun captureScreenshot() {
