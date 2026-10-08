@@ -603,13 +603,8 @@ class OeaGameBoostService : Service() {
         OeaGameBoostStore.prefs(this).edit().putBoolean("dnd", next).apply()
         if (next) {
             if (previousInterruptionFilter == null) previousInterruptionFilter = nm.currentInterruptionFilter
-            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY) }
-        } else {
-            // "DND OFF" means restore normal notification delivery, not the
-            // filter that happened to be active when the game session began.
-            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
-            previousInterruptionFilter = null
-        }
+            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+        } else restoreDnd()
         updateDndButton(button)
     }
 
