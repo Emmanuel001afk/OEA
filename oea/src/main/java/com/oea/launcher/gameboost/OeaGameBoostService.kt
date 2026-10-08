@@ -365,10 +365,13 @@ class OeaGameBoostService : Service() {
             .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
             .withEndAction {
                 val controls = panel.getChildAt(4) as? android.widget.LinearLayout
-                controls?.children?.forEachIndexed { index, child ->
-                    child.alpha = 0f
-                    child.translationY = dp(8).toFloat()
-                    child.animate().alpha(1f).translationY(0f).setStartDelay((index * 45L)).setDuration(180L).start()
+                if (controls != null) {
+                    for (index in 0 until controls.childCount) {
+                        val child = controls.getChildAt(index)
+                        child.alpha = 0f
+                        child.translationY = dp(8).toFloat()
+                        child.animate().alpha(1f).translationY(0f).setStartDelay(index * 45L).setDuration(180L).start()
+                    }
                 }
             }.start()
     }
