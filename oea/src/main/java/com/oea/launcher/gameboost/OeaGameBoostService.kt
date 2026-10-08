@@ -147,7 +147,7 @@ class OeaGameBoostService : Service() {
                 setStroke(dp(1), 0x663F51FF)
             }
             elevation = dp(7).toFloat()
-            contentDescription = "Open OEA Game Boost controls"
+            contentDescription = "Open OEA RAM controls"
             isClickable = true
             isFocusable = true
         }
@@ -193,6 +193,8 @@ class OeaGameBoostService : Service() {
         android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) }
 
     private fun launchCapture(mode: String) {
+        OeaGameBoostStore.prefs(this).edit().putBoolean("capture_active", true).apply()
+        overlay?.alpha = 0f
         val intent = Intent(this, OeaGameCaptureActivity::class.java).apply {
             putExtra(OeaGameCaptureActivity.EXTRA_MODE, mode)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -310,6 +312,7 @@ class OeaGameBoostService : Service() {
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
         updateBoostButton(boost)
+        root.alpha = if (OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)) 0f else 1f
         val recording = OeaGameBoostStore.prefs(this).getBoolean("recording", false)
         (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let {
             (it as? TextView)?.text = if (recording) "RECORDING" else "RECORD"
