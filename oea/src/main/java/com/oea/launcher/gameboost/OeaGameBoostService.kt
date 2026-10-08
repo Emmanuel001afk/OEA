@@ -141,8 +141,6 @@ class OeaGameBoostService : Service() {
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
             OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService)
             val game = foregroundPackage()
-            val keepVisible = OeaGameBoostStore.prefs(this@OeaGameBoostService)
-                .getBoolean("ram_handle_visible", true)
             val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
                 .getBoolean("capture_active", false)
 
@@ -164,7 +162,7 @@ class OeaGameBoostService : Service() {
                 if (launcherHome && !captureActive) {
                     deactivate(activeGame!!)
                     activeGame = null
-                } else if (game == packageName || captureActive || keepVisible) {
+                } else if (game == packageName || captureActive) {
                     updateOverlay()
                 } else {
                     deactivate(activeGame!!)
