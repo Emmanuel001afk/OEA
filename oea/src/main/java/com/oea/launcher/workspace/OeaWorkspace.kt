@@ -772,14 +772,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun openMultitaskDialog() {
         val choices = apps.filter { it.packageName != context.packageName }.distinctBy { it.packageName }
+        if (choices.isEmpty()) {
+            Toast.makeText(context, "No apps are available for multitask.", Toast.LENGTH_SHORT).show()
+            return
+        }
         AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Multitask")
-            .setMessage("Choose an app to open as a floating task over the current app. OEA uses a sensible starting size and does not add a manual drag-to-size control.")
+            .setMessage("Choose an app to open as a floating task over the current app. Android/OEM support determines whether the task can float.")
+            .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
                 val app = choices[which]
                 unlockForLaunch(app) {
                     val result = OeaMultitaskLauncher.launchFloating(context, app)
                     if (!result.success) Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
-                }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -788,6 +792,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun openSplitPairDialog() {
         val choices = apps.filter { it.packageName != context.packageName }.distinctBy { it.packageName }
+        if (choices.size < 2) {
+            Toast.makeText(context, "At least two apps are required for split screen.", Toast.LENGTH_SHORT).show()
+            return
+        }
         val checked = BooleanArray(choices.size)
         AlertDialog.Builder(hostActivity ?: context)
             .setTitle("OEA Split Screen")
@@ -801,6 +809,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Launch") { _, _ ->
                 val picked = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }
+                if (picked.size != 2) {
+                    Toast.makeText(context, "Choose two apps first.", Toast.LENGTH_SHORT).show()
+                } else {
                     val first = choices.first { it.packageName == picked[0] }
                     val second = choices.first { it.packageName == picked[1] }
                     unlockForLaunch(first) {
@@ -810,7 +821,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         }
                     }
                 }
-            }.show()
+            }
+            .show()
     }
 
     private fun openGameBoostSettings() {
