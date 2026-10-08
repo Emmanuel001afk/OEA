@@ -865,7 +865,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
                 visible.forEach { app ->
                     val row = drawerRow(app)
-                    list.addView(row, LinearLayout.LayoutParams(-1, dp(58)).apply { bottomMargin = dp(4) })
+                    list.addView(row, LinearLayout.LayoutParams(-1, dp(56)).apply { bottomMargin = dp(3) })
                 }
                 drawerBody.addView(list)
             }
@@ -880,9 +880,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         setPadding(dp(2), dp(2), dp(2), dp(2))
                     }
                     pageApps.forEachIndexed { index, app ->
-                        column.addView(tile(app), GridLayout.LayoutParams().apply {
-                            width = dp(78)
-                            height = dp(88)
+                        column.addView(drawerTile(app), GridLayout.LayoutParams().apply {
+                            width = dp(72)
+                            height = dp(72)
                             columnSpec = GridLayout.spec(index % cols())
                             rowSpec = GridLayout.spec(index / cols())
                             setMargins(dp(1), dp(1), dp(1), dp(1))
@@ -897,11 +897,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 drawerGrid.removeAllViews()
                 drawerGrid.columnCount = cols()
                 visible.forEachIndexed { index, app ->
-                    drawerGrid.addView(tile(app).apply {
+                    drawerGrid.addView(drawerTile(app).apply {
                         setOnLongClickListener { showAppActions(app, this, OeaWorkspaceStore.key(app.packageName, app.className)); true }
                     }, GridLayout.LayoutParams().apply {
                         width = 0
-                        height = dp(78)
+                        height = dp(68)
                         columnSpec = GridLayout.spec(index % cols(), 1, 1f)
                         rowSpec = GridLayout.spec(index / cols())
                         setMargins(dp(1), dp(1), dp(1), dp(1))
@@ -964,9 +964,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 useDefaultMargins = false
             }
             used.forEachIndexed { index, app ->
-                grid.addView(tile(app), GridLayout.LayoutParams().apply {
+                grid.addView(drawerTile(app), GridLayout.LayoutParams().apply {
                     width = 0
-                    height = dp(78)
+                    height = dp(68)
                     columnSpec = GridLayout.spec(index % 4, 1, 1f)
                     rowSpec = GridLayout.spec(index / 4)
                     setMargins(dp(1), dp(1), dp(1), dp(1))
@@ -981,7 +981,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val strip = HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false }
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         values.forEach { app ->
-            row.addView(tile(app), LinearLayout.LayoutParams(dp(72), dp(78)).apply {
+            row.addView(drawerTile(app), LinearLayout.LayoutParams(dp(68), dp(68)).apply {
                 setMargins(dp(1), dp(1), dp(1), dp(1))
             })
         }
@@ -1054,6 +1054,44 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             })
         }
         drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(220)))
+    }
+
+    private fun drawerTile(app: OeaAppInfo) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        isClickable = true
+        background = ColorDrawable(Color.TRANSPARENT)
+        contentDescription = "Open " + app.label
+        setOnClickListener { launch(app) }
+        addView(FrameLayout(context).apply {
+            val iconView = ImageView(context).apply {
+                setImageDrawable(icon(app.packageName))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+            }
+            addView(iconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
+            val count = OeaNotificationState.countForPackage(app.packageName)
+            if (count > 0) {
+                addView(TextView(context).apply {
+                    text = if (count > 99) "99+" else count.toString()
+                    textSize = 7f
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    background = rounded(Color.rgb(210, 60, 70), 10)
+                    minWidth = dp(16)
+                    minHeight = dp(16)
+                    setPadding(dp(2), 0, dp(2), 0)
+                }, FrameLayout.LayoutParams(-2, dp(16), Gravity.TOP or Gravity.END))
+            }
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        if (store.showAppLabels()) addView(TextView(context).apply {
+            text = app.label
+            textSize = 9f
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(themeText)
+        }, LinearLayout.LayoutParams(-1, dp(20)))
     }
 
     private fun drawerRow(app: OeaAppInfo): View {
