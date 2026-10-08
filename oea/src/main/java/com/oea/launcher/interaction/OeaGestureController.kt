@@ -15,7 +15,7 @@ class OeaGestureController(
     private val onSwipeDown: () -> Unit = {},
     private val onSwipeLeft: () -> Unit = {},
     private val onSwipeRight: () -> Unit = {},
-    private val triggerDistanceDp: Float = 72f,
+    private val triggerDistanceDp: Float = 56f,
     private val consumeTouchEvents: Boolean = true,
 ) : GestureDetector.SimpleOnGestureListener(), View.OnTouchListener {
 
@@ -36,10 +36,15 @@ class OeaGestureController(
         val distance = triggerDistanceDp * density
         if (maxOf(abs(dx), abs(dy)) < distance) return false
 
-        if (abs(dx) > abs(dy)) {
+        val horizontal = abs(dx) > abs(dy) * 1.2f
+        val vertical = abs(dy) > abs(dx) * 1.2f
+        if (horizontal) {
             if (dx < 0) onSwipeLeft() else onSwipeRight()
-        } else {
+        } else if (vertical) {
             if (dy < 0) onSwipeUp() else onSwipeDown()
+        } else {
+            // Ignore ambiguous diagonal movement so the native pager wins.
+            return false
         }
         return true
     }
