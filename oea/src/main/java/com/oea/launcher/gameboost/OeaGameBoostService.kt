@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -66,118 +67,131 @@ class OeaGameBoostService : Service() {
     private fun showOverlay(packageName: String) {
         if (overlay != null) return
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        val root = android.widget.FrameLayout(this).apply {
-            setPadding(0, 0, 0, 0)
-        }
-        val pill = TextView(this).apply {
-            text = "OEA"
-            gravity = Gravity.CENTER
-            setTextColor(0xFF202124.toInt())
-            textSize = 9f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFFF2F3F5.toInt())
-                cornerRadius = dp(999).toFloat()
-            }
-            elevation = dp(4).toFloat()
+        val root = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(10), dp(10), dp(10), dp(10))
         }
         val panel = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(18, 12, 18, 12)
+            setPadding(dp(16), dp(13), dp(16), dp(13))
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(0xEE202124.toInt())
-                cornerRadius = 28f
+                cornerRadius = dp(22).toFloat()
             }
             visibility = View.GONE
         }
         val title = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 12f
+            setTextColor(Color.WHITE); textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             text = "OEA Game Boost"
         }
-        val status = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 11f
-            text = packageName.substringAfterLast('.') + " • RAM"
-            setPadding(0, 6, 0, 8)
+        val gameName = TextView(this).apply {
+            setTextColor(0xFFB9C7FF.toInt()); textSize = 11f
+            text = packageName.substringAfterLast('.')
+            setPadding(0, dp(3), 0, dp(9))
         }
-        val focus = TextView(this).apply {
-            setTextColor(0xFFB9C7FF.toInt())
-            textSize = 10f
-            text = "Game focus active"
-            setPadding(0, 0, 0, 8)
+        val metrics = TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 12f
+            text = "RAM • reading…"; setPadding(0, 0, 0, dp(5))
         }
-        val controls = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
+        val device = TextView(this).apply {
+            setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
+            text = "Battery • reading…"; setPadding(0, 0, 0, dp(10))
         }
-        val dnd = TextView(this).apply {
-            text = if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("dnd", true)) "DND ON" else "DND OFF"
-            setTextColor(Color.WHITE)
-            textSize = 10f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener {
-                val next = !OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("dnd", true)
-                OeaGameBoostStore.prefs(this@OeaGameBoostService).edit().putBoolean("dnd", next).apply()
-                if (next) {
-                    val nm = getSystemService(NotificationManager::class.java)
-                    if (nm.isNotificationPolicyAccessGranted) {
-                        previousInterruptionFilter = nm.currentInterruptionFilter
-                        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                    }
-                } else {
-                    restoreDnd()
-                }
-                text = if (next) "DND ON" else "DND OFF"
+        val controls = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
+        val dnd = chip("DND")
+        val hide = chip("HIDE")
+        controls.addView(dnd, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(6) })
+        controls.addView(hide, android.widget.LinearLayout.LayoutParams(0, dp(40), 1f))
+        dnd.setOnClickListener { toggleDnd(dnd) }
+        hide.setOnClickListener { panel.visibility = View.GONE }
+        panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
+
+        val pill = TextView(this).apply {
+            gravity = Gravity.CENTER; setTextColor(0xFF202124.toInt()); textSize = 9f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFF2F3F5.toInt()); cornerRadius = dp(999).toFloat()
             }
+            elevation = dp(4).toFloat()
+            contentDescription = "Open OEA Game Boost controls"
         }
-        val close = TextView(this).apply {
-            text = "CLOSE"
-            setTextColor(Color.WHITE)
-            textSize = 10f
-            setPadding(12, 8, 12, 8)
-            setOnClickListener { removeOverlay() }
-        }
-        controls.addView(dnd)
-        controls.addView(close)
-        panel.addView(title)
-        panel.addView(status)
-        panel.addView(focus)
-        panel.addView(controls)
-        root.addView(panel, android.widget.FrameLayout.LayoutParams(dp(236), -2).apply { gravity = Gravity.TOP or Gravity.END })
-        root.addView(pill, android.widget.FrameLayout.LayoutParams(dp(62), dp(28), Gravity.END).apply { topMargin = dp(2) })
         pill.setOnClickListener { panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
-        root.setOnClickListener { }
+        root.addView(panel, android.widget.LinearLayout.LayoutParams(dp(250), -2))
+        root.addView(pill, android.widget.LinearLayout.LayoutParams(dp(76), dp(30)).apply { gravity = Gravity.END; topMargin = dp(2) })
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.END; x = 12; y = 96 }
-        runCatching { wm.addView(root, params); overlay = root }
+        ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(8); y = dp(88) }
+        runCatching { wm.addView(root, params); overlay = root; updateOverlay() }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private fun restoreDnd() {
+    private fun chip(label: String): TextView = TextView(this).apply {
+        text = label; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 10f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF34363A.toInt()); cornerRadius = dp(12).toFloat()
+        }
+        isClickable = true; isFocusable = true
+    }
+
+    private fun toggleDnd(button: TextView) {
         val nm = getSystemService(NotificationManager::class.java)
-        previousInterruptionFilter?.let { if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(it) }
-        previousInterruptionFilter = null
+        if (!nm.isNotificationPolicyAccessGranted) {
+            button.text = "DND ACCESS"
+            runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            return
+        }
+        val next = !OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
+        OeaGameBoostStore.prefs(this).edit().putBoolean("dnd", next).apply()
+        if (next) {
+            if (previousInterruptionFilter == null) previousInterruptionFilter = nm.currentInterruptionFilter
+            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+        } else restoreDnd()
+        updateDndButton(button)
+    }
+
+    private fun updateDndButton(button: TextView) {
+        val nm = getSystemService(NotificationManager::class.java)
+        button.text = when {
+            !nm.isNotificationPolicyAccessGranted -> "DND ACCESS"
+            OeaGameBoostStore.prefs(this).getBoolean("dnd", true) -> "DND ON"
+            else -> "DND OFF"
+        }
     }
 
     private fun updateOverlay() {
-        if (overlay == null) {
+        val root = overlay as? android.widget.LinearLayout ?: run {
             activeGame?.let { if (Settings.canDrawOverlays(this)) showOverlay(it) }
+            return
         }
-        val root = overlay as? android.widget.FrameLayout ?: return
         val panel = root.getChildAt(0) as? android.widget.LinearLayout ?: return
-        val status = panel.getChildAt(1) as? TextView ?: return
+        val gameName = panel.getChildAt(1) as? TextView ?: return
+        val metrics = panel.getChildAt(2) as? TextView ?: return
+        val device = panel.getChildAt(3) as? TextView ?: return
+        val controls = panel.getChildAt(4) as? android.widget.LinearLayout ?: return
+        val dnd = controls.getChildAt(0) as? TextView ?: return
+
         val info = ActivityManager.MemoryInfo()
         getSystemService(ActivityManager::class.java).getMemoryInfo(info)
-        val used = (info.totalMem - info.availMem) / (1024.0 * 1024.0)
-        val total = info.totalMem / (1024.0 * 1024.0)
-        val state = if (info.lowMemory) " • LOW" else ""
-        status.text = String.format(Locale.US, "%s • RAM %.0f / %.0f MB%s",
-            activeGame?.substringAfterLast('.') ?: "game", used, total, state)
+        val totalMb = info.totalMem / (1024.0 * 1024.0)
+        val availableMb = info.availMem / (1024.0 * 1024.0)
+        val usedMb = (totalMb - availableMb).coerceAtLeast(0.0)
+        val usedPct = if (totalMb > 0) usedMb / totalMb * 100.0 else 0.0
+        val state = if (info.lowMemory) " • LOW MEMORY" else ""
+        metrics.text = String.format(Locale.US, "RAM %.0f / %.0f MB • %.0f%%%s", usedMb, totalMb, usedPct, state)
+
+        val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
+        val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        device.text = if (level in 0..100) "Battery $level% • Game focus active" else "Game focus active"
+        gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
+        updateDndButton(dnd)
+        (root.getChildAt(1) as? TextView)?.text = String.format(Locale.US, "RAM %.0f%%", usedPct)
     }
 
     private fun removeOverlay() { overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }; overlay = null }
