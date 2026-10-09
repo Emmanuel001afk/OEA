@@ -43,7 +43,7 @@ class OeaGameCaptureService : Service() {
     private var reader: ImageReader? = null
     private var recorder: MediaRecorder? = null
     private var recorderStarted = false
-    @Volatile private var screenshotCompleted = false
+    @Volatile private var screenshotFrameProcessing = false
     private var screenshotThread: android.os.HandlerThread? = null
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
@@ -218,7 +218,7 @@ class OeaGameCaptureService : Service() {
     }
 
     private fun captureScreenshot() {
-        screenshotCompleted = false
+        screenshotFrameProcessing = false
         val (width, height) = size()
         val captureReader = ImageReader.newInstance(
             width,
@@ -261,7 +261,7 @@ class OeaGameCaptureService : Service() {
         }
 
         Handler(Looper.getMainLooper()).postDelayed({
-            if (!completed && !screenshotCompleted && android.os.SystemClock.uptimeMillis() >= deadline) {
+            if (!completed && !screenshotFrameProcessing && android.os.SystemClock.uptimeMillis() >= deadline) {
                 finishCapture(false)
             }
         }, 4200L)
@@ -272,11 +272,14 @@ class OeaGameCaptureService : Service() {
         width: Int,
         height: Int
     ) {
-        if (screenshotCompleted) {
+        if (screenshotFrameProcessing) {
             runCatching { ir.acquireLatestImage()?.close() }
             return
         }
         val image = runCatching { ir.acquireLatestImage() }.getOrNull() ?: return
+        // The first frame has arrived. Do not let the 4-second frame-arrival
+        // timeout interrupt slow pixel conversion/PNG writes on low-memory phones.
+        screenshotFrameProcessing = true
         val saved = runCatching {
             image.use {
                 val plane = it.planes[0]
@@ -314,7 +317,6 @@ class OeaGameCaptureService : Service() {
                 result
             }
         }.getOrDefault(false)
-        screenshotCompleted = true
         Handler(Looper.getMainLooper()).post {
             if (saved) {
                 Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
