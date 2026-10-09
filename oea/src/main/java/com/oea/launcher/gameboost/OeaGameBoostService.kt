@@ -69,6 +69,40 @@ class OeaGameBoostService : Service() {
             textAlign = android.graphics.Paint.Align.CENTER
             color = 0xFFBFC6D8.toInt()
         }
+        private val glow = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(10).toFloat()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+        }
+        private val highlight = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(2).toFloat()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            color = 0xFFEAFBFF.toInt()
+        }
+        private var pulseAngle = 0f
+        private var ringAnimator: android.animation.ValueAnimator? = null
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            if (ringAnimator?.isRunning == true) return
+            ringAnimator = android.animation.ValueAnimator.ofFloat(0f, 360f).apply {
+                duration = 2400L
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                interpolator = android.view.animation.LinearInterpolator()
+                addUpdateListener {
+                    pulseAngle = it.animatedValue as Float
+                    invalidate()
+                }
+                start()
+            }
+        }
+
+        override fun onDetachedFromWindow() {
+            ringAnimator?.cancel()
+            ringAnimator = null
+            super.onDetachedFromWindow()
+        }
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(dp(220))
@@ -112,8 +146,23 @@ class OeaGameBoostService : Service() {
             color: Int
         ) {
             canvas.drawCircle(cx, cy, radius, track)
-            progress.color = color
-            canvas.drawArc(cx - radius, cy - radius, cx + radius, cy + radius, -90f, fraction * 360f, false, progress)
+            val sweep = fraction.coerceIn(0f, 1f) * 360f
+            val bounds = android.graphics.RectF(cx - radius, cy - radius, cx + radius, cy + radius)
+            if (sweep > 0f) {
+                // Soft colored halo beneath the crisp progress arc.
+                glow.color = (color and 0x00FFFFFF) or (0x48 shl 24)
+                canvas.drawArc(bounds, -90f, sweep, false, glow)
+                progress.color = color
+                canvas.drawArc(bounds, -90f, sweep, false, progress)
+
+                // A bright traveling glint makes the live reading feel active
+                // without changing or exaggerating the underlying percentage.
+                val glintSweep = minOf(26f, sweep)
+                val glintStart = -90f + ((pulseAngle / 360f) * sweep)
+                glow.color = (color and 0x00FFFFFF) or (0x88 shl 24)
+                canvas.drawArc(bounds, glintStart, glintSweep, false, glow)
+                canvas.drawArc(bounds, glintStart, glintSweep, false, highlight)
+            }
 
             label.textSize = dp(if (name.length > 6) 6 else 8).toFloat()
             label.color = 0xFFCBD3E6.toInt()
@@ -424,24 +473,25 @@ class OeaGameBoostService : Service() {
         })
         val panel = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xF21B1D22.toInt(), 0xF21B1D22.toInt())
+                intArrayOf(0xF51A263A.toInt(), 0xF21A1F2B.toInt(), 0xF5101725.toInt())
             ).apply {
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), 0x553F51FF)
+                setStroke(dp(1), 0x9955BFFF.toInt())
             }
-            elevation = dp(10).toFloat()
+            elevation = dp(12).toFloat()
             visibility = View.GONE
         }
         val title = TextView(this).apply {
-            setTextColor(Color.WHITE); textSize = 13f
+            setTextColor(0xFFF1F8FF.toInt()); textSize = 13f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            text = "OEA RAM"
+            text = "◈  OEA GAME BOOST"
+            setShadowLayer(dp(5).toFloat(), 0f, 0f, 0x6657C8FF)
         }
         val gameName = TextView(this).apply {
-            setTextColor(0xFFB9C7FF.toInt()); textSize = 11f
+            setTextColor(0xFF78D9FF.toInt()); textSize = 10f
             text = packageName.substringAfterLast('.')
             setPadding(0, dp(2), 0, dp(5))
         }
@@ -450,8 +500,14 @@ class OeaGameBoostService : Service() {
             contentDescription = "Live RAM and virtual RAM circular gauges"
         }
         val device = TextView(this).apply {
-            setTextColor(0xFFD0D0D0.toInt()); textSize = 11f
-            text = "Battery • reading…"; setPadding(0, 0, 0, dp(5))
+            setTextColor(0xFFD7E8F8.toInt()); textSize = 10f
+            text = "Battery • reading…"
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0x332D8EC9)
+                cornerRadius = dp(9).toFloat()
+                setStroke(dp(1), 0x3349BFFF)
+            }
         }
         val controls = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
@@ -488,27 +544,6 @@ class OeaGameBoostService : Service() {
             updateBoostButton(boost)
         }
         panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
-        val closePanelButton = TextView(this).apply {
-            text = "×  CLOSE PANEL"
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            textSize = 11f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            contentDescription = "Close Game Boost panel"
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF30384A.toInt())
-                cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), 0x664D74FF)
-            }
-            setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener {
-                diagnostic(android.util.Log.INFO, "Close Panel button clicked activeGame=$activeGame overlayAttached=${this@OeaGameBoostService.overlay?.parent != null} panelExists=${panelView != null}")
-                closePanel(panel)
-            }
-        }
-        panel.addView(closePanelButton, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply {
-            topMargin = dp(8)
-        })
 
         val handleSize = handleSizePx()
         val handle = android.widget.FrameLayout(this).apply {
@@ -838,13 +873,22 @@ class OeaGameBoostService : Service() {
     }
 
     private fun chip(label: String): TextView = TextView(this).apply {
-        text = label; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 10f
+        text = label
+        gravity = Gravity.CENTER
+        setTextColor(0xFFF2F8FF.toInt())
+        textSize = 9.5f
         typeface = android.graphics.Typeface.DEFAULT_BOLD
-        background = android.graphics.drawable.GradientDrawable().apply {
-            setColor(0xFF2B2E35.toInt()); cornerRadius = dp(13).toFloat()
-            setStroke(dp(1), 0x223F51FF)
+        background = android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+            intArrayOf(0xFF1B2B40.toInt(), 0xFF172234.toInt())
+        ).apply {
+            cornerRadius = dp(12).toFloat()
+            setStroke(dp(1), 0x7750BFFF)
         }
-        isClickable = true; isFocusable = true
+        elevation = dp(2).toFloat()
+        isClickable = true
+        isFocusable = true
+        setPadding(dp(3), 0, dp(3), 0)
     }
 
     private fun toggleDnd(button: TextView) {
