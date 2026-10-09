@@ -7,7 +7,6 @@ import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.appwidget.AppWidgetManager
 import android.content.ClipData
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -220,7 +219,7 @@ class OeaSystemToolsActivity : Activity() {
                 Toast.makeText(this@OeaSystemToolsActivity, "Refreshing installed apps and system state…", Toast.LENGTH_SHORT).show()
                 Thread {
                     val refreshedApps = try {
-                        loadInstalledFreezerApps()
+                        loadInstalledFreezerApps(showSystemApps)
                     } catch (_: Exception) {
                         runOnUiThread {
                             loadingApps = false
@@ -392,7 +391,7 @@ class OeaSystemToolsActivity : Activity() {
         // background. The screen stays responsive while large app lists are loaded.
         Thread {
             val loadedApps = try {
-                loadInstalledFreezerApps()
+                loadInstalledFreezerApps(showSystemApps)
             } catch (_: Exception) {
                 runOnUiThread {
                     loadingApps = false
@@ -410,7 +409,7 @@ class OeaSystemToolsActivity : Activity() {
         }.start()
     }
 
-    private fun loadInstalledFreezerApps(): List<OeaAppInfo> =
+    private fun loadInstalledFreezerApps(showSystemApps): List<OeaAppInfo> =
         packageManager.getInstalledApplications(0)
             .filterNot { it.packageName == packageName }
             .map { info ->
@@ -688,7 +687,9 @@ class OeaSystemToolsActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
                     val icon = ImageView(this@OeaSystemToolsActivity).apply {
-                        setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                        setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
+                    runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull()
+                })
                         scaleType = ImageView.ScaleType.FIT_CENTER
                         contentDescription = app.label + " icon"
                     }
