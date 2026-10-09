@@ -1187,28 +1187,32 @@ class OeaGameBoostService : Service() {
     }
 
     private fun closePanel(panel: View) {
-        if (panel.visibility != View.VISIBLE) return
-        // This method only dismisses the panel window. The floating handle is
-        // a separate view and its visibility preference is left untouched.
+        if (panel.visibility != View.VISIBLE && panel.parent == null) return
+
+        // Close only the panel window. Do this synchronously so no delayed
+        // animation callback can race with the handle's independent lifecycle.
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
-        panel.animate()
-            .alpha(0f)
-            .scaleX(0.96f)
-            .scaleY(0.96f)
-            .translationX(dp(12).toFloat())
-            .setDuration(145L)
-            .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
-            .withEndAction {
-                panel.visibility = View.GONE
-                detachPanelWindow(panel)
-                panel.setOnTouchListener(null)
-                // Deliberately do not hide, remove, or alter the floating handle.
-                panel.alpha = 1f
-                panel.scaleX = 1f
-                panel.scaleY = 1f
-                panel.translationX = 0f
-            }.start()
+        panel.setOnTouchListener(null)
+        panel.visibility = View.GONE
+        detachPanelWindow(panel)
+        panel.alpha = 1f
+        panel.scaleX = 1f
+        panel.scaleY = 1f
+        panel.translationX = 0f
+
+        // The floating handle is a separate child/window and must survive this
+        // action. Recover it only if Android detached it unexpectedly; preserve
+        // the user's existing visibility preference.
+        val handleVisible = OeaGameBoostStore.prefs(this)
+            .getBoolean("ram_handle_visible", true)
+        val root = overlay
+        if (handleVisible && activeGame != null &&
+            (root == null || root.parent == null)
+        ) {
+            ensureOverlayForActiveGame()
+            updateOverlay()
+        }
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
