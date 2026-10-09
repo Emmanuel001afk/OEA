@@ -36,6 +36,10 @@ class OeaGameCaptureActivity : Activity() {
             manager.createScreenCaptureIntent()
         }
         runCatching { startActivityForResult(consentIntent, REQ) }.onFailure {
+            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+                .putBoolean("recording", false)
+                .putBoolean("capture_active", false)
+                .apply()
             Toast.makeText(this, "OEA could not start screen capture.", Toast.LENGTH_SHORT).show()
             finish()
         }
