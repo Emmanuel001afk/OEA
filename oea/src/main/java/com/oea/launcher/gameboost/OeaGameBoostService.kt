@@ -742,7 +742,7 @@ class OeaGameBoostService : Service() {
                                 next.gravity = Gravity.TOP or Gravity.START
                                 next.x = (startX + dx.toInt()).coerceIn(bounds[0], bounds[2])
                                 next.y = (startY + dy.toInt()).coerceIn(bounds[1], bounds[3])
-                                runCatching { wm.updateViewLayout(root, next) }
+                                runCatching { wm.updateViewLayout(root, next) }.onFailure { error -> diagnostic(android.util.Log.ERROR, "handle drag updateViewLayout failed=${error.javaClass.name}:${error.message} attached=${root.parent != null}") }
                                 syncPanelToHandle(root)
                             }
                             return true
@@ -821,13 +821,18 @@ class OeaGameBoostService : Service() {
         runCatching {
             wm.addView(wake, params)
             wakeOverlay = wake
+            diagnostic(android.util.Log.INFO, "wake overlay attached visiblePreference=false activeGame=$activeGame")
+        }.onFailure { error ->
+            diagnostic(android.util.Log.ERROR, "wake overlay attach failed=${error.javaClass.name}:${error.message} overlayAttached=${overlay?.parent != null}")
         }
     }
 
     private fun removeWakeOverlay() {
         val wake = wakeOverlay ?: return
         runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(wake) }
+            .onFailure { error -> diagnostic(android.util.Log.ERROR, "wake overlay removeView failed=${error.javaClass.name}:${error.message} attached=${wake.parent != null}") }
         wakeOverlay = null
+        diagnostic(android.util.Log.INFO, "wake overlay removal requested activeGame=$activeGame")
         lastWakeTapAt = 0L
     }
 
@@ -867,7 +872,7 @@ class OeaGameBoostService : Service() {
         params.x = params.x.coerceIn(bounds[0], bounds[2])
         params.y = params.y.coerceIn(bounds[1], bounds[3])
         params.gravity = Gravity.TOP or Gravity.START
-        runCatching { wm.updateViewLayout(root, params) }
+        runCatching { wm.updateViewLayout(root, params) }.onFailure { error -> diagnostic(android.util.Log.ERROR, "handle snap updateViewLayout failed=${error.javaClass.name}:${error.message} attached=${root.parent != null}") }
         syncPanelToHandle(root)
         OeaGameBoostStore.prefs(this).edit()
             .putBoolean("ram_handle_dragged", true)
@@ -1015,10 +1020,14 @@ class OeaGameBoostService : Service() {
         (overlay as? android.widget.LinearLayout)?.getChildAt(0)?.let { applyHandlePalette(it) }
         val root = overlay as? android.widget.LinearLayout
         if (root == null || root.parent == null) {
+            diagnostic(android.util.Log.WARN, "updateOverlay found missing/detached root rootExists=${root != null} rootAttached=${root?.parent != null} activeGame=$activeGame")
             ensureOverlayForActiveGame()
             return
         }
-        val panel = panelView as? android.widget.LinearLayout ?: return
+        val panel = panelView as? android.widget.LinearLayout ?: run {
+            diagnostic(android.util.Log.ERROR, "updateOverlay missing panel view activeGame=$activeGame rootAttached=${root.parent != null}")
+            return
+        }
         val gameName = panel.getChildAt(1) as? TextView ?: return
         val metrics = panel.getChildAt(2) as? TextView ?: return
         val device = panel.getChildAt(3) as? TextView ?: return
@@ -1325,6 +1334,8 @@ class OeaGameBoostService : Service() {
         panelParams.y = targetY
         runCatching {
             (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(panel, panelParams)
+        }.onFailure { error ->
+            diagnostic(android.util.Log.ERROR, "syncPanelToHandle updateViewLayout failed=${error.javaClass.name}:${error.message} panelAttached=${panel.parent != null} rootAttached=${root.parent != null}")
         }
     }
 
@@ -1450,6 +1461,7 @@ class OeaGameBoostService : Service() {
         if (nextFlags != params.flags) {
             params.flags = nextFlags
             runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(root, params) }
+                .onFailure { error -> diagnostic(android.util.Log.ERROR, "setKeepScreenOn updateViewLayout failed=${error.javaClass.name}:${error.message} enabled=$enabled attached=${root.parent != null}") }
         }
     }
 
@@ -1551,7 +1563,7 @@ class OeaGameBoostService : Service() {
             val fallback = fallbackStat?.packageName
             if (fallback != null) {
                 lastKnownForegroundPackage = fallback
-                lastForegroundEventAt = fallbackStat.lastTimeUsed
+                lastForegroundEventAt = fallbackStat?.lastTimeUsed ?: 0L
                 lastForegroundSource = "usage-stats-bootstrap"
             }
             fallback
