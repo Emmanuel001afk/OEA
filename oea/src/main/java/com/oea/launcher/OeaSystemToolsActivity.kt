@@ -134,7 +134,7 @@ class OeaSystemToolsActivity : Activity() {
 
     private fun showFreezer() {
         val backend = OeaAppFreezer.backend(this)
-        val box = base("App Freezer", "Manage apps available in OEA. Freezing suspends an app; it does not uninstall it or erase its data.")
+        val box = base("App Freezer", "Freeze or restore installed apps. Freezing keeps app data and does not uninstall the app.")
 
         val authorityTitle = when (backend) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "Freezer access  •  Device owner"
@@ -250,15 +250,15 @@ class OeaSystemToolsActivity : Activity() {
             isFocusable = true
             setOnClickListener { action() }
         }
-        selectionActions.addView(freezerControl("SELECT VISIBLE") {
+        selectionActions.addView(freezerControl("Select visible") {
             selectedPackages.addAll(visiblePackages)
             rerender?.invoke()
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(4) })
-        selectionActions.addView(freezerControl("CLEAR") {
+        selectionActions.addView(freezerControl("Clear") {
             selectedPackages.clear()
             rerender?.invoke()
         }, LinearLayout.LayoutParams(0, dp(38), 0.65f).apply { leftMargin = dp(2); rightMargin = dp(4) })
-        selectionActions.addView(freezerControl("REFRESH STATE") {
+        selectionActions.addView(freezerControl("Refresh") {
             val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
             if (activeBackend == OeaAppFreezer.Backend.NONE) {
                 Toast.makeText(this@OeaSystemToolsActivity, "No device-owner or root authority is available to verify suspension state.", Toast.LENGTH_LONG).show()
@@ -347,8 +347,8 @@ class OeaSystemToolsActivity : Activity() {
                 }.start()
             }
         }
-        bulkActions.addView(bulkButton("FREEZE SELECTED", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
-        bulkActions.addView(bulkButton("RESTORE SELECTED", false), LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
+        bulkActions.addView(bulkButton("Freeze selected", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        bulkActions.addView(bulkButton("Restore selected", false), LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
         box.addView(bulkActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         box.addView(list, LinearLayout.LayoutParams(-1, -2))
@@ -1397,15 +1397,7 @@ class OeaSystemToolsActivity : Activity() {
                     setTextColor(textColor())
                 })
                 addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = app.packageName
-                    textSize = 10f
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                    setTextColor(mutedColor())
-                    setPadding(0, dp(2), 0, 0)
-                })
-                addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = if (frozen) "FROZEN" else "NOT FROZEN"
+                    text = if (frozen) "Frozen" else "Ready to freeze"
                     textSize = 10f
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     setTextColor(if (frozen) Color.rgb(65, 174, 125) else mutedColor())
@@ -1414,7 +1406,7 @@ class OeaSystemToolsActivity : Activity() {
             }, LinearLayout.LayoutParams(0, -2, 1f))
 
             addView(TextView(this@OeaSystemToolsActivity).apply {
-                text = if (frozen) "RESTORE" else "FREEZE"
+                text = if (frozen) "Restore" else "Freeze"
                 textSize = 10f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER
