@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.app.usage.UsageStatsManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -17,13 +18,18 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
+import android.os.Environment
 import android.provider.Settings
+import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 
 class OeaGameBoostService : Service() {
@@ -129,6 +135,52 @@ class OeaGameBoostService : Service() {
         private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     }
 
+    private val diagnosticWriteLock = Any()
+    private val diagnosticFileName = "OEA-GameBoost-Diagnostics.txt"
+
+    /**
+     * Writes the same targeted messages to Android Logcat and a user-accessible
+     * Downloads file, so diagnostics can be shared without a computer or ADB.
+     */
+    private fun diagnostic(priority: Int, message: String) {
+        android.util.Log.println(priority, "OeaGameBoost", message)
+        synchronized(diagnosticWriteLock) {
+            runCatching {
+                val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
+                val line = "$stamp ${if (priority >= android.util.Log.WARN) "WARN" else "INFO"} $message\\n"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                    val existing = contentResolver.query(
+                        collection,
+                        arrayOf(MediaStore.Downloads._ID),
+                        "${MediaStore.Downloads.DISPLAY_NAME}=?",
+                        arrayOf(diagnosticFileName),
+                        null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) android.content.ContentUris.withAppendedId(
+                            collection,
+                            cursor.getLong(0)
+                        ) else null
+                    }
+                    val uri = existing ?: contentResolver.insert(
+                        collection,
+                        ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, diagnosticFileName)
+                            put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                        }
+                    )
+                    uri?.let { contentResolver.openOutputStream(it, "wa")?.bufferedWriter()?.use { writer -> writer.append(line) } }
+                } else {
+                    val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: filesDir
+                    java.io.File(directory, diagnosticFileName).appendText(line)
+                }
+            }.onFailure { error ->
+                android.util.Log.w("OeaGameBoost", "Could not save diagnostic file: ${error.javaClass.simpleName}")
+            }
+        }
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var overlay: View? = null
     private var panelView: View? = null
@@ -219,7 +271,7 @@ class OeaGameBoostService : Service() {
                             updateOverlay()
                         } else {
                             val endingGame = activeGame
-                            android.util.Log.w("OeaGameBoost", "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples")
+                            diagnostic(android.util.Log.WARN, "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples")
                             activeGame = null
                             nonGameForegroundSamples = 0
                             lastNonGamePackage = null
@@ -263,7 +315,7 @@ class OeaGameBoostService : Service() {
     }
 
     override fun onDestroy() {
-        android.util.Log.w("OeaGameBoost", "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
+        diagnostic(android.util.Log.WARN, "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
         handler.removeCallbacksAndMessages(null)
         activeGame?.let(::deactivate)
         removeWakeOverlay()
@@ -295,7 +347,7 @@ class OeaGameBoostService : Service() {
         }
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
-        android.util.Log.w("OeaGameBoost", "deactivate called for=$packageName activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
+        diagnostic(android.util.Log.WARN, "deactivate called for=$packageName activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
         restoreDnd()
         setKeepScreenOn(false)
         removeWakeOverlay()
@@ -339,7 +391,7 @@ class OeaGameBoostService : Service() {
         val structureHealthy = root != null && handle != null && handleLabel != null
         if (current != null && current.parent != null && structureHealthy) return
 
-        android.util.Log.w("OeaGameBoost", "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} structureHealthy=$structureHealthy panelAttached=${panelView?.parent != null}")
+        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} structureHealthy=$structureHealthy panelAttached=${panelView?.parent != null}")
         if (current != null) {
             panelView?.let { panel ->
                 panel.animate().cancel()
@@ -445,7 +497,7 @@ class OeaGameBoostService : Service() {
             }
             setPadding(dp(8), 0, dp(8), 0)
             setOnClickListener {
-                android.util.Log.i("OeaGameBoost", "Close Panel button clicked activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panel.parent != null}")
+                diagnostic(android.util.Log.INFO, "Close Panel button clicked activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panel.parent != null}")
                 closePanel(panel)
             }
         }
@@ -1233,7 +1285,7 @@ class OeaGameBoostService : Service() {
     }
 
     private fun closePanel(panel: View) {
-        android.util.Log.i("OeaGameBoost", "closePanel entered visibility=${panel.visibility} panelAttached=${panel.parent != null} activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
+        diagnostic(android.util.Log.INFO, "closePanel entered visibility=${panel.visibility} panelAttached=${panel.parent != null} activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
         if (panel.visibility != View.VISIBLE && panel.parent == null) return
         // Dismiss only the panel window. Never call removeOverlay() here:
         // the floating handle is an independent window and remains available.
@@ -1249,7 +1301,7 @@ class OeaGameBoostService : Service() {
         panel.scaleX = 1f
         panel.scaleY = 1f
         panel.translationX = 0f
-        android.util.Log.i("OeaGameBoost", "closePanel completed activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panel.parent != null} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)}")
+        diagnostic(android.util.Log.INFO, "closePanel completed activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panel.parent != null} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)}")
         // Deliberately do not call ensureOverlayForActiveGame() here.
         // That recovery function is allowed to remove and rebuild the entire
         // overlay root. A panel-dismiss action must never invoke root recovery:
