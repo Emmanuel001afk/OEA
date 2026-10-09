@@ -118,7 +118,7 @@ class OeaSystemToolsActivity : Activity() {
     private fun showFreezer() {
         OeaAppFreezer.syncActualState(this)
         val backend = OeaAppFreezer.backend(this)
-        val box = base("App Freezer", "Manage installed apps. Freezing uses Android package suspension; it does not uninstall apps or erase their data.")
+        val box = base("App Freezer", "Manage apps available in OEA. Freezing suspends an app; it does not uninstall it or erase its data.")
 
         val authorityTitle = when (backend) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "Freezer access  •  Device owner"
