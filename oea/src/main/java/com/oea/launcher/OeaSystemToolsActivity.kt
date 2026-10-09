@@ -409,9 +409,14 @@ class OeaSystemToolsActivity : Activity() {
         }.start()
     }
 
-    private fun loadInstalledFreezerApps(showSystemApps): List<OeaAppInfo> =
+    private fun loadInstalledFreezerApps(includeSystemApps: Boolean = false): List<OeaAppInfo> =
         packageManager.getInstalledApplications(0)
             .filterNot { it.packageName == packageName }
+            .filter { info ->
+                includeSystemApps ||
+                    (info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 ||
+                    (info.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+            }
             .map { info ->
                 OeaAppInfo(
                     packageName = info.packageName,
@@ -784,7 +789,9 @@ class OeaSystemToolsActivity : Activity() {
                     }
                 }
                 val icon = ImageView(this).apply {
-                    setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                    setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
+                    runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull()
+                })
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = app.label + " icon"
                 }
