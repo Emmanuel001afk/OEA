@@ -120,9 +120,14 @@ class OeaGameCaptureService : Service() {
 
     private fun recordingSize(): Pair<Int, Int> {
         val (sourceWidth, sourceHeight) = size()
-        val scale = minOf(1f, 1920f / sourceWidth.toFloat(), 1080f / sourceHeight.toFloat())
-        val width = ((sourceWidth * scale).toInt() and 1.inv()).coerceAtLeast(2)
-        val height = ((sourceHeight * scale).toInt() and 1.inv()).coerceAtLeast(2)
+        val safeWidth = sourceWidth.coerceAtLeast(16)
+        val safeHeight = sourceHeight.coerceAtLeast(16)
+        val scale = minOf(1f, 1920f / safeWidth.toFloat(), 1080f / safeHeight.toFloat())
+        // Align both encoder dimensions to 16-pixel boundaries. This is broadly
+        // compatible with hardware AVC encoders while keeping the screen ratio
+        // nearly unchanged and the recorder/display dimensions identical.
+        val width = (((safeWidth * scale).toInt() / 16) * 16).coerceAtLeast(16)
+        val height = (((safeHeight * scale).toInt() / 16) * 16).coerceAtLeast(16)
         return width to height
     }
 
