@@ -194,9 +194,17 @@ class OeaGameBoostService : Service() {
     private var lastKnownForegroundPackage: String? = null
     private var nonGameForegroundSamples = 0
     private var lastNonGamePackage: String? = null
+    private var diagnosticHeartbeatTicks = 0L
+    private var lastMonitorErrorSignature: String? = null
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
+            diagnosticHeartbeatTicks++
+            if (diagnosticHeartbeatTicks % 10L == 0L) {
+                val root = overlay
+                val handle = ((root as? android.widget.LinearLayout)?.getChildAt(0) as? android.view.ViewGroup)
+                diagnostic(android.util.Log.INFO, "heartbeat tick=$diagnosticHeartbeatTicks enabled=${OeaGameBoostStore.enabled(this@OeaGameBoostService)} usageAccess=${isUsageAccessGranted()} overlayExists=${root != null} overlayAttached=${root?.parent != null} overlayVisibility=${root?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} handleAttached=${handle?.parent != null} panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} wakeOverlayAttached=${wakeOverlay?.parent != null} overlayPermission=${Settings.canDrawOverlays(this@OeaGameBoostService)} activeGame=$activeGame lastForeground=$lastKnownForegroundPackage")
+            }
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService)) {
                 stopSelf()
                 return
@@ -279,12 +287,21 @@ class OeaGameBoostService : Service() {
                         }
                     }
                 }
-            } catch (_: Throwable) {
-                // A transient UsageStats, package-manager or window exception
-                // must not silently kill the polling loop or discard the handle.
+            } catch (error: Throwable) {
+                // Record errors that were previously swallowed; avoid repeating the same
+                // exception to the Downloads file every second.
+                val signature = "${error.javaClass.name}:${error.message}"
+                if (signature != lastMonitorErrorSignature) {
+                    lastMonitorErrorSignature = signature
+                    diagnostic(android.util.Log.ERROR, "foreground-monitor exception=$signature stack=${android.util.Log.getStackTraceString(error).take(1800)}")
+                }
                 activeGame?.let {
-                    ensureOverlayForActiveGame()
-                    updateOverlay()
+                    runCatching { ensureOverlayForActiveGame() }.onFailure { recoveryError ->
+                        diagnostic(android.util.Log.ERROR, "overlay recovery exception=${recoveryError.javaClass.name}:${recoveryError.message}")
+                    }
+                    runCatching { updateOverlay() }.onFailure { updateError ->
+                        diagnostic(android.util.Log.ERROR, "updateOverlay exception=${updateError.javaClass.name}:${updateError.message}")
+                    }
                 }
             } finally {
                 if (OeaGameBoostStore.enabled(this@OeaGameBoostService)) {
@@ -295,6 +312,7 @@ class OeaGameBoostService : Service() {
     }
     override fun onCreate() {
         super.onCreate()
+        diagnostic(android.util.Log.WARN, "service onCreate sdk=${Build.VERSION.SDK_INT} process=${android.os.Process.myPid()} overlayPermission=${Settings.canDrawOverlays(this)} usageAccess=${isUsageAccessGranted()} enabled=${OeaGameBoostStore.enabled(this)}")
         createChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.sym_def_app_icon)
             .setContentTitle("OEA RAM").setContentText("Game session active").setOngoing(true).build()
@@ -303,6 +321,7 @@ class OeaGameBoostService : Service() {
         handler.post(tick)
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        diagnostic(android.util.Log.INFO, "service onStartCommand action=${intent?.action} flags=$flags startId=$startId activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
         if (intent?.action == ACTION_REFRESH) {
             // Settings edits should refresh the existing session, not tear down
             // the WindowManager handle by stopping and recreating this service.
@@ -391,13 +410,14 @@ class OeaGameBoostService : Service() {
         val structureHealthy = root != null && handle != null && handleLabel != null
         if (current != null && current.parent != null && structureHealthy) return
 
-        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} structureHealthy=$structureHealthy panelExists=${panelView != null}")
+        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} rootVisibility=${current?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} structureHealthy=$structureHealthy panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} overlayPermission=${Settings.canDrawOverlays(this)}")
         if (current != null) {
             panelView?.let { panel ->
                 panel.animate().cancel()
                 detachPanelWindow(panel)
             }
             runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(current) }
+                .onFailure { error -> diagnostic(android.util.Log.ERROR, "overlay recovery removeView failed=${error.javaClass.name}:${error.message}") }
             overlay = null
             panelView = null
         }
@@ -581,6 +601,7 @@ class OeaGameBoostService : Service() {
         runCatching {
             wm.addView(root, params)
             overlay = root
+            diagnostic(android.util.Log.INFO, "overlay added game=$packageName rootAttached=${root.parent != null} handleVisibility=${handle.visibility} handleAlpha=${handle.alpha} paramsType=${params.type} flags=${params.flags}")
 
                 handle.setOnTouchListener(object : View.OnTouchListener {
                 private var downRawX = 0f
@@ -662,7 +683,7 @@ class OeaGameBoostService : Service() {
             applyHandlePalette(handle)
             applyPanelPalette(panel)
             updateOverlay()
-        }
+        }.onFailure { error -> diagnostic(android.util.Log.ERROR, "overlay creation failed game=$packageName error=${error.javaClass.name}:${error.message} stack=${android.util.Log.getStackTraceString(error).take(1800)}") }
     }
 
     private fun ensureWakeOverlay() {
@@ -1157,9 +1178,11 @@ class OeaGameBoostService : Service() {
         }
         return runCatching {
             wm.addView(panel, panelParams)
+            diagnostic(android.util.Log.INFO, "panel window attached panelParent=${panel.parent != null} rootAttached=${root.parent != null} activeGame=$activeGame")
             syncPanelToHandle(root)
             true
-        }.getOrElse {
+        }.getOrElse { error ->
+            diagnostic(android.util.Log.ERROR, "panel window attach failed=${error.javaClass.name}:${error.message} stack=${android.util.Log.getStackTraceString(error).take(1800)}")
             panel.setOnTouchListener(null)
             false
         }
@@ -1285,23 +1308,28 @@ class OeaGameBoostService : Service() {
     }
 
     private fun closePanel(panel: View) {
-        diagnostic(android.util.Log.INFO, "closePanel entered visibility=${panel.visibility} panelAttached=${panel.parent != null} activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
-        if (panel.visibility != View.VISIBLE && panel.parent == null) return
-        // Dismiss only the panel window. Never call removeOverlay() here:
-        // the floating handle is an independent window and remains available.
-        stopPanelColorAnimation(panel)
-        panel.animate().cancel()
-        panel.clearAnimation()
-        panel.alpha = 0f
-        panel.visibility = View.GONE
-        // Keep this window attached and its outside-touch listener intact.
-        // Closing the panel must not add/remove WindowManager windows or affect
-        // the independent floating handle and active-game session.
-        panel.alpha = 1f
-        panel.scaleX = 1f
-        panel.scaleY = 1f
-        panel.translationX = 0f
-        diagnostic(android.util.Log.INFO, "closePanel completed activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panel.parent != null} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)}")
+        diagnostic(android.util.Log.INFO, "closePanel entered visibility=${panel.visibility} panelAttached=${panel.parent != null} activeGame=$activeGame overlayAttached=${overlay?.parent != null} overlayVisibility=${overlay?.visibility}")
+        if (panel.visibility != View.VISIBLE && panel.parent == null) {
+            diagnostic(android.util.Log.INFO, "closePanel no-op already hidden and detached activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
+            return
+        }
+        // Panel-dismiss must not be able to abort halfway through and leave an
+        // unrecorded failure. Isolate optional animation/palette cleanup, then
+        // always force the panel hidden while leaving the handle window untouched.
+        runCatching { stopPanelColorAnimation(panel) }.onFailure { error ->
+            diagnostic(android.util.Log.ERROR, "closePanel palette cleanup failed=${error.javaClass.name}:${error.message}")
+        }
+        runCatching { panel.animate().cancel() }.onFailure { error ->
+            diagnostic(android.util.Log.ERROR, "closePanel animation cancel failed=${error.javaClass.name}:${error.message}")
+        }
+        runCatching { panel.clearAnimation() }.onFailure { error ->
+            diagnostic(android.util.Log.ERROR, "closePanel clearAnimation failed=${error.javaClass.name}:${error.message}")
+        }
+        runCatching { panel.alpha = 0f; panel.visibility = View.GONE }
+            .onFailure { error -> diagnostic(android.util.Log.ERROR, "closePanel hide failed=${error.javaClass.name}:${error.message}") }
+        runCatching { panel.alpha = 1f; panel.scaleX = 1f; panel.scaleY = 1f; panel.translationX = 0f }
+            .onFailure { error -> diagnostic(android.util.Log.ERROR, "closePanel reset animation properties failed=${error.javaClass.name}:${error.message}") }
+        diagnostic(android.util.Log.INFO, "closePanel completed activeGame=$activeGame overlayAttached=${overlay?.parent != null} overlayVisibility=${overlay?.visibility} panelAttached=${panel.parent != null} panelVisibility=${panel.visibility} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)} handleAlpha=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.alpha)}")
         // Deliberately do not call ensureOverlayForActiveGame() here.
         // That recovery function is allowed to remove and rebuild the entire
         // overlay root. A panel-dismiss action must never invoke root recovery:
@@ -1356,16 +1384,19 @@ class OeaGameBoostService : Service() {
     }
 
     private fun removeOverlay() {
+        diagnostic(android.util.Log.WARN, "removeOverlay entered activeGame=$activeGame overlayExists=${overlay != null} overlayAttached=${overlay?.parent != null} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)} panelExists=${panelView != null} panelAttached=${panelView?.parent != null}")
         panelView?.let { panel ->
-            panel.animate().cancel()
+            runCatching { panel.animate().cancel() }.onFailure { error -> diagnostic(android.util.Log.ERROR, "removeOverlay panel animation cancel failed=${error.javaClass.name}:${error.message}") }
             detachPanelWindow(panel)
         }
         overlay?.let { root ->
-            root.animate().cancel()
+            runCatching { root.animate().cancel() }.onFailure { error -> diagnostic(android.util.Log.ERROR, "removeOverlay root animation cancel failed=${error.javaClass.name}:${error.message}") }
             runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(root) }
+                .onFailure { error -> diagnostic(android.util.Log.ERROR, "removeOverlay removeView failed=${error.javaClass.name}:${error.message} rootAttached=${root.parent != null}") }
         }
         overlay = null
         panelView = null
+        diagnostic(android.util.Log.WARN, "removeOverlay completed activeGame=$activeGame overlayExists=${overlay != null} panelExists=${panelView != null}")
     }
     private fun foregroundPackage(): String? {
         val usm = getSystemService(UsageStatsManager::class.java) ?: return lastKnownForegroundPackage
