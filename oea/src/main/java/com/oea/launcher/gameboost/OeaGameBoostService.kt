@@ -147,7 +147,7 @@ class OeaGameBoostService : Service() {
         synchronized(diagnosticWriteLock) {
             runCatching {
                 val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
-                val line = "$stamp ${if (priority >= android.util.Log.WARN) "WARN" else "INFO"} $message\\n"
+                val line = "$stamp ${if (priority >= android.util.Log.WARN) "WARN" else "INFO"} $message\n"
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
                     val existing = contentResolver.query(
