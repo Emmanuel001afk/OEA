@@ -156,6 +156,7 @@ class OeaSystemToolsActivity : Activity() {
         val selectedPackages = linkedSetOf<String>()
         var allApps: List<OeaAppInfo> = emptyList()
         var loadingApps = true
+        var freezerOperationRunning = false
         var visiblePackages: List<String> = emptyList()
         var rerender: (() -> Unit)? = null
         val filters = LinearLayout(this).apply {
@@ -269,19 +270,35 @@ class OeaSystemToolsActivity : Activity() {
                     Toast.makeText(this@OeaSystemToolsActivity, "Select one or more apps first.", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                if (OeaAppFreezer.backend(this@OeaSystemToolsActivity) == OeaAppFreezer.Backend.NONE) {
-                    Toast.makeText(this@OeaSystemToolsActivity, "Freezer authority is unavailable. Use the access row above.", Toast.LENGTH_LONG).show()
+                if (freezerOperationRunning) {
+                    Toast.makeText(this@OeaSystemToolsActivity, "A freezer operation is already running.", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                var succeeded = 0
-                var failed = 0
-                chosen.forEach { pkg ->
-                    val result = OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, pkg, frozenState)
-                    if (result.success) succeeded++ else failed++
-                }
+                freezerOperationRunning = true
                 selectedPackages.clear()
-                Toast.makeText(this@OeaSystemToolsActivity, "$succeeded apps updated, $failed failed.", Toast.LENGTH_LONG).show()
                 rerender?.invoke()
+                Toast.makeText(this@OeaSystemToolsActivity, "Updating ${chosen.size} apps…", Toast.LENGTH_SHORT).show()
+                Thread {
+                    val authority = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
+                    var succeeded = 0
+                    var failed = 0
+                    if (authority == OeaAppFreezer.Backend.NONE) {
+                        failed = chosen.size
+                    } else {
+                        chosen.forEach { pkg ->
+                            val result = OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, pkg, frozenState)
+                            if (result.success) succeeded++ else failed++
+                        }
+                    }
+                    runOnUiThread {
+                        freezerOperationRunning = false
+                        val message = if (authority == OeaAppFreezer.Backend.NONE)
+                            "Freezer authority is unavailable. Use the access row above."
+                        else "$succeeded apps updated, $failed failed."
+                        Toast.makeText(this@OeaSystemToolsActivity, message, Toast.LENGTH_LONG).show()
+                        rerender?.invoke()
+                    }
+                }.start()
             }
         }
         bulkActions.addView(bulkButton("FREEZE SELECTED", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
@@ -337,13 +354,24 @@ class OeaSystemToolsActivity : Activity() {
                     if (checked) selectedPackages.add(app.packageName) else selectedPackages.remove(app.packageName)
                     rerender?.invoke()
                 }) {
-                    val activeBackend = OeaAppFreezer.backend(this)
-                    if (activeBackend == OeaAppFreezer.Backend.NONE) {
-                        Toast.makeText(this, "Freezer authority is unavailable. Use the access row above for setup.", Toast.LENGTH_LONG).show()
+                    if (freezerOperationRunning) {
+                        Toast.makeText(this@OeaSystemToolsActivity, "A freezer operation is already running.", Toast.LENGTH_SHORT).show()
                     } else {
-                        val result = OeaAppFreezer.setFrozen(this, app.packageName, !isFrozen)
-                        Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
-                        if (result.success) rerender?.invoke()
+                        freezerOperationRunning = true
+                        Toast.makeText(this@OeaSystemToolsActivity, if (isFrozen) "Restoring app…" else "Freezing app…", Toast.LENGTH_SHORT).show()
+                        Thread {
+                            val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
+                            val result = if (activeBackend == OeaAppFreezer.Backend.NONE) {
+                                OeaAppFreezer.Result(false, "Freezer authority is unavailable. Use the access row above for setup.")
+                            } else {
+                                OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, app.packageName, !isFrozen)
+                            }
+                            runOnUiThread {
+                                freezerOperationRunning = false
+                                Toast.makeText(this@OeaSystemToolsActivity, result.message, Toast.LENGTH_SHORT).show()
+                                if (result.success) rerender?.invoke()
+                            }
+                        }.start()
                     }
                 }
             }
