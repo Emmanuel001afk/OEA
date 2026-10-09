@@ -116,41 +116,189 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun showFreezer() {
-        val box = base("App Freezer", "OEA uses Android package suspension when device-owner authority is available, with root as a fallback.")
         OeaAppFreezer.syncActualState(this)
         val backend = OeaAppFreezer.backend(this)
+        val box = base("App Freezer", "Manage apps available in OEA. Freezing suspends an app; it does not uninstall it or erase its data.")
+
         val authorityTitle = when (backend) {
-            OeaAppFreezer.Backend.DEVICE_OWNER -> "Device-owner authority active"
-            OeaAppFreezer.Backend.ROOT -> "Root authority active"
-            OeaAppFreezer.Backend.NONE -> "Freezer authority required"
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "Freezer access  •  Device owner"
+            OeaAppFreezer.Backend.ROOT -> "Freezer access  •  Root"
+            OeaAppFreezer.Backend.NONE -> "Freezer access required"
         }
         val authoritySubtitle = when (backend) {
-            OeaAppFreezer.Backend.DEVICE_OWNER -> "Android package suspension is available. Tap any app below to freeze or restore it."
-            OeaAppFreezer.Backend.ROOT -> "OEA can use root package suspension. Tap any app below to freeze or restore it."
-            OeaAppFreezer.Backend.NONE -> "Not approved. OEA cannot freeze apps until Android grants device-owner/root authority."
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "System suspension is available on this device."
+            OeaAppFreezer.Backend.ROOT -> "Root backend detected. App suspension will be attempted per app."
+            OeaAppFreezer.Backend.NONE -> "Apps cannot be frozen until Android device-owner or root authority is available."
         }
         row(box, authorityTitle, authoritySubtitle) {
-            if (backend == OeaAppFreezer.Backend.NONE) {
-                requestDeviceOwner()
+            if (OeaAppFreezer.backend(this) == OeaAppFreezer.Backend.NONE) requestDeviceOwner()
+            else Toast.makeText(this, authoritySubtitle, Toast.LENGTH_SHORT).show()
+        }
+
+        val searchField = EditText(this).apply {
+            hint = "Search apps or package names"
+            setSingleLine(true)
+            textSize = 14f
+            setTextColor(textColor())
+            setHintTextColor(mutedColor())
+            setPadding(dp(16), 0, dp(16), 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(surfaceColor())
             }
         }
-        addDivider(box)
-        val frozen = OeaAppFreezer.frozenPackages(this)
-        apps.filterNot { it.packageName == packageName }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
-            .forEach { app ->
+        box.addView(searchField, LinearLayout.LayoutParams(-1, dp(48)).apply {
+            topMargin = dp(12)
+            bottomMargin = dp(8)
+        })
+
+        var currentQuery = ""
+        var currentFilter = "all"
+        val selectedPackages = linkedSetOf<String>()
+        var rerender: (() -> Unit)? = null
+        val filters = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val filterViews = linkedMapOf<String, TextView>()
+        listOf("all" to "All apps", "frozen" to "Frozen", "active" to "Not frozen").forEach { (mode, label) ->
+            val chip = TextView(this).apply {
+                text = label
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(dp(12), dp(9), dp(12), dp(9))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    currentFilter = mode
+                    rerender?.invoke()
+                }
+            }
+            filterViews[mode] = chip
+            filters.addView(chip, LinearLayout.LayoutParams(0, dp(38), 1f).apply {
+                leftMargin = dp(2)
+                rightMargin = dp(2)
+            })
+        }
+        box.addView(filters, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+
+        val summary = TextView(this).apply {
+            textSize = 12f
+            setTextColor(mutedColor())
+            setPadding(dp(2), dp(4), dp(2), dp(8))
+        }
+        box.addView(summary)
+        val bulkActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun bulkButton(label: String, frozenState: Boolean) = TextView(this).apply {
+            text = label
+            textSize = 11f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(11), dp(10), dp(11))
+            setTextColor(textColor())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(surfaceColor())
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val chosen = selectedPackages.toList()
+                if (chosen.isEmpty()) {
+                    Toast.makeText(this@OeaSystemToolsActivity, "Select one or more apps first.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (OeaAppFreezer.backend(this@OeaSystemToolsActivity) == OeaAppFreezer.Backend.NONE) {
+                    Toast.makeText(this@OeaSystemToolsActivity, "Freezer authority is unavailable. Use the access row above.", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                var succeeded = 0
+                var failed = 0
+                chosen.forEach { pkg ->
+                    val result = OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, pkg, frozenState)
+                    if (result.success) succeeded++ else failed++
+                }
+                selectedPackages.clear()
+                Toast.makeText(this@OeaSystemToolsActivity, "$succeeded apps updated, $failed failed.", Toast.LENGTH_LONG).show()
+                rerender?.invoke()
+            }
+        }
+        bulkActions.addView(bulkButton("FREEZE SELECTED", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        bulkActions.addView(bulkButton("RESTORE SELECTED", false), LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
+        box.addView(bulkActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(list, LinearLayout.LayoutParams(-1, -2))
+
+        fun renderApps() {
+            OeaAppFreezer.syncActualState(this)
+            val allApps = apps.filterNot { it.packageName == packageName }
+                .distinctBy { it.packageName }
+                .sortedBy { it.label.lowercase() }
+            val frozen = OeaAppFreezer.frozenPackages(this)
+            val shown = allApps.filter { app ->
+                val matchesQuery = currentQuery.isBlank() ||
+                    app.label.contains(currentQuery, ignoreCase = true) ||
+                    app.packageName.contains(currentQuery, ignoreCase = true)
+                val matchesFilter = when (currentFilter) {
+                    "frozen" -> frozen.contains(app.packageName)
+                    "active" -> !frozen.contains(app.packageName)
+                    else -> true
+                }
+                matchesQuery && matchesFilter
+            }
+            summary.text = "${frozen.size} frozen  •  ${allApps.size} apps  •  ${shown.size} shown  •  ${selectedPackages.size} selected"
+            filterViews.forEach { (mode, chip) ->
+                val selected = mode == currentFilter
+                chip.setTextColor(if (selected) textColor() else mutedColor())
+                chip.background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(18).toFloat()
+                    setColor(if (selected) surfaceColor() else backgroundColor())
+                    if (selected) setStroke(dp(1), if (lightUi) Color.rgb(125, 135, 155) else Color.rgb(75, 88, 110))
+                }
+            }
+            list.removeAllViews()
+            if (shown.isEmpty()) {
+                list.addView(TextView(this).apply {
+                    text = if (currentQuery.isNotBlank()) "No apps match this search." else if (currentFilter == "frozen") "No frozen apps."
+                    else "No apps to show."
+                    textSize = 14f
+                    setTextColor(mutedColor())
+                    gravity = Gravity.CENTER
+                    setPadding(dp(16), dp(28), dp(16), dp(28))
+                })
+                return
+            }
+            shown.forEach { app ->
                 val isFrozen = frozen.contains(app.packageName)
-                freezerRow(box, app, isFrozen) {
-                    if (backend == OeaAppFreezer.Backend.NONE) {
-                        Toast.makeText(this, "No freezer authority. Use the Authority row above to provision device-owner/root access.", Toast.LENGTH_LONG).show()
+                freezerRow(list, app, isFrozen, selectedPackages.contains(app.packageName), { checked ->
+                    if (checked) selectedPackages.add(app.packageName) else selectedPackages.remove(app.packageName)
+                    rerender?.invoke()
+                }) {
+                    val activeBackend = OeaAppFreezer.backend(this)
+                    if (activeBackend == OeaAppFreezer.Backend.NONE) {
+                        Toast.makeText(this, "Freezer authority is unavailable. Use the access row above for setup.", Toast.LENGTH_LONG).show()
                     } else {
                         val result = OeaAppFreezer.setFrozen(this, app.packageName, !isFrozen)
                         Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
-                        showFreezer()
+                        if (result.success) rerender?.invoke()
                     }
                 }
             }
+        }
+
+        rerender = { renderApps() }
+        searchField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                currentQuery = s?.toString().orEmpty()
+                rerender?.invoke()
+            }
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+        })
+        renderApps()
         setRoot(box)
     }
 
@@ -1003,43 +1151,86 @@ class OeaSystemToolsActivity : Activity() {
         setSingleLine(true)
     }
 
-    private fun freezerRow(box: LinearLayout, app: OeaAppInfo, frozen: Boolean, action: () -> Unit) {
-        fun px(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun freezerRow(
+        box: LinearLayout,
+        app: OeaAppInfo,
+        frozen: Boolean,
+        selected: Boolean,
+        onSelectionChanged: (Boolean) -> Unit,
+        action: () -> Unit,
+    ) {
         box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(14, 10, 14, 10)
+            setPadding(dp(12), dp(9), dp(10), dp(9))
             background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 20f
+                cornerRadius = dp(18).toFloat()
                 setColor(surfaceColor())
             }
             isClickable = true
             isFocusable = true
-            contentDescription = if (frozen) app.label + " frozen, tap to restore" else app.label + " not frozen, tap to freeze"
+            contentDescription = if (frozen) app.label + " frozen, tap Restore" else app.label + " not frozen, tap Freeze"
             setOnClickListener { action() }
+
+            val selector = android.widget.CheckBox(this@OeaSystemToolsActivity).apply {
+                isChecked = selected
+                buttonTintList = android.content.res.ColorStateList.valueOf(if (selected) Color.rgb(65, 174, 125) else mutedColor())
+                contentDescription = "Select ${app.label} for bulk actions"
+                setOnClickListener { onSelectionChanged(isChecked) }
+            }
+            addView(selector, LinearLayout.LayoutParams(dp(30), dp(42)).apply { rightMargin = dp(3) })
 
             val iconView = ImageView(this@OeaSystemToolsActivity).apply {
                 setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                scaleType = ImageView.ScaleType.FIT_CENTER
                 contentDescription = app.label + " icon"
             }
-            addView(iconView, LinearLayout.LayoutParams(px(46), px(46)).apply { rightMargin = px(12) })
+            addView(iconView, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(11) })
 
             addView(LinearLayout(this@OeaSystemToolsActivity).apply {
                 orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
                 addView(TextView(this@OeaSystemToolsActivity).apply {
                     text = app.label
-                    textSize = 16f
+                    textSize = 14f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                     setTextColor(textColor())
                 })
                 addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = if (frozen) "FROZEN • tap to restore" else "Tap to freeze"
-                    textSize = 12f
-                    setTextColor(if (frozen) textColor() else mutedColor())
+                    text = app.packageName
+                    textSize = 10f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setTextColor(mutedColor())
+                    setPadding(0, dp(2), 0, 0)
+                })
+                addView(TextView(this@OeaSystemToolsActivity).apply {
+                    text = if (frozen) "FROZEN" else "NOT FROZEN"
+                    textSize = 10f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setTextColor(if (frozen) Color.rgb(65, 174, 125) else mutedColor())
+                    setPadding(0, dp(3), 0, 0)
                 })
             }, LinearLayout.LayoutParams(0, -2, 1f))
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(7) })
+
+            addView(TextView(this@OeaSystemToolsActivity).apply {
+                text = if (frozen) "RESTORE" else "FREEZE"
+                textSize = 10f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(dp(9), dp(9), dp(9), dp(9))
+                setTextColor(if (frozen) Color.rgb(65, 174, 125) else textColor())
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(if (frozen) Color.argb(35, 65, 174, 125) else backgroundColor())
+                    setStroke(dp(1), if (frozen) Color.rgb(65, 174, 125) else mutedColor())
+                }
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply { leftMargin = dp(8) })
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun section(box: LinearLayout, title: String) {
         box.addView(TextView(this).apply {
