@@ -38,6 +38,8 @@ jobs:
           grep -Fq "dumpsys package" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
           grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "freezerOperationRunning" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "loadInstalledFreezerApps" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
       - name: Build standalone OEA Launcher APK
         run: ./gradlew :oea:assembleRelease --stacktrace
