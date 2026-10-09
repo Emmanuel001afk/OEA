@@ -1,0 +1,32 @@
+name: Auto-merge successful OEA PR builds
+
+on:
+  workflow_run:
+    workflows: ["OEA Launcher APK"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge-tested-pr:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge only the exact tested PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --repo "$REPOSITORY" --state open --json number,headRefOid,isDraft --jq ".[] | select(.headRefOid == \"$TESTED_SHA\" and .isDraft == false) | .number")"
+          if [ -z "$prs" ]; then
+            echo "No open, non-draft PR matches the exact commit that passed the APK workflow."
+            exit 0
+          fi
+          while IFS= read -r pr; do
+            [ -n "$pr" ] || continue
+            gh pr merge "$pr" --repo "$REPOSITORY" --squash --delete-branch
+          done <<< "$prs"
