@@ -155,7 +155,10 @@ class OeaGameCaptureService : Service() {
             outputFile = File(dir, "OEA_" + stamp() + ".mp4")
         }
 
-        recorder = MediaRecorder(this).apply {
+        // The Context constructor was added on newer Android releases.
+        // Use the legacy constructor on Android 8–11 so Spark 3-class devices
+        // do not fail at runtime before recording can begin.
+        recorder = (if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else MediaRecorder()).apply {
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
@@ -171,6 +174,9 @@ class OeaGameCaptureService : Service() {
             setOnErrorListener { _, _, _ ->
                 getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
                 stopCapture()
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(this@OeaGameCaptureService, "Screen recording stopped because the recorder reported an error.", Toast.LENGTH_LONG).show()
+                }
                 stopSelf()
             }
             prepare()
@@ -204,6 +210,7 @@ class OeaGameCaptureService : Service() {
                         .putBoolean("capture_active", false)
                         .apply()
                     stopCapture()
+                    Toast.makeText(this, "OEA could not start screen recording on this device.", Toast.LENGTH_LONG).show()
                     stopSelf()
                 }
             }
