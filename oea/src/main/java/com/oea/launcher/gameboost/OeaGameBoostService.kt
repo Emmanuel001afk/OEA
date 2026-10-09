@@ -497,7 +497,7 @@ class OeaGameBoostService : Service() {
             }
             setPadding(dp(8), 0, dp(8), 0)
             setOnClickListener {
-                diagnostic(android.util.Log.INFO, "Close Panel button clicked activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
+                diagnostic(android.util.Log.INFO, "Close Panel button clicked activeGame=$activeGame overlayAttached=${this@OeaGameBoostService.overlay?.parent != null} panelExists=${panelView != null}")
                 closePanel(panel)
             }
         }
