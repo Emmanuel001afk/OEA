@@ -138,7 +138,6 @@ class OeaGameBoostService : Service() {
     private var foregroundActivityClass: String? = null
     private var nonGameForegroundSamples = 0
     private var lastNonGamePackage: String? = null
-    private var lastPanelDismissAt: Long = 0L
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -161,9 +160,6 @@ class OeaGameBoostService : Service() {
             try {
                 runCatching { OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService) }
                 val game = foregroundPackage()
-                val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
-                    .getBoolean("capture_active", false)
-
                 if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                     nonGameForegroundSamples = 0
                     lastNonGamePackage = null
@@ -178,30 +174,26 @@ class OeaGameBoostService : Service() {
                     }
                     updateOverlay()
                 } else if (activeGame != null) {
-                    // Unknown samples, OEA-owned activities, Android permission
-                    // UI and System UI are not proof that the user left the game.
-                    if (captureActive || game == null || isTransientForegroundPackage(game)) {
+                    // Unknown samples and short-lived Android system/permission UI
+                    // are inconclusive. A positively identified launcher or another
+                    // ordinary app, however, means the user has left the game.
+                    if (game == null || isTransientForegroundPackage(game)) {
                         nonGameForegroundSamples = 0
                         lastNonGamePackage = null
                         ensureOverlayForActiveGame()
                         updateOverlay()
                     } else {
-                        // Require the same positively identified non-game app
-                        // for eight consecutive samples. A single transition,
-                        // notification shade, panel dismissal or app switch
-                        // cannot tear down the in-game control.
+                        // Confirm the same ordinary non-game app twice to filter a
+                        // single stale UsageStats event, then remove the overlay.
+                        // Do not add a panel-dismiss grace period: closing the panel
+                        // must not keep the floating button alive after game exit.
                         if (lastNonGamePackage == game) {
                             nonGameForegroundSamples++
                         } else {
                             lastNonGamePackage = game
                             nonGameForegroundSamples = 1
                         }
-                        val recentlyDismissedPanel =
-                            System.currentTimeMillis() - lastPanelDismissAt < 15_000L
-                        // A resumed event can be missed or delayed by OEM UsageStats
-                        // implementations. Require 15 seconds of the same positively
-                        // identified non-game package before ending the session.
-                        if (recentlyDismissedPanel || nonGameForegroundSamples < 15) {
+                        if (nonGameForegroundSamples < 2) {
                             ensureOverlayForActiveGame()
                             updateOverlay()
                         } else {
@@ -301,16 +293,6 @@ class OeaGameBoostService : Service() {
             "com.google.android.inputmethod.latin",
             "com.google.android.apps.inputmethod",
             "com.android.inputmethod.latin",
-            "com.google.android.apps.nexuslauncher",
-            "com.android.launcher",
-            "com.android.launcher3",
-            "com.google.android.apps.launcher",
-            "com.sec.android.app.launcher",
-            "com.miui.home",
-            "com.oppo.launcher",
-            "com.transsion.XOSLauncher",
-            "com.transsion.hilauncher",
-            "com.huawei.android.launcher"
         )
     }
 
@@ -1202,10 +1184,8 @@ class OeaGameBoostService : Service() {
 
     private fun closePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
-        // Record this interaction before animating: the foreground sampler
-        // must not mistake panel dismissal for leaving the game and remove
-        // the independent floating handle.
-        lastPanelDismissAt = System.currentTimeMillis()
+        // This method only dismisses the panel window. The floating handle is
+        // a separate view/window and its visibility preference is left untouched.
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
         panel.animate()
@@ -1219,6 +1199,7 @@ class OeaGameBoostService : Service() {
                 panel.visibility = View.GONE
                 detachPanelWindow(panel)
                 panel.setOnTouchListener(null)
+                // Deliberately do not hide, remove, or alter the floating handle.
                 panel.alpha = 1f
                 panel.scaleX = 1f
                 panel.scaleY = 1f
