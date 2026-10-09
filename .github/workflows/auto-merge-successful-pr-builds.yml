@@ -13,8 +13,11 @@ jobs:
   merge-tested-pr:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      merged: ${{ steps.merge.outputs.merged }}
     steps:
       - name: Merge only the exact tested PR head
+        id: merge
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -23,13 +26,77 @@ jobs:
           set -euo pipefail
           prs="$(gh pr list --repo "$REPOSITORY" --state open --json number,headRefOid,isDraft --jq ".[] | select(.headRefOid == \"$TESTED_SHA\" and .isDraft == false) | .number")"
           if [ -z "$prs" ]; then
+            echo "merged=false" >> "$GITHUB_OUTPUT"
             echo "No open, non-draft PR matches the exact commit that passed the APK workflow."
             exit 0
           fi
+          merged=false
           while IFS= read -r pr; do
             [ -n "$pr" ] || continue
             gh pr merge "$pr" --repo "$REPOSITORY" --squash --delete-branch
-            # GITHUB_TOKEN merges do not trigger push workflows. Explicitly build
-            # the resulting main commit so the downloadable APK stays in sync.
-            gh workflow run oea-apk.yml --repo "$REPOSITORY" --ref main
+            merged=true
           done <<< "$prs"
+          echo "merged=$merged" >> "$GITHUB_OUTPUT"
+
+  build-and-publish-main-apk:
+    needs: merge-tested-pr
+    if: needs.merge-tested-pr.outputs.merged == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: oea-apk-release
+      cancel-in-progress: false
+    steps:
+      - name: Checkout the merged main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+      - name: Verify App Freezer integration
+        run: |
+          set -euo pipefail
+          grep -Fq "setPackagesSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "isPackageSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "dumpsys package" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
+      - name: Build standalone OEA Launcher APK
+        run: ./gradlew :oea:assembleRelease --stacktrace
+      - name: Verify APK identity
+        run: |
+          APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
+          "$AAPT2" dump badging "$APK" | grep -F "package: name='com.oea.launcher'"
+          if "$AAPT2" dump badging "$APK" | grep -Fq "com.android.launcher3"; then
+            echo "ERROR: Launcher3 identity remains in the APK."
+            exit 1
+          fi
+          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          "$APKSIGNER" verify --verbose "$APK"
+          cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oea-launcher-apk-after-merge
+          path: ${{ runner.temp }}/OEA-latest.apk
+          retention-days: 1
+          if-no-files-found: error
+      - name: Publish latest APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view oea-latest --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload oea-latest "$RUNNER_TEMP/OEA-latest.apk" --repo "$REPOSITORY" --clobber
+          else
+            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --repo "$REPOSITORY" --title "OEA Latest" --notes "Latest standalone OEA Launcher build from main."
+          fi
