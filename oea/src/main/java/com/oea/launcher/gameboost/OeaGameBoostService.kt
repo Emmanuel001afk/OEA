@@ -579,7 +579,7 @@ class OeaGameBoostService : Service() {
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
         // A single click on the floating handle toggles the same panel instance.
-        // Closing always funnels through closePanel(), shared with CLOSE PANEL.
+        // The floating handle is the only explicit open/close control.
         handle.setOnClickListener { togglePanel(panel) }
 
         val params = WindowManager.LayoutParams(
