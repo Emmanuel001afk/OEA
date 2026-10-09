@@ -29,4 +29,7 @@ jobs:
           while IFS= read -r pr; do
             [ -n "$pr" ] || continue
             gh pr merge "$pr" --repo "$REPOSITORY" --squash --delete-branch
+            # GITHUB_TOKEN merges do not trigger push workflows. Explicitly build
+            # the resulting main commit so the downloadable APK stays in sync.
+            gh workflow run oea-apk.yml --repo "$REPOSITORY" --ref main
           done <<< "$prs"
