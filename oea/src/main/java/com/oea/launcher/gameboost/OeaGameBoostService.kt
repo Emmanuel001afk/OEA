@@ -889,6 +889,45 @@ class OeaGameBoostService : Service() {
         isClickable = true
         isFocusable = true
         setPadding(dp(3), 0, dp(3), 0)
+        // Responsive press feedback; returning false preserves the normal click action.
+        setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    view.animate().cancel()
+                    view.animate().scaleX(0.96f).scaleY(0.96f).alpha(0.88f)
+                        .setDuration(80L).start()
+                }
+                android.view.MotionEvent.ACTION_UP,
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    view.animate().cancel()
+                    view.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                        .setDuration(150L)
+                        .setInterpolator(android.view.animation.DecelerateInterpolator())
+                        .start()
+                }
+            }
+            false
+        }
+    }
+
+    private fun actionAccent(label: String): Int = when {
+        label.contains("DND", ignoreCase = true) -> 0xFF39D8FF.toInt()
+        label.contains("BOOST", ignoreCase = true) -> 0xFF568BFF.toInt()
+        label.contains("SHOT", ignoreCase = true) -> 0xFF66BFFF.toInt()
+        label.contains("WI-FI", ignoreCase = true) -> 0xFF35D9C2.toInt()
+        label.contains("RECORD", ignoreCase = true) -> 0xFFFFC15A.toInt()
+        label.contains("CLEAN RAM", ignoreCase = true) -> 0xFF6BE6A5.toInt()
+        else -> 0xFF62C8FF.toInt()
+    }
+
+    private fun applyActionChipPalette(chip: TextView, panelBase: Int, panelAccent: Int) {
+        val background = chip.background as? android.graphics.drawable.GradientDrawable ?: return
+        val accent = actionAccent(chip.text.toString())
+        val base = android.animation.ArgbEvaluator().evaluate(0.20f, panelBase, accent) as Int
+        val edge = android.animation.ArgbEvaluator().evaluate(0.18f, accent, panelAccent) as Int
+        val surface = android.animation.ArgbEvaluator().evaluate(0.12f, base, edge) as Int
+        background.setColors(intArrayOf(base, surface))
+        background.setStroke(dp(1), edge.withAlpha(190))
     }
 
     private fun toggleDnd(button: TextView) {
@@ -1053,10 +1092,7 @@ class OeaGameBoostService : Service() {
             val row = controls.getChildAt(rowIndex) as? android.view.ViewGroup ?: continue
             for (index in 0 until row.childCount) {
                 val chip = row.getChildAt(index) as? TextView ?: continue
-                (chip.background as? android.graphics.drawable.GradientDrawable)?.apply {
-                    setColor(palette[0].withAlpha(235))
-                    setStroke(dp(1), palette[1].withAlpha(95))
-                }
+                applyActionChipPalette(chip, palette[0], palette[1])
             }
         }
     }
@@ -1088,10 +1124,7 @@ class OeaGameBoostService : Service() {
                         val row = controls.getChildAt(rowIndex) as? android.view.ViewGroup ?: continue
                         for (index in 0 until row.childCount) {
                             val chip = row.getChildAt(index) as? TextView ?: continue
-                            (chip.background as? android.graphics.drawable.GradientDrawable)?.apply {
-                                setColor(middle.withAlpha(235))
-                                setStroke(dp(1), highlight.withAlpha(110))
-                            }
+                            applyActionChipPalette(chip, middle, highlight)
                         }
                     }
                 }
