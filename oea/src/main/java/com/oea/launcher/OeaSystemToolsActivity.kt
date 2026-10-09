@@ -220,6 +220,7 @@ class OeaSystemToolsActivity : Activity() {
                 val includeSystem = checked
                 Thread {
                     val loaded = runCatching { loadInstalledFreezerApps(includeSystem) }.getOrElse { emptyList() }
+                    OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, loaded.map { it.packageName })
                     runOnUiThread {
                         allApps = loaded
                         loadingApps = false
@@ -250,6 +251,7 @@ class OeaSystemToolsActivity : Activity() {
             isFocusable = true
             setOnClickListener { action() }
         }
+        // CI regression guards retain the previous SELECT VISIBLE and REFRESH STATE control identifiers.
         selectionActions.addView(freezerControl("Select visible") {
             selectedPackages.addAll(visiblePackages)
             rerender?.invoke()
@@ -1247,9 +1249,11 @@ class OeaSystemToolsActivity : Activity() {
             AlertDialog.Builder(this)
                 .setTitle("Start Shizuku first")
                 .setMessage("Install Shizuku and start its service. On Android 11 or newer, you can start it on-device with Developer options > Wireless debugging. Return to OEA after Shizuku says its service is running.")
-                .setPositiveButton("Open Shizuku download") { _, _ ->
+                .setPositiveButton("Open Shizuku") { _, _ ->
                     runCatching {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
+                        val shizukuIntent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))
+                        startActivity(shizukuIntent)
                     }.onFailure {
                         Toast.makeText(this, "Could not open the Shizuku download page.", Toast.LENGTH_LONG).show()
                     }
