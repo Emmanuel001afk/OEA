@@ -341,22 +341,26 @@ class OeaGameBoostService : Service() {
         })
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
-        // Opening stays a single tap. Closing requires a deliberate double tap
-        // so an ordinary tap cannot collapse the panel accidentally.
-        var lastCloseTapAt = 0L
-        handle.setOnClickListener {
-            if (panel.visibility != View.VISIBLE) {
-                lastCloseTapAt = 0L
-                showPanel(panel)
-            } else {
-                val now = android.os.SystemClock.uptimeMillis()
-                if (now - lastCloseTapAt in 1..450L) {
-                    lastCloseTapAt = 0L
-                    closePanel(panel)
-                } else {
-                    lastCloseTapAt = now
+        // Use Android's native gesture recognizer rather than a hand-timed
+        // click counter. A confirmed single tap opens the panel; a true
+        // double tap closes it. The touch handler below cancels this detector
+        // when the handle is dragged, so a drag can never be mistaken for a tap.
+        val handleGestures = android.view.GestureDetector(
+            this,
+            object : android.view.GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapConfirmed(event: android.view.MotionEvent): Boolean {
+                    handle.performClick()
+                    return true
+                }
+
+                override fun onDoubleTap(event: android.view.MotionEvent): Boolean {
+                    if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+                    return true
                 }
             }
+        )
+        handle.setOnClickListener {
+            if (panel.visibility != View.VISIBLE) showPanel(panel)
         }
 
         val params = WindowManager.LayoutParams(
@@ -400,6 +404,7 @@ class OeaGameBoostService : Service() {
                             startX = current.x
                             startY = current.y
                             dragging = false
+                            handleGestures.onTouchEvent(event)
                             return true
                         }
                         android.view.MotionEvent.ACTION_MOVE -> {
@@ -407,8 +412,16 @@ class OeaGameBoostService : Service() {
                             val dy = event.rawY - downRawY
                             if (!dragging && (kotlin.math.abs(dx) > dp(6) || kotlin.math.abs(dy) > dp(6))) {
                                 dragging = true
+                                // Cancel the pending tap before moving the overlay.
+                                android.view.MotionEvent.obtain(event).also { cancel ->
+                                    cancel.action = android.view.MotionEvent.ACTION_CANCEL
+                                    handleGestures.onTouchEvent(cancel)
+                                    cancel.recycle()
+                                }
                                 handle.animate().cancel()
                                 handle.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90L).start()
+                            } else if (!dragging) {
+                                handleGestures.onTouchEvent(event)
                             }
                             if (dragging) {
                                 val next = root.layoutParams as? WindowManager.LayoutParams ?: return true
@@ -424,9 +437,7 @@ class OeaGameBoostService : Service() {
                             if (dragging) {
                                 snapHandleToEdge(root, handle, wm)
                             } else {
-                                // Route taps through click semantics so the same
-                                // handle reliably toggles open/closed and is accessible.
-                                v.performClick()
+                                handleGestures.onTouchEvent(event)
                             }
                             dragging = false
                             return true
@@ -435,6 +446,7 @@ class OeaGameBoostService : Service() {
                             // A cancelled gesture is not a tap. Never synthesize
                             // clicks here: that could count a drag/window transition
                             // as the second tap needed to close the panel.
+                            if (!dragging) handleGestures.onTouchEvent(event)
                             if (dragging) {
                                 handle.animate().cancel()
                                 handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
