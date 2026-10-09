@@ -35,6 +35,10 @@ jobs:
           set -euo pipefail
           grep -Fq "setPackagesSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
           grep -Fq "isPackageSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "rootSuspensionState(packageName)" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "Android did not confirm the requested frozen state" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "android.intent.category.HOME" oea/src/main/AndroidManifest.xml
+          grep -Fq "android.intent.category.DEFAULT" oea/src/main/AndroidManifest.xml
           grep -Fq "dumpsys package" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
           grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt

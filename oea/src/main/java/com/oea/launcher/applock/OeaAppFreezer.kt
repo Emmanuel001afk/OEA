@@ -28,8 +28,18 @@ object OeaAppFreezer {
                 if (failed.contains(packageName)) {
                     return@runCatching Result(false, "Android refused to change the frozen state", Backend.DEVICE_OWNER)
                 }
+                val actualState = runCatching {
+                    context.packageManager.isPackageSuspended(packageName)
+                }.getOrNull()
+                if (actualState == null || actualState != frozen) {
+                    return@runCatching Result(
+                        false,
+                        "Android did not confirm the requested frozen state. Saved state was not changed.",
+                        Backend.DEVICE_OWNER,
+                    )
+                }
                 persist(context, packageName, frozen)
-                Result(true, if (frozen) "App frozen" else "App unfrozen", Backend.DEVICE_OWNER)
+                Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.DEVICE_OWNER)
             }.getOrElse { Result(false, it.message ?: "Could not change frozen state", Backend.DEVICE_OWNER) }
         }
 
@@ -37,11 +47,26 @@ object OeaAppFreezer {
             val command = if (frozen) "cmd package suspend --user 0 $packageName"
             else "cmd package unsuspend --user 0 $packageName"
             val result = runRoot(command)
-            if (result.first) {
-                persist(context, packageName, frozen)
-                return Result(true, if (frozen) "App frozen with root authority" else "App unfrozen with root authority", Backend.ROOT)
+            if (!result.first) {
+                return Result(false, result.second.ifBlank { "Root package suspension failed" }, Backend.ROOT)
             }
-            return Result(false, result.second.ifBlank { "Root package suspension failed" }, Backend.ROOT)
+            val actualState = rootSuspensionState(packageName)
+            if (actualState == null) {
+                return Result(
+                    false,
+                    "The command ran, but Android's actual suspension state could not be verified. Saved state was not changed.",
+                    Backend.ROOT,
+                )
+            }
+            if (actualState != frozen) {
+                return Result(
+                    false,
+                    "Android did not confirm the requested frozen state. Saved state was not changed.",
+                    Backend.ROOT,
+                )
+            }
+            persist(context, packageName, frozen)
+            return Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.ROOT)
         }
 
         return Result(false, "No freezer authority. Provision OEA as device owner or provide root authority.", Backend.NONE)
@@ -84,6 +109,20 @@ object OeaAppFreezer {
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putStringSet(KEY_FROZEN, actualFrozen).apply()
+    }
+
+    private fun rootSuspensionState(packageName: String): Boolean? {
+        val (success, dump) = runRoot("dumpsys package")
+        if (!success || !dump.contains("Package [")) return null
+        val block = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
+            .findAll(dump)
+            .firstOrNull { it.groupValues[1] == packageName }
+            ?: return null
+        val userState = Regex("""(?m)^\s*User 0:.*$""")
+            .find(block.groupValues[2])
+            ?.value
+            ?: return null
+        return Regex("""\bsuspended=true\b""").containsMatchIn(userState)
     }
 
     private fun persist(context: Context, packageName: String, frozen: Boolean) {
