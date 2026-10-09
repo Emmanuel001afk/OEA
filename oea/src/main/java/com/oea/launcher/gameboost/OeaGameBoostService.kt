@@ -137,6 +137,7 @@ class OeaGameBoostService : Service() {
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
     private var nonGameForegroundSamples = 0
+    private var lastPanelDismissAt: Long = 0L
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -175,13 +176,22 @@ class OeaGameBoostService : Service() {
                     nonGameForegroundSamples = 0
                     updateOverlay()
                 } else {
-                    nonGameForegroundSamples++
-                    if (nonGameForegroundSamples >= 2) {
-                        deactivate(activeGame!!)
-                        activeGame = null
+                    // Overlay interactions can briefly make UsageStats report a
+                    // non-game/system package on some Android builds. Do not let
+                    // closing the panel tear down the separate floating handle.
+                    val recentlyDismissedPanel = System.currentTimeMillis() - lastPanelDismissAt < 8_000L
+                    if (recentlyDismissedPanel) {
                         nonGameForegroundSamples = 0
-                    } else {
                         updateOverlay()
+                    } else {
+                        nonGameForegroundSamples++
+                        if (nonGameForegroundSamples >= 2) {
+                            deactivate(activeGame!!)
+                            activeGame = null
+                            nonGameForegroundSamples = 0
+                        } else {
+                            updateOverlay()
+                        }
                     }
                 }
             }
@@ -1087,6 +1097,10 @@ class OeaGameBoostService : Service() {
 
     private fun closePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
+        // Record this interaction before animating: the foreground sampler
+        // must not mistake panel dismissal for leaving the game and remove
+        // the independent floating handle.
+        lastPanelDismissAt = System.currentTimeMillis()
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
         panel.animate()
