@@ -136,6 +136,10 @@ class OeaGameBoostService : Service() {
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
+    // UsageEvents reports lifecycle transitions, not continuous foreground state.
+    // Keep the last resumed package so a long-running game does not look like
+    // "no foreground app" merely because its last resume was over 30 seconds ago.
+    private var lastKnownForegroundPackage: String? = null
     private var nonGameForegroundSamples = 0
     private var lastNonGamePackage: String? = null
     private var lastPanelDismissAt: Long = 0L
@@ -1313,7 +1317,7 @@ class OeaGameBoostService : Service() {
         panelView = null
     }
     private fun foregroundPackage(): String? {
-        val usm = getSystemService(UsageStatsManager::class.java) ?: return null
+        val usm = getSystemService(UsageStatsManager::class.java) ?: return lastKnownForegroundPackage
         val end = System.currentTimeMillis()
         val start = end - 30_000L
 
@@ -1335,16 +1339,33 @@ class OeaGameBoostService : Service() {
                     foregroundActivityClass = event.className
                 }
             }
-            if (latestPackage != null) return latestPackage
-            // queryEvents succeeded but supplied no resumed/foreground event.
-            // Do not replace that authoritative "unknown" state with a stale
-            // UsageStats result, which can keep the button visible after exit.
-            return null
+            if (latestPackage != null) {
+                lastKnownForegroundPackage = latestPackage
+                return latestPackage
+            }
+
+            // No lifecycle event in this rolling window is normal when a game
+            // remains open for minutes. It is not evidence that the user left.
+            // A real transition to Home/another app produces a new resumed event
+            // and replaces this cache before the next foreground decision.
+            lastKnownForegroundPackage?.let { return it }
+
+            // On service start, there may be no cached event yet. Use UsageStats
+            // once as a bootstrap rather than treating an empty event window as
+            // proof that no app is foreground.
+            val stats = runCatching {
+                usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
+            }.getOrNull().orEmpty()
+            val fallback = stats.maxByOrNull { it.lastTimeUsed }?.packageName
+            if (fallback != null) lastKnownForegroundPackage = fallback
+            fallback
         }.getOrElse {
             val stats = runCatching {
                 usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
-            }.getOrNull() ?: return null
-            stats.maxByOrNull { it.lastTimeUsed }?.packageName
+            }.getOrNull().orEmpty()
+            val fallback = stats.maxByOrNull { it.lastTimeUsed }?.packageName
+            if (fallback != null) lastKnownForegroundPackage = fallback
+            fallback ?: lastKnownForegroundPackage
         }
     }
     private fun isUsageAccessGranted() = runCatching {
