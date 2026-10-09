@@ -3,9 +3,12 @@ package com.oea.launcher.applock
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import java.util.concurrent.TimeUnit
 
 object OeaAppFreezer {
     enum class Backend { DEVICE_OWNER, ROOT, NONE }
+
+    @Volatile private var rootAvailableCache: Boolean? = null
     data class Result(val success: Boolean, val message: String, val backend: Backend = Backend.NONE)
 
     fun backend(context: Context): Backend {
@@ -132,8 +135,21 @@ object OeaAppFreezer {
         prefs.edit().putStringSet(KEY_FROZEN, packages).apply()
     }
 
-    private fun hasRoot(): Boolean =
-        runCatching { ProcessBuilder("su", "-c", "id").start().apply { waitFor() }.exitValue() == 0 }.getOrDefault(false)
+    private fun hasRoot(): Boolean {
+        rootAvailableCache?.let { return it }
+        val detected = runCatching {
+            val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+            val completed = process.waitFor(700, TimeUnit.MILLISECONDS)
+            if (!completed) {
+                process.destroyForcibly()
+                false
+            } else {
+                process.exitValue() == 0
+            }
+        }.getOrDefault(false)
+        rootAvailableCache = detected
+        return detected
+    }
 
     private fun runRoot(command: String): Pair<Boolean, String> = runCatching {
         val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
