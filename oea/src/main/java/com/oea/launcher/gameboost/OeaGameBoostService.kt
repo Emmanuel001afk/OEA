@@ -301,6 +301,9 @@ class OeaGameBoostService : Service() {
             val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
             OeaGameBoostStore.prefs(this).edit().putBoolean("boost", next).apply()
             setKeepScreenOn(next)
+            // Enabling Boost also runs the existing best-effort background cleanup.
+            // Android does not permit ordinary apps to raise another app's process priority.
+            if (next) cleanBackgroundMemory(cleanup)
             boost.animate().scaleX(0.94f).scaleY(0.94f).setDuration(70L).withEndAction {
                 boost.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
             }.start()
