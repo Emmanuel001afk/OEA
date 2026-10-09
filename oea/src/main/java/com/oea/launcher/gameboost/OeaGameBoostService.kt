@@ -80,18 +80,29 @@ class OeaGameBoostService : Service() {
             strokeCap = android.graphics.Paint.Cap.ROUND
             color = 0xFFEAFBFF.toInt()
         }
-        private var pulseAngle = 0f
+        private val orbit = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(2).toFloat()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+        }
+        private var ringProgress = 0f
         private var ringAnimator: android.animation.ValueAnimator? = null
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
             if (ringAnimator?.isRunning == true) return
-            ringAnimator = android.animation.ValueAnimator.ofFloat(0f, 360f).apply {
-                duration = 2400L
+            val travel = android.animation.Keyframe.ofFloat(0f, 0f)
+            val arrival = android.animation.Keyframe.ofFloat(0.78f, 1f)
+            val pauseAtEdge = android.animation.Keyframe.ofFloat(1f, 1f)
+            val motion = android.animation.PropertyValuesHolder.ofKeyframe(
+                "ringProgress", travel, arrival, pauseAtEdge
+            )
+            ringAnimator = android.animation.ValueAnimator.ofPropertyValuesHolder(motion).apply {
+                duration = 2600L
                 repeatCount = android.animation.ValueAnimator.INFINITE
                 interpolator = android.view.animation.LinearInterpolator()
                 addUpdateListener {
-                    pulseAngle = it.animatedValue as Float
+                    ringProgress = it.getAnimatedValue("ringProgress") as Float
                     invalidate()
                 }
                 start()
@@ -123,14 +134,18 @@ class OeaGameBoostService : Service() {
                 ramFraction, "RAM",
                 String.format(Locale.US, "%.0f%%", ramFraction * 100.0),
                 String.format(Locale.US, "%.0f / %.0f MB", ramUsedMb, ramTotalMb),
-                0xFF4D7CFF.toInt()
+                0xFF4D7CFF.toInt(),
+                0xFF31D8FF.toInt(),
+                0xFF4DE5B5.toInt()
             )
             drawGauge(
                 canvas, rightCenterX, centerY, radius,
                 virtualFraction, "VIRTUAL RAM",
                 if (virtualTotalMb > 0) String.format(Locale.US, "%.0f%%", virtualFraction * 100.0) else "—",
                 if (virtualTotalMb > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsedMb, virtualTotalMb) else "not exposed",
-                0xFF27D9B7.toInt()
+                0xFF27D9B7.toInt(),
+                0xFF4D7CFF.toInt(),
+                0xFF9DFF8A.toInt()
             )
         }
 
@@ -143,25 +158,41 @@ class OeaGameBoostService : Service() {
             name: String,
             percentage: String,
             value: String,
-            color: Int
+            color: Int,
+            secondaryColor: Int,
+            tertiaryColor: Int
         ) {
             canvas.drawCircle(cx, cy, radius, track)
-            val sweep = fraction.coerceIn(0f, 1f) * 360f
             val bounds = android.graphics.RectF(cx - radius, cy - radius, cx + radius, cy + radius)
+            orbit.color = (secondaryColor and 0x00FFFFFF) or (0x50 shl 24)
+            canvas.drawArc(bounds, 0f, 360f, false, orbit)
+
+            val sweep = fraction.coerceIn(0f, 1f) * 360f
             if (sweep > 0f) {
-                // Soft colored halo beneath the crisp progress arc.
+                val firstSweep = minOf(sweep, 120f)
+                val secondSweep = (sweep - 120f).coerceAtLeast(0f).coerceAtMost(120f)
+                val thirdSweep = (sweep - 240f).coerceAtLeast(0f)
                 glow.color = (color and 0x00FFFFFF) or (0x48 shl 24)
                 canvas.drawArc(bounds, -90f, sweep, false, glow)
                 progress.color = color
-                canvas.drawArc(bounds, -90f, sweep, false, progress)
+                canvas.drawArc(bounds, -90f, firstSweep, false, progress)
+                if (secondSweep > 0f) {
+                    progress.color = secondaryColor
+                    canvas.drawArc(bounds, -90f + firstSweep, secondSweep, false, progress)
+                }
+                if (thirdSweep > 0f) {
+                    progress.color = tertiaryColor
+                    canvas.drawArc(bounds, -90f + firstSweep + secondSweep, thirdSweep, false, progress)
+                }
 
-                // A bright traveling glint makes the live reading feel active
-                // without changing or exaggerating the underlying percentage.
+                // A bright comet travels smoothly, eases to the edge, pauses,
+                // then restarts cleanly rather than endlessly rolling at one speed.
                 val glintSweep = minOf(26f, sweep)
-                val glintStart = -90f + ((pulseAngle / 360f) * sweep)
-                glow.color = (color and 0x00FFFFFF) or (0x88 shl 24)
+                val glintStart = -90f + ringProgress * 360f
+                glow.color = (secondaryColor and 0x00FFFFFF) or (0xA0 shl 24)
                 canvas.drawArc(bounds, glintStart, glintSweep, false, glow)
-                canvas.drawArc(bounds, glintStart, glintSweep, false, highlight)
+                highlight.color = 0xFFEAFBFF.toInt()
+                canvas.drawArc(bounds, glintStart, minOf(12f, glintSweep), false, highlight)
             }
 
             label.textSize = dp(if (name.length > 6) 6 else 8).toFloat()
@@ -194,7 +225,6 @@ class OeaGameBoostService : Service() {
     private var panelView: View? = null
     private var wakeOverlay: View? = null
     private var lastWakeTapAt: Long = 0L
-    private var lastHandleClickAt: Long = 0L
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
     // UsageEvents reports lifecycle transitions, not continuous foreground state.
@@ -581,10 +611,7 @@ class OeaGameBoostService : Service() {
         handle.bringToFront()
         // A single click on the floating handle toggles the same panel instance.
         // Closing always funnels through closePanel(), shared with CLOSE PANEL.
-        handle.setOnClickListener {
-            lastHandleClickAt = System.currentTimeMillis()
-            togglePanel(panel)
-        }
+        handle.setOnClickListener { togglePanel(panel) }
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -1190,7 +1217,7 @@ class OeaGameBoostService : Service() {
             .setDuration(280L)
             .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
             .withEndAction {
-                animateGameBoostPanel(panel)
+                // Keep one coherent entrance; avoid a second staggered opening effect.
             }.start()
     }
 
@@ -1210,16 +1237,7 @@ class OeaGameBoostService : Service() {
                     // for this separate panel window. Ignore that event so the
                     // handle's ACTION_UP can toggle the panel closed exactly once.
                     if (!isPointInsideFloatingHandle(event.rawX, event.rawY)) {
-                        // ACTION_OUTSIDE can arrive before the floating handle
-                        // click callback. Defer dismissal so a handle tap toggles
-                        // the panel once instead of closing and reopening it.
-                        handler.postDelayed({
-                            val handleTapJustHandled =
-                                System.currentTimeMillis() - lastHandleClickAt in 0..450L
-                            if (!handleTapJustHandled && panel.visibility == View.VISIBLE) {
-                                closePanel(panel)
-                            }
-                        }, 120L)
+                        closePanel(panel)
                     }
                     true
                 } else {
@@ -1249,15 +1267,7 @@ class OeaGameBoostService : Service() {
                 // A tap on the handle is a toggle, not a generic outside dismissal.
                 // All other outside taps still dismiss the panel.
                 if (!isPointInsideFloatingHandle(event.rawX, event.rawY)) {
-                    // Delay outside dismissal to distinguish an actual outside
-                    // tap from the handle's own toggle click.
-                    handler.postDelayed({
-                        val handleTapJustHandled =
-                            System.currentTimeMillis() - lastHandleClickAt in 0..450L
-                        if (!handleTapJustHandled && panel.visibility == View.VISIBLE) {
-                            closePanel(panel)
-                        }
-                    }, 120L)
+                    closePanel(panel)
                 }
                 true
             } else {
