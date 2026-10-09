@@ -117,15 +117,15 @@ class OeaGameBoostService : Service() {
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(dp(220))
-            val desiredHeight = dp(72)
+            val desiredHeight = dp(86)
             setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
         }
 
         override fun onDraw(canvas: android.graphics.Canvas) {
             val available = width - paddingLeft - paddingRight
-            val diameter = minOf(dp(58), ((available - dp(14)) / 2).coerceAtLeast(dp(52)))
-            val radius = diameter / 2f - dp(3)
-            val centerY = dp(29).toFloat()
+            val diameter = minOf(dp(68), ((available - dp(14)) / 2).coerceAtLeast(dp(56)))
+            val radius = diameter / 2f - dp(4)
+            val centerY = dp(34).toFloat()
             val leftCenterX = paddingLeft + available / 4f
             val rightCenterX = paddingLeft + available * 3f / 4f
 
@@ -195,8 +195,8 @@ class OeaGameBoostService : Service() {
                 canvas.drawArc(bounds, glintStart, minOf(12f, glintSweep), false, highlight)
             }
 
-            label.textSize = dp(if (name.length > 6) 6 else 8).toFloat()
-            label.color = 0xFFCBD3E6.toInt()
+            label.textSize = dp(if (name.length > 6) 7 else 8).toFloat()
+            label.color = 0xFFE2F6FF.toInt()
             canvas.drawText(name, cx, cy - dp(3).toFloat(), label)
 
             percent.textSize = dp(14).toFloat()
@@ -204,7 +204,7 @@ class OeaGameBoostService : Service() {
             canvas.drawText(percentage, cx, cy + dp(15).toFloat(), percent)
 
             detail.textSize = dp(8).toFloat()
-            canvas.drawText(value, cx, cy + radius + dp(11).toFloat(), detail)
+            canvas.drawText(value, cx, cy + radius + dp(12).toFloat(), detail)
         }
 
         private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -226,6 +226,8 @@ class OeaGameBoostService : Service() {
     private var wakeOverlay: View? = null
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
+    // Save the user's exact DND state once per continuous game session.
+    private var originalDndFilter: Int? = null
     private var foregroundActivityClass: String? = null
     // UsageEvents reports lifecycle transitions, not continuous foreground state.
     // Keep the last resumed package so a long-running game does not look like
@@ -289,7 +291,7 @@ class OeaGameBoostService : Service() {
                     nonGameForegroundSamples = 0
                     lastNonGamePackage = null
                     if (activeGame != game) {
-                        restoreDnd()
+                        if (activeGame == null) beginDndSession()
                         setKeepScreenOn(false)
                         activeGame = game
                         activate(game)
@@ -1511,13 +1513,23 @@ class OeaGameBoostService : Service() {
         }
     }
 
+    private fun beginDndSession() {
+        val nm = getSystemService(NotificationManager::class.java)
+        originalDndFilter = if (nm.isNotificationPolicyAccessGranted) {
+            nm.currentInterruptionFilter
+        } else {
+            null
+        }
+    }
+
     private fun restoreDnd() {
         val nm = getSystemService(NotificationManager::class.java)
-        // OEA's DND toggle means "DND while a selected game is active".
-        // Do not restore a previously active filter after leaving the game.
-        if (nm.isNotificationPolicyAccessGranted) {
-            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
-                .onFailure { diagnostic(android.util.Log.ERROR, "game-session DND reset failed error=${it.javaClass.simpleName}:${it.message}") }
+        val original = originalDndFilter
+        originalDndFilter = null
+        if (original != null && nm.isNotificationPolicyAccessGranted &&
+            nm.currentInterruptionFilter != original) {
+            runCatching { nm.setInterruptionFilter(original) }
+                .onFailure { diagnostic(android.util.Log.ERROR, "game-session DND restore failed error=${it.javaClass.simpleName}:${it.message}") }
         }
     }
 
