@@ -10,16 +10,16 @@ class OeaShizukuShellService : IOeaShizukuShellService.Stub() {
 
     override fun getSuspendedPackages(packageNamesDelimited: String): String {
         val candidates = packageNamesDelimited.split(',').filter { PACKAGE_NAME.matches(it) }.toSet()
-        if (candidates.isEmpty()) return "0\\n"
+        if (candidates.isEmpty()) return "0\n"
         val result = execute(arrayOf("dumpsys", "package"))
-        if (result.first != 0 || !result.second.contains("Package [")) return "-1\\n" + result.second
-        val packageBlocks = Regex("""(?ms)^Package \\[([^\\]]+)](.*?)(?=^Package \\[|\\z)""")
+        if (result.first != 0 || !result.second.contains("Package [")) return "-1\n" + result.second
+        val packageBlocks = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
             .findAll(result.second)
         val frozen = packageBlocks.filter { match ->
             match.groupValues[1] in candidates &&
-                Regex("""(?m)^\\s*User 0:.*\\bsuspended=true\\b""").containsMatchIn(match.groupValues[2])
+                Regex("""(?m)^\s*User 0:.*\bsuspended=true\b""").containsMatchIn(match.groupValues[2])
         }.map { it.groupValues[1] }
-        return "0\\n" + frozen.joinToString(",")
+        return "0\n" + frozen.joinToString(",")
     }
 
     override fun getSuspended(packageName: String): Int {
