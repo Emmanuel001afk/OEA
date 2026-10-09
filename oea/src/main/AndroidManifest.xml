@@ -28,6 +28,13 @@
         android:label="OEA Launcher"
         android:allowBackup="false"
         android:supportsRtl="true">
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <activity
             android:name=".OeaLauncherActivity"
             android:exported="true"
