@@ -541,7 +541,7 @@ class OeaSystemToolsActivity : Activity() {
     private fun ramOverlaySummary(): String {
         val prefs = OeaGameBoostStore.prefs(this)
         val visible = prefs.getBoolean("ram_handle_visible", true)
-        if (!visible) return "Hidden • double-tap the game to bring it back"
+        if (!visible) return "Hidden • double-tap the screen to restore it"
         val size = when (prefs.getString("ram_handle_size", "medium")) {
             "small" -> "Small"
             "large" -> "Large"
@@ -649,7 +649,7 @@ class OeaSystemToolsActivity : Activity() {
 
         AlertDialog.Builder(this)
             .setTitle("OEA RAM floating control")
-            .setMessage("When enabled, the OEA RAM control stays visible above the selected game until you leave it. Put it in a quiet corner or resize it. When hidden, double-tap the game to bring the control back.")
+            .setMessage("When enabled, the OEA RAM control stays visible above the selected game until you leave it. Put it in a quiet corner or resize it. When hidden, double-tap the screen to restore the control. This does not close the panel.")
             .setView(container)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
