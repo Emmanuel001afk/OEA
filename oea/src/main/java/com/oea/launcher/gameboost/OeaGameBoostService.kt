@@ -456,7 +456,7 @@ class OeaGameBoostService : Service() {
     }
 
     private fun ensureWakeOverlay() {
-        if (wakeOverlay != null || !OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) return
+        if (wakeOverlay != null || OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) return
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val wake = android.view.View(this).apply {
             alpha = 0.01f
