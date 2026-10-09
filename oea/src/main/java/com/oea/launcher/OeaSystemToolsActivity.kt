@@ -154,6 +154,7 @@ class OeaSystemToolsActivity : Activity() {
 
         var currentQuery = ""
         var currentFilter = "all"
+        val selectedPackages = linkedSetOf<String>()
         var rerender: (() -> Unit)? = null
         val filters = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -187,6 +188,47 @@ class OeaSystemToolsActivity : Activity() {
             setPadding(dp(2), dp(4), dp(2), dp(8))
         }
         box.addView(summary)
+        val bulkActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun bulkButton(label: String, frozenState: Boolean) = TextView(this).apply {
+            text = label
+            textSize = 11f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(11), dp(10), dp(11))
+            setTextColor(textColor())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(surfaceColor())
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val chosen = selectedPackages.toList()
+                if (chosen.isEmpty()) {
+                    Toast.makeText(this@OeaSystemToolsActivity, "Select one or more apps first.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (OeaAppFreezer.backend(this@OeaSystemToolsActivity) == OeaAppFreezer.Backend.NONE) {
+                    Toast.makeText(this@OeaSystemToolsActivity, "Freezer authority is unavailable. Use the access row above.", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                var succeeded = 0
+                var failed = 0
+                chosen.forEach { pkg ->
+                    val result = OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, pkg, frozenState)
+                    if (result.success) succeeded++ else failed++
+                }
+                selectedPackages.clear()
+                Toast.makeText(this@OeaSystemToolsActivity, "$succeeded apps updated, $failed failed.", Toast.LENGTH_LONG).show()
+                rerender?.invoke()
+            }
+        }
+        bulkActions.addView(bulkButton("FREEZE SELECTED", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        bulkActions.addView(bulkButton("RESTORE SELECTED", false), LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
+        box.addView(bulkActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         box.addView(list, LinearLayout.LayoutParams(-1, -2))
 
@@ -207,7 +249,7 @@ class OeaSystemToolsActivity : Activity() {
                 }
                 matchesQuery && matchesFilter
             }
-            summary.text = "${frozen.size} frozen  •  ${allApps.size} installed apps  •  ${shown.size} shown"
+            summary.text = "${frozen.size} frozen  •  ${allApps.size} apps  •  ${shown.size} shown  •  ${selectedPackages.size} selected"
             filterViews.forEach { (mode, chip) ->
                 val selected = mode == currentFilter
                 chip.setTextColor(if (selected) textColor() else mutedColor())
@@ -231,10 +273,13 @@ class OeaSystemToolsActivity : Activity() {
             }
             shown.forEach { app ->
                 val isFrozen = frozen.contains(app.packageName)
-                freezerRow(list, app, isFrozen) {
+                freezerRow(list, app, isFrozen, selectedPackages.contains(app.packageName), { checked ->
+                    if (checked) selectedPackages.add(app.packageName) else selectedPackages.remove(app.packageName)
+                    rerender?.invoke()
+                }) {
                     val activeBackend = OeaAppFreezer.backend(this)
                     if (activeBackend == OeaAppFreezer.Backend.NONE) {
-                        requestDeviceOwner()
+                        Toast.makeText(this, "Freezer authority is unavailable. Use the access row above for setup.", Toast.LENGTH_LONG).show()
                     } else {
                         val result = OeaAppFreezer.setFrozen(this, app.packageName, !isFrozen)
                         Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
@@ -1106,7 +1151,14 @@ class OeaSystemToolsActivity : Activity() {
         setSingleLine(true)
     }
 
-    private fun freezerRow(box: LinearLayout, app: OeaAppInfo, frozen: Boolean, action: () -> Unit) {
+    private fun freezerRow(
+        box: LinearLayout,
+        app: OeaAppInfo,
+        frozen: Boolean,
+        selected: Boolean,
+        onSelectionChanged: (Boolean) -> Unit,
+        action: () -> Unit,
+    ) {
         box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1119,6 +1171,14 @@ class OeaSystemToolsActivity : Activity() {
             isFocusable = true
             contentDescription = if (frozen) app.label + " frozen, tap Restore" else app.label + " not frozen, tap Freeze"
             setOnClickListener { action() }
+
+            val selector = android.widget.CheckBox(this@OeaSystemToolsActivity).apply {
+                isChecked = selected
+                buttonTintList = android.content.res.ColorStateList.valueOf(if (selected) Color.rgb(65, 174, 125) else mutedColor())
+                contentDescription = "Select ${app.label} for bulk actions"
+                setOnClickListener { onSelectionChanged(isChecked) }
+            }
+            addView(selector, LinearLayout.LayoutParams(dp(30), dp(42)).apply { rightMargin = dp(3) })
 
             val iconView = ImageView(this@OeaSystemToolsActivity).apply {
                 setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
