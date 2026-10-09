@@ -279,10 +279,14 @@ class OeaGameBoostService : Service() {
     }
 
     private fun isTransientForegroundPackage(packageName: String): Boolean {
-        if (packageName == this.packageName) return true
-        // Android can surface these short-lived UI packages while the game
-        // remains underneath (permission sheets, recents, keyboards and launchers).
-        // They are treated as transition evidence, never as proof that a game ended.
+        if (packageName == this.packageName) {
+            // OEA's own launcher is the home screen, not a game. Other OEA
+            // activities (for example capture/permission flows) are transient.
+            return foregroundActivityClass?.substringAfterLast('.') != "OeaLauncherActivity"
+        }
+        // Android can surface short-lived system/permission UI while a game
+        // remains underneath. Home/launcher packages are intentionally excluded:
+        // returning to the launcher must end the game overlay session.
         return packageName in setOf(
             "com.android.systemui",
             "com.android.settings",
@@ -1185,7 +1189,7 @@ class OeaGameBoostService : Service() {
     private fun closePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
         // This method only dismisses the panel window. The floating handle is
-        // a separate view/window and its visibility preference is left untouched.
+        // a separate view and its visibility preference is left untouched.
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
         panel.animate()
