@@ -169,7 +169,7 @@ class OeaSystemToolsActivity : Activity() {
                 isFocusable = true
                 setOnClickListener {
                     currentFilter = mode
-                    renderFreezerRows(box, currentQuery, currentFilter, filterViews)
+                    renderApps()
                 }
             }
             filterViews[mode] = chip
@@ -253,46 +253,6 @@ class OeaSystemToolsActivity : Activity() {
         })
         renderApps()
         setRoot(box)
-    }
-
-    private fun renderFreezerRows(
-        box: LinearLayout,
-        query: String,
-        filter: String,
-        filterViews: Map<String, TextView>,
-    ) {
-        // The selected filter is owned by showFreezer; clicking a filter rebuilds
-        // the screen so the displayed state and active chip cannot drift apart.
-        showFreezerWithFilter(query, filter)
-    }
-
-    private fun showFreezerWithFilter(query: String, filter: String) {
-        showFreezer()
-        // Search and filter values are restored after the native screen is rebuilt.
-        val root = findViewById<android.view.View>(android.R.id.content)
-        val edit = findFirstEditText(root)
-        edit?.setText(query)
-        // Filter selection is applied by the screen's own controls after rebuild.
-        if (filter != "all") {
-            val label = if (filter == "frozen") "Frozen" else "Not frozen"
-            findTextView(root, label)?.performClick()
-        }
-    }
-
-    private fun findFirstEditText(view: android.view.View?): EditText? {
-        if (view is EditText) return view
-        if (view is android.view.ViewGroup) {
-            for (i in 0 until view.childCount) findFirstEditText(view.getChildAt(i))?.let { return it }
-        }
-        return null
-    }
-
-    private fun findTextView(view: android.view.View?, label: String): TextView? {
-        if (view is TextView && view.text.toString() == label) return view
-        if (view is android.view.ViewGroup) {
-            for (i in 0 until view.childCount) findTextView(view.getChildAt(i), label)?.let { return it }
-        }
-        return null
     }
 
     private fun showCallBlocker() {
