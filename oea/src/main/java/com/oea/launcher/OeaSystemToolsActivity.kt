@@ -116,7 +116,7 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun showFreezer() {
-        OeaAppFreezer.syncActualState(this)
+        OeaAppFreezer.syncActualState(this, apps.map { it.packageName })
         val backend = OeaAppFreezer.backend(this)
         val box = base("App Freezer", "Manage apps available in OEA. Freezing suspends an app; it does not uninstall it or erase its data.")
 
@@ -233,10 +233,20 @@ class OeaSystemToolsActivity : Activity() {
         box.addView(list, LinearLayout.LayoutParams(-1, -2))
 
         fun renderApps() {
-            OeaAppFreezer.syncActualState(this)
-            val allApps = apps.filterNot { it.packageName == packageName }
+            // Include installed packages even when they do not publish a launcher icon.
+            val allApps = packageManager.getInstalledApplications(0)
+                .filterNot { it.packageName == packageName }
+                .map { info ->
+                    OeaAppInfo(
+                        packageName = info.packageName,
+                        className = "",
+                        label = runCatching { info.loadLabel(packageManager).toString() }
+                            .getOrDefault(info.packageName),
+                    )
+                }
                 .distinctBy { it.packageName }
                 .sortedBy { it.label.lowercase() }
+            OeaAppFreezer.syncActualState(this, allApps.map { it.packageName })
             val frozen = OeaAppFreezer.frozenPackages(this)
             val shown = allApps.filter { app ->
                 val matchesQuery = currentQuery.isBlank() ||
