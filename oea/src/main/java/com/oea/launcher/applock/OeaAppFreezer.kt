@@ -222,8 +222,8 @@ object OeaAppFreezer {
 
     private fun shizukuFrozenPackages(candidates: Set<String>): Set<String>? {
         val response = getShizukuShellService().getSuspendedPackages(candidates.joinToString(","))
-        if (response.substringBefore('\\n').toIntOrNull() != 0) return null
-        return response.substringAfter('\\n', "")
+        if (response.substringBefore('\n').toIntOrNull() != 0) return null
+        return response.substringAfter('\n', "")
             .split(',')
             .filterTo(mutableSetOf()) { it.isNotBlank() && it in candidates }
     }
