@@ -30,6 +30,15 @@ jobs:
           cache: gradle
       - name: Make Gradle executable
         run: chmod +x ./gradlew
+      - name: Verify App Freezer integration
+        run: |
+          set -euo pipefail
+          grep -Fq "setPackagesSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "isPackageSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "dumpsys package" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
       - name: Build standalone OEA Launcher APK
         run: ./gradlew :oea:assembleRelease --stacktrace
       - name: Verify APK identity
