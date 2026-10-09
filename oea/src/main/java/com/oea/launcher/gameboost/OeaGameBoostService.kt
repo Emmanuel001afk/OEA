@@ -478,8 +478,12 @@ class OeaGameBoostService : Service() {
         val handleGestures = android.view.GestureDetector(
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
+                // GestureDetector rejects a gesture when onDown returns false.
+                // The previous listener therefore swallowed touches without ever
+                // dispatching the click on some Android/OEM builds.
+                override fun onDown(event: android.view.MotionEvent): Boolean = true
+
                 override fun onSingleTapUp(event: android.view.MotionEvent): Boolean {
-                    // Route taps through one click handler so the panel toggles exactly once.
                     handle.performClick()
                     return true
                 }
@@ -1065,8 +1069,19 @@ class OeaGameBoostService : Service() {
         }
         panel.setOnTouchListener { _, event ->
             if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
+                // Android sends ACTION_OUTSIDE to the topmost panel window, but
+                // does not reliably deliver that same tap to the handle window
+                // underneath it. Detect a tap landing on the handle explicitly,
+                // dismiss the panel, and keep the handle window alive.
+                val handle = (root as? android.widget.LinearLayout)?.getChildAt(0)
+                val hitHandle = if (handle != null) {
+                    val location = IntArray(2)
+                    handle.getLocationOnScreen(location)
+                    event.rawX >= location[0] && event.rawX <= location[0] + handle.width &&
+                        event.rawY >= location[1] && event.rawY <= location[1] + handle.height
+                } else false
                 closePanel(panel)
-                true
+                hitHandle
             } else {
                 false
             }
@@ -1201,29 +1216,27 @@ class OeaGameBoostService : Service() {
     }
 
     private fun closePanel(panel: View) {
-        if (panel.visibility != View.VISIBLE) return
-        // Record this interaction before animating: the foreground sampler
-        // must not mistake panel dismissal for leaving the game and remove
-        // the independent floating handle.
+        if (panel.visibility != View.VISIBLE && panel.parent == null) return
+        // Dismiss only the panel window. Never call removeOverlay() here: that
+        // method intentionally removes both the panel and the persistent handle.
         lastPanelDismissAt = System.currentTimeMillis()
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
-        panel.animate()
-            .alpha(0f)
-            .scaleX(0.96f)
-            .scaleY(0.96f)
-            .translationX(dp(12).toFloat())
-            .setDuration(145L)
-            .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
-            .withEndAction {
-                panel.visibility = View.GONE
-                detachPanelWindow(panel)
-                panel.setOnTouchListener(null)
-                panel.alpha = 1f
-                panel.scaleX = 1f
-                panel.scaleY = 1f
-                panel.translationX = 0f
-            }.start()
+        panel.clearAnimation()
+        panel.alpha = 0f
+        panel.visibility = View.GONE
+        detachPanelWindow(panel)
+        panel.setOnTouchListener(null)
+        panel.alpha = 1f
+        panel.scaleX = 1f
+        panel.scaleY = 1f
+        panel.translationX = 0f
+        // Defensive invariant: panel dismissal must not tear down the handle.
+        // If Android detached the handle independently, the normal recovery
+        // path will recreate it while the selected app remains active.
+        if (activeGame != null && (overlay == null || overlay?.parent == null)) {
+            ensureOverlayForActiveGame()
+        }
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
