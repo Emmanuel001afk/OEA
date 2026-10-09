@@ -71,12 +71,12 @@ object OeaAppFreezer {
             Backend.ROOT -> {
                 val (success, dump) = runRoot("dumpsys package")
                 if (!success || !dump.contains("Package [")) return
-                val packageBlocks = Regex("""(?ms)^Package \\[([^\\]]+)](.*?)(?=^Package \\[|\\z)""")
+                val packageBlocks = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
                     .findAll(dump).toList()
                 if (packageBlocks.isEmpty()) return
                 packageBlocks.filter { match ->
                     match.groupValues[1] in candidates &&
-                        Regex("""(?m)^\\s*User 0:.*\\bsuspended=true\\b""")
+                        Regex("""(?m)^\s*User 0:.*\bsuspended=true\b""")
                             .containsMatchIn(match.groupValues[2])
                 }.mapTo(mutableSetOf()) { it.groupValues[1] }
             }
