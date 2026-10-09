@@ -30,6 +30,8 @@ import java.util.Locale
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.max
 
 class OeaGameBoostService : Service() {
@@ -136,48 +138,116 @@ class OeaGameBoostService : Service() {
     }
 
     private val diagnosticWriteLock = Any()
-    private val diagnosticFileName = "OEA-GameBoost-Diagnostics.txt"
+    private val diagnosticTextFile = "OEA-GameBoost-Diagnostics.txt"
+    private val diagnosticJsonFile = "OEA-GameBoost-Diagnostics.jsonl"
+    private val diagnosticCsvFile = "OEA-GameBoost-Diagnostics.csv"
+    private val diagnosticUris = mutableMapOf<String, android.net.Uri>()
+    private val diagnosticWriter: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OEA-GameBoost-Diagnostics").apply { isDaemon = true }
+    }
+    private var lastForegroundEventAt = 0L
+    private var lastForegroundSource = "not-queried"
+    private var lastForegroundQueryError: String? = null
 
     /**
-     * Writes the same targeted messages to Android Logcat and a user-accessible
-     * Downloads file, so diagnostics can be shared without a computer or ADB.
+     * Writes every event to Logcat and three automatically maintained Downloads
+     * formats. Disk I/O runs on a dedicated queue so MediaStore queries cannot
+     * stall the one-second foreground monitor or panel/handle touch processing.
      */
     private fun diagnostic(priority: Int, message: String) {
         android.util.Log.println(priority, "OeaGameBoost", message)
-        synchronized(diagnosticWriteLock) {
-            runCatching {
-                val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
-                val line = "$stamp ${if (priority >= android.util.Log.WARN) "WARN" else "INFO"} $message\n"
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                    val existing = contentResolver.query(
-                        collection,
-                        arrayOf(MediaStore.Downloads._ID),
-                        "${MediaStore.Downloads.DISPLAY_NAME}=?",
-                        arrayOf(diagnosticFileName),
-                        null
-                    )?.use { cursor ->
-                        if (cursor.moveToFirst()) android.content.ContentUris.withAppendedId(
-                            collection,
-                            cursor.getLong(0)
-                        ) else null
-                    }
-                    val uri = existing ?: contentResolver.insert(
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
+        val level = when {
+            priority >= android.util.Log.ERROR -> "ERROR"
+            priority >= android.util.Log.WARN -> "WARN"
+            priority >= android.util.Log.INFO -> "INFO"
+            else -> "DEBUG"
+        }
+        val component = when {
+            message.contains("foreground", ignoreCase = true) || message.contains("monitor", ignoreCase = true) -> "foreground-detection"
+            message.contains("panel", ignoreCase = true) || message.contains("closePanel", ignoreCase = true) -> "panel"
+            message.contains("handle", ignoreCase = true) || message.contains("visibility", ignoreCase = true) -> "floating-handle"
+            message.contains("overlay", ignoreCase = true) || message.contains("WindowManager", ignoreCase = true) -> "overlay-window"
+            message.contains("permission", ignoreCase = true) || message.contains("usageAccess", ignoreCase = true) -> "permissions"
+            message.contains("wake", ignoreCase = true) -> "wake-overlay"
+            message.contains("service", ignoreCase = true) || message.contains("deactivate", ignoreCase = true) || message.contains("activate", ignoreCase = true) -> "service-lifecycle"
+            else -> "game-boost"
+        }
+        val event = message.substringBefore(' ').take(80)
+        val json = org.json.JSONObject()
+            .put("timestamp", stamp)
+            .put("level", level)
+            .put("component", component)
+            .put("event", event)
+            .put("message", message)
+            .put("activeGame", activeGame)
+            .put("foregroundPackage", lastKnownForegroundPackage)
+            .put("foregroundSource", lastForegroundSource)
+            .put("foregroundEventAt", lastForegroundEventAt)
+            .toString() + "\n"
+        val csv = listOf(stamp, level, component, event, activeGame.orEmpty(),
+            lastKnownForegroundPackage.orEmpty(), lastForegroundSource, lastForegroundEventAt.toString(), message)
+            .joinToString(",") { "\"${it.replace("\"", "\"\"")}\"" } + "\n"
+        val textLine = "$stamp $level [$component] $message\n"
+
+        runCatching {
+            diagnosticWriter.execute {
+                synchronized(diagnosticWriteLock) {
+                    appendDiagnosticFile(diagnosticTextFile, textLine, null)
+                    appendDiagnosticFile(diagnosticJsonFile, json, null)
+                    appendDiagnosticFile(
+                        diagnosticCsvFile,
+                        csv,
+                        "\"timestamp\",\"level\",\"component\",\"event\",\"activeGame\",\"foregroundPackage\",\"foregroundSource\",\"foregroundEventAt\",\"message\"\n"
+                    )
+                }
+            }
+        }.onFailure { error ->
+            android.util.Log.e("OeaGameBoost", "Could not queue diagnostic write: ${error.javaClass.simpleName}", error)
+        }
+    }
+
+    private fun appendDiagnosticFile(fileName: String, content: String, header: String?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            var uri = diagnosticUris[fileName]
+            var isNew = false
+            if (uri == null) {
+                uri = contentResolver.query(
+                    collection,
+                    arrayOf(MediaStore.Downloads._ID),
+                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+                    arrayOf(fileName, "${Environment.DIRECTORY_DOWNLOADS}/"),
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) android.content.ContentUris.withAppendedId(collection, cursor.getLong(0)) else null
+                }
+                if (uri == null) {
+                    uri = contentResolver.insert(
                         collection,
                         ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, diagnosticFileName)
-                            put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                            put(MediaStore.Downloads.MIME_TYPE, if (fileName.endsWith(".jsonl")) "application/x-ndjson" else if (fileName.endsWith(".csv")) "text/csv" else "text/plain")
                             put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                         }
                     )
-                    uri?.let { contentResolver.openOutputStream(it, "wa")?.bufferedWriter()?.use { writer -> writer.append(line) } }
-                } else {
-                    val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: filesDir
-                    java.io.File(directory, diagnosticFileName).appendText(line)
+                    isNew = true
                 }
-            }.onFailure { error ->
-                android.util.Log.w("OeaGameBoost", "Could not save diagnostic file: ${error.javaClass.simpleName}")
+                if (uri != null) diagnosticUris[fileName] = uri
             }
+            val target = uri ?: throw java.io.IOException("MediaStore could not create $fileName")
+            val prefix = if (isNew) header.orEmpty() else ""
+            val stream = contentResolver.openOutputStream(target, "wa")
+                ?: throw java.io.IOException("MediaStore returned no output stream for $fileName")
+            stream.bufferedWriter().use { writer ->
+                if (prefix.isNotEmpty()) writer.append(prefix)
+                writer.append(content)
+            }
+        } else {
+            val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: filesDir
+            val target = java.io.File(directory, fileName)
+            if (!target.exists() && !header.isNullOrEmpty()) target.appendText(header)
+            target.appendText(content)
         }
     }
 
@@ -197,6 +267,7 @@ class OeaGameBoostService : Service() {
     private var diagnosticHeartbeatTicks = 0L
     private var lastMonitorErrorSignature: String? = null
     private var lastLoggedForegroundPackage: String? = null
+    private var lastForegroundDecisionLogAt = 0L
     private var lastLoggedHandleVisibility: Int? = null
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
@@ -228,8 +299,13 @@ class OeaGameBoostService : Service() {
                 runCatching { OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService) }
                 val game = foregroundPackage()
                 if (game != lastLoggedForegroundPackage) {
-                    diagnostic(android.util.Log.INFO, "foreground package changed from=$lastLoggedForegroundPackage to=$game activeGame=$activeGame samples=$nonGameForegroundSamples")
+                    diagnostic(android.util.Log.INFO, "foreground package changed from=$lastLoggedForegroundPackage to=$game activeGame=$activeGame samples=$nonGameForegroundSamples source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass queryError=$lastForegroundQueryError")
                     lastLoggedForegroundPackage = game
+                }
+                if (activeGame != null && game != activeGame &&
+                    System.currentTimeMillis() - lastForegroundDecisionLogAt >= 5000L) {
+                    lastForegroundDecisionLogAt = System.currentTimeMillis()
+                    diagnostic(android.util.Log.WARN, "foreground decision candidate activeGame=$activeGame candidate=$game source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass transient=${game?.let(::isTransientForegroundPackage)} samples=$nonGameForegroundSamples")
                 }
                 val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
                     .getBoolean("capture_active", false)
@@ -281,12 +357,12 @@ class OeaGameBoostService : Service() {
                         }
                         // A confirmed different foreground app ends the session
                         // quickly. Closing the panel never extends game eligibility.
-                        if (nonGameForegroundSamples < 2) {
+                        if (nonGameForegroundSamples < 5) {
                             ensureOverlayForActiveGame()
                             updateOverlay()
                         } else {
                             val endingGame = activeGame
-                            diagnostic(android.util.Log.WARN, "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples")
+                            diagnostic(android.util.Log.WARN, "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass")
                             activeGame = null
                             nonGameForegroundSamples = 0
                             lastNonGamePackage = null
@@ -347,6 +423,8 @@ class OeaGameBoostService : Service() {
         removeWakeOverlay()
         removeOverlay()
         super.onDestroy()
+        // Flush queued diagnostic records, including final teardown messages.
+        diagnosticWriter.shutdown()
     }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun activate(packageName: String) {
@@ -1448,6 +1526,9 @@ class OeaGameBoostService : Service() {
             }
             if (latestPackage != null) {
                 lastKnownForegroundPackage = latestPackage
+                lastForegroundEventAt = latestTime
+                lastForegroundSource = "usage-events-resumed"
+                lastForegroundQueryError = null
                 return latestPackage
             }
 
@@ -1455,7 +1536,10 @@ class OeaGameBoostService : Service() {
             // remains open for minutes. It is not evidence that the user left.
             // A real transition to Home/another app produces a new resumed event
             // and replaces this cache before the next foreground decision.
-            lastKnownForegroundPackage?.let { return it }
+            lastKnownForegroundPackage?.let {
+                lastForegroundSource = "cached-last-resumed"
+                return it
+            }
 
             // On service start, there may be no cached event yet. Use UsageStats
             // once as a bootstrap rather than treating an empty event window as
@@ -1463,15 +1547,29 @@ class OeaGameBoostService : Service() {
             val stats = runCatching {
                 usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
             }.getOrNull().orEmpty()
-            val fallback = stats.maxByOrNull { it.lastTimeUsed }?.packageName
-            if (fallback != null) lastKnownForegroundPackage = fallback
+            val fallbackStat = stats.maxByOrNull { it.lastTimeUsed }
+            val fallback = fallbackStat?.packageName
+            if (fallback != null) {
+                lastKnownForegroundPackage = fallback
+                lastForegroundEventAt = fallbackStat.lastTimeUsed
+                lastForegroundSource = "usage-stats-bootstrap"
+            }
             fallback
-        }.getOrElse {
+        }.getOrElse { error ->
+            lastForegroundQueryError = "${error.javaClass.simpleName}:${error.message}"
             val stats = runCatching {
                 usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
             }.getOrNull().orEmpty()
-            val fallback = stats.maxByOrNull { it.lastTimeUsed }?.packageName
-            if (fallback != null) lastKnownForegroundPackage = fallback
+            val fallbackStat = stats.maxByOrNull { it.lastTimeUsed }
+            val fallback = fallbackStat?.packageName
+            if (fallback != null) {
+                lastKnownForegroundPackage = fallback
+                lastForegroundEventAt = fallbackStat.lastTimeUsed
+                lastForegroundSource = "usage-stats-after-query-error"
+            } else {
+                lastForegroundSource = "cached-after-query-error"
+            }
+            diagnostic(android.util.Log.ERROR, "foregroundPackage query failed=${error.javaClass.name}:${error.message} fallback=$fallback cached=$lastKnownForegroundPackage")
             fallback ?: lastKnownForegroundPackage
         }
     }
