@@ -132,7 +132,6 @@ class OeaGameBoostService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var overlay: View? = null
     private var panelView: View? = null
-    private var panelAttachedSeparately = false
     private var wakeOverlay: View? = null
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
@@ -215,7 +214,7 @@ class OeaGameBoostService : Service() {
                 overlay = null
             }
             showOverlay(packageName)
-            (overlay as? android.widget.LinearLayout)?.getChildAt(if (panelAttachedSeparately) 0 else 1)?.let { handle ->
+            (overlay as? android.widget.LinearLayout)?.getChildAt(1)?.let { handle ->
                 val visible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
                 handle.visibility = if (visible) View.VISIBLE else View.GONE
                 if (visible) removeWakeOverlay() else ensureWakeOverlay()
@@ -344,29 +343,13 @@ class OeaGameBoostService : Service() {
         })
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
-        // Use Android's native gesture recognizer rather than a hand-timed
-        // click counter. A single tap opens the panel; a double tap closes it.
-        // GestureDetector reports the first tap immediately through onSingleTapUp,
-        // before it knows a second tap is coming. It also reports onSingleTapUp for
-        // the second tap, so without this guard that second callback reopens the
-        // panel immediately after onDoubleTap closes it.
-        var consumeDoubleTapUp = false
+        // One tap toggles the panel. Panel and handle remain in one overlay window.
         val handleGestures = android.view.GestureDetector(
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
                 override fun onSingleTapUp(event: android.view.MotionEvent): Boolean {
-                    if (consumeDoubleTapUp) {
-                        consumeDoubleTapUp = false
-                        return true
-                    }
-                    if (panel.visibility != View.VISIBLE) showPanel(panel)
-                    handle.performClick()
-                    return true
-                }
-
-                override fun onDoubleTap(event: android.view.MotionEvent): Boolean {
-                    consumeDoubleTapUp = true
                     if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+                    handle.performClick()
                     return true
                 }
             }
@@ -379,7 +362,8 @@ class OeaGameBoostService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("ram_handle_dragged", false)) {
@@ -398,6 +382,15 @@ class OeaGameBoostService : Service() {
         runCatching {
             wm.addView(root, params)
             overlay = root
+
+            // Android delivers ACTION_OUTSIDE for taps beyond this overlay window.
+            // Dismiss only the panel; the floating handle and service stay active.
+            root.setOnTouchListener { _, event ->
+                if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE && panel.visibility == View.VISIBLE) {
+                    closePanel(panel)
+                    true
+                } else false
+            }
 
             handle.setOnTouchListener(object : View.OnTouchListener {
                 private var downRawX = 0f
@@ -495,7 +488,7 @@ class OeaGameBoostService : Service() {
                         removeWakeOverlay()
                         updateOverlay()
                         val root = overlay
-                        val handle = (root as? android.widget.LinearLayout)?.getChildAt(if (panelAttachedSeparately) 0 else 1) as? android.widget.FrameLayout
+                        val handle = (root as? android.widget.LinearLayout)?.getChildAt(1) as? android.widget.FrameLayout
                         handle?.alpha = 0f
                         handle?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(220L)?.start()
                     } else {
@@ -710,7 +703,7 @@ class OeaGameBoostService : Service() {
     }
 
     private fun updateOverlay() {
-        (overlay as? android.widget.LinearLayout)?.getChildAt(if (panelAttachedSeparately) 0 else 1)?.let { applyHandlePalette(it) }
+        (overlay as? android.widget.LinearLayout)?.getChildAt(1)?.let { applyHandlePalette(it) }
         val root = overlay as? android.widget.LinearLayout ?: run {
             activeGame?.let { if (Settings.canDrawOverlays(this)) showOverlay(it) }
             return
@@ -766,7 +759,7 @@ class OeaGameBoostService : Service() {
             }
         }
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
-        val handle = root.getChildAt(if (panelAttachedSeparately) 0 else 1) as? android.widget.FrameLayout
+        val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleVisible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
         handle?.visibility = if (handleVisible) View.VISIBLE else View.GONE
         if (handleVisible) removeWakeOverlay() else ensureWakeOverlay()
@@ -898,7 +891,6 @@ class OeaGameBoostService : Service() {
 
     private fun showPanel(panel: View) {
         if (panel.visibility == View.VISIBLE) return
-        attachPanelWindow(panel)
         panel.animate().cancel()
         panel.visibility = View.VISIBLE
         applyPanelPalette(panel)
@@ -1007,7 +999,6 @@ class OeaGameBoostService : Service() {
             .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
             .withEndAction {
                 panel.visibility = View.GONE
-                detachPanelWindow(panel)
                 panel.alpha = 1f
                 panel.scaleX = 1f
                 panel.scaleY = 1f
@@ -1062,71 +1053,10 @@ class OeaGameBoostService : Service() {
         previousInterruptionFilter = null
     }
 
-    private fun attachPanelWindow(panel: View) {
-        if (panelAttachedSeparately) return
-        val root = overlay as? android.widget.LinearLayout ?: return
-        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        runCatching {
-            root.removeView(panel)
-            val params = WindowManager.LayoutParams(
-                dp(286), WindowManager.LayoutParams.WRAP_CONTENT,
-                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-                PixelFormat.TRANSLUCENT
-            ).apply {
-                val rootParams = root.layoutParams as? WindowManager.LayoutParams
-                val dragged = OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("ram_handle_dragged", false)
-                gravity = if (dragged) Gravity.TOP or Gravity.START else overlayGravity()
-                x = if (dragged) rootParams?.x ?: dp(8) else dp(8)
-                y = if (dragged) (rootParams?.y ?: dp(8)) + handleSizePx() + dp(24) else handleSizePx() + dp(24)
-            }
-            panel.setOnTouchListener { _, event ->
-                if (event.actionMasked != android.view.MotionEvent.ACTION_OUTSIDE) return@setOnTouchListener false
-                val handle = (overlay as? android.widget.LinearLayout)
-                    ?.getChildAt(if (panelAttachedSeparately) 0 else 1)
-                val location = IntArray(2)
-                handle?.getLocationOnScreen(location)
-                val x = event.rawX.toInt()
-                val y = event.rawY.toInt()
-                val tappedHandle = handle != null &&
-                    x >= location[0] && x < location[0] + handle.width &&
-                    y >= location[1] && y < location[1] + handle.height
-                if (!tappedHandle) closePanel(panel)
-                true
-            }
-            wm.addView(panel, params)
-            panelAttachedSeparately = true
-            root.requestLayout()
-        }.onFailure {
-            panelAttachedSeparately = false
-            if (panel.parent == null) root.addView(panel, 0, android.widget.LinearLayout.LayoutParams(dp(286), -2))
-        }
-    }
-
-    private fun detachPanelWindow(panel: View) {
-        if (!panelAttachedSeparately) return
-        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        runCatching { wm.removeView(panel) }
-        panelAttachedSeparately = false
-        val root = overlay as? android.widget.LinearLayout
-        if (root != null && panel.parent == null) {
-            root.addView(panel, 0, android.widget.LinearLayout.LayoutParams(dp(286), -2))
-            root.requestLayout()
-        }
-    }
-
     private fun removeOverlay() {
-        panelView?.let { panel ->
-            if (panelAttachedSeparately) {
-                runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(panel) }
-                panelAttachedSeparately = false
-            }
-            panelView = null
-        }
         overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }
         overlay = null
+        panelView = null
     }
     private fun foregroundPackage(): String? {
         val usm = getSystemService(UsageStatsManager::class.java) ?: return null
