@@ -1353,8 +1353,15 @@ object OeaGameBoostStore {
     fun setEnabled(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean("enabled", enabled).apply()
     fun games(context: Context) = prefs(context).getStringSet("games", emptySet()).orEmpty()
     fun setGames(context: Context, games: Set<String>) = prefs(context).edit().putStringSet("games", games).apply()
+    fun mode(context: Context) = prefs(context).getString("game_selection_mode", "automatic") ?: "automatic"
+    fun setMode(context: Context, mode: String) {
+        prefs(context).edit().putString("game_selection_mode", if (mode == "manual_automatic") mode else "automatic").apply()
+    }
     fun dismissedGames(context: Context) = prefs(context).getStringSet("dismissed_games", emptySet()).orEmpty()
-    fun isGame(context: Context, packageName: String) = games(context).contains(packageName)
+    fun isGame(context: Context, packageName: String): Boolean {
+        if (!games(context).contains(packageName)) return false
+        return mode(context) == "manual_automatic" || detectedGames(context).contains(packageName)
+    }
 
     /** Uses Android's declared application category where available, with a conservative legacy fallback. */
     fun detectedGames(context: Context): Set<String> {
