@@ -1012,7 +1012,7 @@ class OeaGameBoostService : Service() {
         panelParams.x = (handleCenterX - panelWidth / 2).coerceIn(0, (screen.widthPixels - panelWidth).coerceAtLeast(0))
         panelParams.y = targetY
         runCatching {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(panel, panelParams)
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(container, panelParams)
         }
     }
 
@@ -1104,10 +1104,6 @@ class OeaGameBoostService : Service() {
 
     private fun closePanel(panel: View) {
         if (panel.visibility != View.VISIBLE) return
-        // Record this interaction before animating: the foreground sampler
-        // must not mistake panel dismissal for leaving the game and remove
-        // the independent floating handle.
-        lastPanelDismissAt = System.currentTimeMillis()
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
         panel.animate()
