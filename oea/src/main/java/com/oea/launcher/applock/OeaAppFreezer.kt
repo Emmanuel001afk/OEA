@@ -51,16 +51,36 @@ object OeaAppFreezer {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet(KEY_FROZEN, emptySet()).orEmpty()
 
     fun syncActualState(context: Context, candidatePackages: Collection<String> = emptyList()) {
-        // PackageManager is the source of truth when OEA is device owner. Include
-        // currently visible apps as well as saved entries so a suspension changed
-        // outside this screen is reflected when the list is refreshed.
-        if (backend(context) != Backend.DEVICE_OWNER) return
-        val pm = context.packageManager
+        // Reconcile the display with Android's package state, not just OEA's saved
+        // preference. Device-owner mode has a direct PackageManager API. Root mode
+        // reads one package-manager dump and updates state only if its format is
+        // recognized; an unrecognized OEM format must not erase the saved state.
+        val activeBackend = backend(context)
         val candidates = (frozenPackages(context) + candidatePackages)
             .filter { it.isNotBlank() && it != context.packageName }
             .toSet()
-        val actualFrozen = candidates.filterTo(mutableSetOf()) { pkg ->
-            runCatching { pm.isPackageSuspended(pkg) }.getOrDefault(false)
+        if (candidates.isEmpty()) return
+
+        val actualFrozen: Set<String> = when (activeBackend) {
+            Backend.DEVICE_OWNER -> {
+                val pm = context.packageManager
+                candidates.filterTo(mutableSetOf()) { pkg ->
+                    runCatching { pm.isPackageSuspended(pkg) }.getOrDefault(false)
+                }
+            }
+            Backend.ROOT -> {
+                val (success, dump) = runRoot("dumpsys package")
+                if (!success || !dump.contains("Package [")) return
+                val packageBlocks = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
+                    .findAll(dump).toList()
+                if (packageBlocks.isEmpty()) return
+                packageBlocks.filter { match ->
+                    match.groupValues[1] in candidates &&
+                        Regex("""(?m)^\s*User 0:.*\bsuspended=true\b""")
+                            .containsMatchIn(match.groupValues[2])
+                }.mapTo(mutableSetOf()) { it.groupValues[1] }
+            }
+            Backend.NONE -> return
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putStringSet(KEY_FROZEN, actualFrozen).apply()
