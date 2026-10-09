@@ -1049,7 +1049,20 @@ class OeaGameBoostService : Service() {
      * small overlay window and is never dismissed by this listener.
      */
     private fun attachPanelWindow(panel: View): Boolean {
-        if (panel.parent != null) return true
+        // Reuse the same WindowManager window while hidden. Repeated remove/add
+        // cycles can trigger OEM input/foreground transitions unrelated to the game.
+        if (panel.parent != null) {
+            panel.setOnTouchListener { _, event ->
+                if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
+                    closePanel(panel)
+                    true
+                } else {
+                    false
+                }
+            }
+            overlay?.let(::syncPanelToHandle)
+            return true
+        }
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val root = overlay as? android.widget.LinearLayout ?: return false
         if (root.layoutParams !is WindowManager.LayoutParams) return false
@@ -1214,8 +1227,9 @@ class OeaGameBoostService : Service() {
         panel.clearAnimation()
         panel.alpha = 0f
         panel.visibility = View.GONE
-        detachPanelWindow(panel)
-        panel.setOnTouchListener(null)
+        // Keep this window attached and its outside-touch listener intact.
+        // Closing the panel must not add/remove WindowManager windows or affect
+        // the independent floating handle and active-game session.
         panel.alpha = 1f
         panel.scaleX = 1f
         panel.scaleY = 1f
