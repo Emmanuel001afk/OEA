@@ -57,7 +57,8 @@ object OeaAppFreezer {
             if (!result.first) {
                 return Result(false, result.second.ifBlank { "Package suspension command failed" }, activeBackend)
             }
-            val actualState = suspensionState(packageName, activeBackend)
+            val actualState = if (activeBackend == Backend.ROOT) rootSuspensionState(packageName)
+                else suspensionState(packageName, activeBackend)
             if (actualState == null) {
                 return Result(
                     false,
@@ -164,7 +165,7 @@ object OeaAppFreezer {
 
     private fun runShell(backend: Backend, command: String): Pair<Boolean, String> = runCatching {
         val process = when (backend) {
-            Backend.SHIZUKU -> Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+            Backend.SHIZUKU -> Shizuku.newProcess(arrayOf("sh", "-c", "$command 2>&1"), null, null)
             Backend.ROOT -> ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
             else -> return@runCatching false to "No shell authority"
         }
