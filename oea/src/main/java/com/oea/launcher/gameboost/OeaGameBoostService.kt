@@ -248,7 +248,10 @@ class OeaGameBoostService : Service() {
                         }
                         // A confirmed different foreground app ends the session
                         // quickly. Closing the panel never extends game eligibility.
-                        if (nonGameForegroundSamples < 5) {
+                        // End promptly after two consecutive confirmed samples outside
+                        // the selected game; the old five-sample delay left the handle
+                        // visible for several seconds after returning Home.
+                        if (nonGameForegroundSamples < 2) {
                             ensureOverlayForActiveGame()
                             updateOverlay()
                         } else {
@@ -1122,7 +1125,12 @@ class OeaGameBoostService : Service() {
         if (panel.parent != null) {
             panel.setOnTouchListener { _, event ->
                 if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
-                    closePanel(panel)
+                    // Tapping the floating handle also counts as an outside tap
+                    // for this separate panel window. Ignore that event so the
+                    // handle's ACTION_UP can toggle the panel closed exactly once.
+                    if (!isPointInsideFloatingHandle(event.rawX, event.rawY)) {
+                        closePanel(panel)
+                    }
                     true
                 } else {
                     false
@@ -1148,10 +1156,11 @@ class OeaGameBoostService : Service() {
         }
         panel.setOnTouchListener { _, event ->
             if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
-                // The panel owns this outside-touch notification. Consume it after
-                // dismissing the panel; do not depend on ACTION_OUTSIDE coordinates
-                // or on Android forwarding the same tap to the handle window.
-                closePanel(panel)
+                // A tap on the handle is a toggle, not a generic outside dismissal.
+                // All other outside taps still dismiss the panel.
+                if (!isPointInsideFloatingHandle(event.rawX, event.rawY)) {
+                    closePanel(panel)
+                }
                 true
             } else {
                 false
@@ -1167,6 +1176,20 @@ class OeaGameBoostService : Service() {
             panel.setOnTouchListener(null)
             false
         }
+    }
+
+    private fun isPointInsideFloatingHandle(rawX: Float, rawY: Float): Boolean {
+        val root = overlay as? android.widget.LinearLayout ?: return false
+        val handle = root.getChildAt(0) ?: return false
+        if (handle.visibility != View.VISIBLE || !handle.isShown || handle.width <= 0 || handle.height <= 0) {
+            return false
+        }
+        val location = IntArray(2)
+        handle.getLocationOnScreen(location)
+        val x = rawX.toInt()
+        val y = rawY.toInt()
+        return x >= location[0] && x < location[0] + handle.width &&
+            y >= location[1] && y < location[1] + handle.height
     }
 
     /**
