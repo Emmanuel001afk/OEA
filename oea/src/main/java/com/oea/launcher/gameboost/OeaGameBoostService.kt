@@ -308,6 +308,24 @@ class OeaGameBoostService : Service() {
             updateBoostButton(boost)
         }
         panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
+        val closePanelButton = TextView(this).apply {
+            text = "×  CLOSE PANEL"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 11f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            contentDescription = "Close Game Boost panel"
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF30384A.toInt())
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), 0x664D74FF)
+            }
+            setPadding(dp(8), 0, dp(8), 0)
+            setOnClickListener { closePanel(panel) }
+        }
+        panel.addView(closePanelButton, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply {
+            topMargin = dp(8)
+        })
 
         val handleSize = handleSizePx()
         val handle = android.widget.FrameLayout(this).apply {
@@ -918,8 +936,6 @@ class OeaGameBoostService : Service() {
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val root = overlay as? android.widget.LinearLayout ?: return false
         val rootParams = root.layoutParams as? WindowManager.LayoutParams ?: return false
-        val dragged = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_dragged", false)
-        val gravity = if (dragged) Gravity.TOP or Gravity.START else overlayGravity()
         val panelParams = WindowManager.LayoutParams(
             dp(286), WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
@@ -928,14 +944,9 @@ class OeaGameBoostService : Service() {
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            this.gravity = gravity
-            if (dragged) {
-                x = rootParams.x
-                y = (rootParams.y + handleSizePx() + dp(24)).coerceAtLeast(0)
-            } else {
-                x = dp(8)
-                y = handleSizePx() + dp(24)
-            }
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
         }
         panel.setOnTouchListener { _, event ->
             if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
@@ -962,18 +973,32 @@ class OeaGameBoostService : Service() {
     private fun syncPanelToHandle(root: View) {
         val panel = panelView ?: return
         if (panel.visibility != View.VISIBLE || panel.parent == null) return
-        val rootParams = root.layoutParams as? WindowManager.LayoutParams ?: return
         val panelParams = panel.layoutParams as? WindowManager.LayoutParams ?: return
-        val dragged = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_dragged", false)
-        if (dragged || rootParams.gravity == (Gravity.TOP or Gravity.START)) {
-            panelParams.gravity = Gravity.TOP or Gravity.START
-            panelParams.x = rootParams.x
-            panelParams.y = (rootParams.y + handleSizePx() + dp(24)).coerceAtLeast(0)
-        } else {
-            panelParams.gravity = overlayGravity()
-            panelParams.x = dp(8)
-            panelParams.y = handleSizePx() + dp(24)
-        }
+        val handle = (root as? android.widget.LinearLayout)?.getChildAt(0) ?: return
+        val screen = resources.displayMetrics
+        val panelWidth = dp(286).coerceAtMost(screen.widthPixels)
+        panel.measure(
+            View.MeasureSpec.makeMeasureSpec(panelWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(screen.heightPixels, View.MeasureSpec.AT_MOST)
+        )
+        val panelHeight = panel.measuredHeight.coerceAtMost(screen.heightPixels)
+        val handleLocation = IntArray(2)
+        handle.getLocationOnScreen(handleLocation)
+        val gap = dp(8)
+        val belowY = handleLocation[1] + handle.height + gap
+        val aboveY = handleLocation[1] - panelHeight - gap
+        val fitsBelow = belowY + panelHeight <= screen.heightPixels
+        val fitsAbove = aboveY >= 0
+        val targetY = when {
+            fitsBelow -> belowY
+            fitsAbove -> aboveY
+            (screen.heightPixels - (handleLocation[1] + handle.height)) >= handleLocation[1] -> belowY
+            else -> aboveY
+        }.coerceIn(0, (screen.heightPixels - panelHeight).coerceAtLeast(0))
+        val handleCenterX = handleLocation[0] + handle.width / 2
+        panelParams.gravity = Gravity.TOP or Gravity.START
+        panelParams.x = (handleCenterX - panelWidth / 2).coerceIn(0, (screen.widthPixels - panelWidth).coerceAtLeast(0))
+        panelParams.y = targetY
         runCatching {
             (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(panel, panelParams)
         }
