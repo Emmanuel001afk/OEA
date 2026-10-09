@@ -901,20 +901,33 @@ class OeaGameBoostService : Service() {
         (this and 0x00FFFFFF) or ((alpha.coerceIn(0, 255)) shl 24)
 
     private fun showPanel(panel: View) {
-        if (panel.visibility == View.VISIBLE) return
-        panel.animate().cancel()
+        val existingHost = panelWindowContainer
+        if (existingHost?.parent != null) return
+
+        // The encasement is the panel's independent window/lifecycle owner.
+        // Never animate or dismiss the floating handle's WindowManager root.
         panel.visibility = View.VISIBLE
+        panel.alpha = 1f
+        panel.scaleX = 1f
+        panel.scaleY = 1f
+        panel.translationX = 0f
         if (!attachPanelWindow(panel)) {
+            panel.visibility = View.GONE
+            return
+        }
+
+        val host = panelWindowContainer ?: run {
             panel.visibility = View.GONE
             return
         }
         applyPanelPalette(panel)
         startPanelColorAnimation(panel)
-        panel.alpha = 0f
-        panel.scaleX = 0.96f
-        panel.scaleY = 0.96f
-        panel.translationX = dp(20).toFloat()
-        panel.animate()
+        host.alpha = 0f
+        host.scaleX = 0.96f
+        host.scaleY = 0.96f
+        host.translationX = dp(20).toFloat()
+        host.animate().cancel()
+        host.animate()
             .alpha(1f)
             .scaleX(1f)
             .scaleY(1f)
@@ -922,7 +935,9 @@ class OeaGameBoostService : Service() {
             .setDuration(280L)
             .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
             .withEndAction {
-                animateGameBoostPanel(panel)
+                if (panelWindowContainer === host && host.parent != null && panel.visibility == View.VISIBLE) {
+                    animateGameBoostPanel(panel)
+                }
             }.start()
     }
 
@@ -1007,14 +1022,21 @@ class OeaGameBoostService : Service() {
     }
 
     private fun detachPanelWindow(panel: View) {
-        val container = panelWindowContainer ?: return
+        val container = panelWindowContainer
+        // Clear ownership first so late animation/outside-touch callbacks are inert.
         panelWindowContainer = null
+        container?.animate()?.cancel()
         runCatching {
-            if (container.parent != null) {
+            if (container?.parent != null) {
                 (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(container)
             }
         }
         (panel.parent as? android.view.ViewGroup)?.removeView(panel)
+        panel.visibility = View.GONE
+        panel.alpha = 1f
+        panel.scaleX = 1f
+        panel.scaleY = 1f
+        panel.translationX = 0f
     }
 
     private fun animateGameBoostPanel(panel: View) {
@@ -1093,10 +1115,22 @@ class OeaGameBoostService : Service() {
     }
 
     private fun closePanel(panel: View) {
-        if (panel.visibility != View.VISIBLE) return
+        // Dismiss only the independent encasement window. The floating handle
+        // belongs to 'overlay' and is deliberately never hidden, detached,
+        // re-parented, or animated by this close path.
+        val host = panelWindowContainer ?: run {
+            panel.visibility = View.GONE
+            stopPanelColorAnimation(panel)
+            return
+        }
+        if (host.parent == null) {
+            detachPanelWindow(panel)
+            return
+        }
+
         stopPanelColorAnimation(panel)
-        panel.animate().cancel()
-        panel.animate()
+        host.animate().cancel()
+        host.animate()
             .alpha(0f)
             .scaleX(0.96f)
             .scaleY(0.96f)
@@ -1104,12 +1138,15 @@ class OeaGameBoostService : Service() {
             .setDuration(145L)
             .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
             .withEndAction {
-                panel.visibility = View.GONE
-                detachPanelWindow(panel)
-                panel.alpha = 1f
-                panel.scaleX = 1f
-                panel.scaleY = 1f
-                panel.translationX = 0f
+                // Guard against a stale animation callback dismissing a newly
+                // opened panel host.
+                if (panelWindowContainer === host) {
+                    detachPanelWindow(panel)
+                    host.alpha = 1f
+                    host.scaleX = 1f
+                    host.scaleY = 1f
+                    host.translationX = 0f
+                }
             }.start()
     }
 
