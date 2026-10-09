@@ -161,11 +161,18 @@ class OeaGameBoostService : Service() {
                     activeGame = game
                     activate(game)
                     updateOverlay()
-                    panelView?.let(::closePanel)
+                    if (isPanelEncasementAttached()) requestPanelEncasementDismissal()
                 } else {
                     updateOverlay()
                 }
             } else if (activeGame != null) {
+                // OEA can be reported as foreground during interaction with its
+                // own overlay. That is not proof the user left the game: never
+                // tear down the handle while the panel encasement is attached.
+                if (game == packageName && isPanelEncasementAttached()) {
+                    nonGameForegroundSamples = 0
+                    updateOverlay()
+                } else {
                 // Capture consent/host transitions are allowed to keep the
                 // button alive. For every other positively identified
                 // non-game foreground package, require two consecutive samples
@@ -184,6 +191,7 @@ class OeaGameBoostService : Service() {
                     } else {
                         updateOverlay()
                     }
+                }
                 }
             }
             handler.postDelayed(this, 1000)
@@ -322,7 +330,7 @@ class OeaGameBoostService : Service() {
                 setStroke(dp(1), 0x664D74FF)
             }
             setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener { closePanel(panel) }
+            setOnClickListener { requestPanelEncasementDismissal() }
         }
         panel.addView(closePanelButton, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply {
             topMargin = dp(8)
@@ -373,7 +381,7 @@ class OeaGameBoostService : Service() {
             }
         )
         handle.setOnClickListener {
-            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+            togglePanelEncasement()
         }
 
         val params = WindowManager.LayoutParams(
@@ -962,7 +970,7 @@ class OeaGameBoostService : Service() {
             addView(panel, android.widget.FrameLayout.LayoutParams(-1, -2))
             setOnTouchListener { _, event ->
                 if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
-                    closePanel(panel)
+                    requestPanelEncasementDismissal()
                     true
                 } else false
             }
@@ -1114,7 +1122,21 @@ class OeaGameBoostService : Service() {
             }.start()
     }
 
-    private fun closePanel(panel: View) {
+    private fun isPanelEncasementAttached(): Boolean =
+        panelWindowContainer?.parent != null
+
+    /** All panel-dismissal sources route through this encasement owner. */
+    private fun togglePanelEncasement() {
+        val panel = panelView ?: return
+        if (isPanelEncasementAttached()) {
+            requestPanelEncasementDismissal()
+        } else {
+            showPanel(panel)
+        }
+    }
+
+    private fun requestPanelEncasementDismissal() {
+        val panel = panelView ?: return
         // Dismiss only the independent encasement window. The floating handle
         // belongs to 'overlay' and is deliberately never hidden, detached,
         // re-parented, or animated by this close path.
