@@ -44,6 +44,7 @@ class OeaGameCaptureService : Service() {
     private var recorder: MediaRecorder? = null
     private var recorderStarted = false
     @Volatile private var screenshotFrameProcessing = false
+    @Volatile private var screenshotNotBeforeUptime = 0L
     private var screenshotThread: android.os.HandlerThread? = null
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
@@ -219,6 +220,9 @@ class OeaGameCaptureService : Service() {
 
     private fun captureScreenshot() {
         screenshotFrameProcessing = false
+        // Ignore the first mirrored frame: Android can deliver a transient black
+        // frame immediately after VirtualDisplay creation, before the display is attached.
+        screenshotNotBeforeUptime = android.os.SystemClock.uptimeMillis() + 450L
         val (width, height) = size()
         val captureReader = ImageReader.newInstance(
             width,
@@ -277,6 +281,10 @@ class OeaGameCaptureService : Service() {
             return
         }
         val image = runCatching { ir.acquireLatestImage() }.getOrNull() ?: return
+        if (android.os.SystemClock.uptimeMillis() < screenshotNotBeforeUptime) {
+            image.close()
+            return
+        }
         // The first frame has arrived. Do not let the 4-second frame-arrival
         // timeout interrupt slow pixel conversion/PNG writes on low-memory phones.
         screenshotFrameProcessing = true
@@ -301,8 +309,11 @@ class OeaGameCaptureService : Service() {
                         val red = buffer.get(offset).toInt() and 0xFF
                         val green = buffer.get(offset + 1).toInt() and 0xFF
                         val blue = buffer.get(offset + 2).toInt() and 0xFF
-                        val alpha = buffer.get(offset + 3).toInt() and 0xFF
-                        pixels[y * width + x] = android.graphics.Color.argb(alpha, red, green, blue)
+                        // A mirrored display frame is opaque. Some device/driver
+                        // combinations leave the RGBA alpha byte at zero; preserving
+                        // that byte turns valid RGB pixels into a fully transparent
+                        // bitmap, which gallery viewers render as black.
+                        pixels[y * width + x] = android.graphics.Color.rgb(red, green, blue)
                     }
                 }
                 val bitmap = android.graphics.Bitmap.createBitmap(
