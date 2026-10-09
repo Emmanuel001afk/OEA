@@ -43,6 +43,7 @@ class OeaGameCaptureService : Service() {
     private var reader: ImageReader? = null
     private var recorder: MediaRecorder? = null
     private var recorderStarted = false
+    private var screenshotCompleted = false
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
     private var outputDescriptor: android.os.ParcelFileDescriptor? = null
@@ -200,6 +201,7 @@ class OeaGameCaptureService : Service() {
     }
 
     private fun captureScreenshot() {
+        screenshotCompleted = false
         val (width, height) = size()
         val captureReader = ImageReader.newInstance(
             width,
@@ -238,7 +240,7 @@ class OeaGameCaptureService : Service() {
         }
 
         Handler(Looper.getMainLooper()).postDelayed({
-            if (!completed && android.os.SystemClock.uptimeMillis() >= deadline) {
+            if (!completed && !screenshotCompleted && android.os.SystemClock.uptimeMillis() >= deadline) {
                 finishCapture(false)
             }
         }, 4200L)
@@ -276,6 +278,7 @@ class OeaGameCaptureService : Service() {
                 result
             }
         }.getOrDefault(false)
+        screenshotCompleted = true
         if (saved) {
             Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
             getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
