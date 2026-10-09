@@ -197,8 +197,11 @@ class OeaGameBoostService : Service() {
                             nonGameForegroundSamples = 1
                         }
                         val recentlyDismissedPanel =
-                            System.currentTimeMillis() - lastPanelDismissAt < 8_000L
-                        if (recentlyDismissedPanel || nonGameForegroundSamples < 8) {
+                            System.currentTimeMillis() - lastPanelDismissAt < 15_000L
+                        // A resumed event can be missed or delayed by OEM UsageStats
+                        // implementations. Require 15 seconds of the same positively
+                        // identified non-game package before ending the session.
+                        if (recentlyDismissedPanel || nonGameForegroundSamples < 15) {
                             ensureOverlayForActiveGame()
                             updateOverlay()
                         } else {
@@ -233,7 +236,25 @@ class OeaGameBoostService : Service() {
         else startForeground(NOTIFICATION_ID, notification)
         handler.post(tick)
     }
-    override fun onDestroy() { handler.removeCallbacksAndMessages(null); activeGame?.let(::deactivate); removeWakeOverlay(); removeOverlay(); super.onDestroy() }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_REFRESH) {
+            // Settings edits should refresh the existing session, not tear down
+            // the WindowManager handle by stopping and recreating this service.
+            activeGame?.let {
+                ensureOverlayForActiveGame()
+                updateOverlay()
+            }
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        activeGame?.let(::deactivate)
+        removeWakeOverlay()
+        removeOverlay()
+        super.onDestroy()
+    }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun activate(packageName: String) {
         if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) {
@@ -267,6 +288,9 @@ class OeaGameBoostService : Service() {
 
     private fun isTransientForegroundPackage(packageName: String): Boolean {
         if (packageName == this.packageName) return true
+        // Android can surface these short-lived UI packages while the game
+        // remains underneath (permission sheets, recents, keyboards and launchers).
+        // They are treated as transition evidence, never as proof that a game ended.
         return packageName in setOf(
             "com.android.systemui",
             "com.android.settings",
@@ -276,7 +300,17 @@ class OeaGameBoostService : Service() {
             "com.google.android.packageinstaller",
             "com.google.android.inputmethod.latin",
             "com.google.android.apps.inputmethod",
-            "com.android.inputmethod.latin"
+            "com.android.inputmethod.latin",
+            "com.google.android.apps.nexuslauncher",
+            "com.android.launcher",
+            "com.android.launcher3",
+            "com.google.android.apps.launcher",
+            "com.sec.android.app.launcher",
+            "com.miui.home",
+            "com.oppo.launcher",
+            "com.transsion.XOSLauncher",
+            "com.transsion.hilauncher",
+            "com.huawei.android.launcher"
         )
     }
 
@@ -289,10 +323,20 @@ class OeaGameBoostService : Service() {
         val game = activeGame ?: return
         if (!Settings.canDrawOverlays(this)) return
         val current = overlay
-        if (current != null && current.parent != null) return
+        val root = current as? android.widget.LinearLayout
+        val handle = root?.getChildAt(0) as? android.widget.FrameLayout
+        val handleLabel = handle?.getChildAt(0) as? TextView
+        // An attached but damaged root is not a healthy overlay. Checking only
+        // View.parent can leave Game Boost believing its button still exists.
+        val structureHealthy = root != null && handle != null && handleLabel != null
+        if (current != null && current.parent != null && structureHealthy) return
 
         if (current != null) {
-            panelView?.let(::detachPanelWindow)
+            panelView?.let { panel ->
+                panel.animate().cancel()
+                detachPanelWindow(panel)
+            }
+            runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(current) }
             overlay = null
             panelView = null
         }
@@ -1283,7 +1327,11 @@ class OeaGameBoostService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL, "OEA Game Boost", NotificationManager.IMPORTANCE_LOW))
     }
-    companion object { private const val CHANNEL = "oea_game_boost"; private const val NOTIFICATION_ID = 4107 }
+    companion object {
+        const val ACTION_REFRESH = "com.oea.launcher.gameboost.REFRESH"
+        private const val CHANNEL = "oea_game_boost"
+        private const val NOTIFICATION_ID = 4107
+    }
 }
 object OeaGameBoostStore {
     private const val PREFS = "oea_game_boost"
