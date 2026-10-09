@@ -205,9 +205,10 @@ class OeaGameBoostService : Service() {
             if (diagnosticHeartbeatTicks % 10L == 0L) {
                 val root = overlay
                 val handle = ((root as? android.widget.LinearLayout)?.getChildAt(0) as? android.view.ViewGroup)
-                diagnostic(android.util.Log.INFO, "heartbeat tick=$diagnosticHeartbeatTicks enabled=${OeaGameBoostStore.enabled(this@OeaGameBoostService)} usageAccess=${isUsageAccessGranted()} overlayExists=${root != null} overlayAttached=${root?.parent != null} overlayVisibility=${root?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} handleAttached=${handle?.parent != null} panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} wakeOverlayAttached=${wakeOverlay?.parent != null} overlayPermission=${Settings.canDrawOverlays(this@OeaGameBoostService)} activeGame=$activeGame lastForeground=$lastKnownForegroundPackage")
+                diagnostic(android.util.Log.INFO, "heartbeat tick=$diagnosticHeartbeatTicks enabled=${OeaGameBoostStore.enabled(this@OeaGameBoostService)} usageAccess=${isUsageAccessGranted()} overlayExists=${root != null} overlayAttached=${root?.parent != null} overlayVisibility=${root?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} handleAttached=${handle?.parent != null} panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} wakeOverlayAttached=${wakeOverlay?.parent != null} overlayPermission=${Settings.canDrawOverlays(this@OeaGameBoostService)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("ram_handle_visible", true)} activeGame=$activeGame lastForeground=$lastKnownForegroundPackage")
             }
             if (!OeaGameBoostStore.enabled(this@OeaGameBoostService)) {
+                diagnostic(android.util.Log.WARN, "monitor stopping because enabled=false activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
                 stopSelf()
                 return
             }
@@ -349,6 +350,7 @@ class OeaGameBoostService : Service() {
     }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun activate(packageName: String) {
+        diagnostic(android.util.Log.INFO, "activate requested game=$packageName overlayPermission=${Settings.canDrawOverlays(this)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)} existingOverlayAttached=${overlay?.parent != null}")
         if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) {
             val nm = getSystemService(NotificationManager::class.java)
             if (nm.isNotificationPolicyAccessGranted) { previousInterruptionFilter = nm.currentInterruptionFilter; nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY) }
@@ -369,6 +371,8 @@ class OeaGameBoostService : Service() {
                 if (visible) removeWakeOverlay() else ensureWakeOverlay()
             }
             if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) setKeepScreenOn(true)
+        } else {
+            diagnostic(android.util.Log.ERROR, "activate cannot create overlay: overlay permission denied game=$packageName")
         }
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
