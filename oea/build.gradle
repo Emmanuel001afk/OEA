@@ -3,6 +3,7 @@ plugins {
 }
 android {
     namespace "com.oea.launcher"
+    buildFeatures { aidl true }
     compileSdk 36
     defaultConfig {
         applicationId "com.oea.launcher"
