@@ -178,30 +178,52 @@ class OeaGameBoostService : Service() {
                     }
                     updateOverlay()
                 } else if (activeGame != null) {
-                    // Unknown samples, OEA-owned activities, Android permission
-                    // UI and System UI are not proof that the user left the game.
-                    if (captureActive || game == null || isTransientForegroundPackage(game)) {
+                    // Keep the overlay briefly during genuine Android transition
+                    // surfaces, but do not treat the Home launcher as a transient:
+                    // returning Home means the selected game/app has been left.
+                    if (captureActive) {
                         nonGameForegroundSamples = 0
                         lastNonGamePackage = null
                         ensureOverlayForActiveGame()
                         updateOverlay()
+                    } else if (game == null) {
+                        // Unknown foreground samples get only a short grace period.
+                        // They must not pin the overlay on-screen indefinitely.
+                        nonGameForegroundSamples++
+                        if (nonGameForegroundSamples < 3) {
+                            ensureOverlayForActiveGame()
+                            updateOverlay()
+                        } else {
+                            val endingGame = activeGame
+                            activeGame = null
+                            nonGameForegroundSamples = 0
+                            lastNonGamePackage = null
+                            endingGame?.let(::deactivate)
+                        }
+                    } else if (isTransientForegroundPackage(game)) {
+                        // Permission/system UI may briefly cover the selected app.
+                        // Keep the overlay for at most two polls, then dismiss it.
+                        nonGameForegroundSamples++
+                        if (nonGameForegroundSamples < 3) {
+                            ensureOverlayForActiveGame()
+                            updateOverlay()
+                        } else {
+                            val endingGame = activeGame
+                            activeGame = null
+                            nonGameForegroundSamples = 0
+                            lastNonGamePackage = null
+                            endingGame?.let(::deactivate)
+                        }
                     } else {
-                        // Require the same positively identified non-game app
-                        // for eight consecutive samples. A single transition,
-                        // notification shade, panel dismissal or app switch
-                        // cannot tear down the in-game control.
                         if (lastNonGamePackage == game) {
                             nonGameForegroundSamples++
                         } else {
                             lastNonGamePackage = game
                             nonGameForegroundSamples = 1
                         }
-                        val recentlyDismissedPanel =
-                            System.currentTimeMillis() - lastPanelDismissAt < 15_000L
-                        // A resumed event can be missed or delayed by OEM UsageStats
-                        // implementations. Require 15 seconds of the same positively
-                        // identified non-game package before ending the session.
-                        if (recentlyDismissedPanel || nonGameForegroundSamples < 15) {
+                        // A confirmed different foreground app ends the session
+                        // quickly. Closing the panel never extends game eligibility.
+                        if (nonGameForegroundSamples < 2) {
                             ensureOverlayForActiveGame()
                             updateOverlay()
                         } else {
@@ -301,16 +323,8 @@ class OeaGameBoostService : Service() {
             "com.google.android.inputmethod.latin",
             "com.google.android.apps.inputmethod",
             "com.android.inputmethod.latin",
-            "com.google.android.apps.nexuslauncher",
-            "com.android.launcher",
-            "com.android.launcher3",
-            "com.google.android.apps.launcher",
-            "com.sec.android.app.launcher",
-            "com.miui.home",
-            "com.oppo.launcher",
-            "com.transsion.XOSLauncher",
-            "com.transsion.hilauncher",
-            "com.huawei.android.launcher"
+            // Do not include Home launcher packages here. Their resumed
+            // activity is positive evidence that the selected app was left.
         )
     }
 
