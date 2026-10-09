@@ -279,24 +279,32 @@ class OeaGameBoostService : Service() {
         val rowOne = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
         val rowTwo = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
         val dnd = chip("◉  DND")
-        val boost = chip("⚡  BOOST")
         val screenshot = chip("▣  SHOT")
+        val boost = chip("⚡  BOOST")
         val record = chip("●  RECORD")
         val cleanup = chip("↻  CLEAN RAM")
+        val close = chip("✕  CLOSE")
         rowOne.addView(dnd, chipParams())
-        rowOne.addView(boost, chipParams())
         rowOne.addView(screenshot, chipParams())
-        val wifi = chip("⌁  WI-FI")
-        rowOne.addView(wifi, chipParams())
+        rowOne.addView(boost, chipParams())
         rowTwo.addView(record, chipParams())
         rowTwo.addView(cleanup, chipParams())
+        rowTwo.addView(close, chipParams())
         controls.addView(rowOne)
         controls.addView(rowTwo, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply { topMargin = dp(4) })
         dnd.setOnClickListener { toggleDnd(dnd) }
         screenshot.setOnClickListener { launchCapture(OeaGameCaptureActivity.MODE_SCREENSHOT) }
         record.setOnClickListener { toggleRecording(record) }
-        wifi.setOnClickListener { openWifiPanel() }
         cleanup.setOnClickListener { cleanBackgroundMemory(cleanup) }
+        close.setOnClickListener { closePanel(panel) }
+        val wifi = chip("⌁  WI-FI").apply { textSize = 9f }
+        wifi.setOnClickListener { openWifiPanel() }
+        val header = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(title, android.widget.LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(wifi, android.widget.LinearLayout.LayoutParams(dp(68), dp(30)))
         boost.setOnClickListener {
             val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
             OeaGameBoostStore.prefs(this).edit().putBoolean("boost", next).apply()
@@ -306,7 +314,7 @@ class OeaGameBoostService : Service() {
             }.start()
             updateBoostButton(boost)
         }
-        panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
+        panel.addView(header); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
 
         val handleSize = handleSizePx()
         val handle = android.widget.FrameLayout(this).apply {
@@ -341,22 +349,10 @@ class OeaGameBoostService : Service() {
         })
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
-        // Opening stays a single tap. Closing requires a deliberate double tap
-        // so an ordinary tap cannot collapse the panel accidentally.
-        var lastCloseTapAt = 0L
+        // The floating button only opens the panel. Closing is handled by
+        // the dedicated CLOSE chip inside the panel; the handle stays visible.
         handle.setOnClickListener {
-            if (panel.visibility != View.VISIBLE) {
-                lastCloseTapAt = 0L
-                showPanel(panel)
-            } else {
-                val now = android.os.SystemClock.uptimeMillis()
-                if (now - lastCloseTapAt in 1..450L) {
-                    lastCloseTapAt = 0L
-                    closePanel(panel)
-                } else {
-                    lastCloseTapAt = now
-                }
-            }
+            if (panel.visibility != View.VISIBLE) showPanel(panel)
         }
 
         val params = WindowManager.LayoutParams(
@@ -699,7 +695,7 @@ class OeaGameBoostService : Service() {
         val rowOne = controls.getChildAt(0) as? android.widget.LinearLayout ?: return
         val rowTwo = controls.getChildAt(1) as? android.widget.LinearLayout ?: return
         val dnd = rowOne.getChildAt(0) as? TextView ?: return
-        val boost = rowOne.getChildAt(1) as? TextView ?: return
+        val boost = rowOne.getChildAt(2) as? TextView ?: return
 
         val info = ActivityManager.MemoryInfo()
         getSystemService(ActivityManager::class.java).getMemoryInfo(info)
@@ -732,7 +728,7 @@ class OeaGameBoostService : Service() {
         val captureActive = OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)
         val captureMode = OeaGameBoostStore.prefs(this).getString("capture_mode", "")
         val recording = OeaGameBoostStore.prefs(this).getBoolean("recording", false)
-        (controls.getChildAt(0) as? android.widget.LinearLayout)?.getChildAt(2)?.let { (it as? TextView)?.text = if (captureActive && captureMode == OeaGameCaptureActivity.MODE_SCREENSHOT) "▣  SAVING…" else "▣  SHOT" }
+        (controls.getChildAt(0) as? android.widget.LinearLayout)?.getChildAt(1)?.let { (it as? TextView)?.text = if (captureActive && captureMode == OeaGameCaptureActivity.MODE_SCREENSHOT) "▣  SAVING…" else "▣  SHOT" }
         (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text =
             when {
                 recording -> "■  STOP REC"
@@ -895,7 +891,7 @@ class OeaGameBoostService : Service() {
 
     private fun animateGameBoostPanel(panel: View) {
         val content = panel as? android.widget.LinearLayout ?: return
-        val title = content.getChildAt(0) as? TextView
+        val title = (content.getChildAt(0) as? android.view.ViewGroup)?.getChildAt(0) as? TextView
         val game = content.getChildAt(1) as? TextView
         val metrics = content.getChildAt(2) as? TextView
         val battery = content.getChildAt(3) as? TextView
