@@ -55,6 +55,13 @@ class OeaGameBoostService : Service() {
             strokeWidth = dp(6).toFloat()
             strokeCap = android.graphics.Paint.Cap.ROUND
         }
+        private val accentArc = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(2).toFloat()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+        }
+        private fun alphaColor(color: Int, alpha: Int): Int =
+            (color and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
         private val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             textAlign = android.graphics.Paint.Align.CENTER
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -106,15 +113,15 @@ class OeaGameBoostService : Service() {
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(dp(220))
-            val desiredHeight = dp(72)
+            val desiredHeight = dp(86)
             setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
         }
 
         override fun onDraw(canvas: android.graphics.Canvas) {
             val available = width - paddingLeft - paddingRight
-            val diameter = minOf(dp(58), ((available - dp(14)) / 2).coerceAtLeast(dp(52)))
-            val radius = diameter / 2f - dp(3)
-            val centerY = dp(29).toFloat()
+            val diameter = minOf(dp(68), ((available - dp(14)) / 2).coerceAtLeast(dp(56)))
+            val radius = diameter / 2f - dp(4)
+            val centerY = dp(34).toFloat()
             val leftCenterX = paddingLeft + available / 4f
             val rightCenterX = paddingLeft + available * 3f / 4f
 
@@ -123,14 +130,18 @@ class OeaGameBoostService : Service() {
                 ramFraction, "RAM",
                 String.format(Locale.US, "%.0f%%", ramFraction * 100.0),
                 String.format(Locale.US, "%.0f / %.0f MB", ramUsedMb, ramTotalMb),
-                0xFF4D7CFF.toInt()
+                0xFF4D7CFF.toInt(),
+                0xFF31D8FF.toInt(),
+                0xFF4DE5B5.toInt()
             )
             drawGauge(
                 canvas, rightCenterX, centerY, radius,
                 virtualFraction, "VIRTUAL RAM",
                 if (virtualTotalMb > 0) String.format(Locale.US, "%.0f%%", virtualFraction * 100.0) else "—",
                 if (virtualTotalMb > 0) String.format(Locale.US, "%.0f / %.0f MB", virtualUsedMb, virtualTotalMb) else "not exposed",
-                0xFF27D9B7.toInt()
+                0xFF27D9B7.toInt(),
+                0xFF4D7CFF.toInt(),
+                0xFF9DFF8A.toInt()
             )
         }
 
@@ -143,37 +154,53 @@ class OeaGameBoostService : Service() {
             name: String,
             percentage: String,
             value: String,
-            color: Int
+            color: Int,
+            secondaryColor: Int,
+            tertiaryColor: Int
         ) {
             canvas.drawCircle(cx, cy, radius, track)
-            val sweep = fraction.coerceIn(0f, 1f) * 360f
             val bounds = android.graphics.RectF(cx - radius, cy - radius, cx + radius, cy + radius)
+            accentArc.color = alphaColor(secondaryColor, 72)
+            accentArc.strokeWidth = dp(2).toFloat()
+            canvas.drawArc(bounds, 0f, 360f, false, accentArc)
+
+            val sweep = fraction.coerceIn(0f, 1f) * 360f
             if (sweep > 0f) {
-                // Soft colored halo beneath the crisp progress arc.
-                glow.color = (color and 0x00FFFFFF) or (0x48 shl 24)
+                val firstSweep = minOf(sweep, 120f)
+                val secondSweep = (sweep - 120f).coerceAtLeast(0f).coerceAtMost(120f)
+                val thirdSweep = (sweep - 240f).coerceAtLeast(0f)
+                glow.color = alphaColor(color, 66)
                 canvas.drawArc(bounds, -90f, sweep, false, glow)
                 progress.color = color
-                canvas.drawArc(bounds, -90f, sweep, false, progress)
+                canvas.drawArc(bounds, -90f, firstSweep, false, progress)
+                if (secondSweep > 0f) {
+                    progress.color = secondaryColor
+                    canvas.drawArc(bounds, -90f + firstSweep, secondSweep, false, progress)
+                }
+                if (thirdSweep > 0f) {
+                    progress.color = tertiaryColor
+                    canvas.drawArc(bounds, -90f + firstSweep + secondSweep, thirdSweep, false, progress)
+                }
 
-                // A bright traveling glint makes the live reading feel active
-                // without changing or exaggerating the underlying percentage.
-                val glintSweep = minOf(26f, sweep)
+                // The moving highlight circles only the measured portion of the ring.
+                val glintSweep = minOf(24f, sweep)
                 val glintStart = -90f + ((pulseAngle / 360f) * sweep)
-                glow.color = (color and 0x00FFFFFF) or (0x88 shl 24)
+                glow.color = alphaColor(secondaryColor, 130)
                 canvas.drawArc(bounds, glintStart, glintSweep, false, glow)
-                canvas.drawArc(bounds, glintStart, glintSweep, false, highlight)
+                highlight.color = 0xFFEAFBFF.toInt()
+                canvas.drawArc(bounds, glintStart, minOf(12f, glintSweep), false, highlight)
             }
 
-            label.textSize = dp(if (name.length > 6) 6 else 8).toFloat()
-            label.color = 0xFFCBD3E6.toInt()
-            canvas.drawText(name, cx, cy - dp(3).toFloat(), label)
+            label.textSize = dp(if (name.length > 6) 7 else 8).toFloat()
+            label.color = 0xFFE2F6FF.toInt()
+            canvas.drawText(name, cx, cy - dp(4).toFloat(), label)
 
             percent.textSize = dp(14).toFloat()
             percent.color = Color.WHITE
             canvas.drawText(percentage, cx, cy + dp(15).toFloat(), percent)
 
             detail.textSize = dp(8).toFloat()
-            canvas.drawText(value, cx, cy + radius + dp(11).toFloat(), detail)
+            canvas.drawText(value, cx, cy + radius + dp(12).toFloat(), detail)
         }
 
         private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -579,7 +606,7 @@ class OeaGameBoostService : Service() {
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
         // A single click on the floating handle toggles the same panel instance.
-        // Closing always funnels through closePanel(), shared with CLOSE PANEL.
+        // The floating handle is the only explicit open/close control.
         handle.setOnClickListener { togglePanel(panel) }
 
         val params = WindowManager.LayoutParams(
