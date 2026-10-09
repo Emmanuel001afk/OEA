@@ -1087,19 +1087,11 @@ class OeaGameBoostService : Service() {
         }
         panel.setOnTouchListener { _, event ->
             if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
-                // Android sends ACTION_OUTSIDE to the topmost panel window, but
-                // does not reliably deliver that same tap to the handle window
-                // underneath it. Detect a tap landing on the handle explicitly,
-                // dismiss the panel, and keep the handle window alive.
-                val handle = (root as? android.widget.LinearLayout)?.getChildAt(0)
-                val hitHandle = if (handle != null) {
-                    val location = IntArray(2)
-                    handle.getLocationOnScreen(location)
-                    event.rawX >= location[0] && event.rawX <= location[0] + handle.width &&
-                        event.rawY >= location[1] && event.rawY <= location[1] + handle.height
-                } else false
+                // The panel owns this outside-touch notification. Consume it after
+                // dismissing the panel; do not depend on ACTION_OUTSIDE coordinates
+                // or on Android forwarding the same tap to the handle window.
                 closePanel(panel)
-                hitHandle
+                true
             } else {
                 false
             }
@@ -1249,12 +1241,10 @@ class OeaGameBoostService : Service() {
         panel.scaleX = 1f
         panel.scaleY = 1f
         panel.translationX = 0f
-        // Defensive invariant: panel dismissal must not tear down the handle.
-        // If Android detached the handle independently, the normal recovery
-        // path will recreate it while the selected app remains active.
-        if (activeGame != null && (overlay == null || overlay?.parent == null)) {
-            ensureOverlayForActiveGame()
-        }
+        // Defensive invariant: after every dismissal path, validate the handle
+        // itself. This repairs a detached/damaged handle without removing a
+        // healthy one, and never changes the active-game selection.
+        if (activeGame != null) ensureOverlayForActiveGame()
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
