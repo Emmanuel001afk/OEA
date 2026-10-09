@@ -30,6 +30,7 @@ import com.oea.launcher.widgets.OeaWidgetController
 import java.io.InputStream
 
 class OeaSystemToolsActivity : Activity() {
+    private val freezerIconCache = mutableMapOf<String, android.graphics.drawable.Drawable?>()
     override fun onBackPressed() {
         if (isTaskRoot) {
             super.onBackPressed()
@@ -152,6 +153,7 @@ class OeaSystemToolsActivity : Activity() {
 
         var currentQuery = ""
         var currentFilter = "all"
+        var showSystemApps = false
         val selectedPackages = linkedSetOf<String>()
         var allApps: List<OeaAppInfo> = emptyList()
         var loadingApps = true
@@ -182,7 +184,33 @@ class OeaSystemToolsActivity : Activity() {
                 rightMargin = dp(2)
             })
         }
-        box.addView(filters, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+        box.addView(filters, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+
+        val systemAppsToggle = CheckBox(this).apply {
+            text = "Show system apps"
+            textSize = 13f
+            setTextColor(mutedColor())
+            buttonTintList = android.content.res.ColorStateList.valueOf(if (lightUi) Color.rgb(80, 95, 115) else Color.rgb(145, 160, 180))
+            isChecked = false
+            setOnCheckedChangeListener { _, checked ->
+                showSystemApps = checked
+                loadingApps = true
+                allApps = emptyList()
+                selectedPackages.clear()
+                rerender?.invoke()
+                val includeSystem = checked
+                Thread {
+                    val loaded = runCatching { loadInstalledFreezerApps(includeSystem) }.getOrElse { emptyList() }
+                    runOnUiThread {
+                        allApps = loaded
+                        loadingApps = false
+                        rerender?.invoke()
+                        if (loaded.isEmpty()) Toast.makeText(this@OeaSystemToolsActivity, "Could not load apps for this filter.", Toast.LENGTH_SHORT).show()
+                    }
+                }.start()
+            }
+        }
+        box.addView(systemAppsToggle, LinearLayout.LayoutParams(-1, dp(42)))
 
         val selectionActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1174,31 +1202,22 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun requestDeviceOwner() {
-        val admin = ComponentName(this, OeaDeviceAdminReceiver::class.java)
         val command = "adb shell dpm set-device-owner " + packageName + "/" + OeaDeviceAdminReceiver::class.java.name
         AlertDialog.Builder(this)
-            .setTitle("Enable OEA Freezer")
+            .setTitle("Freezer authority required")
             .setMessage(
-                "Android does not expose app-freezing as a normal runtime permission. " +
-                "OEA needs device-owner authority (or root) for true package suspension. " +
-                "You can enable OEA's device-admin component first, then provision device-owner authority from a computer."
+                "The screen you opened grants ordinary Device Admin, not Device Owner. " +
+                "Android does not allow Device Admin alone to suspend other apps, so repeating that step cannot enable freezing.\n\n" +
+                "OEA currently supports verified suspension through Device Owner or root. Device Owner is provisioned with ADB from a computer and may require a freshly set-up device. " +
+                "Without either authority, OEA must report freezing as unavailable instead of pretending it worked."
             )
-            .setNeutralButton("Device admin") { _, _ ->
-                runCatching {
-                    startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                        putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
-                        putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "OEA uses this authority as the administrator component required for its freezer backend.")
-                    })
-                }.onFailure {
-                    Toast.makeText(this, "Android could not open device-admin setup.", Toast.LENGTH_LONG).show()
-                }
-            }
-            .setPositiveButton("Copy ADB command") { _, _ ->
+            .setPositiveButton("Copy setup command") { _, _ ->
                 getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
                     ClipData.newPlainText("OEA device-owner command", command)
                 )
-                Toast.makeText(this, "ADB command copied. Run it while OEA is the intended device-owner app.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "ADB command copied. Run it from a computer; Device Admin activation alone is insufficient.", Toast.LENGTH_LONG).show()
             }
+            .setNeutralButton("Device Admin is insufficient", null)
             .setNegativeButton("Cancel", null)
             .show()
     }
@@ -1311,7 +1330,9 @@ class OeaSystemToolsActivity : Activity() {
             addView(selector, LinearLayout.LayoutParams(dp(30), dp(42)).apply { rightMargin = dp(3) })
 
             val iconView = ImageView(this@OeaSystemToolsActivity).apply {
-                setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
+                        runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull()
+                    })
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 contentDescription = app.label + " icon"
             }
