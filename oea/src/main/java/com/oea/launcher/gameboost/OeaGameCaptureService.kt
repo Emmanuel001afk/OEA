@@ -43,7 +43,8 @@ class OeaGameCaptureService : Service() {
     private var reader: ImageReader? = null
     private var recorder: MediaRecorder? = null
     private var recorderStarted = false
-    private var screenshotCompleted = false
+    @Volatile private var screenshotCompleted = false
+    private var screenshotThread: android.os.HandlerThread? = null
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
     private var outputDescriptor: android.os.ParcelFileDescriptor? = null
@@ -102,6 +103,9 @@ class OeaGameCaptureService : Service() {
             if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
         }.onFailure {
             stopCapture()
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(this, "OEA capture failed to start. Try again.", Toast.LENGTH_LONG).show()
+            }
             stopSelf()
         }
         return START_NOT_STICKY
@@ -216,9 +220,13 @@ class OeaGameCaptureService : Service() {
             3
         )
         reader = captureReader
+        // Pixel conversion and PNG encoding must not run on the UI thread:
+        // a full-resolution game frame can contain several million pixels.
+        val worker = android.os.HandlerThread("OEA-Screenshot-Capture").apply { start() }
+        screenshotThread = worker
         captureReader.setOnImageAvailableListener({ ir ->
             handleScreenshotFrame(ir, width, height)
-        }, Handler(Looper.getMainLooper()))
+        }, Handler(worker.looper))
 
         display = projection!!.createVirtualDisplay(
             "OEA Screenshot",
@@ -257,6 +265,10 @@ class OeaGameCaptureService : Service() {
         width: Int,
         height: Int
     ) {
+        if (screenshotCompleted) {
+            runCatching { ir.acquireLatestImage()?.close() }
+            return
+        }
         val image = runCatching { ir.acquireLatestImage() }.getOrNull() ?: return
         val saved = runCatching {
             image.use {
@@ -296,15 +308,12 @@ class OeaGameCaptureService : Service() {
             }
         }.getOrDefault(false)
         screenshotCompleted = true
-        if (saved) {
-            Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
-            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
-                .putBoolean("capture_active", false)
-                .apply()
-            stopCapture()
-            stopSelf()
-        } else {
-            Toast.makeText(this, "OEA could not save the screenshot.", Toast.LENGTH_LONG).show()
+        Handler(Looper.getMainLooper()).post {
+            if (saved) {
+                Toast.makeText(this, "Screenshot saved to Pictures/OEA", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "OEA could not save the screenshot.", Toast.LENGTH_LONG).show()
+            }
             getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
                 .putBoolean("capture_active", false)
                 .apply()
@@ -356,7 +365,12 @@ class OeaGameCaptureService : Service() {
         recorder = null
         recorderStarted = false
         display?.release(); display = null
+        reader?.setOnImageAvailableListener(null, null)
         reader?.close(); reader = null
+        screenshotThread?.let { thread ->
+            thread.quitSafely()
+            screenshotThread = null
+        }
         val currentProjection = projection
         projection = null
         projectionCallback?.let { callback ->
