@@ -342,22 +342,27 @@ class OeaGameBoostService : Service() {
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
         // Use Android's native gesture recognizer rather than a hand-timed
-        // click counter. A confirmed single tap opens the panel; a true
-        // double tap closes it. The touch handler below cancels this detector
-        // when the handle is dragged, so a drag can never be mistaken for a tap.
+        // click counter. A single tap opens the panel; a double tap closes it.
+        // GestureDetector reports the first tap immediately through onSingleTapUp,
+        // before it knows a second tap is coming. It also reports onSingleTapUp for
+        // the second tap, so without this guard that second callback reopens the
+        // panel immediately after onDoubleTap closes it.
+        var consumeDoubleTapUp = false
         val handleGestures = android.view.GestureDetector(
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
-                // Open on the first tap's UP event so the panel appears
-                // immediately; waiting for onSingleTapConfirmed delays opening
-                // and makes a quick follow-up tap look like the only action.
                 override fun onSingleTapUp(event: android.view.MotionEvent): Boolean {
+                    if (consumeDoubleTapUp) {
+                        consumeDoubleTapUp = false
+                        return true
+                    }
                     if (panel.visibility != View.VISIBLE) showPanel(panel)
                     handle.performClick()
                     return true
                 }
 
                 override fun onDoubleTap(event: android.view.MotionEvent): Boolean {
+                    consumeDoubleTapUp = true
                     if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
                     return true
                 }
