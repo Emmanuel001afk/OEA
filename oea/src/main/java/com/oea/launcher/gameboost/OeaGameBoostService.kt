@@ -575,10 +575,16 @@ class OeaGameBoostService : Service() {
             startService(Intent(this, OeaGameCaptureService::class.java).setAction(OeaGameCaptureService.ACTION_STOP))
             prefs.edit().putBoolean("recording", false).apply()
             button.text = "RECORD"
+        } else if (
+            prefs.getBoolean("capture_active", false) &&
+            prefs.getString("capture_mode", "") == OeaGameCaptureActivity.MODE_RECORD
+        ) {
+            // Consent/startup is already in progress; don't launch a second capture session.
+            button.text = "STARTING…"
         } else {
-            prefs.edit().putBoolean("recording", true).apply()
+            // Do not claim recording has started before Android consent and MediaRecorder.start succeed.
             launchCapture(OeaGameCaptureActivity.MODE_RECORD)
-            button.text = "RECORDING"
+            button.text = "STARTING…"
         }
     }
 
@@ -696,7 +702,13 @@ class OeaGameBoostService : Service() {
         val captureMode = OeaGameBoostStore.prefs(this).getString("capture_mode", "")
         val recording = OeaGameBoostStore.prefs(this).getBoolean("recording", false)
         (controls.getChildAt(0) as? android.widget.LinearLayout)?.getChildAt(2)?.let { (it as? TextView)?.text = if (captureActive && captureMode == OeaGameCaptureActivity.MODE_SCREENSHOT) "▣  SAVING…" else "▣  SHOT" }
-        (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text = if (recording) "■  STOP REC" else "●  RECORD" }
+        (controls.getChildAt(1) as? android.widget.LinearLayout)?.getChildAt(0)?.let { (it as? TextView)?.text =
+            when {
+                recording -> "■  STOP REC"
+                captureActive && captureMode == OeaGameCaptureActivity.MODE_RECORD -> "●  STARTING…"
+                else -> "●  RECORD"
+            }
+        }
         setKeepScreenOn(OeaGameBoostStore.prefs(this).getBoolean("boost", true))
         val handle = root.getChildAt(1) as? android.widget.FrameLayout
         val handleVisible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
