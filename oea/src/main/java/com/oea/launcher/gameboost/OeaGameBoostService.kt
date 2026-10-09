@@ -193,13 +193,26 @@ class OeaGameBoostService : Service() {
         runCatching {
             diagnosticWriter.execute {
                 synchronized(diagnosticWriteLock) {
-                    appendDiagnosticFile(diagnosticTextFile, textLine, null)
-                    appendDiagnosticFile(diagnosticJsonFile, json, null)
-                    appendDiagnosticFile(
-                        diagnosticCsvFile,
-                        csv,
-                        "\"timestamp\",\"level\",\"component\",\"event\",\"activeGame\",\"foregroundPackage\",\"foregroundSource\",\"foregroundEventAt\",\"message\"\n"
-                    )
+                    runCatching { appendDiagnosticFile(diagnosticTextFile, textLine, null) }
+                        .onFailure { error ->
+                            diagnosticUris.remove(diagnosticTextFile)
+                            android.util.Log.e("OeaGameBoost", "Text diagnostics write failed: ${error.javaClass.simpleName}:${error.message}")
+                        }
+                    runCatching { appendDiagnosticFile(diagnosticJsonFile, json, null) }
+                        .onFailure { error ->
+                            diagnosticUris.remove(diagnosticJsonFile)
+                            android.util.Log.e("OeaGameBoost", "JSONL diagnostics write failed: ${error.javaClass.simpleName}:${error.message}")
+                        }
+                    runCatching {
+                        appendDiagnosticFile(
+                            diagnosticCsvFile,
+                            csv,
+                            "\"timestamp\",\"level\",\"component\",\"event\",\"activeGame\",\"foregroundPackage\",\"foregroundSource\",\"foregroundEventAt\",\"message\"\n"
+                        )
+                    }.onFailure { error ->
+                        diagnosticUris.remove(diagnosticCsvFile)
+                        android.util.Log.e("OeaGameBoost", "CSV diagnostics write failed: ${error.javaClass.simpleName}:${error.message}")
+                    }
                 }
             }
         }.onFailure { error ->
@@ -1576,7 +1589,7 @@ class OeaGameBoostService : Service() {
             val fallback = fallbackStat?.packageName
             if (fallback != null) {
                 lastKnownForegroundPackage = fallback
-                lastForegroundEventAt = fallbackStat.lastTimeUsed
+                lastForegroundEventAt = fallbackStat?.lastTimeUsed ?: 0L
                 lastForegroundSource = "usage-stats-after-query-error"
             } else {
                 lastForegroundSource = "cached-after-query-error"
