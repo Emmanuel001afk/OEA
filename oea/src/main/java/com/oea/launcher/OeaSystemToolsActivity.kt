@@ -154,7 +154,8 @@ class OeaSystemToolsActivity : Activity() {
         var currentQuery = ""
         var currentFilter = "all"
         val selectedPackages = linkedSetOf<String>()
-        var allApps = loadInstalledFreezerApps()
+        var allApps: List<OeaAppInfo> = emptyList()
+        var loadingApps = true
         var visiblePackages: List<String> = emptyList()
         var rerender: (() -> Unit)? = null
         val filters = LinearLayout(this).apply {
@@ -221,13 +222,16 @@ class OeaSystemToolsActivity : Activity() {
                         loadInstalledFreezerApps()
                     } catch (_: Exception) {
                         runOnUiThread {
+                            loadingApps = false
                             Toast.makeText(this@OeaSystemToolsActivity, "Could not refresh the installed-app list.", Toast.LENGTH_LONG).show()
+                            rerender?.invoke()
                         }
                         return@Thread
                     }
                     OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, refreshedApps.map { it.packageName })
                     runOnUiThread {
                         allApps = refreshedApps
+                        loadingApps = false
                         Toast.makeText(this@OeaSystemToolsActivity, "System suspension state refreshed.", Toast.LENGTH_SHORT).show()
                         rerender?.invoke()
                     }
@@ -314,8 +318,12 @@ class OeaSystemToolsActivity : Activity() {
             list.removeAllViews()
             if (shown.isEmpty()) {
                 list.addView(TextView(this).apply {
-                    text = if (currentQuery.isNotBlank()) "No apps match this search." else if (currentFilter == "frozen") "No frozen apps."
-                    else "No apps to show."
+                    text = when {
+                        loadingApps -> "Loading installed apps…"
+                        currentQuery.isNotBlank() -> "No apps match this search."
+                        currentFilter == "frozen" -> "No frozen apps."
+                        else -> "No apps to show."
+                    }
                     textSize = 14f
                     setTextColor(mutedColor())
                     gravity = Gravity.CENTER
@@ -352,15 +360,25 @@ class OeaSystemToolsActivity : Activity() {
         })
         renderApps()
         setRoot(box)
-        val initialPackages = allApps.map { it.packageName }
-        // Package-manager dumps and root checks can be expensive on some devices.
-        // Reconcile in the background so opening the freezer and typing in search
-        // never blocks the launcher UI thread.
+        // Enumerate installed packages and reconcile actual suspension state in the
+        // background. The screen stays responsive while large app lists are loaded.
         Thread {
-            runCatching {
-                OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, initialPackages)
+            val loadedApps = try {
+                loadInstalledFreezerApps()
+            } catch (_: Exception) {
+                runOnUiThread {
+                    loadingApps = false
+                    Toast.makeText(this@OeaSystemToolsActivity, "Could not load installed apps.", Toast.LENGTH_LONG).show()
+                    rerender?.invoke()
+                }
+                return@Thread
             }
-            runOnUiThread { rerender?.invoke() }
+            OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, loadedApps.map { it.packageName })
+            runOnUiThread {
+                allApps = loadedApps
+                loadingApps = false
+                rerender?.invoke()
+            }
         }.start()
     }
 
