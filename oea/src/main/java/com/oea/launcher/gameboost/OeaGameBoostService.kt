@@ -137,65 +137,91 @@ class OeaGameBoostService : Service() {
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
     private var nonGameForegroundSamples = 0
+    private var lastNonGamePackage: String? = null
     private var lastPanelDismissAt: Long = 0L
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
-            if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !isUsageAccessGranted()) { stopSelf(); return }
-            OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService)
-            val game = foregroundPackage()
-            val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
-                .getBoolean("capture_active", false)
+            if (!OeaGameBoostStore.enabled(this@OeaGameBoostService)) {
+                stopSelf()
+                return
+            }
 
-            if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
-                // A confirmed game foreground sample keeps the floating control
-                // alive and clears any transient transition samples.
+            // Usage access can temporarily report unavailable after Settings or
+            // permission-controller transitions. Do not destroy a live game
+            // overlay merely because one permission check failed.
+            if (!isUsageAccessGranted()) {
                 nonGameForegroundSamples = 0
-                if (activeGame != game) {
-                    // Keep the floating OEA RAM control mounted while moving
-                    // directly from one recognized game to another. Removing
-                    // the whole overlay here creates a visible/lifecycle gap
-                    // and can leave the new game without its in-game button.
-                    restoreDnd()
-                    setKeepScreenOn(false)
-                    activeGame = game
-                    activate(game)
-                    updateOverlay()
-                    panelView?.let(::closePanel)
-                } else {
-                    updateOverlay()
-                }
-            } else if (activeGame != null) {
-                // Capture consent/host transitions are allowed to keep the
-                // button alive. For every other positively identified
-                // non-game foreground package, require two consecutive samples
-                // before ending the session. This prevents one UsageStats
-                // transition from killing the button, while still ensuring the
-                // button disappears after the user actually leaves the game.
-                if (captureActive || game == null) {
+                lastNonGamePackage = null
+                activeGame?.let { ensureOverlayForActiveGame() }
+                handler.postDelayed(this, 1500L)
+                return
+            }
+
+            try {
+                runCatching { OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService) }
+                val game = foregroundPackage()
+                val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
+                    .getBoolean("capture_active", false)
+
+                if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                     nonGameForegroundSamples = 0
+                    lastNonGamePackage = null
+                    if (activeGame != game) {
+                        restoreDnd()
+                        setKeepScreenOn(false)
+                        activeGame = game
+                        activate(game)
+                        panelView?.let(::closePanel)
+                    } else {
+                        ensureOverlayForActiveGame()
+                    }
                     updateOverlay()
-                } else {
-                    // Overlay interactions can briefly make UsageStats report a
-                    // non-game/system package on some Android builds. Do not let
-                    // closing the panel tear down the separate floating handle.
-                    val recentlyDismissedPanel = System.currentTimeMillis() - lastPanelDismissAt < 8_000L
-                    if (recentlyDismissedPanel) {
+                } else if (activeGame != null) {
+                    // Unknown samples, OEA-owned activities, Android permission
+                    // UI and System UI are not proof that the user left the game.
+                    if (captureActive || game == null || isTransientForegroundPackage(game)) {
                         nonGameForegroundSamples = 0
+                        lastNonGamePackage = null
+                        ensureOverlayForActiveGame()
                         updateOverlay()
                     } else {
-                        nonGameForegroundSamples++
-                        if (nonGameForegroundSamples >= 2) {
-                            deactivate(activeGame!!)
+                        // Require the same positively identified non-game app
+                        // for eight consecutive samples. A single transition,
+                        // notification shade, panel dismissal or app switch
+                        // cannot tear down the in-game control.
+                        if (lastNonGamePackage == game) {
+                            nonGameForegroundSamples++
+                        } else {
+                            lastNonGamePackage = game
+                            nonGameForegroundSamples = 1
+                        }
+                        val recentlyDismissedPanel =
+                            System.currentTimeMillis() - lastPanelDismissAt < 8_000L
+                        if (recentlyDismissedPanel || nonGameForegroundSamples < 8) {
+                            ensureOverlayForActiveGame()
+                            updateOverlay()
+                        } else {
+                            val endingGame = activeGame
                             activeGame = null
                             nonGameForegroundSamples = 0
-                        } else {
-                            updateOverlay()
+                            lastNonGamePackage = null
+                            endingGame?.let(::deactivate)
                         }
                     }
                 }
+            } catch (_: Throwable) {
+                // A transient UsageStats, package-manager or window exception
+                // must not silently kill the polling loop or discard the handle.
+                activeGame?.let {
+                    ensureOverlayForActiveGame()
+                    updateOverlay()
+                }
+            } finally {
+                if (OeaGameBoostStore.enabled(this@OeaGameBoostService)) {
+                    handler.postDelayed(this, 1000L)
+                }
             }
-            handler.postDelayed(this, 1000)
         }
     }
     override fun onCreate() {
@@ -233,10 +259,44 @@ class OeaGameBoostService : Service() {
         }
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
-        val nm = getSystemService(NotificationManager::class.java)
         restoreDnd()
         setKeepScreenOn(false)
+        removeWakeOverlay()
         removeOverlay()
+    }
+
+    private fun isTransientForegroundPackage(packageName: String): Boolean {
+        if (packageName == this.packageName) return true
+        return packageName in setOf(
+            "com.android.systemui",
+            "com.android.settings",
+            "com.android.permissioncontroller",
+            "com.google.android.permissioncontroller",
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+            "com.google.android.inputmethod.latin",
+            "com.google.android.apps.inputmethod",
+            "com.android.inputmethod.latin"
+        )
+    }
+
+    /**
+     * Recover the floating control if Android detached its window or a
+     * transient WindowManager failure left a stale View reference behind.
+     * This repairs the existing handle; it does not add another container.
+     */
+    private fun ensureOverlayForActiveGame() {
+        val game = activeGame ?: return
+        if (!Settings.canDrawOverlays(this)) return
+        val current = overlay
+        if (current != null && current.parent != null) return
+
+        if (current != null) {
+            panelView?.let(::detachPanelWindow)
+            overlay = null
+            panelView = null
+        }
+        showOverlay(game)
     }
     private fun showOverlay(packageName: String) {
         val existing = overlay
@@ -724,8 +784,9 @@ class OeaGameBoostService : Service() {
 
     private fun updateOverlay() {
         (overlay as? android.widget.LinearLayout)?.getChildAt(0)?.let { applyHandlePalette(it) }
-        val root = overlay as? android.widget.LinearLayout ?: run {
-            activeGame?.let { if (Settings.canDrawOverlays(this)) showOverlay(it) }
+        val root = overlay as? android.widget.LinearLayout
+        if (root == null || root.parent == null) {
+            ensureOverlayForActiveGame()
             return
         }
         val panel = panelView as? android.widget.LinearLayout ?: return
@@ -1169,8 +1230,14 @@ class OeaGameBoostService : Service() {
     }
 
     private fun removeOverlay() {
-        panelView?.let(::detachPanelWindow)
-        overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }
+        panelView?.let { panel ->
+            panel.animate().cancel()
+            detachPanelWindow(panel)
+        }
+        overlay?.let { root ->
+            root.animate().cancel()
+            runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(root) }
+        }
         overlay = null
         panelView = null
     }
