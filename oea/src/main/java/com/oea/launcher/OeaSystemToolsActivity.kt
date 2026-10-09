@@ -233,7 +233,17 @@ class OeaSystemToolsActivity : Activity() {
         box.addView(list, LinearLayout.LayoutParams(-1, -2))
 
         fun renderApps() {
-            val allApps = apps.filterNot { it.packageName == packageName }
+            // Include installed packages even when they do not publish a launcher icon.
+            val allApps = packageManager.getInstalledApplications(0)
+                .filterNot { it.packageName == packageName }
+                .map { info ->
+                    OeaAppInfo(
+                        packageName = info.packageName,
+                        className = "",
+                        label = runCatching { info.loadLabel(packageManager).toString() }
+                            .getOrDefault(info.packageName),
+                    )
+                }
                 .distinctBy { it.packageName }
                 .sortedBy { it.label.lowercase() }
             OeaAppFreezer.syncActualState(this, allApps.map { it.packageName })
