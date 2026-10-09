@@ -935,7 +935,7 @@ class OeaGameBoostService : Service() {
         if (panel.parent != null) return true
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val root = overlay as? android.widget.LinearLayout ?: return false
-        val rootParams = root.layoutParams as? WindowManager.LayoutParams ?: return false
+        if (root.layoutParams !is WindowManager.LayoutParams) return false
         val panelParams = WindowManager.LayoutParams(
             dp(286), WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
@@ -958,6 +958,7 @@ class OeaGameBoostService : Service() {
         }
         return runCatching {
             wm.addView(panel, panelParams)
+            syncPanelToHandle(root)
             true
         }.getOrElse {
             panel.setOnTouchListener(null)
