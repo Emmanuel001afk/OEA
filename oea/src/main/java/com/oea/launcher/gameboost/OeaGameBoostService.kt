@@ -80,6 +80,11 @@ class OeaGameBoostService : Service() {
             strokeCap = android.graphics.Paint.Cap.ROUND
             color = 0xFFEAFBFF.toInt()
         }
+        private val orbit = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = dp(2).toFloat()
+            strokeCap = android.graphics.Paint.Cap.ROUND
+        }
         private var ringProgress = 0f
         private var ringAnimator: android.animation.ValueAnimator? = null
 
@@ -159,11 +164,7 @@ class OeaGameBoostService : Service() {
         ) {
             canvas.drawCircle(cx, cy, radius, track)
             val bounds = android.graphics.RectF(cx - radius, cy - radius, cx + radius, cy + radius)
-            val orbit = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                style = android.graphics.Paint.Style.STROKE
-                strokeWidth = dp(2).toFloat()
-                color = (secondaryColor and 0x00FFFFFF) or (0x50 shl 24)
-            }
+            orbit.color = (secondaryColor and 0x00FFFFFF) or (0x50 shl 24)
             canvas.drawArc(bounds, 0f, 360f, false, orbit)
 
             val sweep = fraction.coerceIn(0f, 1f) * 360f
@@ -612,7 +613,7 @@ class OeaGameBoostService : Service() {
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
         // A single click on the floating handle toggles the same panel instance.
-        // Closing always funnels through closePanel(), shared with CLOSE PANEL.
+        // The floating handle is the only explicit open/close control.
         handle.setOnClickListener { togglePanel(panel) }
 
         val params = WindowManager.LayoutParams(
