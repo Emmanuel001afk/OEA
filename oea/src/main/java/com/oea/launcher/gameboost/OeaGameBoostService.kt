@@ -6,7 +6,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.app.usage.UsageStatsManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -20,18 +19,13 @@ import android.os.Looper
 import android.os.Process
 import android.os.Environment
 import android.provider.Settings
-import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import java.util.Locale
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import kotlin.math.max
 
 class OeaGameBoostService : Service() {
@@ -137,131 +131,14 @@ class OeaGameBoostService : Service() {
         private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     }
 
-    private val diagnosticWriteLock = Any()
-    private val diagnosticTextFile = "OEA-GameBoost-Diagnostics.txt"
-    private val diagnosticJsonFile = "OEA-GameBoost-Diagnostics.jsonl"
-    private val diagnosticCsvFile = "OEA-GameBoost-Diagnostics.csv"
-    private val diagnosticUris = mutableMapOf<String, android.net.Uri>()
-    private val diagnosticWriter: ExecutorService = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "OEA-GameBoost-Diagnostics").apply { isDaemon = true }
-    }
     private var lastForegroundEventAt = 0L
     private var lastForegroundSource = "not-queried"
     private var lastForegroundQueryError: String? = null
 
-    /**
-     * Writes every event to Logcat and three automatically maintained Downloads
-     * formats. Disk I/O runs on a dedicated queue so MediaStore queries cannot
-     * stall the one-second foreground monitor or panel/handle touch processing.
-     */
+    // Keep diagnostics in Logcat only; temporary Downloads file generation has
+    // been removed now that the overlay failure has been isolated.
     private fun diagnostic(priority: Int, message: String) {
         android.util.Log.println(priority, "OeaGameBoost", message)
-        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
-        val level = when {
-            priority >= android.util.Log.ERROR -> "ERROR"
-            priority >= android.util.Log.WARN -> "WARN"
-            priority >= android.util.Log.INFO -> "INFO"
-            else -> "DEBUG"
-        }
-        val component = when {
-            message.contains("foreground", ignoreCase = true) || message.contains("monitor", ignoreCase = true) -> "foreground-detection"
-            message.contains("panel", ignoreCase = true) || message.contains("closePanel", ignoreCase = true) -> "panel"
-            message.contains("handle", ignoreCase = true) || message.contains("visibility", ignoreCase = true) -> "floating-handle"
-            message.contains("overlay", ignoreCase = true) || message.contains("WindowManager", ignoreCase = true) -> "overlay-window"
-            message.contains("permission", ignoreCase = true) || message.contains("usageAccess", ignoreCase = true) -> "permissions"
-            message.contains("wake", ignoreCase = true) -> "wake-overlay"
-            message.contains("service", ignoreCase = true) || message.contains("deactivate", ignoreCase = true) || message.contains("activate", ignoreCase = true) -> "service-lifecycle"
-            else -> "game-boost"
-        }
-        val event = message.substringBefore(' ').take(80)
-        val json = org.json.JSONObject()
-            .put("timestamp", stamp)
-            .put("level", level)
-            .put("component", component)
-            .put("event", event)
-            .put("message", message)
-            .put("activeGame", activeGame)
-            .put("foregroundPackage", lastKnownForegroundPackage)
-            .put("foregroundSource", lastForegroundSource)
-            .put("foregroundEventAt", lastForegroundEventAt)
-            .toString() + "\n"
-        val csv = listOf(stamp, level, component, event, activeGame.orEmpty(),
-            lastKnownForegroundPackage.orEmpty(), lastForegroundSource, lastForegroundEventAt.toString(), message)
-            .joinToString(",") { "\"${it.replace("\"", "\"\"")}\"" } + "\n"
-        val textLine = "$stamp $level [$component] $message\n"
-
-        runCatching {
-            diagnosticWriter.execute {
-                synchronized(diagnosticWriteLock) {
-                    runCatching { appendDiagnosticFile(diagnosticTextFile, textLine, null) }
-                        .onFailure { error ->
-                            diagnosticUris.remove(diagnosticTextFile)
-                            android.util.Log.e("OeaGameBoost", "Text diagnostics write failed: ${error.javaClass.simpleName}:${error.message}")
-                        }
-                    runCatching { appendDiagnosticFile(diagnosticJsonFile, json, null) }
-                        .onFailure { error ->
-                            diagnosticUris.remove(diagnosticJsonFile)
-                            android.util.Log.e("OeaGameBoost", "JSONL diagnostics write failed: ${error.javaClass.simpleName}:${error.message}")
-                        }
-                    runCatching {
-                        appendDiagnosticFile(
-                            diagnosticCsvFile,
-                            csv,
-                            "\"timestamp\",\"level\",\"component\",\"event\",\"activeGame\",\"foregroundPackage\",\"foregroundSource\",\"foregroundEventAt\",\"message\"\n"
-                        )
-                    }.onFailure { error ->
-                        diagnosticUris.remove(diagnosticCsvFile)
-                        android.util.Log.e("OeaGameBoost", "CSV diagnostics write failed: ${error.javaClass.simpleName}:${error.message}")
-                    }
-                }
-            }
-        }.onFailure { error ->
-            android.util.Log.e("OeaGameBoost", "Could not queue diagnostic write: ${error.javaClass.simpleName}", error)
-        }
-    }
-
-    private fun appendDiagnosticFile(fileName: String, content: String, header: String?) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            var uri = diagnosticUris[fileName]
-            var isNew = false
-            if (uri == null) {
-                uri = contentResolver.query(
-                    collection,
-                    arrayOf(MediaStore.Downloads._ID),
-                    "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
-                    arrayOf(fileName, "${Environment.DIRECTORY_DOWNLOADS}/"),
-                    null
-                )?.use { cursor ->
-                    if (cursor.moveToFirst()) android.content.ContentUris.withAppendedId(collection, cursor.getLong(0)) else null
-                }
-                if (uri == null) {
-                    uri = contentResolver.insert(
-                        collection,
-                        ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                            put(MediaStore.Downloads.MIME_TYPE, if (fileName.endsWith(".jsonl")) "application/x-ndjson" else if (fileName.endsWith(".csv")) "text/csv" else "text/plain")
-                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                        }
-                    )
-                    isNew = true
-                }
-                if (uri != null) diagnosticUris[fileName] = uri
-            }
-            val target = uri ?: throw java.io.IOException("MediaStore could not create $fileName")
-            val prefix = if (isNew) header.orEmpty() else ""
-            val stream = contentResolver.openOutputStream(target, "wa")
-                ?: throw java.io.IOException("MediaStore returned no output stream for $fileName")
-            stream.bufferedWriter().use { writer ->
-                if (prefix.isNotEmpty()) writer.append(prefix)
-                writer.append(content)
-            }
-        } else {
-            val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: filesDir
-            val target = java.io.File(directory, fileName)
-            if (!target.exists() && !header.isNullOrEmpty()) target.appendText(header)
-            target.appendText(content)
-        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -1175,7 +1052,7 @@ class OeaGameBoostService : Service() {
         val end = palette[2]
         val isRgb = OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue") == "rgb"
 
-        content.getTag(android.R.id.custom)?.let { (it as? android.animation.ValueAnimator)?.cancel() }
+        (content.tag as? android.animation.ValueAnimator)?.cancel()
         val animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
             duration = if (isRgb) 1800L else 1500L
             repeatCount = android.animation.ValueAnimator.INFINITE
@@ -1200,14 +1077,14 @@ class OeaGameBoostService : Service() {
                 }
             }
         }
-        content.setTag(android.R.id.custom, animator)
+        content.tag = animator
         animator.start()
     }
 
     private fun stopPanelColorAnimation(panel: View) {
         val content = panel as? android.widget.LinearLayout ?: return
-        (content.getTag(android.R.id.custom) as? android.animation.ValueAnimator)?.cancel()
-        content.setTag(android.R.id.custom, null)
+        (content.tag as? android.animation.ValueAnimator)?.cancel()
+        content.tag = null
         applyPanelPalette(content)
     }
 
