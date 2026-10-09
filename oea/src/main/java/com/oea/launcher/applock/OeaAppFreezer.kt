@@ -114,15 +114,15 @@ object OeaAppFreezer {
     private fun rootSuspensionState(packageName: String): Boolean? {
         val (success, dump) = runRoot("dumpsys package")
         if (!success || !dump.contains("Package [")) return null
-        val block = Regex("""(?ms)^Package \\[([^\\]]+)](.*?)(?=^Package \\[|\\z)""")
+        val block = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
             .findAll(dump)
             .firstOrNull { it.groupValues[1] == packageName }
             ?: return null
-        val userState = Regex("""(?m)^\\s*User 0:.*$""")
+        val userState = Regex("""(?m)^\s*User 0:.*$""")
             .find(block.groupValues[2])
             ?.value
             ?: return null
-        return Regex("""\\bsuspended=true\\b""").containsMatchIn(userState)
+        return Regex("""\bsuspended=true\b""").containsMatchIn(userState)
     }
 
     private fun persist(context: Context, packageName: String, frozen: Boolean) {
