@@ -166,32 +166,30 @@ class OeaGameBoostService : Service() {
                     updateOverlay()
                 }
             } else if (activeGame != null) {
-                // OEA can be reported as foreground during interaction with its
-                // own overlay. That is not proof the user left the game: never
-                // tear down the handle while the panel encasement is attached.
-                if (game == packageName && isPanelEncasementAttached()) {
+                // While the encasement is mounted, UsageStats may report OEA,
+                // System UI, or another transient package during panel touches.
+                // None of those samples may end the game session: panel dismissal
+                // belongs exclusively to the encasement, not to session teardown.
+                if (isPanelEncasementAttached()) {
                     nonGameForegroundSamples = 0
                     updateOverlay()
                 } else {
-                // Capture consent/host transitions are allowed to keep the
-                // button alive. For every other positively identified
-                // non-game foreground package, require two consecutive samples
-                // before ending the session. This prevents one UsageStats
-                // transition from killing the button, while still ensuring the
-                // button disappears after the user actually leaves the game.
-                if (captureActive || game == null) {
-                    nonGameForegroundSamples = 0
-                    updateOverlay()
-                } else {
-                    nonGameForegroundSamples++
-                    if (nonGameForegroundSamples >= 2) {
-                        deactivate(activeGame!!)
-                        activeGame = null
+                    // Capture consent/host transitions are allowed to keep the
+                    // button alive. Otherwise require two consecutive positive
+                    // non-game samples before ending a genuinely exited session.
+                    if (captureActive || game == null) {
                         nonGameForegroundSamples = 0
-                    } else {
                         updateOverlay()
+                    } else {
+                        nonGameForegroundSamples++
+                        if (nonGameForegroundSamples >= 2) {
+                            deactivate(activeGame!!)
+                            activeGame = null
+                            nonGameForegroundSamples = 0
+                        } else {
+                            updateOverlay()
+                        }
                     }
-                }
                 }
             }
             handler.postDelayed(this, 1000)
@@ -1116,7 +1114,7 @@ class OeaGameBoostService : Service() {
                         .setDuration(650L)
                         .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
                         .withEndAction {
-                            if (overlay != null && view.visibility == View.VISIBLE) animateGameBoostTelemetry(view)
+                            if (isPanelEncasementAttached() && view.visibility == View.VISIBLE) animateGameBoostTelemetry(view)
                         }.start()
                 }
             }.start()
@@ -1137,39 +1135,11 @@ class OeaGameBoostService : Service() {
 
     private fun requestPanelEncasementDismissal() {
         val panel = panelView ?: return
-        // Dismiss only the independent encasement window. The floating handle
-        // belongs to 'overlay' and is deliberately never hidden, detached,
-        // re-parented, or animated by this close path.
-        val host = panelWindowContainer ?: run {
-            panel.visibility = View.GONE
-            stopPanelColorAnimation(panel)
-            return
-        }
-        if (host.parent == null) {
-            detachPanelWindow(panel)
-            return
-        }
-
+        // Closing the encasement removes its window immediately. The panel is
+        // a child of that window, so it cannot remain touchable or visible after
+        // dismissal. This method never modifies the independent handle window.
         stopPanelColorAnimation(panel)
-        host.animate().cancel()
-        host.animate()
-            .alpha(0f)
-            .scaleX(0.96f)
-            .scaleY(0.96f)
-            .translationX(dp(12).toFloat())
-            .setDuration(145L)
-            .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
-            .withEndAction {
-                // Guard against a stale animation callback dismissing a newly
-                // opened panel host.
-                if (panelWindowContainer === host) {
-                    detachPanelWindow(panel)
-                    host.alpha = 1f
-                    host.scaleX = 1f
-                    host.scaleY = 1f
-                    host.translationX = 0f
-                }
-            }.start()
+        detachPanelWindow(panel)
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
