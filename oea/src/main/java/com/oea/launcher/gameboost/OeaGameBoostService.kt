@@ -1241,10 +1241,10 @@ class OeaGameBoostService : Service() {
         panel.scaleX = 1f
         panel.scaleY = 1f
         panel.translationX = 0f
-        // Defensive invariant: after every dismissal path, validate the handle
-        // itself. This repairs a detached/damaged handle without removing a
-        // healthy one, and never changes the active-game selection.
-        if (activeGame != null) ensureOverlayForActiveGame()
+        // Deliberately do not call ensureOverlayForActiveGame() here.
+        // That recovery function is allowed to remove and rebuild the entire
+        // overlay root. A panel-dismiss action must never invoke root recovery:
+        // the polling loop independently repairs a genuinely detached handle.
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
