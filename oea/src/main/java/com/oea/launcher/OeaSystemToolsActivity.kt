@@ -220,7 +220,18 @@ class OeaSystemToolsActivity : Activity() {
                 showGameBoost()
             }
         }
-        row(box, "Selected games", games.size.toString() + " selected") { chooseGames() }
+        val selectionMode = OeaGameBoostStore.mode(this)
+        row(
+            box,
+            "App selection mode",
+            if (selectionMode == "manual_automatic") "Manual + Automatic • games detected automatically; you can also add apps"
+            else "Automatic • only Android-recognized games"
+        ) {
+            val next = if (selectionMode == "manual_automatic") "automatic" else "manual_automatic"
+            OeaGameBoostStore.setMode(this, next)
+            showGameBoost()
+        }
+        row(box, if (selectionMode == "manual_automatic") "Selected games & apps" else "Selected games", games.size.toString() + " selected") { chooseGames() }
         row(box, "Usage access", usageStatus()) { openUsageAccess() }
         row(box, "Overlay permission", if (overlayGranted) "Granted" else "Required for the in-game control pill") { openOverlaySettings() }
         row(box, "DND access", dndAccessStatus()) { openDndAccess() }
@@ -348,11 +359,21 @@ class OeaSystemToolsActivity : Activity() {
 
     private fun chooseGames() {
         OeaGameBoostStore.syncDetectedGames(this)
-        val choices = apps.filterNot { it.packageName == packageName }.distinctBy { it.packageName }
+        val manualAndAutomatic = OeaGameBoostStore.mode(this) == "manual_automatic"
+        val detected = OeaGameBoostStore.detectedGames(this)
+        val choices = apps
+            .filterNot { it.packageName == packageName }
+            .filter { manualAndAutomatic || it.packageName in detected }
+            .distinctBy { it.packageName }
         val selected = OeaGameBoostStore.games(this)
         val checked = BooleanArray(choices.size) { selected.contains(choices[it].packageName) }
-        AlertDialog.Builder(this).setTitle("Game Boost games")
-            .setMessage("OEA automatically detects Android-declared games. You can also add or remove any installed app.")
+        AlertDialog.Builder(this).setTitle(if (manualAndAutomatic) "Game Boost games & apps" else "Game Boost games")
+            .setMessage(
+                if (manualAndAutomatic)
+                    "OEA detects Android-recognized games automatically. Select any additional installed apps to enable the in-app Game Boost control for them too."
+                else
+                    "Automatic mode uses Android-recognized games only. Switch to Manual + Automatic to add regular apps."
+            )
             .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { _, which, value -> checked[which] = value }
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
@@ -361,7 +382,9 @@ class OeaSystemToolsActivity : Activity() {
                     if (app.packageName in next) OeaGameBoostStore.restoreGame(this, app.packageName)
                     else if (app.packageName in selected) OeaGameBoostStore.removeGame(this, app.packageName)
                 }
-                OeaGameBoostStore.setGames(this, next)
+                // Preserve packages outside the current mode's selectable list.
+                val preserved = selected.filter { old -> choices.none { it.packageName == old } }.toSet()
+                OeaGameBoostStore.setGames(this, next + preserved)
                 showGameBoost()
             }.show()
     }
