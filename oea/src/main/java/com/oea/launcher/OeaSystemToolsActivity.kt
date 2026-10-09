@@ -155,6 +155,7 @@ class OeaSystemToolsActivity : Activity() {
         var currentQuery = ""
         var currentFilter = "all"
         val selectedPackages = linkedSetOf<String>()
+        var visiblePackages: List<String> = emptyList()
         var rerender: (() -> Unit)? = null
         val filters = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -180,7 +181,47 @@ class OeaSystemToolsActivity : Activity() {
                 rightMargin = dp(2)
             })
         }
-        box.addView(filters, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        box.addView(filters, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+
+        val selectionActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun freezerControl(label: String, action: () -> Unit) = TextView(this).apply {
+            text = label
+            textSize = 10f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(dp(5), dp(10), dp(5), dp(10))
+            setTextColor(textColor())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(11).toFloat()
+                setColor(surfaceColor())
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { action() }
+        }
+        selectionActions.addView(freezerControl("SELECT VISIBLE") {
+            selectedPackages.addAll(visiblePackages)
+            rerender?.invoke()
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(4) })
+        selectionActions.addView(freezerControl("CLEAR") {
+            selectedPackages.clear()
+            rerender?.invoke()
+        }, LinearLayout.LayoutParams(0, dp(38), 0.65f).apply { leftMargin = dp(2); rightMargin = dp(4) })
+        selectionActions.addView(freezerControl("REFRESH STATE") {
+            val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
+            if (activeBackend == OeaAppFreezer.Backend.NONE) {
+                Toast.makeText(this@OeaSystemToolsActivity, "No device-owner or root authority is available to verify suspension state.", Toast.LENGTH_LONG).show()
+            } else {
+                val installed = packageManager.getInstalledApplications(0).map { it.packageName }
+                OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, installed)
+                Toast.makeText(this@OeaSystemToolsActivity, "System suspension state refreshed.", Toast.LENGTH_SHORT).show()
+                rerender?.invoke()
+            }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(2) })
+        box.addView(selectionActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
 
         val summary = TextView(this).apply {
             textSize = 12f
@@ -259,6 +300,7 @@ class OeaSystemToolsActivity : Activity() {
                 }
                 matchesQuery && matchesFilter
             }
+            visiblePackages = shown.map { it.packageName }
             summary.text = "${frozen.size} frozen  •  ${allApps.size} apps  •  ${shown.size} shown  •  ${selectedPackages.size} selected"
             filterViews.forEach { (mode, chip) ->
                 val selected = mode == currentFilter
