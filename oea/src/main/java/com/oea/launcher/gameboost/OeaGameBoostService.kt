@@ -594,20 +594,23 @@ class OeaGameBoostService : Service() {
     private fun cleanBackgroundMemory(button: TextView) {
         val am = getSystemService(ActivityManager::class.java)
         val active = activeGame
-        var attempted = 0
-        runCatching {
+        // Android may expose only a subset of other apps' processes, and a
+        // successful API call does not prove that RAM was freed. Report requests,
+        // not a false "cleaned" success.
+        val targets = runCatching {
             am.runningAppProcesses.orEmpty()
                 .filter { it.importance >= ActivityManager.RunningAppProcessInfo.IMPORTANCE_BACKGROUND }
-                .filter { it.pkgList?.none { pkg -> pkg == packageName || pkg == active } == true }
+                .flatMap { it.pkgList.orEmpty().asList() }
+                .filter { it != packageName && it != active }
+                .distinct()
                 .take(24)
-                .forEach { process ->
-                    process.pkgList.orEmpty().distinct().forEach { pkg ->
-                        runCatching { am.killBackgroundProcesses(pkg); attempted++ }
-                    }
-                }
+        }.getOrDefault(emptyList())
+        var requested = 0
+        targets.forEach { pkg ->
+            if (runCatching { am.killBackgroundProcesses(pkg) }.isSuccess) requested++
         }
-        button.text = if (attempted > 0) "✓ CLEANED" else "CLEAN RAM"
-        handler.postDelayed({ button.text = "CLEAN RAM" }, 1200L)
+        button.text = if (requested > 0) "REQUESTED $requested" else "NO TARGETS"
+        handler.postDelayed({ button.text = "↻  CLEAN RAM" }, 1600L)
         updateOverlay()
     }
 
