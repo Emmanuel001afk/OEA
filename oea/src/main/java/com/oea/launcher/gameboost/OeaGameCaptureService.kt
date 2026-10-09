@@ -42,6 +42,7 @@ class OeaGameCaptureService : Service() {
     private var display: android.hardware.display.VirtualDisplay? = null
     private var reader: ImageReader? = null
     private var recorder: MediaRecorder? = null
+    private var recorderStarted = false
     private var outputFile: File? = null
     private var outputUri: android.net.Uri? = null
     private var outputDescriptor: android.os.ParcelFileDescriptor? = null
@@ -177,8 +178,16 @@ class OeaGameCaptureService : Service() {
             null
         )
         Handler(Looper.getMainLooper()).postDelayed({
-            if (recorder != null && display != null && projection != null) {
-                runCatching { recorder!!.start() }.onFailure {
+            val activeRecorder = recorder
+            if (activeRecorder != null && display != null && projection != null) {
+                runCatching {
+                    activeRecorder.start()
+                    recorderStarted = true
+                    getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+                        .putBoolean("recording", true)
+                        .putBoolean("capture_active", true)
+                        .apply()
+                }.onFailure {
                     getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
                         .putBoolean("recording", false)
                         .putBoolean("capture_active", false)
@@ -276,6 +285,11 @@ class OeaGameCaptureService : Service() {
             stopSelf()
         } else {
             Toast.makeText(this, "OEA could not save the screenshot.", Toast.LENGTH_LONG).show()
+            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+                .putBoolean("capture_active", false)
+                .apply()
+            stopCapture()
+            stopSelf()
         }
     }
 
@@ -311,10 +325,16 @@ class OeaGameCaptureService : Service() {
     }
 
     private fun stopCapture(stopProjection: Boolean = true) {
-        val wasRecording = recorder != null
-        val stopped = runCatching { recorder?.stop(); true }.getOrDefault(false)
+        val wasRecording = recorder != null && recorderStarted
+        val stopped = if (wasRecording) {
+            runCatching { recorder?.stop(); true }.getOrDefault(false)
+        } else {
+            false
+        }
         runCatching { recorder?.reset() }
+        runCatching { recorder?.release() }
         recorder = null
+        recorderStarted = false
         display?.release(); display = null
         reader?.close(); reader = null
         val currentProjection = projection
@@ -331,7 +351,21 @@ class OeaGameCaptureService : Service() {
             } else {
                 runCatching { contentResolver.delete(outputUri!!, null, null) }
             }
+        } else if (outputFile != null) {
+            if (wasRecording && stopped) {
+                runCatching {
+                    android.media.MediaScannerConnection.scanFile(
+                        this,
+                        arrayOf(outputFile!!.absolutePath),
+                        arrayOf("video/mp4"),
+                        null
+                    )
+                }
+            } else {
+                runCatching { outputFile!!.delete() }
+            }
         }
+        outputFile = null
         runCatching { outputDescriptor?.close() }
         outputDescriptor = null
         outputUri = null
