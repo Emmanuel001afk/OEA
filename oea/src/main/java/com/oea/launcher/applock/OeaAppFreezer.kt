@@ -146,7 +146,7 @@ object OeaAppFreezer {
                             .containsMatchIn(match.groupValues[2])
                 }.mapTo(mutableSetOf()) { it.groupValues[1] }
             }
-            Backend.SHIZUKU -> candidates.filterTo(mutableSetOf()) { pkg -> shizukuSuspensionState(pkg) == true }
+            Backend.SHIZUKU -> shizukuFrozenPackages(candidates) ?: return
             Backend.NONE -> return
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -219,6 +219,14 @@ object OeaAppFreezer {
             0 -> false
             else -> null
         }
+
+    private fun shizukuFrozenPackages(candidates: Set<String>): Set<String>? {
+        val response = getShizukuShellService().getSuspendedPackages(candidates.joinToString(","))
+        if (response.substringBefore('\\n').toIntOrNull() != 0) return null
+        return response.substringAfter('\\n', "")
+            .split(',')
+            .filterTo(mutableSetOf()) { it.isNotBlank() && it in candidates }
+    }
 
     private fun getShizukuShellService(): IOeaShizukuShellService {
         val latch: CountDownLatch
