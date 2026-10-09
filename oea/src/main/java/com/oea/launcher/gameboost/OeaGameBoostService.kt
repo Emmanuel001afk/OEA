@@ -296,7 +296,12 @@ class OeaGameBoostService : Service() {
         screenshot.setOnClickListener { launchCapture(OeaGameCaptureActivity.MODE_SCREENSHOT) }
         record.setOnClickListener { toggleRecording(record) }
         cleanup.setOnClickListener { cleanBackgroundMemory(cleanup) }
-        close.setOnClickListener { closePanel(panel) }
+        close.isClickable = true
+        close.isFocusable = true
+        close.contentDescription = "Close Game Boost panel"
+        close.setOnClickListener {
+            closePanel(panel)
+        }
         val wifi = chip("⌁  WI-FI").apply { textSize = 9f }
         wifi.setOnClickListener { openWifiPanel() }
         val header = android.widget.LinearLayout(this).apply {
@@ -347,8 +352,6 @@ class OeaGameBoostService : Service() {
             gravity = Gravity.END
             topMargin = dp(6)
         })
-        // Keep the same floating handle above the panel if their bounds overlap.
-        handle.bringToFront()
         // The floating button only opens the panel. Closing is handled by
         // the dedicated CLOSE chip inside the panel; the handle stays visible.
         handle.setOnClickListener {
@@ -965,23 +968,18 @@ class OeaGameBoostService : Service() {
     }
 
     private fun closePanel(panel: View) {
-        if (panel.visibility != View.VISIBLE) return
+        // Only change the inner panel's state. Never remove or hide the root
+        // overlay: its sibling floating handle must remain attached and visible.
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
-        panel.animate()
-            .alpha(0f)
-            .scaleX(0.96f)
-            .scaleY(0.96f)
-            .translationX(dp(12).toFloat())
-            .setDuration(145L)
-            .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
-            .withEndAction {
-                panel.visibility = View.GONE
-                panel.alpha = 1f
-                panel.scaleX = 1f
-                panel.scaleY = 1f
-                panel.translationX = 0f
-            }.start()
+        panel.clearAnimation()
+        panel.visibility = View.GONE
+        panel.alpha = 1f
+        panel.scaleX = 1f
+        panel.scaleY = 1f
+        panel.translationX = 0f
+        panel.invalidate()
+        (panel.parent as? View)?.requestLayout()
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
