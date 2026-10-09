@@ -315,7 +315,7 @@ class OeaGameBoostService : Service() {
     }
 
     override fun onDestroy() {
-        diagnostic(android.util.Log.WARN, "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
+        diagnostic(android.util.Log.WARN, "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
         handler.removeCallbacksAndMessages(null)
         activeGame?.let(::deactivate)
         removeWakeOverlay()
@@ -347,7 +347,7 @@ class OeaGameBoostService : Service() {
         }
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
-        diagnostic(android.util.Log.WARN, "deactivate called for=$packageName activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
+        diagnostic(android.util.Log.WARN, "deactivate called for=$packageName activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
         restoreDnd()
         setKeepScreenOn(false)
         removeWakeOverlay()
@@ -391,7 +391,7 @@ class OeaGameBoostService : Service() {
         val structureHealthy = root != null && handle != null && handleLabel != null
         if (current != null && current.parent != null && structureHealthy) return
 
-        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} structureHealthy=$structureHealthy panelAttached=${panelView?.parent != null}")
+        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} structureHealthy=$structureHealthy panelExists=${panelView != null}")
         if (current != null) {
             panelView?.let { panel ->
                 panel.animate().cancel()
@@ -497,7 +497,7 @@ class OeaGameBoostService : Service() {
             }
             setPadding(dp(8), 0, dp(8), 0)
             setOnClickListener {
-                diagnostic(android.util.Log.INFO, "Close Panel button clicked activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
+                diagnostic(android.util.Log.INFO, "Close Panel button clicked activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
                 closePanel(panel)
             }
         }
