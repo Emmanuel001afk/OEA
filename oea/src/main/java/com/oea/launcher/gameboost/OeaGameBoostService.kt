@@ -159,7 +159,7 @@ class OeaGameBoostService : Service() {
                     activeGame = game
                     activate(game)
                     updateOverlay()
-                    (overlay as? android.widget.LinearLayout)?.getChildAt(0)?.let(::closePanel)
+                    (overlay as? android.widget.LinearLayout)?.getChildAt(0)?.let(::hideGameBoostPanel)
                 } else {
                     updateOverlay()
                 }
@@ -300,7 +300,7 @@ class OeaGameBoostService : Service() {
         close.isFocusable = true
         close.contentDescription = "Close Game Boost panel"
         close.setOnClickListener {
-            closePanel(panel)
+            hideGameBoostPanel(panel)
         }
         val wifi = chip("⌁  WI-FI").apply { textSize = 9f }
         wifi.setOnClickListener { openWifiPanel() }
@@ -967,7 +967,7 @@ class OeaGameBoostService : Service() {
             }.start()
     }
 
-    private fun closePanel(panel: View) {
+    private fun hideGameBoostPanel(panel: View) {
         // Only change the inner panel's state. Never remove or hide the root
         // overlay: its sibling floating handle must remain attached and visible.
         stopPanelColorAnimation(panel)
