@@ -196,6 +196,8 @@ class OeaGameBoostService : Service() {
     private var lastNonGamePackage: String? = null
     private var diagnosticHeartbeatTicks = 0L
     private var lastMonitorErrorSignature: String? = null
+    private var lastLoggedForegroundPackage: String? = null
+    private var lastLoggedHandleVisibility: Int? = null
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -224,6 +226,10 @@ class OeaGameBoostService : Service() {
             try {
                 runCatching { OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService) }
                 val game = foregroundPackage()
+                if (game != lastLoggedForegroundPackage) {
+                    diagnostic(android.util.Log.INFO, "foreground package changed from=$lastLoggedForegroundPackage to=$game activeGame=$activeGame samples=$nonGameForegroundSamples")
+                    lastLoggedForegroundPackage = game
+                }
                 val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
                     .getBoolean("capture_active", false)
 
@@ -437,6 +443,14 @@ class OeaGameBoostService : Service() {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(10), dp(10), dp(10), dp(10))
         }
+        root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                diagnostic(android.util.Log.INFO, "overlay root attached game=$packageName visibility=${view.visibility} isShown=${view.isShown}")
+            }
+            override fun onViewDetachedFromWindow(view: View) {
+                diagnostic(android.util.Log.ERROR, "overlay root DETACHED game=$packageName activeGame=$activeGame visibility=${view.visibility} isShown=${view.isShown} handleVisibility=${((view as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)}")
+            }
+        })
         val panel = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(10))
@@ -976,6 +990,11 @@ class OeaGameBoostService : Service() {
         val handle = root.getChildAt(0) as? android.widget.FrameLayout
         val handleVisible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
         handle?.visibility = if (handleVisible) View.VISIBLE else View.GONE
+        val handleVisibilityNow = handle?.visibility
+        if (handleVisibilityNow != lastLoggedHandleVisibility) {
+            diagnostic(android.util.Log.INFO, "handle visibility changed old=$lastLoggedHandleVisibility new=$handleVisibilityNow preferenceVisible=$handleVisible activeGame=$activeGame overlayAttached=${root.parent != null} overlayIsShown=${root.isShown} handleIsShown=${handle?.isShown}")
+            lastLoggedHandleVisibility = handleVisibilityNow
+        }
         if (handleVisible) removeWakeOverlay() else ensureWakeOverlay()
         handle?.let { h ->
             val size = handleSizePx()
@@ -1229,7 +1248,9 @@ class OeaGameBoostService : Service() {
 
     private fun detachPanelWindow(panel: View) {
         if (panel.parent == null) return
+        diagnostic(android.util.Log.WARN, "detachPanelWindow called panelVisibility=${panel.visibility} activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
         runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(panel) }
+            .onFailure { error -> diagnostic(android.util.Log.ERROR, "detachPanelWindow failed=${error.javaClass.name}:${error.message} panelStillAttached=${panel.parent != null}") }
     }
 
     private fun animateGameBoostPanel(panel: View) {
