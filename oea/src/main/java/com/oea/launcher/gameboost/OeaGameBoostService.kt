@@ -301,9 +301,6 @@ class OeaGameBoostService : Service() {
             val next = !OeaGameBoostStore.prefs(this).getBoolean("boost", true)
             OeaGameBoostStore.prefs(this).edit().putBoolean("boost", next).apply()
             setKeepScreenOn(next)
-            // Enabling Boost also runs the existing best-effort background cleanup.
-            // Android does not permit ordinary apps to raise another app's process priority.
-            if (next) cleanBackgroundMemory(cleanup)
             boost.animate().scaleX(0.94f).scaleY(0.94f).setDuration(70L).withEndAction {
                 boost.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
             }.start()
@@ -342,6 +339,11 @@ class OeaGameBoostService : Service() {
             gravity = Gravity.END
             topMargin = dp(6)
         })
+        // Keep the same floating handle above the panel if their bounds overlap.
+        handle.bringToFront()
+        handle.setOnClickListener {
+            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+        }
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -406,8 +408,11 @@ class OeaGameBoostService : Service() {
                             if (dragging) {
                                 snapHandleToEdge(root, handle, wm)
                             } else {
-                                if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+                                // Route taps through click semantics so the same
+                                // handle reliably toggles open/closed and is accessible.
+                                v.performClick()
                             }
+                            dragging = false
                             return true
                         }
                         android.view.MotionEvent.ACTION_CANCEL -> {
@@ -415,6 +420,7 @@ class OeaGameBoostService : Service() {
                                 handle.animate().cancel()
                                 handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
                             }
+                            dragging = false
                             return true
                         }
                     }
