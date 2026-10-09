@@ -660,8 +660,21 @@ class OeaSystemToolsActivity : Activity() {
                     .putBoolean("ram_handle_dragged", false)
                     .apply()
                 if (OeaGameBoostStore.enabled(this)) {
-                    stopService(Intent(this, OeaGameBoostService::class.java))
-                    startBoostService()
+                    // Apply size/position/visibility edits without destroying the
+                    // live overlay window or resetting foreground-game detection.
+                    runCatching {
+                        if (android.os.Build.VERSION.SDK_INT >= 26) {
+                            startForegroundService(
+                                Intent(this, OeaGameBoostService::class.java)
+                                    .setAction(OeaGameBoostService.ACTION_REFRESH)
+                            )
+                        } else {
+                            startService(
+                                Intent(this, OeaGameBoostService::class.java)
+                                    .setAction(OeaGameBoostService.ACTION_REFRESH)
+                            )
+                        }
+                    }.onFailure { startBoostService() }
                 }
                 showGameBoost()
             }
