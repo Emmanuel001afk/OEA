@@ -68,10 +68,14 @@ class OeaGameCaptureService : Service() {
         val mode = intent.getStringExtra(EXTRA_MODE) ?: OeaGameCaptureActivity.MODE_SCREENSHOT
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
         val data: Intent = if (Build.VERSION.SDK_INT >= 33) {
-            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java) ?: return START_NOT_STICKY
+            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
         } else {
             @Suppress("DEPRECATION")
-            (intent.getParcelableExtra(EXTRA_RESULT_DATA) ?: return START_NOT_STICKY)
+            intent.getParcelableExtra(EXTRA_RESULT_DATA)
+        } ?: run {
+            clearCaptureState()
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
@@ -81,11 +85,8 @@ class OeaGameCaptureService : Service() {
         if (projection == null) {
             // Never leave the Game Boost UI stuck in a capture/recording state
             // when Android rejects or ends the projection before a session starts.
-            getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
-                .putBoolean("recording", false)
-                .putBoolean("capture_active", false)
-                .apply()
-            stopSelf()
+            clearCaptureState()
+            stopSelf(startId)
             return START_NOT_STICKY
         }
 
@@ -177,7 +178,7 @@ class OeaGameCaptureService : Service() {
             recorder!!.surface,
             null,
             null
-        )
+        ) ?: throw IllegalStateException("Could not create the recording display")
         Handler(Looper.getMainLooper()).postDelayed({
             val activeRecorder = recorder
             if (activeRecorder != null && display != null && projection != null) {
@@ -223,7 +224,7 @@ class OeaGameCaptureService : Service() {
             captureReader.surface,
             null,
             Handler(Looper.getMainLooper())
-        )
+        ) ?: throw IllegalStateException("Could not create the screenshot display")
 
         val deadline = android.os.SystemClock.uptimeMillis() + 4000L
         var completed = false
@@ -258,23 +259,34 @@ class OeaGameCaptureService : Service() {
                 val buffer = plane.buffer
                 val rowStride = plane.rowStride
                 val pixelStride = plane.pixelStride
-                if (pixelStride <= 0 || rowStride < pixelStride * width) {
+                if (pixelStride < 4 || rowStride < pixelStride * width) {
                     throw IllegalStateException("Invalid screen image stride")
                 }
-                val rowPadding = rowStride - pixelStride * width
-                val paddedWidth = width + rowPadding / pixelStride
-                val padded = android.graphics.Bitmap.createBitmap(
-                    paddedWidth,
-                    height,
-                    android.graphics.Bitmap.Config.ARGB_8888
+
+                // Read each pixel using the image's actual row/pixel strides.
+                // Bulk-copying into a padded bitmap can underflow on devices
+                // whose final row omits trailing padding bytes.
+                val pixels = IntArray(width * height)
+                for (y in 0 until height) {
+                    val rowOffset = y * rowStride
+                    for (x in 0 until width) {
+                        val offset = rowOffset + x * pixelStride
+                        val red = buffer.get(offset).toInt() and 0xFF
+                        val green = buffer.get(offset + 1).toInt() and 0xFF
+                        val blue = buffer.get(offset + 2).toInt() and 0xFF
+                        val alpha = buffer.get(offset + 3).toInt() and 0xFF
+                        pixels[y * width + x] = android.graphics.Color.argb(alpha, red, green, blue)
+                    }
+                }
+                val bitmap = android.graphics.Bitmap.createBitmap(
+                    width, height, android.graphics.Bitmap.Config.ARGB_8888
                 )
-                padded.copyPixelsFromBuffer(buffer)
-                val cropped = android.graphics.Bitmap.createBitmap(
-                    padded, 0, 0, width, height
-                )
-                padded.recycle()
-                val result = saveScreenshot(cropped)
-                cropped.recycle()
+                bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+                val result = try {
+                    saveScreenshot(bitmap)
+                } finally {
+                    bitmap.recycle()
+                }
                 result
             }
         }.getOrDefault(false)
@@ -374,6 +386,13 @@ class OeaGameCaptureService : Service() {
         outputUri = null
         getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit().putBoolean("recording", false).putBoolean("capture_active", false).apply()
         getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+    }
+
+    private fun clearCaptureState() {
+        getSharedPreferences("oea_game_boost", MODE_PRIVATE).edit()
+            .putBoolean("recording", false)
+            .putBoolean("capture_active", false)
+            .apply()
     }
 
     private fun notification(text: String): Notification =
