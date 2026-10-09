@@ -194,6 +194,7 @@ class OeaGameBoostService : Service() {
     private var panelView: View? = null
     private var wakeOverlay: View? = null
     private var lastWakeTapAt: Long = 0L
+    private var lastHandleClickAt: Long = 0L
     private var activeGame: String? = null
     private var foregroundActivityClass: String? = null
     // UsageEvents reports lifecycle transitions, not continuous foreground state.
@@ -580,7 +581,10 @@ class OeaGameBoostService : Service() {
         handle.bringToFront()
         // A single click on the floating handle toggles the same panel instance.
         // Closing always funnels through closePanel(), shared with CLOSE PANEL.
-        handle.setOnClickListener { togglePanel(panel) }
+        handle.setOnClickListener {
+            lastHandleClickAt = System.currentTimeMillis()
+            togglePanel(panel)
+        }
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -1206,7 +1210,16 @@ class OeaGameBoostService : Service() {
                     // for this separate panel window. Ignore that event so the
                     // handle's ACTION_UP can toggle the panel closed exactly once.
                     if (!isPointInsideFloatingHandle(event.rawX, event.rawY)) {
-                        closePanel(panel)
+                        // ACTION_OUTSIDE can arrive before the floating handle
+                        // click callback. Defer dismissal so a handle tap toggles
+                        // the panel once instead of closing and reopening it.
+                        handler.postDelayed({
+                            val handleTapJustHandled =
+                                System.currentTimeMillis() - lastHandleClickAt in 0..450L
+                            if (!handleTapJustHandled && panel.visibility == View.VISIBLE) {
+                                closePanel(panel)
+                            }
+                        }, 120L)
                     }
                     true
                 } else {
@@ -1236,7 +1249,15 @@ class OeaGameBoostService : Service() {
                 // A tap on the handle is a toggle, not a generic outside dismissal.
                 // All other outside taps still dismiss the panel.
                 if (!isPointInsideFloatingHandle(event.rawX, event.rawY)) {
-                    closePanel(panel)
+                    // Delay outside dismissal to distinguish an actual outside
+                    // tap from the handle's own toggle click.
+                    handler.postDelayed({
+                        val handleTapJustHandled =
+                            System.currentTimeMillis() - lastHandleClickAt in 0..450L
+                        if (!handleTapJustHandled && panel.visibility == View.VISIBLE) {
+                            closePanel(panel)
+                        }
+                    }, 120L)
                 }
                 true
             } else {
