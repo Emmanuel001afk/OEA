@@ -595,12 +595,7 @@ class OeaGameBoostService : Service() {
                             val dy = event.rawY - downRawY
                             if (!dragging && (kotlin.math.abs(dx) > dp(6) || kotlin.math.abs(dy) > dp(6))) {
                                 dragging = true
-                                // Cancel the pending tap before moving the overlay.
-                                android.view.MotionEvent.obtain(event).also { cancel ->
-                                    cancel.action = android.view.MotionEvent.ACTION_CANCEL
-                                    handleGestures.onTouchEvent(cancel)
-                                    cancel.recycle()
-                                }
+                                // Once movement crosses the drag threshold, ACTION_UP must not click.
                                 handle.animate().cancel()
                                 handle.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90L).start()
                             }
