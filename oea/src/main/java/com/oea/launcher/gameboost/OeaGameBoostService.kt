@@ -341,8 +341,22 @@ class OeaGameBoostService : Service() {
         })
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
+        // Opening stays a single tap. Closing requires a deliberate double tap
+        // so an ordinary tap cannot collapse the panel accidentally.
+        var lastCloseTapAt = 0L
         handle.setOnClickListener {
-            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+            if (panel.visibility != View.VISIBLE) {
+                lastCloseTapAt = 0L
+                showPanel(panel)
+            } else {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (now - lastCloseTapAt in 1..450L) {
+                    lastCloseTapAt = 0L
+                    closePanel(panel)
+                } else {
+                    lastCloseTapAt = now
+                }
+            }
         }
 
         val params = WindowManager.LayoutParams(
@@ -418,14 +432,12 @@ class OeaGameBoostService : Service() {
                             return true
                         }
                         android.view.MotionEvent.ACTION_CANCEL -> {
+                            // A cancelled gesture is not a tap. Never synthesize
+                            // clicks here: that could count a drag/window transition
+                            // as the second tap needed to close the panel.
                             if (dragging) {
                                 handle.animate().cancel()
                                 handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
-                            } else if (event.eventTime - downTime < 500L) {
-                                // Some overlay/window transitions cancel a tap
-                                // before ACTION_UP. Preserve the tap action so
-                                // the same handle can still close the panel.
-                                v.performClick()
                             }
                             dragging = false
                             return true
