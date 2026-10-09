@@ -400,10 +400,10 @@ class OeaGameBoostService : Service() {
     }
 
     private fun isTransientForegroundPackage(packageName: String): Boolean {
-        if (packageName == this.packageName) return true
-        // Android can surface these short-lived UI packages while the game
-        // remains underneath (permission sheets, recents, keyboards and launchers).
-        // They are treated as transition evidence, never as proof that a game ended.
+        // OEA Home is a real destination, not a transient transition surface.
+        // Returning to OEA (including its All Apps drawer) must end the game
+        // session so the in-game floating control is removed.
+        // Only short-lived system surfaces below are ignored.
         return packageName in setOf(
             "com.android.systemui",
             "com.android.settings",
