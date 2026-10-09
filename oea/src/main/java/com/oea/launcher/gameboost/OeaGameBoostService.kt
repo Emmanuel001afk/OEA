@@ -168,7 +168,20 @@ class OeaGameBoostService : Service() {
                 val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
                     .getBoolean("capture_active", false)
 
-                if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
+                // Closing the panel can briefly perturb UsageStats foreground
+                // reporting on OEM builds. During this short dismissal window,
+                // do not interpret an unknown/other package sample as the game
+                // ending and remove the independent floating-handle window.
+                val panelDismissalGraceActive = activeGame != null &&
+                    System.currentTimeMillis() - lastPanelDismissAt in 0L..2500L &&
+                    (game == null || game != activeGame) && !captureActive
+
+                if (panelDismissalGraceActive) {
+                    nonGameForegroundSamples = 0
+                    lastNonGamePackage = null
+                    ensureOverlayForActiveGame()
+                    updateOverlay()
+                } else if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                     nonGameForegroundSamples = 0
                     lastNonGamePackage = null
                     if (activeGame != game) {
