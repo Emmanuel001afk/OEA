@@ -347,14 +347,14 @@ class OeaGameBoostService : Service() {
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
                 override fun onSingleTapUp(event: android.view.MotionEvent): Boolean {
-                    if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
+                    // Route taps through one click handler so the panel toggles exactly once.
                     handle.performClick()
                     return true
                 }
             }
         )
         handle.setOnClickListener {
-            if (panel.visibility != View.VISIBLE) showPanel(panel)
+            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
         }
 
         val params = WindowManager.LayoutParams(
