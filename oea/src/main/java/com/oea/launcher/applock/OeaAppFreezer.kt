@@ -50,12 +50,20 @@ object OeaAppFreezer {
     fun frozenPackages(context: Context): Set<String> =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet(KEY_FROZEN, emptySet()).orEmpty()
 
-    fun syncActualState(context: Context) {
+    fun syncActualState(context: Context, candidatePackages: Collection<String> = emptyList()) {
+        // PackageManager is the source of truth when OEA is device owner. Include
+        // currently visible apps as well as saved entries so a suspension changed
+        // outside this screen is reflected when the list is refreshed.
         if (backend(context) != Backend.DEVICE_OWNER) return
         val pm = context.packageManager
-        val known = frozenPackages(context).toMutableSet()
-        known.removeAll { pkg -> runCatching { !pm.isPackageSuspended(pkg) }.getOrDefault(true) }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putStringSet(KEY_FROZEN, known).apply()
+        val candidates = (frozenPackages(context) + candidatePackages)
+            .filter { it.isNotBlank() && it != context.packageName }
+            .toSet()
+        val actualFrozen = candidates.filterTo(mutableSetOf()) { pkg ->
+            runCatching { pm.isPackageSuspended(pkg) }.getOrDefault(false)
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putStringSet(KEY_FROZEN, actualFrozen).apply()
     }
 
     private fun persist(context: Context, packageName: String, frozen: Boolean) {
