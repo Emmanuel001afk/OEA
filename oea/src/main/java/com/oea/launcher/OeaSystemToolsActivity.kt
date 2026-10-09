@@ -48,7 +48,7 @@ class OeaSystemToolsActivity : Activity() {
         if (requestCode == SHIZUKU_PERMISSION_REQUEST) runOnUiThread {
             if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Shizuku access granted.", Toast.LENGTH_SHORT).show()
-                if (intent.getStringExtra(EXTRA_SCREEN) == "freezer") showFreezer()
+                showFreezer()
             } else {
                 Toast.makeText(this, "Shizuku access was not granted.", Toast.LENGTH_LONG).show()
             }
