@@ -167,7 +167,14 @@ class OeaGameBoostService : Service() {
                 val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
                     .getBoolean("capture_active", false)
 
-                if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
+                // Once a game session is active, its package remains authoritative
+                // for that session. Do not re-run automatic category detection
+                // against the same package every poll: OEM/app metadata can make
+                // isGame() fluctuate and falsely trigger deactivate(), which
+                // removes the floating handle when the panel is dismissed.
+                val isActiveSessionForeground = game != null && game == activeGame
+                if (isActiveSessionForeground ||
+                    (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game))) {
                     nonGameForegroundSamples = 0
                     lastNonGamePackage = null
                     if (activeGame != game) {
