@@ -17,7 +17,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
-import android.os.Environment
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -159,7 +158,6 @@ class OeaGameBoostService : Service() {
     private var lastLoggedForegroundPackage: String? = null
     private var lastForegroundDecisionLogAt = 0L
     private var lastLoggedHandleVisibility: Int? = null
-    private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
             diagnosticHeartbeatTicks++
@@ -217,6 +215,7 @@ class OeaGameBoostService : Service() {
                         activate(game)
                         panelView?.let(::closePanel)
                     } else {
+                        applyGameDndPreference()
                         ensureOverlayForActiveGame()
                     }
                     updateOverlay()
@@ -225,11 +224,13 @@ class OeaGameBoostService : Service() {
                     // surfaces, but do not treat the Home launcher as a transient:
                     // returning Home means the selected game/app has been left.
                     if (captureActive) {
+                        applyGameDndPreference()
                         nonGameForegroundSamples = 0
                         lastNonGamePackage = null
                         ensureOverlayForActiveGame()
                         updateOverlay()
                     } else if (game == null || isTransientForegroundPackage(game)) {
+                        applyGameDndPreference()
                         // Missing UsageStats data and temporary system/OEA UI are
                         // not proof that the user left the game. Keep the session
                         // and its independent handle until Android reports a real,
@@ -313,16 +314,11 @@ class OeaGameBoostService : Service() {
         removeWakeOverlay()
         removeOverlay()
         super.onDestroy()
-        // Flush queued diagnostic records, including final teardown messages.
-        diagnosticWriter.shutdown()
     }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun activate(packageName: String) {
         diagnostic(android.util.Log.INFO, "activate requested game=$packageName overlayPermission=${Settings.canDrawOverlays(this)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)} existingOverlayAttached=${overlay?.parent != null}")
-        if (OeaGameBoostStore.prefs(this).getBoolean("dnd", true)) {
-            val nm = getSystemService(NotificationManager::class.java)
-            if (nm.isNotificationPolicyAccessGranted) { previousInterruptionFilter = nm.currentInterruptionFilter; nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY) }
-        }
+        applyGameDndPreference()
         if (Settings.canDrawOverlays(this)) {
             // The RAM control is a persistent part of the in-game overlay.
             // A previous game/session may have removed the WindowManager view
@@ -887,12 +883,12 @@ class OeaGameBoostService : Service() {
         }
         val next = !OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
         OeaGameBoostStore.prefs(this).edit().putBoolean("dnd", next).apply()
-        if (next) {
-            if (previousInterruptionFilter == null) previousInterruptionFilter = nm.currentInterruptionFilter
-            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+        if (activeGame != null) {
+            applyGameDndPreference()
         } else {
-            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-            previousInterruptionFilter = null
+            // The setting is a per-game policy, not a request to leave system
+            // DND enabled while the user is outside a selected game.
+            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
         }
         updateDndButton(button)
     }
@@ -1380,12 +1376,33 @@ class OeaGameBoostService : Service() {
         return Pair(usedKb / 1024.0, totalKb / 1024.0)
     }
 
+    private fun applyGameDndPreference() {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (!nm.isNotificationPolicyAccessGranted) {
+            diagnostic(android.util.Log.WARN, "game-session DND cannot be applied: notification policy access is not granted")
+            return
+        }
+        val shouldEnable = activeGame != null &&
+            OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
+        val targetFilter = if (shouldEnable) {
+            NotificationManager.INTERRUPTION_FILTER_PRIORITY
+        } else {
+            NotificationManager.INTERRUPTION_FILTER_ALL
+        }
+        if (nm.currentInterruptionFilter != targetFilter) {
+            runCatching { nm.setInterruptionFilter(targetFilter) }
+                .onFailure { diagnostic(android.util.Log.ERROR, "game-session DND apply failed enabled=$shouldEnable error=${it.javaClass.simpleName}:${it.message}") }
+        }
+    }
+
     private fun restoreDnd() {
         val nm = getSystemService(NotificationManager::class.java)
-        previousInterruptionFilter?.let {
-            if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(it)
+        // OEA's DND toggle means "DND while a selected game is active".
+        // Do not restore a previously active filter after leaving the game.
+        if (nm.isNotificationPolicyAccessGranted) {
+            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
+                .onFailure { diagnostic(android.util.Log.ERROR, "game-session DND reset failed error=${it.javaClass.simpleName}:${it.message}") }
         }
-        previousInterruptionFilter = null
     }
 
     private fun removeOverlay() {
