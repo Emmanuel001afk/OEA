@@ -373,11 +373,13 @@ class OeaGameBoostService : Service() {
                 private var downRawY = 0f
                 private var startX = 0
                 private var startY = 0
+                private var downTime = 0L
                 private var dragging = false
 
                 override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
                     when (event.actionMasked) {
                         android.view.MotionEvent.ACTION_DOWN -> {
+                            downTime = event.eventTime
                             downRawX = event.rawX
                             downRawY = event.rawY
                             val current = root.layoutParams as? WindowManager.LayoutParams ?: return false
@@ -419,6 +421,11 @@ class OeaGameBoostService : Service() {
                             if (dragging) {
                                 handle.animate().cancel()
                                 handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+                            } else if (event.eventTime - downTime < 500L) {
+                                // Some overlay/window transitions cancel a tap
+                                // before ACTION_UP. Preserve the tap action so
+                                // the same handle can still close the panel.
+                                v.performClick()
                             }
                             dragging = false
                             return true
