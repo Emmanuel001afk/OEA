@@ -116,7 +116,6 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun showFreezer() {
-        OeaAppFreezer.syncActualState(this, apps.map { it.packageName })
         val backend = OeaAppFreezer.backend(this)
         val box = base("App Freezer", "Manage apps available in OEA. Freezing suspends an app; it does not uninstall it or erase its data.")
 
@@ -155,6 +154,7 @@ class OeaSystemToolsActivity : Activity() {
         var currentQuery = ""
         var currentFilter = "all"
         val selectedPackages = linkedSetOf<String>()
+        var allApps = loadInstalledFreezerApps()
         var visiblePackages: List<String> = emptyList()
         var rerender: (() -> Unit)? = null
         val filters = LinearLayout(this).apply {
@@ -215,10 +215,23 @@ class OeaSystemToolsActivity : Activity() {
             if (activeBackend == OeaAppFreezer.Backend.NONE) {
                 Toast.makeText(this@OeaSystemToolsActivity, "No device-owner or root authority is available to verify suspension state.", Toast.LENGTH_LONG).show()
             } else {
-                val installed = packageManager.getInstalledApplications(0).map { it.packageName }
-                OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, installed)
-                Toast.makeText(this@OeaSystemToolsActivity, "System suspension state refreshed.", Toast.LENGTH_SHORT).show()
-                rerender?.invoke()
+                Toast.makeText(this@OeaSystemToolsActivity, "Refreshing installed apps and system state…", Toast.LENGTH_SHORT).show()
+                Thread {
+                    val refreshedApps = try {
+                        loadInstalledFreezerApps()
+                    } catch (_: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this@OeaSystemToolsActivity, "Could not refresh the installed-app list.", Toast.LENGTH_LONG).show()
+                        }
+                        return@Thread
+                    }
+                    OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, refreshedApps.map { it.packageName })
+                    runOnUiThread {
+                        allApps = refreshedApps
+                        Toast.makeText(this@OeaSystemToolsActivity, "System suspension state refreshed.", Toast.LENGTH_SHORT).show()
+                        rerender?.invoke()
+                    }
+                }.start()
             }
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(2) })
         box.addView(selectionActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
@@ -274,20 +287,7 @@ class OeaSystemToolsActivity : Activity() {
         box.addView(list, LinearLayout.LayoutParams(-1, -2))
 
         fun renderApps() {
-            // Include installed packages even when they do not publish a launcher icon.
-            val allApps = packageManager.getInstalledApplications(0)
-                .filterNot { it.packageName == packageName }
-                .map { info ->
-                    OeaAppInfo(
-                        packageName = info.packageName,
-                        className = "",
-                        label = runCatching { info.loadLabel(packageManager).toString() }
-                            .getOrDefault(info.packageName),
-                    )
-                }
-                .distinctBy { it.packageName }
-                .sortedBy { it.label.lowercase() }
-            OeaAppFreezer.syncActualState(this, allApps.map { it.packageName })
+            // Use the cached installed-app snapshot; filtering/searching must stay lightweight.
             val frozen = OeaAppFreezer.frozenPackages(this)
             val shown = allApps.filter { app ->
                 val matchesQuery = currentQuery.isBlank() ||
@@ -352,7 +352,31 @@ class OeaSystemToolsActivity : Activity() {
         })
         renderApps()
         setRoot(box)
+        val initialPackages = allApps.map { it.packageName }
+        // Package-manager dumps and root checks can be expensive on some devices.
+        // Reconcile in the background so opening the freezer and typing in search
+        // never blocks the launcher UI thread.
+        Thread {
+            runCatching {
+                OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, initialPackages)
+            }
+            runOnUiThread { rerender?.invoke() }
+        }.start()
     }
+
+    private fun loadInstalledFreezerApps(): List<OeaAppInfo> =
+        packageManager.getInstalledApplications(0)
+            .filterNot { it.packageName == packageName }
+            .map { info ->
+                OeaAppInfo(
+                    packageName = info.packageName,
+                    className = "",
+                    label = runCatching { info.loadLabel(packageManager).toString() }
+                        .getOrDefault(info.packageName),
+                )
+            }
+            .distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
 
     private fun showCallBlocker() {
         val box = base("Call Blocker", "OEA call-screening rules. Android controls the required screening role.")
