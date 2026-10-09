@@ -1076,15 +1076,25 @@ class OeaGameBoostService : Service() {
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = overlayGravity()
-                x = dp(8)
-                y = handleSizePx() + dp(24)
+                val rootParams = root.layoutParams as? WindowManager.LayoutParams
+                val dragged = OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("ram_handle_dragged", false)
+                gravity = if (dragged) Gravity.TOP or Gravity.START else overlayGravity()
+                x = if (dragged) rootParams?.x ?: dp(8) else dp(8)
+                y = if (dragged) (rootParams?.y ?: dp(8)) + handleSizePx() + dp(24) else handleSizePx() + dp(24)
             }
             panel.setOnTouchListener { _, event ->
-                if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
-                    closePanel(panel)
-                    true
-                } else false
+                if (event.actionMasked != android.view.MotionEvent.ACTION_OUTSIDE) return@setOnTouchListener false
+                val handle = (overlay as? android.widget.LinearLayout)
+                    ?.getChildAt(if (panelAttachedSeparately) 0 else 1)
+                val location = IntArray(2)
+                handle?.getLocationOnScreen(location)
+                val x = event.rawX.toInt()
+                val y = event.rawY.toInt()
+                val tappedHandle = handle != null &&
+                    x >= location[0] && x < location[0] + handle.width &&
+                    y >= location[1] && y < location[1] + handle.height
+                if (!tappedHandle) closePanel(panel)
+                true
             }
             wm.addView(panel, params)
             panelAttachedSeparately = true
