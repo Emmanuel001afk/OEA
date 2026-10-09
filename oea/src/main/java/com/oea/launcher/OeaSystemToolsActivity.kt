@@ -154,6 +154,7 @@ class OeaSystemToolsActivity : Activity() {
 
         var currentQuery = ""
         var currentFilter = "all"
+        var rerender: (() -> Unit)? = null
         val filters = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -169,7 +170,7 @@ class OeaSystemToolsActivity : Activity() {
                 isFocusable = true
                 setOnClickListener {
                     currentFilter = mode
-                    renderApps()
+                    rerender?.invoke()
                 }
             }
             filterViews[mode] = chip
@@ -237,17 +238,18 @@ class OeaSystemToolsActivity : Activity() {
                     } else {
                         val result = OeaAppFreezer.setFrozen(this, app.packageName, !isFrozen)
                         Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
-                        if (result.success) renderApps()
+                        if (result.success) rerender?.invoke()
                     }
                 }
             }
         }
 
+        rerender = { renderApps() }
         searchField.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 currentQuery = s?.toString().orEmpty()
-                renderApps()
+                rerender?.invoke()
             }
             override fun afterTextChanged(s: android.text.Editable?) = Unit
         })
