@@ -219,11 +219,11 @@ class OeaGameBoostService : Service() {
                             updateOverlay()
                         } else {
                             val endingGame = activeGame
+                            android.util.Log.w("OeaGameBoost", "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples")
                             activeGame = null
                             nonGameForegroundSamples = 0
                             lastNonGamePackage = null
-                            android.util.Log.w("OeaGameBoost", "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples")
-            endingGame?.let(::deactivate)
+                            endingGame?.let(::deactivate)
                         }
                     }
                 }
