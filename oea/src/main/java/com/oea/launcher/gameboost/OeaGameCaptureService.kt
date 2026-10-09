@@ -332,7 +332,8 @@ class OeaGameCaptureService : Service() {
     }
 
     private fun saveScreenshot(bitmap: android.graphics.Bitmap): Boolean {
-        val name = "OEA_" + stamp() + ".png"
+        // Make screenshots unmistakable beside OEA's OEA_<timestamp>.mp4 recordings.
+        val name = "OEA_I_" + SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date()) + ".png"
         val resolver = contentResolver
         return runCatching {
             if (Build.VERSION.SDK_INT >= 29) {
@@ -344,21 +345,48 @@ class OeaGameCaptureService : Service() {
                 }
                 val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     ?: return@runCatching false
-                val wrote = resolver.openOutputStream(uri)?.use {
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-                } == true
-                if (!wrote) {
+                try {
+                    val wrote = resolver.openOutputStream(uri)?.use { stream ->
+                        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+                    } == true
+                    if (!wrote) {
+                        resolver.delete(uri, null, null)
+                        return@runCatching false
+                    }
+                    val published = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+                    if (resolver.update(uri, published, null, null) > 0) {
+                        true
+                    } else {
+                        resolver.delete(uri, null, null)
+                        false
+                    }
+                } catch (error: Exception) {
                     resolver.delete(uri, null, null)
+                    throw error
+                }
+            } else {
+                val pictures = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    "OEA"
+                )
+                if (!pictures.exists() && !pictures.mkdirs()) {
+                    throw IllegalStateException("Could not create Pictures/OEA")
+                }
+                val file = File(pictures, name)
+                val wrote = FileOutputStream(file).use {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+                if (!wrote) {
+                    file.delete()
                     return@runCatching false
                 }
-                val published = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
-                resolver.update(uri, published, null, null) > 0
-            } else {
-                val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), name)
-                FileOutputStream(file).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-                android.media.MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf("image/png"), null)
+                android.media.MediaScannerConnection.scanFile(
+                    this, arrayOf(file.absolutePath), arrayOf("image/png"), null
+                )
                 true
             }
+        }.onFailure {
+            android.util.Log.e("OeaGameCapture", "Screenshot save failed", it)
         }.getOrDefault(false)
     }
 
