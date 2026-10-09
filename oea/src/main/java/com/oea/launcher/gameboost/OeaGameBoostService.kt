@@ -426,6 +426,7 @@ class OeaGameBoostService : Service() {
                                 next.x = (startX + dx.toInt()).coerceIn(bounds[0], bounds[2])
                                 next.y = (startY + dy.toInt()).coerceIn(bounds[1], bounds[3])
                                 runCatching { wm.updateViewLayout(root, next) }
+                                syncPanelToHandle(root)
                             }
                             return true
                         }
@@ -550,6 +551,7 @@ class OeaGameBoostService : Service() {
         params.y = params.y.coerceIn(bounds[1], bounds[3])
         params.gravity = Gravity.TOP or Gravity.START
         runCatching { wm.updateViewLayout(root, params) }
+        syncPanelToHandle(root)
         OeaGameBoostStore.prefs(this).edit()
             .putBoolean("ram_handle_dragged", true)
             .putInt("ram_handle_x", params.x)
@@ -949,6 +951,31 @@ class OeaGameBoostService : Service() {
         }.getOrElse {
             panel.setOnTouchListener(null)
             false
+        }
+    }
+
+    /**
+     * Keep the panel anchored to the floating handle while it is open.
+     * The panel uses a separate Android window only so Android can deliver
+     * outside-window touch events; its coordinates always follow the handle.
+     */
+    private fun syncPanelToHandle(root: View) {
+        val panel = panelView ?: return
+        if (panel.visibility != View.VISIBLE || panel.parent == null) return
+        val rootParams = root.layoutParams as? WindowManager.LayoutParams ?: return
+        val panelParams = panel.layoutParams as? WindowManager.LayoutParams ?: return
+        val dragged = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_dragged", false)
+        if (dragged || rootParams.gravity == (Gravity.TOP or Gravity.START)) {
+            panelParams.gravity = Gravity.TOP or Gravity.START
+            panelParams.x = rootParams.x
+            panelParams.y = (rootParams.y + handleSizePx() + dp(24)).coerceAtLeast(0)
+        } else {
+            panelParams.gravity = overlayGravity()
+            panelParams.x = dp(8)
+            panelParams.y = handleSizePx() + dp(24)
+        }
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(panel, panelParams)
         }
     }
 
