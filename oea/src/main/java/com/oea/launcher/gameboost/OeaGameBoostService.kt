@@ -222,7 +222,8 @@ class OeaGameBoostService : Service() {
                             activeGame = null
                             nonGameForegroundSamples = 0
                             lastNonGamePackage = null
-                            endingGame?.let(::deactivate)
+                            android.util.Log.w("OeaGameBoost", "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples")
+            endingGame?.let(::deactivate)
                         }
                     }
                 }
@@ -262,6 +263,7 @@ class OeaGameBoostService : Service() {
     }
 
     override fun onDestroy() {
+        android.util.Log.w("OeaGameBoost", "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
         handler.removeCallbacksAndMessages(null)
         activeGame?.let(::deactivate)
         removeWakeOverlay()
@@ -293,6 +295,7 @@ class OeaGameBoostService : Service() {
         }
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
+        android.util.Log.w("OeaGameBoost", "deactivate called for=$packageName activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panelView?.parent != null}")
         restoreDnd()
         setKeepScreenOn(false)
         removeWakeOverlay()
@@ -336,6 +339,7 @@ class OeaGameBoostService : Service() {
         val structureHealthy = root != null && handle != null && handleLabel != null
         if (current != null && current.parent != null && structureHealthy) return
 
+        android.util.Log.w("OeaGameBoost", "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} structureHealthy=$structureHealthy panelAttached=${panelView?.parent != null}")
         if (current != null) {
             panelView?.let { panel ->
                 panel.animate().cancel()
@@ -440,7 +444,10 @@ class OeaGameBoostService : Service() {
                 setStroke(dp(1), 0x664D74FF)
             }
             setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener { closePanel(panel) }
+            setOnClickListener {
+                android.util.Log.i("OeaGameBoost", "Close Panel button clicked activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panel.parent != null}")
+                closePanel(panel)
+            }
         }
         panel.addView(closePanelButton, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply {
             topMargin = dp(8)
@@ -1226,6 +1233,7 @@ class OeaGameBoostService : Service() {
     }
 
     private fun closePanel(panel: View) {
+        android.util.Log.i("OeaGameBoost", "closePanel entered visibility=${panel.visibility} panelAttached=${panel.parent != null} activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
         if (panel.visibility != View.VISIBLE && panel.parent == null) return
         // Dismiss only the panel window. Never call removeOverlay() here:
         // the floating handle is an independent window and remains available.
@@ -1241,6 +1249,7 @@ class OeaGameBoostService : Service() {
         panel.scaleX = 1f
         panel.scaleY = 1f
         panel.translationX = 0f
+        android.util.Log.i("OeaGameBoost", "closePanel completed activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelAttached=${panel.parent != null} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)}")
         // Deliberately do not call ensureOverlayForActiveGame() here.
         // That recovery function is allowed to remove and rebuild the entire
         // overlay root. A panel-dismiss action must never invoke root recovery:
