@@ -142,7 +142,6 @@ class OeaGameBoostService : Service() {
     private var lastKnownForegroundPackage: String? = null
     private var nonGameForegroundSamples = 0
     private var lastNonGamePackage: String? = null
-    private var lastPanelDismissAt: Long = 0L
     private var previousInterruptionFilter: Int? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -168,20 +167,7 @@ class OeaGameBoostService : Service() {
                 val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
                     .getBoolean("capture_active", false)
 
-                // Closing the panel can briefly perturb UsageStats foreground
-                // reporting on OEM builds. During this short dismissal window,
-                // do not interpret an unknown/other package sample as the game
-                // ending and remove the independent floating-handle window.
-                val panelDismissalGraceActive = activeGame != null &&
-                    System.currentTimeMillis() - lastPanelDismissAt in 0L..2500L &&
-                    (game == null || game != activeGame) && !captureActive
-
-                if (panelDismissalGraceActive) {
-                    nonGameForegroundSamples = 0
-                    lastNonGamePackage = null
-                    ensureOverlayForActiveGame()
-                    updateOverlay()
-                } else if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
+                if (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game)) {
                     nonGameForegroundSamples = 0
                     lastNonGamePackage = null
                     if (activeGame != game) {
@@ -203,34 +189,15 @@ class OeaGameBoostService : Service() {
                         lastNonGamePackage = null
                         ensureOverlayForActiveGame()
                         updateOverlay()
-                    } else if (game == null) {
-                        // Unknown foreground samples get only a short grace period.
-                        // They must not pin the overlay on-screen indefinitely.
-                        nonGameForegroundSamples++
-                        if (nonGameForegroundSamples < 3) {
-                            ensureOverlayForActiveGame()
-                            updateOverlay()
-                        } else {
-                            val endingGame = activeGame
-                            activeGame = null
-                            nonGameForegroundSamples = 0
-                            lastNonGamePackage = null
-                            endingGame?.let(::deactivate)
-                        }
-                    } else if (isTransientForegroundPackage(game)) {
-                        // Permission/system UI may briefly cover the selected app.
-                        // Keep the overlay for at most two polls, then dismiss it.
-                        nonGameForegroundSamples++
-                        if (nonGameForegroundSamples < 3) {
-                            ensureOverlayForActiveGame()
-                            updateOverlay()
-                        } else {
-                            val endingGame = activeGame
-                            activeGame = null
-                            nonGameForegroundSamples = 0
-                            lastNonGamePackage = null
-                            endingGame?.let(::deactivate)
-                        }
+                    } else if (game == null || isTransientForegroundPackage(game)) {
+                        // Missing UsageStats data and temporary system/OEA UI are
+                        // not proof that the user left the game. Keep the session
+                        // and its independent handle until Android reports a real,
+                        // non-transient foreground app (Home or another app).
+                        nonGameForegroundSamples = 0
+                        lastNonGamePackage = null
+                        ensureOverlayForActiveGame()
+                        updateOverlay()
                     } else {
                         if (lastNonGamePackage == game) {
                             nonGameForegroundSamples++
@@ -1240,9 +1207,8 @@ class OeaGameBoostService : Service() {
 
     private fun closePanel(panel: View) {
         if (panel.visibility != View.VISIBLE && panel.parent == null) return
-        // Dismiss only the panel window. Never call removeOverlay() here: that
-        // method intentionally removes both the panel and the persistent handle.
-        lastPanelDismissAt = System.currentTimeMillis()
+        // Dismiss only the panel window. Never call removeOverlay() here:
+        // the floating handle is an independent window and remains available.
         stopPanelColorAnimation(panel)
         panel.animate().cancel()
         panel.clearAnimation()
