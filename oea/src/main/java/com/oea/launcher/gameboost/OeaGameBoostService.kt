@@ -370,7 +370,9 @@ class OeaGameBoostService : Service() {
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = if (OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("ram_handle_dragged", false)) {
@@ -389,6 +391,18 @@ class OeaGameBoostService : Service() {
         runCatching {
             wm.addView(root, params)
             overlay = root
+
+            // Match the established game-overlay pattern: tapping the game outside
+            // the panel dismisses only the panel. The floating handle and capture
+            // service remain alive. Double-tapping the handle still closes it too.
+            root.setOnTouchListener { _, event ->
+                if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
+                    closePanel(panel)
+                    true
+                } else {
+                    false
+                }
+            }
 
             handle.setOnTouchListener(object : View.OnTouchListener {
                 private var downRawX = 0f
