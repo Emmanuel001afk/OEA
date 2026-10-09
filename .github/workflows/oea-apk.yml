@@ -3,6 +3,12 @@ name: OEA Launcher APK
 permissions:
   contents: write
 
+# Serialize release publication: rapid pushes must not concurrently delete/upload
+# the same OEA-latest.apk asset, which can produce uploads.github.com 404s.
+concurrency:
+  group: oea-apk-release
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]
@@ -39,16 +45,6 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
-      - name: Publish latest APK release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view oea-latest >/dev/null 2>&1; then
-            gh release upload oea-latest "$RUNNER_TEMP/OEA-latest.apk" --clobber
-          else
-            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --title "OEA Latest" --notes "Latest standalone OEA Launcher build from main."
-          fi
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -56,3 +52,16 @@ jobs:
           path: oea/build/outputs/apk/**/*.apk
           retention-days: 1
           if-no-files-found: error
+      - name: Publish latest APK release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view oea-latest >/dev/null 2>&1; then
+            # --clobber replaces the old asset. This job is serialized above to
+            # prevent another push from deleting the asset during this upload.
+            gh release upload oea-latest "$RUNNER_TEMP/OEA-latest.apk" --clobber
+          else
+            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --title "OEA Latest" --notes "Latest standalone OEA Launcher build from main."
+          fi
