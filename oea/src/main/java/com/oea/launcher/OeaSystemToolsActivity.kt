@@ -473,7 +473,7 @@ class OeaSystemToolsActivity : Activity() {
         val scroll = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(list)
-        content.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        content.addView(scroll, LinearLayout.LayoutParams(-1, px(420)))
 
         val dialog = AlertDialog.Builder(this)
             .setTitle(if (manualAndAutomatic) "＋ Add games & apps" else "Select games")
