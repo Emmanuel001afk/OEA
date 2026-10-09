@@ -3,6 +3,9 @@ package com.oea.launcher.applock
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.ServiceConnection
+import android.os.IBinder
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import android.content.pm.PackageManager
 import rikka.shizuku.Shizuku
@@ -11,6 +14,32 @@ object OeaAppFreezer {
     enum class Backend { DEVICE_OWNER, SHIZUKU, ROOT, NONE }
 
     @Volatile private var rootAvailableCache: Boolean? = null
+    @Volatile private var shizukuShell: IOeaShizukuShellService? = null
+    @Volatile private var shizukuBinding = false
+    @Volatile private var shizukuLatch = CountDownLatch(1)
+    private val shizukuLock = Any()
+    private val shizukuServiceArgs by lazy {
+        Shizuku.UserServiceArgs(ComponentName("com.oea.launcher", OeaShizukuShellService::class.java.name))
+            .daemon(false)
+            .processNameSuffix("freezer")
+            .debuggable(false)
+            .version(1)
+    }
+    private val shizukuConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            shizukuShell = service?.let { IOeaShizukuShellService.Stub.asInterface(it) }
+            shizukuLatch.countDown()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            shizukuShell = null
+            synchronized(shizukuLock) {
+                shizukuBinding = false
+                shizukuLatch = CountDownLatch(1)
+            }
+        }
+    }
+
     data class Result(val success: Boolean, val message: String, val backend: Backend = Backend.NONE)
 
     fun backend(context: Context): Backend {
@@ -164,8 +193,8 @@ object OeaAppFreezer {
     }.getOrDefault(false)
 
     private fun runShell(backend: Backend, command: String): Pair<Boolean, String> = runCatching {
+        if (backend == Backend.SHIZUKU) return@runCatching runShizuku(command)
         val process = when (backend) {
-            Backend.SHIZUKU -> Shizuku.newProcess(arrayOf("sh", "-c", "$command 2>&1"), null, null)
             Backend.ROOT -> ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
             else -> return@runCatching false to "No shell authority"
         }
@@ -173,6 +202,37 @@ object OeaAppFreezer {
         val code = process.waitFor()
         (code == 0) to output
     }.getOrElse { false to (it.message ?: "") }
+
+    private fun runShizuku(command: String): Pair<Boolean, String> {
+        val service = getShizukuShellService()
+        val response = service.runCommand(command)
+        val code = response.substringBefore('\n').toIntOrNull() ?: -1
+        val output = response.substringAfter('\n', "")
+        return (code == 0) to output.trim()
+    }
+
+    private fun getShizukuShellService(): IOeaShizukuShellService {
+        val latch: CountDownLatch
+        synchronized(shizukuLock) {
+            shizukuShell?.let { return it }
+            if (!shizukuBinding) {
+                shizukuBinding = true
+                shizukuLatch = CountDownLatch(1)
+                try {
+                    Shizuku.bindUserService(shizukuServiceArgs, shizukuConnection)
+                } catch (error: Throwable) {
+                    shizukuBinding = false
+                    throw error
+                }
+            }
+            latch = shizukuLatch
+        }
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+            synchronized(shizukuLock) { shizukuBinding = false }
+            throw IllegalStateException("Shizuku shell service did not connect in time")
+        }
+        return shizukuShell ?: throw IllegalStateException("Shizuku shell service is unavailable")
+    }
 
     private fun runRoot(command: String): Pair<Boolean, String> = runShell(Backend.ROOT, command)
 
