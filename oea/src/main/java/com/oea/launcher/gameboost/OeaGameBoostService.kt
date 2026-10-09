@@ -348,7 +348,11 @@ class OeaGameBoostService : Service() {
         val handleGestures = android.view.GestureDetector(
             this,
             object : android.view.GestureDetector.SimpleOnGestureListener() {
-                override fun onSingleTapConfirmed(event: android.view.MotionEvent): Boolean {
+                // Open on the first tap's UP event so the panel appears
+                // immediately; waiting for onSingleTapConfirmed delays opening
+                // and makes a quick follow-up tap look like the only action.
+                override fun onSingleTapUp(event: android.view.MotionEvent): Boolean {
+                    if (panel.visibility != View.VISIBLE) showPanel(panel)
                     handle.performClick()
                     return true
                 }
