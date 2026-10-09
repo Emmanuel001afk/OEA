@@ -4,7 +4,37 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M54,12A42,42 0,1 0,54 96A42,42 0,1 0,54 12M54,24A30,30 0,1 1,54 84A30,30 0,1 1,54 24" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M32,52L76,52L76,64L32,64Z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M48,40L60,40L60,76L48,76Z" />
+    <!-- OEA identity: a layered workspace portal, not a medical cross.
+         The opaque midnight base keeps the mark legible on light home screens. -->
+    <path
+        android:fillColor="#0B1224"
+        android:pathData="M20,2 L88,2 A18,18 0,0 1,106 20 L106,88 A18,18 0,0 1,88 106 L20,106 A18,18 0,0 1,2 88 L2,20 A18,18 0,0 1,20 2 Z" />
+    <!-- Rear workspace planes -->
+    <path
+        android:fillColor="#2447A8"
+        android:pathData="M31,23 L73,23 Q79,23 79,29 L79,62 L70,62 L70,34 L31,34 Z" />
+    <path
+        android:fillColor="#27D9D0"
+        android:pathData="M38,30 L80,30 Q86,30 86,36 L86,68 L77,68 L77,41 L38,41 Z" />
+    <!-- Main floating window -->
+    <path
+        android:fillColor="#F4F7FF"
+        android:pathData="M22,39 Q22,33 28,33 L69,33 Q75,33 75,39 L75,76 Q75,82 69,82 L28,82 Q22,82 22,76 Z" />
+    <path
+        android:fillColor="#315FEA"
+        android:pathData="M22,39 Q22,33 28,33 L69,33 Q75,33 75,39 L75,46 L22,46 Z" />
+    <!-- Window controls and app tiles -->
+    <path android:fillColor="#27D9D0" android:pathData="M29,39 A2,2 0,1 0,33 39 A2,2 0,1 0,29 39" />
+    <path android:fillColor="#FFFFFF" android:pathData="M37,38 L43,38 L43,40 L37,40 Z" />
+    <path android:fillColor="#C8D5FF" android:pathData="M31,53 L42,53 L42,64 L31,64 Z" />
+    <path android:fillColor="#27D9D0" android:pathData="M47,53 L66,53 L66,57 L47,57 Z" />
+    <path android:fillColor="#315FEA" android:pathData="M47,61 L62,61 L62,65 L47,65 Z" />
+    <path android:fillColor="#C8D5FF" android:pathData="M31,69 L42,69 L42,75 L31,75 Z" />
+    <!-- Orbit node suggests a living, connected launcher engine -->
+    <path
+        android:fillColor="#27D9D0"
+        android:pathData="M77,75 A7,7 0,1 0,91 75 A7,7 0,1 0,77 75" />
+    <path
+        android:fillColor="#0B1224"
+        android:pathData="M81,75 A3,3 0,1 0,87 75 A3,3 0,1 0,81 75" />
 </vector>
