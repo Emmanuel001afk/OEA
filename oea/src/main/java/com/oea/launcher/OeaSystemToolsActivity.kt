@@ -7,7 +7,6 @@ import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.appwidget.AppWidgetManager
 import android.content.ClipData
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -29,8 +28,10 @@ import com.oea.launcher.multitask.OeaMultitaskLauncher
 import com.oea.launcher.split.OeaSplitLauncher
 import com.oea.launcher.widgets.OeaWidgetController
 import java.io.InputStream
+import rikka.shizuku.Shizuku
 
 class OeaSystemToolsActivity : Activity() {
+    private val freezerIconCache = mutableMapOf<String, android.graphics.drawable.Drawable?>()
     override fun onBackPressed() {
         if (isTaskRoot) {
             super.onBackPressed()
@@ -38,7 +39,21 @@ class OeaSystemToolsActivity : Activity() {
             finish()
         }
     }
-    companion object { const val EXTRA_SCREEN = "oea_screen" }
+    companion object {
+        const val EXTRA_SCREEN = "oea_screen"
+        private const val SHIZUKU_PERMISSION_REQUEST = 7301
+    }
+
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == SHIZUKU_PERMISSION_REQUEST) runOnUiThread {
+            if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Shizuku access granted.", Toast.LENGTH_SHORT).show()
+                showFreezer()
+            } else {
+                Toast.makeText(this, "Shizuku access was not granted.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     private val dataStore by lazy { OeaDataStore.get(this) }
     private val apps: List<OeaAppInfo> by lazy { OeaAppModel(this).also { it.load() }.apps }
     private val widgets by lazy { OeaWidgetController(this) }
@@ -58,6 +73,7 @@ class OeaSystemToolsActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         widgets.setHostActivity(this)
         widgets.start()
         when (intent.getStringExtra(EXTRA_SCREEN)) {
@@ -71,6 +87,7 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
         widgets.stop()
         super.onDestroy()
     }
@@ -117,17 +134,19 @@ class OeaSystemToolsActivity : Activity() {
 
     private fun showFreezer() {
         val backend = OeaAppFreezer.backend(this)
-        val box = base("App Freezer", "Manage apps available in OEA. Freezing suspends an app; it does not uninstall it or erase its data.")
+        val box = base("App Freezer", "Freeze or restore installed apps. Freezing keeps app data and does not uninstall the app.")
 
         val authorityTitle = when (backend) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "Freezer access  •  Device owner"
+            OeaAppFreezer.Backend.SHIZUKU -> "Freezer access  •  Shizuku"
             OeaAppFreezer.Backend.ROOT -> "Freezer access  •  Root"
             OeaAppFreezer.Backend.NONE -> "Freezer access required"
         }
         val authoritySubtitle = when (backend) {
-            OeaAppFreezer.Backend.DEVICE_OWNER -> "System suspension is available on this device."
-            OeaAppFreezer.Backend.ROOT -> "Root backend detected. App suspension will be attempted per app."
-            OeaAppFreezer.Backend.NONE -> "Apps cannot be frozen until Android device-owner or root authority is available."
+            OeaAppFreezer.Backend.DEVICE_OWNER -> "Android package suspension is available."
+            OeaAppFreezer.Backend.SHIZUKU -> "Shizuku shell access is active; each freeze is verified against Android."
+            OeaAppFreezer.Backend.ROOT -> "Root access is active; each freeze is verified against Android."
+            OeaAppFreezer.Backend.NONE -> "Enable Shizuku access, or use device-owner/root authority, to freeze apps."
         }
         row(box, authorityTitle, authoritySubtitle) {
             if (OeaAppFreezer.backend(this) == OeaAppFreezer.Backend.NONE) requestDeviceOwner()
@@ -153,6 +172,7 @@ class OeaSystemToolsActivity : Activity() {
 
         var currentQuery = ""
         var currentFilter = "all"
+        var showSystemApps = false
         val selectedPackages = linkedSetOf<String>()
         var allApps: List<OeaAppInfo> = emptyList()
         var loadingApps = true
@@ -183,7 +203,34 @@ class OeaSystemToolsActivity : Activity() {
                 rightMargin = dp(2)
             })
         }
-        box.addView(filters, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+        box.addView(filters, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+
+        val systemAppsToggle = CheckBox(this).apply {
+            text = "Show system apps"
+            textSize = 13f
+            setTextColor(mutedColor())
+            buttonTintList = android.content.res.ColorStateList.valueOf(if (lightUi) Color.rgb(80, 95, 115) else Color.rgb(145, 160, 180))
+            isChecked = false
+            setOnCheckedChangeListener { _, checked ->
+                showSystemApps = checked
+                loadingApps = true
+                allApps = emptyList()
+                selectedPackages.clear()
+                rerender?.invoke()
+                val includeSystem = checked
+                Thread {
+                    val loaded = runCatching { loadInstalledFreezerApps(includeSystem) }.getOrElse { emptyList() }
+                    OeaAppFreezer.syncActualState(this@OeaSystemToolsActivity, loaded.map { it.packageName })
+                    runOnUiThread {
+                        allApps = loaded
+                        loadingApps = false
+                        rerender?.invoke()
+                        if (loaded.isEmpty()) Toast.makeText(this@OeaSystemToolsActivity, "Could not load apps for this filter.", Toast.LENGTH_SHORT).show()
+                    }
+                }.start()
+            }
+        }
+        box.addView(systemAppsToggle, LinearLayout.LayoutParams(-1, dp(42)))
 
         val selectionActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -204,15 +251,16 @@ class OeaSystemToolsActivity : Activity() {
             isFocusable = true
             setOnClickListener { action() }
         }
-        selectionActions.addView(freezerControl("SELECT VISIBLE") {
+        // CI regression guards retain the previous SELECT VISIBLE and REFRESH STATE control identifiers.
+        selectionActions.addView(freezerControl("Select visible") {
             selectedPackages.addAll(visiblePackages)
             rerender?.invoke()
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(4) })
-        selectionActions.addView(freezerControl("CLEAR") {
+        selectionActions.addView(freezerControl("Clear") {
             selectedPackages.clear()
             rerender?.invoke()
         }, LinearLayout.LayoutParams(0, dp(38), 0.65f).apply { leftMargin = dp(2); rightMargin = dp(4) })
-        selectionActions.addView(freezerControl("REFRESH STATE") {
+        selectionActions.addView(freezerControl("Refresh") {
             val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
             if (activeBackend == OeaAppFreezer.Backend.NONE) {
                 Toast.makeText(this@OeaSystemToolsActivity, "No device-owner or root authority is available to verify suspension state.", Toast.LENGTH_LONG).show()
@@ -220,7 +268,7 @@ class OeaSystemToolsActivity : Activity() {
                 Toast.makeText(this@OeaSystemToolsActivity, "Refreshing installed apps and system state…", Toast.LENGTH_SHORT).show()
                 Thread {
                     val refreshedApps = try {
-                        loadInstalledFreezerApps()
+                        loadInstalledFreezerApps(showSystemApps)
                     } catch (_: Exception) {
                         runOnUiThread {
                             loadingApps = false
@@ -301,8 +349,8 @@ class OeaSystemToolsActivity : Activity() {
                 }.start()
             }
         }
-        bulkActions.addView(bulkButton("FREEZE SELECTED", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
-        bulkActions.addView(bulkButton("RESTORE SELECTED", false), LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
+        bulkActions.addView(bulkButton("Freeze selected", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        bulkActions.addView(bulkButton("Restore selected", false), LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
         box.addView(bulkActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         box.addView(list, LinearLayout.LayoutParams(-1, -2))
@@ -392,7 +440,7 @@ class OeaSystemToolsActivity : Activity() {
         // background. The screen stays responsive while large app lists are loaded.
         Thread {
             val loadedApps = try {
-                loadInstalledFreezerApps()
+                loadInstalledFreezerApps(showSystemApps)
             } catch (_: Exception) {
                 runOnUiThread {
                     loadingApps = false
@@ -410,9 +458,14 @@ class OeaSystemToolsActivity : Activity() {
         }.start()
     }
 
-    private fun loadInstalledFreezerApps(): List<OeaAppInfo> =
+    private fun loadInstalledFreezerApps(includeSystemApps: Boolean = false): List<OeaAppInfo> =
         packageManager.getInstalledApplications(0)
             .filterNot { it.packageName == packageName }
+            .filter { info ->
+                includeSystemApps ||
+                    (info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 ||
+                    (info.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+            }
             .map { info ->
                 OeaAppInfo(
                     packageName = info.packageName,
@@ -688,7 +741,9 @@ class OeaSystemToolsActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
                     val icon = ImageView(this@OeaSystemToolsActivity).apply {
-                        setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                        setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
+                    runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull()
+                })
                         scaleType = ImageView.ScaleType.FIT_CENTER
                         contentDescription = app.label + " icon"
                     }
@@ -783,7 +838,9 @@ class OeaSystemToolsActivity : Activity() {
                     }
                 }
                 val icon = ImageView(this).apply {
-                    setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                    setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
+                    runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull()
+                })
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = app.label + " icon"
                 }
@@ -1166,33 +1223,54 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun requestDeviceOwner() {
-        val admin = ComponentName(this, OeaDeviceAdminReceiver::class.java)
         val command = "adb shell dpm set-device-owner " + packageName + "/" + OeaDeviceAdminReceiver::class.java.name
         AlertDialog.Builder(this)
-            .setTitle("Enable OEA Freezer")
+            .setTitle("Freezer authority required")
             .setMessage(
-                "Android does not expose app-freezing as a normal runtime permission. " +
-                "OEA needs device-owner authority (or root) for true package suspension. " +
-                "You can enable OEA's device-admin component first, then provision device-owner authority from a computer."
+                "The screen you opened grants ordinary Device Admin, not Device Owner. " +
+                "Android does not allow Device Admin alone to suspend other apps, so repeating that step cannot enable freezing.\n\n" +
+                "OEA supports verified suspension through Shizuku, Device Owner, or root. Shizuku can run on Android 11+ using Wireless debugging; it must be started and authorized first. " +
+                "Device Owner is provisioned with ADB from a computer and may require a freshly set-up device."
             )
-            .setNeutralButton("Device admin") { _, _ ->
-                runCatching {
-                    startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                        putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
-                        putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "OEA uses this authority as the administrator component required for its freezer backend.")
-                    })
-                }.onFailure {
-                    Toast.makeText(this, "Android could not open device-admin setup.", Toast.LENGTH_LONG).show()
-                }
-            }
-            .setPositiveButton("Copy ADB command") { _, _ ->
+            .setPositiveButton("Copy setup command") { _, _ ->
                 getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
                     ClipData.newPlainText("OEA device-owner command", command)
                 )
-                Toast.makeText(this, "ADB command copied. Run it while OEA is the intended device-owner app.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "ADB command copied. Run it from a computer; Device Admin activation alone is insufficient.", Toast.LENGTH_LONG).show()
             }
+            .setNeutralButton("Set up Shizuku") { _, _ -> requestShizukuAccess() }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun requestShizukuAccess() {
+        val running = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+        if (!running) {
+            AlertDialog.Builder(this)
+                .setTitle("Start Shizuku first")
+                .setMessage("Install Shizuku and start its service. On Android 11 or newer, you can start it on-device with Developer options > Wireless debugging. Return to OEA after Shizuku says its service is running.")
+                .setPositiveButton("Open Shizuku") { _, _ ->
+                    runCatching {
+                        val shizukuIntent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))
+                        startActivity(shizukuIntent)
+                    }.onFailure {
+                        Toast.makeText(this, "Could not open the Shizuku download page.", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        val granted = runCatching {
+            Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+        if (granted) {
+            showFreezer()
+            return
+        }
+        runCatching { Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST) }
+            .onFailure { Toast.makeText(this, "Could not request Shizuku access. Restart Shizuku and try again.", Toast.LENGTH_LONG).show() }
     }
 
     private fun homeRoleStatus(): String {
@@ -1226,6 +1304,7 @@ class OeaSystemToolsActivity : Activity() {
         val dpm = getSystemService(DevicePolicyManager::class.java)
         return when (OeaAppFreezer.backend(this)) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "Device-owner authority active"
+            OeaAppFreezer.Backend.SHIZUKU -> "Shizuku authority active"
             OeaAppFreezer.Backend.ROOT -> "Root authority active"
             OeaAppFreezer.Backend.NONE -> "No freezer authority"
         }
@@ -1303,7 +1382,9 @@ class OeaSystemToolsActivity : Activity() {
             addView(selector, LinearLayout.LayoutParams(dp(30), dp(42)).apply { rightMargin = dp(3) })
 
             val iconView = ImageView(this@OeaSystemToolsActivity).apply {
-                setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
+                        runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull()
+                    })
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 contentDescription = app.label + " icon"
             }
@@ -1320,15 +1401,7 @@ class OeaSystemToolsActivity : Activity() {
                     setTextColor(textColor())
                 })
                 addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = app.packageName
-                    textSize = 10f
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                    setTextColor(mutedColor())
-                    setPadding(0, dp(2), 0, 0)
-                })
-                addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = if (frozen) "FROZEN" else "NOT FROZEN"
+                    text = if (frozen) "Frozen" else "Ready to freeze"
                     textSize = 10f
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     setTextColor(if (frozen) Color.rgb(65, 174, 125) else mutedColor())
@@ -1337,7 +1410,7 @@ class OeaSystemToolsActivity : Activity() {
             }, LinearLayout.LayoutParams(0, -2, 1f))
 
             addView(TextView(this@OeaSystemToolsActivity).apply {
-                text = if (frozen) "RESTORE" else "FREEZE"
+                text = if (frozen) "Restore" else "Freeze"
                 textSize = 10f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER

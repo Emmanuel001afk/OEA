@@ -3,14 +3,49 @@ package com.oea.launcher.applock
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.ServiceConnection
+import android.os.IBinder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import android.content.pm.PackageManager
+import rikka.shizuku.Shizuku
 
 object OeaAppFreezer {
-    enum class Backend { DEVICE_OWNER, ROOT, NONE }
+    enum class Backend { DEVICE_OWNER, SHIZUKU, ROOT, NONE }
+
+    @Volatile private var rootAvailableCache: Boolean? = null
+    @Volatile private var shizukuShell: IOeaShizukuShellService? = null
+    @Volatile private var shizukuBinding = false
+    @Volatile private var shizukuLatch = CountDownLatch(1)
+    private val shizukuLock = Any()
+    private val shizukuServiceArgs by lazy {
+        Shizuku.UserServiceArgs(ComponentName("com.oea.launcher", OeaShizukuShellService::class.java.name))
+            .daemon(false)
+            .processNameSuffix("freezer")
+            .debuggable(false)
+            .version(1)
+    }
+    private val shizukuConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            shizukuShell = service?.let { IOeaShizukuShellService.Stub.asInterface(it) }
+            shizukuLatch.countDown()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            shizukuShell = null
+            synchronized(shizukuLock) {
+                shizukuBinding = false
+                shizukuLatch = CountDownLatch(1)
+            }
+        }
+    }
+
     data class Result(val success: Boolean, val message: String, val backend: Backend = Backend.NONE)
 
     fun backend(context: Context): Backend {
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
         if (dpm?.isDeviceOwnerApp(context.packageName) == true) return Backend.DEVICE_OWNER
+        if (hasShizukuPermission()) return Backend.SHIZUKU
         return if (hasRoot()) Backend.ROOT else Backend.NONE
     }
 
@@ -43,33 +78,39 @@ object OeaAppFreezer {
             }.getOrElse { Result(false, it.message ?: "Could not change frozen state", Backend.DEVICE_OWNER) }
         }
 
-        if (hasRoot()) {
+        val activeBackend = backend(context)
+        if (activeBackend == Backend.ROOT || activeBackend == Backend.SHIZUKU) {
             val command = if (frozen) "cmd package suspend --user 0 $packageName"
             else "cmd package unsuspend --user 0 $packageName"
-            val result = runRoot(command)
+            val result = if (activeBackend == Backend.SHIZUKU) setShizukuFrozen(packageName, frozen)
+                else runShell(activeBackend, command)
             if (!result.first) {
-                return Result(false, result.second.ifBlank { "Root package suspension failed" }, Backend.ROOT)
+                return Result(false, result.second.ifBlank { "Package suspension command failed" }, activeBackend)
             }
-            val actualState = rootSuspensionState(packageName)
+            val actualState = when (activeBackend) {
+                Backend.ROOT -> rootSuspensionState(packageName)
+                Backend.SHIZUKU -> shizukuSuspensionState(packageName)
+                else -> null
+            }
             if (actualState == null) {
                 return Result(
                     false,
                     "The command ran, but Android's actual suspension state could not be verified. Saved state was not changed.",
-                    Backend.ROOT,
+                    activeBackend,
                 )
             }
             if (actualState != frozen) {
                 return Result(
                     false,
                     "Android did not confirm the requested frozen state. Saved state was not changed.",
-                    Backend.ROOT,
+                    activeBackend,
                 )
             }
             persist(context, packageName, frozen)
-            return Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.ROOT)
+            return Result(true, if (frozen) "App frozen and verified" else "App restored and verified", activeBackend)
         }
 
-        return Result(false, "No freezer authority. Provision OEA as device owner or provide root authority.", Backend.NONE)
+        return Result(false, "No freezer authority. Use Shizuku, provision OEA as device owner, or provide root authority.", Backend.NONE)
     }
 
     fun frozenPackages(context: Context): Set<String> =
@@ -94,7 +135,7 @@ object OeaAppFreezer {
                 }
             }
             Backend.ROOT -> {
-                val (success, dump) = runRoot("dumpsys package")
+                val (success, dump) = runShell(Backend.ROOT, "dumpsys package")
                 if (!success || !dump.contains("Package [")) return
                 val packageBlocks = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
                     .findAll(dump).toList()
@@ -105,14 +146,18 @@ object OeaAppFreezer {
                             .containsMatchIn(match.groupValues[2])
                 }.mapTo(mutableSetOf()) { it.groupValues[1] }
             }
+            Backend.SHIZUKU -> shizukuFrozenPackages(candidates) ?: return
             Backend.NONE -> return
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putStringSet(KEY_FROZEN, actualFrozen).apply()
     }
 
-    private fun rootSuspensionState(packageName: String): Boolean? {
-        val (success, dump) = runRoot("dumpsys package")
+    private fun rootSuspensionState(packageName: String): Boolean? =
+        suspensionState(packageName, Backend.ROOT)
+
+    private fun suspensionState(packageName: String, backend: Backend): Boolean? {
+        val (success, dump) = runShell(backend, "dumpsys package")
         if (!success || !dump.contains("Package [")) return null
         val block = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
             .findAll(dump)
@@ -132,15 +177,81 @@ object OeaAppFreezer {
         prefs.edit().putStringSet(KEY_FROZEN, packages).apply()
     }
 
-    private fun hasRoot(): Boolean =
-        runCatching { ProcessBuilder("su", "-c", "id").start().apply { waitFor() }.exitValue() == 0 }.getOrDefault(false)
+    private fun hasRoot(): Boolean {
+        rootAvailableCache?.let { return it }
+        val detected = runCatching {
+            val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+            val completed = process.waitFor(700, TimeUnit.MILLISECONDS)
+            if (!completed) {
+                process.destroyForcibly()
+                false
+            } else {
+                process.exitValue() == 0
+            }
+        }.getOrDefault(false)
+        rootAvailableCache = detected
+        return detected
+    }
 
-    private fun runRoot(command: String): Pair<Boolean, String> = runCatching {
-        val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+    private fun hasShizukuPermission(): Boolean = runCatching {
+        Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
+
+    private fun runShell(backend: Backend, command: String): Pair<Boolean, String> = runCatching {
+        val process = when (backend) {
+            Backend.ROOT -> ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+            else -> return@runCatching false to "No shell authority"
+        }
         val output = process.inputStream.bufferedReader().use { it.readText().trim() }
         val code = process.waitFor()
         (code == 0) to output
     }.getOrElse { false to (it.message ?: "") }
+
+    private fun setShizukuFrozen(packageName: String, frozen: Boolean): Pair<Boolean, String> {
+        val response = getShizukuShellService().setSuspended(packageName, frozen)
+        val code = response.substringBefore('\n').toIntOrNull() ?: -1
+        return (code == 0) to response.substringAfter('\n', "").trim()
+    }
+
+    private fun shizukuSuspensionState(packageName: String): Boolean? =
+        when (getShizukuShellService().getSuspended(packageName)) {
+            1 -> true
+            0 -> false
+            else -> null
+        }
+
+    private fun shizukuFrozenPackages(candidates: Set<String>): Set<String>? {
+        val response = getShizukuShellService().getSuspendedPackages(candidates.joinToString(","))
+        if (response.substringBefore('\n').toIntOrNull() != 0) return null
+        return response.substringAfter('\n', "")
+            .split(',')
+            .filterTo(mutableSetOf()) { it.isNotBlank() && it in candidates }
+    }
+
+    private fun getShizukuShellService(): IOeaShizukuShellService {
+        val latch: CountDownLatch
+        synchronized(shizukuLock) {
+            shizukuShell?.let { return it }
+            if (!shizukuBinding) {
+                shizukuBinding = true
+                shizukuLatch = CountDownLatch(1)
+                try {
+                    Shizuku.bindUserService(shizukuServiceArgs, shizukuConnection)
+                } catch (error: Throwable) {
+                    shizukuBinding = false
+                    throw error
+                }
+            }
+            latch = shizukuLatch
+        }
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+            synchronized(shizukuLock) { shizukuBinding = false }
+            throw IllegalStateException("Shizuku shell service did not connect in time")
+        }
+        return shizukuShell ?: throw IllegalStateException("Shizuku shell service is unavailable")
+    }
+
+    private fun runRoot(command: String): Pair<Boolean, String> = runShell(Backend.ROOT, command)
 
     private const val PREFS = "oea_app_freezer"
     private const val KEY_FROZEN = "frozen_packages"

@@ -678,6 +678,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val frozen = OeaAppFreezer.frozenPackages(context).contains(app.packageName)
         val authorityLabel = when (backend) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "device-owner"
+            OeaAppFreezer.Backend.SHIZUKU -> "Shizuku"
             OeaAppFreezer.Backend.ROOT -> "root"
             OeaAppFreezer.Backend.NONE -> "none"
         }
@@ -685,7 +686,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             if (frozen) app.label + " is currently frozen by OEA (" + authorityLabel + " authority)."
             else app.label + " can be frozen by OEA (" + authorityLabel + " authority)."
         } else {
-            app.label + " is not frozen. True package suspension needs device-owner or root authority; OEA will not repeatedly prompt for unavailable authority."
+            app.label + " is not frozen. True package suspension needs Shizuku, device-owner, or root authority; OEA will not repeatedly prompt for unavailable authority."
         }
         AlertDialog.Builder(hostActivity ?: context)
             .setTitle("App Freezer")
