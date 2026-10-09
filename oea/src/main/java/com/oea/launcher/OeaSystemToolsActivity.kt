@@ -231,7 +231,7 @@ class OeaSystemToolsActivity : Activity() {
             OeaGameBoostStore.setMode(this, next)
             showGameBoost()
         }
-        row(box, if (selectionMode == "manual_automatic") "Selected games & apps" else "Selected games", games.size.toString() + " selected") { chooseGames() }
+        addGameSelectionSection(box, selectionMode, games)
         row(box, "Usage access", usageStatus()) { openUsageAccess() }
         row(box, "Overlay permission", if (overlayGranted) "Granted" else "Required for the in-game control pill") { openOverlaySettings() }
         row(box, "DND access", dndAccessStatus()) { openDndAccess() }
@@ -357,6 +357,86 @@ class OeaSystemToolsActivity : Activity() {
             .setPositiveButton("Done") { _, _ -> showSettings() }.show()
     }
 
+    private fun addGameSelectionSection(box: LinearLayout, selectionMode: String, selectedPackages: Set<String>) {
+        fun px(value: Int) = (value * resources.displayMetrics.density).toInt()
+        val manualAndAutomatic = selectionMode == "manual_automatic"
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(16), px(12), px(12), px(12))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = px(20).toFloat()
+                setColor(surfaceColor())
+            }
+        }
+        val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        labels.addView(TextView(this).apply {
+            text = if (manualAndAutomatic) "Selected games & apps" else "Selected games"
+            textSize = 16f
+            setTextColor(textColor())
+        })
+        labels.addView(TextView(this).apply {
+            text = selectedPackages.size.toString() + " selected" +
+                if (manualAndAutomatic) " • automatic detection stays on" else " • Android-recognized games only"
+            textSize = 12f
+            setTextColor(mutedColor())
+        })
+        header.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+        if (manualAndAutomatic) {
+            val add = TextView(this).apply {
+                text = "＋ Add apps"
+                textSize = 14f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER
+                setPadding(px(12), px(10), px(12), px(10))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = px(16).toFloat()
+                    setColor(0xFF315FEA.toInt())
+                }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { chooseGames() }
+            }
+            header.addView(add, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = px(8) })
+        } else {
+            header.isClickable = true
+            header.isFocusable = true
+            header.setOnClickListener { chooseGames() }
+        }
+        box.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) })
+
+        val chosen = apps.filter { it.packageName in selectedPackages }.distinctBy { it.packageName }
+        if (chosen.isNotEmpty()) {
+            val strip = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(px(4), px(2), px(4), px(8))
+            }
+            chosen.take(8).forEach { app ->
+                strip.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    val icon = ImageView(this@OeaSystemToolsActivity).apply {
+                        setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        contentDescription = app.label + " icon"
+                    }
+                    addView(icon, LinearLayout.LayoutParams(px(38), px(38)))
+                    addView(TextView(this@OeaSystemToolsActivity).apply {
+                        text = app.label
+                        textSize = 10f
+                        setTextColor(mutedColor())
+                        gravity = Gravity.CENTER
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }, LinearLayout.LayoutParams(px(62), -2))
+                }, LinearLayout.LayoutParams(px(66), -2))
+            }
+            box.addView(strip)
+        }
+    }
+
     private fun chooseGames() {
         OeaGameBoostStore.syncDetectedGames(this)
         val manualAndAutomatic = OeaGameBoostStore.mode(this) == "manual_automatic"
@@ -365,30 +445,125 @@ class OeaSystemToolsActivity : Activity() {
             .filterNot { it.packageName == packageName }
             .filter { manualAndAutomatic || it.packageName in detected }
             .distinctBy { it.packageName }
-        val selected = OeaGameBoostStore.games(this)
-        val checked = BooleanArray(choices.size) { selected.contains(choices[it].packageName) }
-        AlertDialog.Builder(this).setTitle(if (manualAndAutomatic) "Game Boost games & apps" else "Game Boost games")
-            .setMessage(
-                if (manualAndAutomatic)
-                    "OEA detects Android-recognized games automatically. Select any additional installed apps to enable the in-app Game Boost control for them too."
-                else
-                    "Automatic mode uses Android-recognized games only. Switch to Manual + Automatic to add regular apps."
-            )
-            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), checked) { _, which, value -> checked[which] = value }
+            .sortedBy { it.label.lowercase() }
+        val selectedBefore = OeaGameBoostStore.games(this)
+        val selected = selectedBefore.toMutableSet()
+        val px = { value: Int -> (value * resources.displayMetrics.density).toInt() }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(16), px(8), px(16), px(4))
+        }
+        val search = EditText(this).apply {
+            hint = "Search installed apps"
+            setSingleLine(true)
+            setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_search, 0, 0, 0)
+            setPadding(px(12), px(10), px(12), px(10))
+        }
+        content.addView(search, LinearLayout.LayoutParams(-1, -2))
+        content.addView(TextView(this).apply {
+            text = if (manualAndAutomatic)
+                "Tap an app icon to add or remove it. Automatic game detection remains enabled."
+            else
+                "Automatic mode only allows Android-recognized games. Switch to Manual + Automatic to add other apps."
+            textSize = 12f
+            setTextColor(mutedColor())
+            setPadding(0, px(8), 0, px(8))
+        })
+        val scroll = ScrollView(this)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(list)
+        content.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (manualAndAutomatic) "＋ Add games & apps" else "Select games")
+            .setView(content)
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Save") { _, _ ->
-                val next = choices.mapIndexedNotNull { i, app -> app.packageName.takeIf { checked[i] } }.toSet()
+            .setPositiveButton("Save", null)
+            .create()
+
+        fun render(filter: String = search.text.toString()) {
+            list.removeAllViews()
+            val visible = choices.filter { it.label.contains(filter, ignoreCase = true) || it.packageName.contains(filter, ignoreCase = true) }
+            if (visible.isEmpty()) {
+                list.addView(TextView(this).apply {
+                    text = "No matching installed apps"
+                    setTextColor(mutedColor())
+                    setPadding(px(8), px(20), px(8), px(20))
+                })
+                return
+            }
+            visible.forEach { app ->
+                val isSelected = app.packageName in selected
+                val item = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(px(10), px(8), px(10), px(8))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = px(14).toFloat()
+                        setColor(if (isSelected) (if (lightUi) 0xFFDCE7FF.toInt() else 0xFF26395F.toInt()) else surfaceColor())
+                        if (isSelected) setStroke(px(1), 0xFF4D7CFF.toInt())
+                    }
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = app.label + if (isSelected) ", selected" else ", not selected"
+                    setOnClickListener {
+                        if (app.packageName in selected) selected.remove(app.packageName) else selected.add(app.packageName)
+                        render()
+                    }
+                }
+                val icon = ImageView(this).apply {
+                    setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = app.label + " icon"
+                }
+                item.addView(icon, LinearLayout.LayoutParams(px(48), px(48)).apply { rightMargin = px(12) })
+                val appText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                appText.addView(TextView(this).apply {
+                    text = app.label
+                    textSize = 15f
+                    setTextColor(textColor())
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                appText.addView(TextView(this).apply {
+                    text = app.packageName
+                    textSize = 10f
+                    setTextColor(mutedColor())
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                item.addView(appText, LinearLayout.LayoutParams(0, -2, 1f))
+                item.addView(TextView(this).apply {
+                    text = if (isSelected) "✓" else "＋"
+                    textSize = 22f
+                    setTextColor(if (isSelected) 0xFF4D7CFF.toInt() else mutedColor())
+                    gravity = Gravity.CENTER
+                }, LinearLayout.LayoutParams(px(32), px(48)))
+                list.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(6) })
+            }
+        }
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { render(s?.toString().orEmpty()) }
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+        })
+        render("")
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val next = selected.toSet()
                 choices.forEach { app ->
                     if (app.packageName in next) OeaGameBoostStore.restoreGame(this, app.packageName)
-                    else if (app.packageName in selected) OeaGameBoostStore.removeGame(this, app.packageName)
+                    else if (app.packageName in selectedBefore) OeaGameBoostStore.removeGame(this, app.packageName)
                 }
-                // Preserve packages outside the current mode's selectable list.
-                val preserved = selected.filter { old -> choices.none { it.packageName == old } }.toSet()
+                val preserved = selectedBefore.filter { old -> choices.none { it.packageName == old } }.toSet()
                 OeaGameBoostStore.setGames(this, next + preserved)
+                dialog.dismiss()
                 showGameBoost()
-            }.show()
+            }
+        }
+        dialog.show()
     }
-
     private fun ruleSection(box: LinearLayout, title: String, values: List<String>, type: String) {
         box.addView(TextView(this).apply {
             text = title + " (" + values.size + ")"
