@@ -1,8 +1,8 @@
 package com.oea.launcher.applock;
 
 interface IOeaShizukuShellService {
-    String setSuspended(String packageName, boolean suspended);
-    int getSuspended(String packageName);
-    String getSuspendedPackages(String packageNamesDelimited);
+    String setSuspended(String packageName, boolean suspended) = 1;
+    int getSuspended(String packageName) = 2;
+    String getSuspendedPackages(String packageNamesDelimited) = 3;
     void destroy() = 16777114;
 }
