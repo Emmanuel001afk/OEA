@@ -132,7 +132,6 @@ class OeaGameBoostService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var overlay: View? = null
     private var panelView: View? = null
-    private var panelWindowContainer: android.widget.FrameLayout? = null
     private var wakeOverlay: View? = null
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
@@ -161,34 +160,28 @@ class OeaGameBoostService : Service() {
                     activeGame = game
                     activate(game)
                     updateOverlay()
-                    if (isPanelEncasementAttached()) requestPanelEncasementDismissal()
+                    panelView?.let(::closePanel)
                 } else {
                     updateOverlay()
                 }
             } else if (activeGame != null) {
-                // While the encasement is mounted, UsageStats may report OEA,
-                // System UI, or another transient package during panel touches.
-                // None of those samples may end the game session: panel dismissal
-                // belongs exclusively to the encasement, not to session teardown.
-                if (isPanelEncasementAttached()) {
+                // Capture consent/host transitions are allowed to keep the
+                // button alive. For every other positively identified
+                // non-game foreground package, require two consecutive samples
+                // before ending the session. This prevents one UsageStats
+                // transition from killing the button, while still ensuring the
+                // button disappears after the user actually leaves the game.
+                if (captureActive || game == null) {
                     nonGameForegroundSamples = 0
                     updateOverlay()
                 } else {
-                    // Capture consent/host transitions are allowed to keep the
-                    // button alive. Otherwise require two consecutive positive
-                    // non-game samples before ending a genuinely exited session.
-                    if (captureActive || game == null) {
+                    nonGameForegroundSamples++
+                    if (nonGameForegroundSamples >= 2) {
+                        deactivate(activeGame!!)
+                        activeGame = null
                         nonGameForegroundSamples = 0
-                        updateOverlay()
                     } else {
-                        nonGameForegroundSamples++
-                        if (nonGameForegroundSamples >= 2) {
-                            deactivate(activeGame!!)
-                            activeGame = null
-                            nonGameForegroundSamples = 0
-                        } else {
-                            updateOverlay()
-                        }
+                        updateOverlay()
                     }
                 }
             }
@@ -328,7 +321,7 @@ class OeaGameBoostService : Service() {
                 setStroke(dp(1), 0x664D74FF)
             }
             setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener { requestPanelEncasementDismissal() }
+            setOnClickListener { closePanel(panel) }
         }
         panel.addView(closePanelButton, android.widget.LinearLayout.LayoutParams(-1, dp(36)).apply {
             topMargin = dp(8)
@@ -379,7 +372,7 @@ class OeaGameBoostService : Service() {
             }
         )
         handle.setOnClickListener {
-            togglePanelEncasement()
+            if (panel.visibility == View.VISIBLE) closePanel(panel) else showPanel(panel)
         }
 
         val params = WindowManager.LayoutParams(
@@ -907,33 +900,20 @@ class OeaGameBoostService : Service() {
         (this and 0x00FFFFFF) or ((alpha.coerceIn(0, 255)) shl 24)
 
     private fun showPanel(panel: View) {
-        val existingHost = panelWindowContainer
-        if (existingHost?.parent != null) return
-
-        // The encasement is the panel's independent window/lifecycle owner.
-        // Never animate or dismiss the floating handle's WindowManager root.
+        if (panel.visibility == View.VISIBLE) return
+        panel.animate().cancel()
         panel.visibility = View.VISIBLE
-        panel.alpha = 1f
-        panel.scaleX = 1f
-        panel.scaleY = 1f
-        panel.translationX = 0f
         if (!attachPanelWindow(panel)) {
-            panel.visibility = View.GONE
-            return
-        }
-
-        val host = panelWindowContainer ?: run {
             panel.visibility = View.GONE
             return
         }
         applyPanelPalette(panel)
         startPanelColorAnimation(panel)
-        host.alpha = 0f
-        host.scaleX = 0.96f
-        host.scaleY = 0.96f
-        host.translationX = dp(20).toFloat()
-        host.animate().cancel()
-        host.animate()
+        panel.alpha = 0f
+        panel.scaleX = 0.96f
+        panel.scaleY = 0.96f
+        panel.translationX = dp(20).toFloat()
+        panel.animate()
             .alpha(1f)
             .scaleX(1f)
             .scaleY(1f)
@@ -941,9 +921,7 @@ class OeaGameBoostService : Service() {
             .setDuration(280L)
             .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f))
             .withEndAction {
-                if (panelWindowContainer === host && host.parent != null && panel.visibility == View.VISIBLE) {
-                    animateGameBoostPanel(panel)
-                }
+                animateGameBoostPanel(panel)
             }.start()
     }
 
@@ -954,49 +932,49 @@ class OeaGameBoostService : Service() {
      * small overlay window and is never dismissed by this listener.
      */
     private fun attachPanelWindow(panel: View): Boolean {
-        val currentContainer = panelWindowContainer
-        if (currentContainer?.parent != null) return true
+        if (panel.parent != null) return true
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val root = overlay as? android.widget.LinearLayout ?: return false
         if (root.layoutParams !is WindowManager.LayoutParams) return false
-
-        // Give the panel its own host container. Dismissal removes this host,
-        // never the separate floating-handle window.
-        val container = android.widget.FrameLayout(this).apply {
-            clipChildren = false
-            clipToPadding = false
-            addView(panel, android.widget.FrameLayout.LayoutParams(-1, -2))
-            setOnTouchListener { _, event ->
-                if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
-                    requestPanelEncasementDismissal()
-                    true
-                } else false
-            }
-        }
-        val params = WindowManager.LayoutParams(
+        val panelParams = WindowManager.LayoutParams(
             dp(286), WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 0 }
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+        panel.setOnTouchListener { _, event ->
+            if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
+                closePanel(panel)
+                true
+            } else {
+                false
+            }
+        }
         return runCatching {
-            panelWindowContainer = container
-            wm.addView(container, params)
+            wm.addView(panel, panelParams)
             syncPanelToHandle(root)
             true
         }.getOrElse {
-            panelWindowContainer = null
-            (panel.parent as? android.view.ViewGroup)?.removeView(panel)
+            panel.setOnTouchListener(null)
             false
         }
     }
+
+    /**
+     * Keep the panel anchored to the floating handle while it is open.
+     * The panel uses a separate Android window only so Android can deliver
+     * outside-window touch events; its coordinates always follow the handle.
+     */
     private fun syncPanelToHandle(root: View) {
         val panel = panelView ?: return
-        val container = panelWindowContainer ?: return
-        if (panel.visibility != View.VISIBLE || container.parent == null) return
-        val panelParams = container.layoutParams as? WindowManager.LayoutParams ?: return
+        if (panel.visibility != View.VISIBLE || panel.parent == null) return
+        val panelParams = panel.layoutParams as? WindowManager.LayoutParams ?: return
         val handle = (root as? android.widget.LinearLayout)?.getChildAt(0) ?: return
         val screen = resources.displayMetrics
         val panelWidth = dp(286).coerceAtMost(screen.widthPixels)
@@ -1023,26 +1001,13 @@ class OeaGameBoostService : Service() {
         panelParams.x = (handleCenterX - panelWidth / 2).coerceIn(0, (screen.widthPixels - panelWidth).coerceAtLeast(0))
         panelParams.y = targetY
         runCatching {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(container, panelParams)
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(panel, panelParams)
         }
     }
 
     private fun detachPanelWindow(panel: View) {
-        val container = panelWindowContainer
-        // Clear ownership first so late animation/outside-touch callbacks are inert.
-        panelWindowContainer = null
-        container?.animate()?.cancel()
-        runCatching {
-            if (container?.parent != null) {
-                (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(container)
-            }
-        }
-        (panel.parent as? android.view.ViewGroup)?.removeView(panel)
-        panel.visibility = View.GONE
-        panel.alpha = 1f
-        panel.scaleX = 1f
-        panel.scaleY = 1f
-        panel.translationX = 0f
+        if (panel.parent == null) return
+        runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(panel) }
     }
 
     private fun animateGameBoostPanel(panel: View) {
@@ -1114,32 +1079,32 @@ class OeaGameBoostService : Service() {
                         .setDuration(650L)
                         .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
                         .withEndAction {
-                            if (isPanelEncasementAttached() && view.visibility == View.VISIBLE) animateGameBoostTelemetry(view)
+                            if (overlay != null && view.visibility == View.VISIBLE) animateGameBoostTelemetry(view)
                         }.start()
                 }
             }.start()
     }
 
-    private fun isPanelEncasementAttached(): Boolean =
-        panelWindowContainer?.parent != null
-
-    /** All panel-dismissal sources route through this encasement owner. */
-    private fun togglePanelEncasement() {
-        val panel = panelView ?: return
-        if (isPanelEncasementAttached()) {
-            requestPanelEncasementDismissal()
-        } else {
-            showPanel(panel)
-        }
-    }
-
-    private fun requestPanelEncasementDismissal() {
-        val panel = panelView ?: return
-        // Closing the encasement removes its window immediately. The panel is
-        // a child of that window, so it cannot remain touchable or visible after
-        // dismissal. This method never modifies the independent handle window.
+    private fun closePanel(panel: View) {
+        if (panel.visibility != View.VISIBLE) return
         stopPanelColorAnimation(panel)
-        detachPanelWindow(panel)
+        panel.animate().cancel()
+        panel.animate()
+            .alpha(0f)
+            .scaleX(0.96f)
+            .scaleY(0.96f)
+            .translationX(dp(12).toFloat())
+            .setDuration(145L)
+            .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 1f, 1f))
+            .withEndAction {
+                panel.visibility = View.GONE
+                detachPanelWindow(panel)
+                panel.setOnTouchListener(null)
+                panel.alpha = 1f
+                panel.scaleX = 1f
+                panel.scaleY = 1f
+                panel.translationX = 0f
+            }.start()
     }
 
     private fun setKeepScreenOn(enabled: Boolean) {
@@ -1190,16 +1155,10 @@ class OeaGameBoostService : Service() {
     }
 
     private fun removeOverlay() {
-        panelView?.let { panel ->
-            panel.animate().cancel()
-            stopPanelColorAnimation(panel)
-            panel.visibility = View.GONE
-            detachPanelWindow(panel)
-        }
+        panelView?.let(::detachPanelWindow)
         overlay?.let { runCatching { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } }
         overlay = null
         panelView = null
-        panelWindowContainer = null
     }
     private fun foregroundPackage(): String? {
         val usm = getSystemService(UsageStatsManager::class.java) ?: return null
