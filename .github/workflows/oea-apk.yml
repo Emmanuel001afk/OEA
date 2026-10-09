@@ -41,6 +41,8 @@ jobs:
           grep -Fq "freezerOperationRunning" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "loadInstalledFreezerApps" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
+          grep -Fq "originalDndFilter" oea/src/main/java/com/oea/launcher/gameboost/OeaGameBoostService.kt
+          grep -Fq "beginDndSession" oea/src/main/java/com/oea/launcher/gameboost/OeaGameBoostService.kt
       - name: Build standalone OEA Launcher APK
         run: ./gradlew :oea:assembleRelease --stacktrace
       - name: Verify APK identity
