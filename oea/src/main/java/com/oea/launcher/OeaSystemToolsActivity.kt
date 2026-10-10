@@ -142,19 +142,19 @@ class OeaSystemToolsActivity : Activity() {
             setPadding(dp(16), dp(15), dp(16), dp(15))
             background = android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = dp(20).toFloat()
-                setColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT)
+                setColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT || backend == OeaAppFreezer.Backend.ADB_BRIDGE)
                     Color.rgb(20, 75, 62) else surfaceColor())
             }
             addView(TextView(this@OeaSystemToolsActivity).apply {
                 text = authorityTitle
                 textSize = 12f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
-                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT) Color.rgb(139, 242, 196) else textColor())
+                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT || backend == OeaAppFreezer.Backend.ADB_BRIDGE) Color.rgb(139, 242, 196) else textColor())
             })
             addView(TextView(this@OeaSystemToolsActivity).apply {
                 text = authoritySubtitle
                 textSize = 13f
-                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT) Color.rgb(220, 245, 236) else mutedColor())
+                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT || backend == OeaAppFreezer.Backend.ADB_BRIDGE) Color.rgb(220, 245, 236) else mutedColor())
                 setPadding(0, dp(6), 0, 0)
             })
             if (backend == OeaAppFreezer.Backend.NONE || backend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
