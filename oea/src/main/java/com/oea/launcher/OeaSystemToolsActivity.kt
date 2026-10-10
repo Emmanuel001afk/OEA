@@ -279,7 +279,7 @@ class OeaSystemToolsActivity : Activity() {
         selectionActions.addView(freezerControl("Refresh") {
             val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
             if (activeBackend == OeaAppFreezer.Backend.NONE || activeBackend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
-                Toast.makeText(this@OeaSystemToolsActivity, "No device-owner or root authority is available to verify suspension state.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@OeaSystemToolsActivity, "Android has not granted OEA an authority capable of verifying app suspension.", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(this@OeaSystemToolsActivity, "Refreshing installed apps and system state…", Toast.LENGTH_SHORT).show()
                 Thread {
@@ -1238,19 +1238,32 @@ class OeaSystemToolsActivity : Activity() {
         }
     }
 
+    private fun freezerAuthorityExplanation(): String {
+        val admin = getSystemService(DevicePolicyManager::class.java)
+            ?.isAdminActive(ComponentName(this, OeaDeviceAdminReceiver::class.java)) == true
+        return if (admin) {
+            "Device Admin is active, but Android does not grant app-freezing authority to ordinary Device Admin."
+        } else {
+            "Device Admin is not activated. Activating it still will not grant authority to freeze other apps."
+        }
+    }
+
     private fun requestDeviceOwner() {
+        val admin = getSystemService(DevicePolicyManager::class.java)
+            ?.isAdminActive(ComponentName(this, OeaDeviceAdminReceiver::class.java)) == true
         val command = "adb shell dpm set-device-owner " + packageName + "/" + OeaDeviceAdminReceiver::class.java.name
         AlertDialog.Builder(this)
-            .setTitle("Enable OEA system freezer")
+            .setTitle(if (admin) "Device Admin already active" else "Freezer authority required")
             .setMessage(
-                "OEA has recognized the current Device Admin state. Device Admin alone cannot suspend other apps; Android reserves that capability for a Device Owner or a rooted system.\n\n" +
-                "To enable genuine freezing without another app, provision OEA as Device Owner from a computer using the command below. Android may require a freshly reset device with no accounts configured. This is a system restriction, not a missing OEA permission prompt."
+                (if (admin) "OEA recognizes Device Admin is already active. You do not need to activate it again.\\n\\n" else "") +
+                "Android does not let ordinary Device Admin freeze arbitrary apps. OEA can verify real suspension only with Device Owner authority or root.\\n\\n" +
+                "Device Owner must be provisioned using ADB from a computer and commonly requires a freshly reset device. Repeating the Device Admin screen cannot unlock freezing."
             )
             .setPositiveButton("Copy Device Owner command") { _, _ ->
                 getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
                     ClipData.newPlainText("OEA device-owner command", command)
                 )
-                Toast.makeText(this, "Command copied. Run it from a computer connected by ADB.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Command copied. Run it from a computer only if you understand the device-owner provisioning requirements.", Toast.LENGTH_LONG).show()
             }
             .setNegativeButton("Close", null)
             .show()
