@@ -46,7 +46,7 @@ object OeaFreezerShellBridge {
             val action = fields[1]
             val packageName = fields[2]
             if (!packageName.matches(Regex("[A-Za-z0-9_.]+")) ||
-                packageName == "com.oea.launcher" ||
+                (packageName == "com.oea.launcher" && action != "STATUS") ||
                 action !in setOf("SUSPEND", "UNSUSPEND", "STATUS")) {
                 writer.println("ERROR\tInvalid request")
                 return
