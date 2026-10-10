@@ -29,6 +29,7 @@ import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.notifications.OeaNotificationState
 import com.oea.launcher.R
+import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.widgets.OeaWidgetController
 import com.oea.launcher.shortcuts.OeaShortcutController
 import com.oea.launcher.focus.OeaFocusStore
@@ -700,18 +701,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
             }
             .setNeutralButton(if (authority) "Close" else "How to enable") { _, _ ->
-                if (!authority) openDeviceAdminSettings()
+                if (!authority) openFreezerSetup()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun openDeviceAdminSettings() {
-        AlertDialog.Builder(hostActivity ?: context)
-            .setTitle("Freezer authority required")
-            .setMessage("Android has not approved device-owner or root authority for OEA. True package freezing is unavailable until that authority is provisioned. OEA will not repeatedly request an unavailable permission.")
-            .setPositiveButton("OK", null)
-            .show()
+    private fun openFreezerSetup() {
+        val intent = Intent(context, OeaSystemToolsActivity::class.java)
+            .putExtra(OeaSystemToolsActivity.EXTRA_SCREEN, "freezer")
+        if (hostActivity == null) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { (hostActivity ?: context).startActivity(intent) }
+            .onFailure { Toast.makeText(context, "Could not open OEA App Freezer setup.", Toast.LENGTH_SHORT).show() }
     }
 
     private fun openThemeSettings() {
