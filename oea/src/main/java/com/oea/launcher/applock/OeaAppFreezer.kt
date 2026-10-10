@@ -4,13 +4,19 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import java.util.concurrent.TimeUnit
+import java.net.InetAddress
+import java.net.Socket
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.PrintWriter
+import java.security.SecureRandom
 
 /**
  * Uses only authority Android actually grants OEA. Ordinary Device Admin is
  * detected separately because it cannot suspend arbitrary packages.
  */
 object OeaAppFreezer {
-    enum class Backend { DEVICE_OWNER, ROOT, DEVICE_ADMIN, NONE }
+    enum class Backend { DEVICE_OWNER, ROOT, ADB_BRIDGE, DEVICE_ADMIN, NONE }
 
     @Volatile private var rootAvailableCache: Boolean? = null
 
@@ -20,6 +26,7 @@ object OeaAppFreezer {
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
         if (dpm?.isDeviceOwnerApp(context.packageName) == true) return Backend.DEVICE_OWNER
         if (hasRoot()) return Backend.ROOT
+        if (bridgeRequest(context, "STATUS", context.packageName) != null) return Backend.ADB_BRIDGE
         val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
         if (dpm?.isAdminActive(admin) == true) return Backend.DEVICE_ADMIN
         return Backend.NONE
@@ -45,6 +52,16 @@ object OeaAppFreezer {
                 persist(context, packageName, frozen)
                 Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.DEVICE_OWNER)
             }.getOrElse { Result(false, it.message ?: "Could not change frozen state", Backend.DEVICE_OWNER) }
+        }
+
+        if (bridgeRequest(context, if (frozen) "SUSPEND" else "UNSUSPEND", packageName) != null) {
+            val state = bridgeRequest(context, "STATUS", packageName)
+            val expected = if (frozen) "FROZEN" else "ACTIVE"
+            if (state != expected) {
+                return Result(false, "OEA's ADB bridge could not verify the requested state. Nothing was saved.", Backend.ADB_BRIDGE)
+            }
+            persist(context, packageName, frozen)
+            return Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.ADB_BRIDGE)
         }
 
         if (hasRoot()) {
@@ -81,6 +98,9 @@ object OeaAppFreezer {
             Backend.DEVICE_OWNER -> candidates.filterTo(mutableSetOf()) { pkg ->
                 runCatching { context.packageManager.isPackageSuspended(pkg) }.getOrDefault(false)
             }
+            Backend.ADB_BRIDGE -> candidates.filterTo(mutableSetOf()) { pkg ->
+                bridgeRequest(context, "STATUS", pkg) == "FROZEN"
+            }
             Backend.ROOT -> {
                 val (success, dump) = runShell("dumpsys package")
                 if (!success || !dump.contains("Package [")) return
@@ -112,6 +132,45 @@ object OeaAppFreezer {
         prefs.edit().putStringSet(KEY_FROZEN, packages).apply()
     }
 
+    /**
+     * Command to start the embedded bridge as Android's ADB shell user. It is
+     * deliberately an explicit user action; OEA cannot elevate its own UID.
+     */
+    fun adbBridgeSetupCommand(context: Context): String {
+        val token = bridgeToken(context)
+        val apk = context.applicationInfo.sourceDir
+        return "adb shell \"CLASSPATH=$apk app_process /system/bin com.oea.launcher.applock.OeaFreezerShellBridge $BRIDGE_PORT $token >/dev/null 2>&1 < /dev/null &\""
+    }
+
+    fun adbBridgeStatus(context: Context): Boolean =
+        bridgeRequest(context, "STATUS", context.packageName) != null
+
+    private fun bridgeToken(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.getString(KEY_BRIDGE_TOKEN, null)?.let { if (it.length >= 24) return it }
+        val bytes = ByteArray(24)
+        SecureRandom().nextBytes(bytes)
+        val token = bytes.joinToString("") { "%02x".format(it) }
+        prefs.edit().putString(KEY_BRIDGE_TOKEN, token).apply()
+        return token
+    }
+
+    /** Returns FROZEN/ACTIVE on verified success, null when the bridge is absent or rejects the request. */
+    private fun bridgeRequest(context: Context, action: String, packageName: String): String? = runCatching {
+        if (!packageName.matches(Regex("[A-Za-z0-9_.]+"))) return null
+        val socket = Socket()
+        socket.connect(java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), BRIDGE_PORT), 600)
+        socket.soTimeout = 2_500
+        socket.use { client ->
+            val writer = PrintWriter(client.getOutputStream(), true)
+            val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
+            writer.println("${bridgeToken(context)}\\t$action\\t$packageName")
+            val response = reader.readLine() ?: return null
+            val fields = response.split('\\t', limit = 2)
+            if (fields.size == 2 && fields[0] == "OK") fields[1] else null
+        }
+    }.getOrNull()
+
     private fun hasRoot(): Boolean {
         rootAvailableCache?.let { return it }
         val detected = runCatching {
@@ -134,4 +193,6 @@ object OeaAppFreezer {
 
     private const val PREFS = "oea_app_freezer"
     private const val KEY_FROZEN = "frozen_packages"
+    private const val KEY_BRIDGE_TOKEN = "adb_bridge_token"
+    private const val BRIDGE_PORT = 39742
 }
