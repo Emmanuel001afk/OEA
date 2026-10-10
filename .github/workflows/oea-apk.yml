@@ -42,6 +42,7 @@ jobs:
           grep -Fq "dumpsys package" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
           grep -Fq "OeaFreezerShellBridge" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
           grep -Fq "adbBridgeSetupCommand" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          grep -Fq "android.permission.INTERNET" oea/src/main/AndroidManifest.xml
           grep -Fq "ServerSocket" oea/src/main/java/com/oea/launcher/applock/OeaFreezerShellBridge.kt
           grep -Fq "Authentication failed" oea/src/main/java/com/oea/launcher/applock/OeaFreezerShellBridge.kt
           grep -Fq "SET UP OEA ADB BRIDGE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
