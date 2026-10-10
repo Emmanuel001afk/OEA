@@ -40,7 +40,7 @@ object OeaAppFreezer {
                 }
                 val actual = runCatching { context.packageManager.isPackageSuspended(packageName) }.getOrNull()
                 if (actual == null || actual != frozen) {
-                    return@runCatching Result(false, "Android did not confirm the requested state; nothing was saved.", Backend.DEVICE_OWNER)
+                    return@runCatching Result(false, "Android did not confirm the requested frozen state. Nothing was saved.", Backend.DEVICE_OWNER)
                 }
                 persist(context, packageName, frozen)
                 Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.DEVICE_OWNER)
@@ -52,7 +52,7 @@ object OeaAppFreezer {
                 else "cmd package unsuspend --user 0 $packageName"
             val (success, output) = runShell(command)
             if (!success) return Result(false, output.ifBlank { "Root package-suspension command failed" }, Backend.ROOT)
-            val actual = suspensionState(packageName)
+            val actual = rootSuspensionState(packageName)
             if (actual == null || actual != frozen) {
                 return Result(false, "Android did not confirm the requested state; nothing was saved.", Backend.ROOT)
             }
@@ -96,7 +96,7 @@ object OeaAppFreezer {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putStringSet(KEY_FROZEN, actual).apply()
     }
 
-    private fun suspensionState(packageName: String): Boolean? {
+    private fun rootSuspensionState(packageName: String): Boolean? {
         val (success, dump) = runShell("dumpsys package")
         if (!success || !dump.contains("Package [")) return null
         val block = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
