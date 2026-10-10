@@ -126,12 +126,14 @@ class OeaSystemToolsActivity : Activity() {
         val authorityTitle = when (backend) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "SYSTEM FREEZER ACTIVE  •  DEVICE OWNER"
             OeaAppFreezer.Backend.ROOT -> "SYSTEM FREEZER ACTIVE  •  ROOT"
+            OeaAppFreezer.Backend.ADB_BRIDGE -> "SYSTEM FREEZER ACTIVE  •  OEA ADB BRIDGE"
             OeaAppFreezer.Backend.DEVICE_ADMIN -> "DEVICE ADMIN ACTIVE  •  FREEZER NOT AUTHORIZED"
             OeaAppFreezer.Backend.NONE -> "SYSTEM FREEZER NEEDS AUTHORITY"
         }
         val authoritySubtitle = when (backend) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "Android confirms package suspension is available."
             OeaAppFreezer.Backend.ROOT -> "Root access detected. Each change is checked against Android."
+            OeaAppFreezer.Backend.ADB_BRIDGE -> "OEA shell bridge is connected. Each freeze and restore is verified with Android."
             OeaAppFreezer.Backend.DEVICE_ADMIN -> "Your Device Admin approval is recognized. Android does not grant app-freezing rights to ordinary Device Admin."
             OeaAppFreezer.Backend.NONE -> "No supported system-level freezing authority is available on this device."
         }
@@ -140,24 +142,24 @@ class OeaSystemToolsActivity : Activity() {
             setPadding(dp(16), dp(15), dp(16), dp(15))
             background = android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = dp(20).toFloat()
-                setColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT)
+                setColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT || backend == OeaAppFreezer.Backend.ADB_BRIDGE)
                     Color.rgb(20, 75, 62) else surfaceColor())
             }
             addView(TextView(this@OeaSystemToolsActivity).apply {
                 text = authorityTitle
                 textSize = 12f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
-                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT) Color.rgb(139, 242, 196) else textColor())
+                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT || backend == OeaAppFreezer.Backend.ADB_BRIDGE) Color.rgb(139, 242, 196) else textColor())
             })
             addView(TextView(this@OeaSystemToolsActivity).apply {
                 text = authoritySubtitle
                 textSize = 13f
-                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT) Color.rgb(220, 245, 236) else mutedColor())
+                setTextColor(if (backend == OeaAppFreezer.Backend.DEVICE_OWNER || backend == OeaAppFreezer.Backend.ROOT || backend == OeaAppFreezer.Backend.ADB_BRIDGE) Color.rgb(220, 245, 236) else mutedColor())
                 setPadding(0, dp(6), 0, 0)
             })
             if (backend == OeaAppFreezer.Backend.NONE || backend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
                 addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = "DEVICE OWNER SETUP  ↗"
+                    text = "SET UP OEA ADB BRIDGE  ↗"
                     textSize = 11f
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     setTextColor(if (lightUi) Color.rgb(35, 95, 210) else Color.rgb(135, 177, 255))
@@ -165,7 +167,7 @@ class OeaSystemToolsActivity : Activity() {
                 })
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { requestDeviceOwner() }
+                setOnClickListener { requestAdbBridgeSetup() }
             }
         }
         box.addView(authorityCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
@@ -1249,22 +1251,31 @@ class OeaSystemToolsActivity : Activity() {
         }
     }
 
-    private fun requestDeviceOwner() {
-        val admin = getSystemService(DevicePolicyManager::class.java)
-            ?.isAdminActive(ComponentName(this, OeaDeviceAdminReceiver::class.java)) == true
-        val command = "adb shell dpm set-device-owner " + packageName + "/" + OeaDeviceAdminReceiver::class.java.name
+    private fun requestAdbBridgeSetup() {
+        val command = OeaAppFreezer.adbBridgeSetupCommand(this)
         AlertDialog.Builder(this)
-            .setTitle(if (admin) "Device Admin already active" else "Freezer authority required")
+            .setTitle("Enable OEA App Freezer")
             .setMessage(
-                (if (admin) "OEA recognizes Device Admin is already active. You do not need to activate it again.\\n\\n" else "") +
-                "Android does not let ordinary Device Admin freeze arbitrary apps. OEA can verify real suspension only with Device Owner authority or root.\\n\\n" +
-                "Device Owner must be provisioned using ADB from a computer and commonly requires a freshly reset device. Repeating the Device Admin screen cannot unlock freezing."
+                "No factory reset, Device Owner conversion, Shizuku app, or server is required. " +
+                "This OEA-owned bridge runs locally as Android's ADB shell user.\n\n" +
+                "1. On a computer, install Android Platform Tools (ADB).\n" +
+                "2. On this phone, enable Developer options and USB debugging, then connect USB and accept the computer's trust prompt.\n" +
+                "3. Copy the command below and run it in the computer terminal.\n" +
+                "4. Return here; OEA checks the bridge before enabling real freeze/restore.\n\n" +
+                "The bridge runs until stopped or the phone reboots; after a reboot, run the command again. This does not wipe your phone."
             )
-            .setPositiveButton("Copy Device Owner command") { _, _ ->
+            .setPositiveButton("Copy ADB command") { _, _ ->
                 getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
-                    ClipData.newPlainText("OEA device-owner command", command)
+                    ClipData.newPlainText("OEA ADB bridge setup", command)
                 )
-                Toast.makeText(this, "Command copied. Run it from a computer only if you understand the device-owner provisioning requirements.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "ADB command copied. Run it from a trusted computer connected to this phone.", Toast.LENGTH_LONG).show()
+            }
+            .setNeutralButton("Check connection") { _, _ ->
+                val connected = OeaAppFreezer.adbBridgeStatus(this)
+                AlertDialog.Builder(this)
+                    .setMessage(if (connected) "OEA ADB bridge is connected and responding." else "Bridge not detected. Run the copied command from a trusted computer, then check again.")
+                    .setPositiveButton("OK", null)
+                    .show()
             }
             .setNegativeButton("Close", null)
             .show()
@@ -1302,6 +1313,7 @@ class OeaSystemToolsActivity : Activity() {
         return when (OeaAppFreezer.backend(this)) {
             OeaAppFreezer.Backend.DEVICE_OWNER -> "Device-owner authority active"
             OeaAppFreezer.Backend.ROOT -> "Root authority active"
+            OeaAppFreezer.Backend.ADB_BRIDGE -> "OEA ADB bridge connected"
             OeaAppFreezer.Backend.DEVICE_ADMIN -> "Device Admin active; freezing needs Device Owner"
             OeaAppFreezer.Backend.NONE -> "No freezer authority"
         }
