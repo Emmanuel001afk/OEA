@@ -54,11 +54,11 @@ object OeaAppFreezer {
             }.getOrElse { Result(false, it.message ?: "Could not change frozen state", Backend.DEVICE_OWNER) }
         }
 
-        if (bridgeRequest(context, if (frozen) "SUSPEND" else "UNSUSPEND", packageName) != null) {
-            val state = bridgeRequest(context, "STATUS", packageName)
+        if (bridgeRequest(context, "STATUS", context.packageName) != null) {
+            val response = bridgeRequest(context, if (frozen) "SUSPEND" else "UNSUSPEND", packageName)
             val expected = if (frozen) "FROZEN" else "ACTIVE"
-            if (state != expected) {
-                return Result(false, "OEA's ADB bridge could not verify the requested state. Nothing was saved.", Backend.ADB_BRIDGE)
+            if (response != expected) {
+                return Result(false, "OEA's ADB bridge could not complete and verify the requested change. Nothing was saved.", Backend.ADB_BRIDGE)
             }
             persist(context, packageName, frozen)
             return Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.ADB_BRIDGE)
