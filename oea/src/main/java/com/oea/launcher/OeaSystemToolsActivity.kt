@@ -278,7 +278,7 @@ class OeaSystemToolsActivity : Activity() {
         }, LinearLayout.LayoutParams(0, dp(38), 0.65f).apply { leftMargin = dp(2); rightMargin = dp(4) })
         selectionActions.addView(freezerControl("Refresh") {
             val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
-            if (activeBackend == OeaAppFreezer.Backend.NONE) {
+            if (activeBackend == OeaAppFreezer.Backend.NONE || activeBackend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
                 Toast.makeText(this@OeaSystemToolsActivity, "No device-owner or root authority is available to verify suspension state.", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(this@OeaSystemToolsActivity, "Refreshing installed apps and system state…", Toast.LENGTH_SHORT).show()
@@ -346,7 +346,7 @@ class OeaSystemToolsActivity : Activity() {
                     val authority = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
                     var succeeded = 0
                     var failed = 0
-                    if (authority == OeaAppFreezer.Backend.NONE) {
+                    if (authority == OeaAppFreezer.Backend.NONE || authority == OeaAppFreezer.Backend.DEVICE_ADMIN) {
                         failed = chosen.size
                     } else {
                         chosen.forEach { pkg ->
@@ -356,8 +356,8 @@ class OeaSystemToolsActivity : Activity() {
                     }
                     runOnUiThread {
                         freezerOperationRunning = false
-                        val message = if (authority == OeaAppFreezer.Backend.NONE)
-                            "Freezer authority is unavailable. Use the access row above."
+                        val message = if (authority == OeaAppFreezer.Backend.NONE || authority == OeaAppFreezer.Backend.DEVICE_ADMIN)
+                            "Device Owner or root authority is required. Use the access card above."
                         else "$succeeded apps updated, $failed failed."
                         Toast.makeText(this@OeaSystemToolsActivity, message, Toast.LENGTH_LONG).show()
                         rerender?.invoke()
@@ -425,8 +425,8 @@ class OeaSystemToolsActivity : Activity() {
                         Toast.makeText(this@OeaSystemToolsActivity, if (isFrozen) "Restoring app…" else "Freezing app…", Toast.LENGTH_SHORT).show()
                         Thread {
                             val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
-                            val result = if (activeBackend == OeaAppFreezer.Backend.NONE) {
-                                OeaAppFreezer.Result(false, "Freezer authority is unavailable. Use the access row above for setup.")
+                            val result = if (activeBackend == OeaAppFreezer.Backend.NONE || activeBackend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
+                                OeaAppFreezer.Result(false, "Device Owner or root authority is required. Use the access card above for setup.")
                             } else {
                                 OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, app.packageName, !isFrozen)
                             }
@@ -1346,32 +1346,42 @@ class OeaSystemToolsActivity : Activity() {
         box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(9), dp(10), dp(9))
+            setPadding(dp(12), dp(11), dp(12), dp(11))
             background = android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = dp(18).toFloat()
                 setColor(surfaceColor())
+                setStroke(dp(1), if (selected) Color.rgb(80, 150, 255) else
+                    if (lightUi) Color.rgb(222, 226, 234) else Color.rgb(47, 55, 70))
             }
             isClickable = true
             isFocusable = true
             contentDescription = if (frozen) app.label + " frozen, tap Restore" else app.label + " not frozen, tap Freeze"
             setOnClickListener { action() }
 
-            val selector = android.widget.CheckBox(this@OeaSystemToolsActivity).apply {
+            val selector = CheckBox(this@OeaSystemToolsActivity).apply {
                 isChecked = selected
-                buttonTintList = android.content.res.ColorStateList.valueOf(if (selected) Color.rgb(65, 174, 125) else mutedColor())
+                buttonTintList = android.content.res.ColorStateList.valueOf(if (selected) Color.rgb(65, 145, 255) else mutedColor())
                 contentDescription = "Select ${app.label} for bulk actions"
                 setOnClickListener { onSelectionChanged(isChecked) }
             }
-            addView(selector, LinearLayout.LayoutParams(dp(30), dp(42)).apply { rightMargin = dp(3) })
+            addView(selector, LinearLayout.LayoutParams(dp(28), dp(42)).apply { rightMargin = dp(4) })
 
-            val iconView = ImageView(this@OeaSystemToolsActivity).apply {
-                setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
+            val iconHolder = FrameLayout(this@OeaSystemToolsActivity).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(15).toFloat()
+                    setColor(if (lightUi) Color.rgb(242, 244, 248) else Color.rgb(42, 49, 64))
+                }
+                val iconView = ImageView(this@OeaSystemToolsActivity).apply {
+                    setImageDrawable(freezerIconCache.getOrPut(app.packageName) {
                         runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull()
                     })
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                contentDescription = app.label + " icon"
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = app.label + " icon"
+                    setPadding(dp(5), dp(5), dp(5), dp(5))
+                }
+                addView(iconView, FrameLayout.LayoutParams(-1, -1))
             }
-            addView(iconView, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(11) })
+            addView(iconHolder, LinearLayout.LayoutParams(dp(46), dp(46)).apply { rightMargin = dp(11) })
 
             addView(LinearLayout(this@OeaSystemToolsActivity).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1381,31 +1391,40 @@ class OeaSystemToolsActivity : Activity() {
                     textSize = 14f
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
                     setTextColor(textColor())
                 })
                 addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = if (frozen) "Frozen" else "Ready to freeze"
+                    text = app.packageName
                     textSize = 10f
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    setTextColor(if (frozen) Color.rgb(65, 174, 125) else mutedColor())
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                    setTextColor(mutedColor())
                     setPadding(0, dp(3), 0, 0)
+                })
+                addView(TextView(this@OeaSystemToolsActivity).apply {
+                    text = if (frozen) "SUSPENDED BY ANDROID" else "NOT FROZEN"
+                    textSize = 9f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setTextColor(if (frozen) Color.rgb(52, 190, 143) else mutedColor())
+                    setPadding(0, dp(4), 0, 0)
                 })
             }, LinearLayout.LayoutParams(0, -2, 1f))
 
             addView(TextView(this@OeaSystemToolsActivity).apply {
                 text = if (frozen) "Restore" else "Freeze"
-                textSize = 10f
+                textSize = 11f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER
-                setPadding(dp(9), dp(9), dp(9), dp(9))
-                setTextColor(if (frozen) Color.rgb(65, 174, 125) else textColor())
+                setPadding(dp(11), dp(10), dp(11), dp(10))
+                setTextColor(if (frozen) Color.rgb(60, 205, 157) else Color.rgb(130, 174, 255))
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(if (frozen) Color.argb(35, 65, 174, 125) else backgroundColor())
-                    setStroke(dp(1), if (frozen) Color.rgb(65, 174, 125) else mutedColor())
+                    cornerRadius = dp(13).toFloat()
+                    setColor(if (frozen) Color.argb(32, 52, 190, 143) else Color.argb(30, 110, 155, 255))
+                    setStroke(dp(1), if (frozen) Color.rgb(52, 150, 115) else Color.rgb(75, 115, 185))
                 }
-            }, LinearLayout.LayoutParams(-2, dp(34)).apply { leftMargin = dp(8) })
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            }, LinearLayout.LayoutParams(-2, dp(38)).apply { leftMargin = dp(8) })
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
