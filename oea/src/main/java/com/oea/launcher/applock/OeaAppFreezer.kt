@@ -3,6 +3,7 @@ package com.oea.launcher.applock
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import java.util.concurrent.TimeUnit
 
 /**
  * Uses only authority Android actually grants OEA. Ordinary Device Admin is
