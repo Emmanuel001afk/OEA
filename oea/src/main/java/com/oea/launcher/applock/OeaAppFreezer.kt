@@ -164,9 +164,9 @@ object OeaAppFreezer {
         socket.use { client ->
             val writer = PrintWriter(client.getOutputStream(), true)
             val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
-            writer.println("${bridgeToken(context)}\\t$action\\t$packageName")
+            writer.println("${bridgeToken(context)}\t$action\t$packageName")
             val response = reader.readLine() ?: return null
-            val fields = response.split('\\t', limit = 2)
+            val fields = response.split('\t', limit = 2)
             if (fields.size == 2 && fields[0] == "OK") fields[1] else null
         }
     }.getOrNull()
