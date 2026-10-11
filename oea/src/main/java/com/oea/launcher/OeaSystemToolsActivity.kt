@@ -2,12 +2,9 @@ package com.oea.launcher
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.app.admin.DevicePolicyManager
 import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.appwidget.AppWidgetManager
-import android.content.ClipData
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -18,7 +15,6 @@ import android.view.Gravity
 import android.widget.*
 import com.oea.launcher.applock.OeaAppFreezer
 import com.oea.launcher.applock.OeaAppLockStore
-import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import com.oea.launcher.callblocker.OeaCallBlockRules
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.gameboost.OeaGameBoostService
@@ -157,7 +153,7 @@ class OeaSystemToolsActivity : Activity() {
             })
             if (backend == OeaAppFreezer.Backend.NONE || backend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
                 addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = "DEVICE OWNER SETUP  ↗"
+                    text = "CHECK NATIVE XOS FREEZER  ↗"
                     textSize = 11f
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     setTextColor(if (lightUi) Color.rgb(35, 95, 210) else Color.rgb(135, 177, 255))
@@ -165,7 +161,7 @@ class OeaSystemToolsActivity : Activity() {
                 })
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { requestDeviceOwner() }
+                setOnClickListener { showNativeFreezerHelp() }
             }
         }
         box.addView(authorityCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
@@ -1239,33 +1235,19 @@ class OeaSystemToolsActivity : Activity() {
         }
     }
 
-    private fun freezerAuthorityExplanation(): String {
-        val admin = getSystemService(DevicePolicyManager::class.java)
-            ?.isAdminActive(ComponentName(this, OeaDeviceAdminReceiver::class.java)) == true
-        return if (admin) {
-            "Device Admin is active, but Android does not grant app-freezing authority to ordinary Device Admin."
-        } else {
-            "Device Admin is not activated. Activating it still will not grant authority to freeze other apps."
-        }
-    }
-
-    private fun requestDeviceOwner() {
-        val admin = getSystemService(DevicePolicyManager::class.java)
-            ?.isAdminActive(ComponentName(this, OeaDeviceAdminReceiver::class.java)) == true
-        val command = "adb shell dpm set-device-owner " + packageName + "/" + OeaDeviceAdminReceiver::class.java.name
+    private fun showNativeFreezerHelp() {
         AlertDialog.Builder(this)
-            .setTitle(if (admin) "Device Admin already active" else "Freezer authority required")
+            .setTitle("Check the phone's built-in Freezer")
             .setMessage(
-                (if (admin) "OEA recognizes Device Admin is already active. You do not need to activate it again.\\n\\n" else "") +
-                "Android does not let ordinary Device Admin freeze arbitrary apps. OEA can verify real suspension only with Device Owner authority or root.\\n\\n" +
-                "Device Owner must be provisioned using ADB from a computer and commonly requires a freshly reset device. Repeating the Device Admin screen cannot unlock freezing."
+                "The native XOS/Transsion Freezer is separate from OEA's App Freezer. If its icon disappeared, you do not need to install files, use ADB, or reset your phone.\n\n" +
+                "1. Open Home Settings below and temporarily select XOS Launcher as the Home app.\n" +
+                "2. On the XOS home screen, press and hold an empty area.\n" +
+                "3. Open Menu or Desktop Settings, then Other settings.\n" +
+                "4. If Freezer is listed, switch it on and return home.\n\n" +
+                "If the option is missing, check the pre-installed Phone Master app. Menu names vary by XOS version.\n\n" +
+                "OEA's separate freezer controls only work when Android grants OEA actual package-suspension authority; ordinary Device Admin is not enough. This screen will not pretend otherwise."
             )
-            .setPositiveButton("Copy Device Owner command") { _, _ ->
-                getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
-                    ClipData.newPlainText("OEA device-owner command", command)
-                )
-                Toast.makeText(this, "Command copied. Run it from a computer only if you understand the device-owner provisioning requirements.", Toast.LENGTH_LONG).show()
-            }
+            .setPositiveButton("Open Home Settings") { _, _ -> openHomeSettings() }
             .setNegativeButton("Close", null)
             .show()
     }
