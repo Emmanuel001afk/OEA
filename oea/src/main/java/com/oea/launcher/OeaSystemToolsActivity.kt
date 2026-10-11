@@ -643,7 +643,7 @@ class OeaSystemToolsActivity : Activity() {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply {
             isFillViewport = false
-            addView(list, ScrollView.LayoutParams(-1, -2))
+            addView(list, android.widget.FrameLayout.LayoutParams(-1, -2))
         }
         panel.addView(scroll, LinearLayout.LayoutParams(-1, dp(390)))
 
