@@ -47,6 +47,7 @@ class OeaSystemToolsActivity : Activity() {
     private val apps: List<OeaAppInfo> by lazy { OeaAppModel(this).also { it.load() }.apps }
     private val widgets by lazy { OeaWidgetController(this) }
     private val wallpaperRequestCode = 0x4F58
+    private var refreshOverviewOnResume = false
 
     private val lightUi: Boolean
         get() = when (dataStore.themeMode()) {
@@ -71,6 +72,14 @@ class OeaSystemToolsActivity : Activity() {
             "multitask" -> showMultitask()
             "split" -> chooseSplitApps()
             else -> showSettings()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (refreshOverviewOnResume && intent.getStringExtra(EXTRA_SCREEN) == "multitask") {
+            refreshOverviewOnResume = false
+            showMultitask()
         }
     }
 
@@ -618,6 +627,7 @@ class OeaSystemToolsActivity : Activity() {
 
         if (!usageAccess) {
             row(box, "Enable recent-app history", "Allow OEA Usage access so this overview can order apps by recent use.") {
+                refreshOverviewOnResume = true
                 openUsageAccess()
             }
         }
