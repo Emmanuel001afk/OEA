@@ -55,8 +55,11 @@ jobs:
           grep -Fq "Intent.FLAG_ACTIVITY_NEW_TASK" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "Search apps or package names" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "OEA Multitask" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "android.widget.FrameLayout.LayoutParams(-1, -2)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "Overview" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "UsageStatsManager" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "Open as floating window" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "App info / force stop" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "box.addView(list, LinearLayout.LayoutParams(-1, -2))" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "currentWindowMetrics.bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.software.freeform_window_management" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
       - name: Build standalone OEA Launcher APK
