@@ -57,8 +57,13 @@ jobs:
           grep -Fq "Search apps or package names" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "Overview" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "UsageStatsManager" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'overviewTab("Recent")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'overviewTab("All apps")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "overviewNow - usedAt <= sevenDaysMillis" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq '"Lock this app"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "Open as floating window" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "App info / force stop" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "android:excludeFromRecents=\"true\"" oea/src/main/AndroidManifest.xml
           grep -Fq "box.addView(list, LinearLayout.LayoutParams(-1, -2))" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "currentWindowMetrics.bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.software.freeform_window_management" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
