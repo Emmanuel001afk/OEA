@@ -6,7 +6,6 @@ import android.app.admin.DevicePolicyManager
 import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.appwidget.AppWidgetManager
-import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -1246,14 +1245,6 @@ class OeaSystemToolsActivity : Activity() {
         } else {
             "Device Admin is not activated. Activating it still will not grant authority to freeze other apps."
         }
-    }
-
-    private fun requestDeviceOwner() {
-        AlertDialog.Builder(this)
-            .setTitle("App Freezer access is restricted by Android")
-            .setMessage("OEA will not ask you to use a laptop, ADB, root, or reset your phone. Standard Android does not let ordinary apps freeze other apps with Device Admin alone. OEA will only mark an app frozen when the system confirms the state. Manufacturer-provided freezer features may use permissions unavailable to third-party launchers.")
-            .setPositiveButton("OK", null)
-            .show()
     }
 
     private fun homeRoleStatus(): String {
