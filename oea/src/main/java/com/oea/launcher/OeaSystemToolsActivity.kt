@@ -599,17 +599,146 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun showMultitask() {
-        val choices = apps.filter { it.packageName != packageName }.distinctBy { it.packageName }
-        AlertDialog.Builder(this)
-            .setTitle("OEA Multitask")
-            .setMessage("Choose an app. OEA asks Android for a floating/freeform task with a sensible starting size. Android/OEM support determines whether it can actually float.")
-            .setItems(choices.map { it.label }.toTypedArray()) { _, which ->
-                protectedLaunch(choices[which]) {
-                    val result = OeaMultitaskLauncher.launchFloating(this, choices[which])
-                    if (!result.success) Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
-                }
+        val choices = apps
+            .filter { it.packageName != packageName }
+            .distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
+
+        if (choices.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("OEA Multitask")
+                .setMessage("OEA could not find any launchable apps.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        panel.addView(TextView(this).apply {
+            text = "Choose an app to request a native Android floating task. On supported devices, use Android's window controls to move, resize, and interact with the app while another app remains behind it."
+            textSize = 13f
+            setTextColor(mutedColor())
+            setPadding(0, 0, 0, dp(10))
+        })
+
+        val search = EditText(this).apply {
+            hint = "Search apps or package names"
+            setSingleLine(true)
+            textSize = 14f
+            setTextColor(textColor())
+            setHintTextColor(mutedColor())
+            setPadding(dp(14), 0, dp(14), 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(surfaceColor())
             }
-            .setNegativeButton("Cancel", null).show()
+        }
+        panel.addView(search, LinearLayout.LayoutParams(-1, dp(46)).apply {
+            bottomMargin = dp(8)
+        })
+
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            addView(list, ScrollView.LayoutParams(-1, -2))
+        }
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, dp(390)))
+
+        lateinit var dialog: AlertDialog
+        fun render(query: String) {
+            list.removeAllViews()
+            val normalized = query.trim()
+            val visible = choices.filter { app ->
+                normalized.isBlank() ||
+                    app.label.contains(normalized, ignoreCase = true) ||
+                    app.packageName.contains(normalized, ignoreCase = true)
+            }
+            if (visible.isEmpty()) {
+                list.addView(TextView(this).apply {
+                    text = "No matching apps"
+                    textSize = 14f
+                    setTextColor(mutedColor())
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(24), 0, dp(24))
+                })
+                return
+            }
+            visible.forEach { app ->
+                val item = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(10), dp(9), dp(10), dp(9))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(14).toFloat()
+                        setColor(surfaceColor())
+                    }
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = "Open ${app.label} as a floating task"
+                    setOnClickListener {
+                        dialog.dismiss()
+                        protectedLaunch(app) {
+                            val result = OeaMultitaskLauncher.launchFloating(this@OeaSystemToolsActivity, app)
+                            Toast.makeText(this@OeaSystemToolsActivity, result.message, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                val icon = ImageView(this).apply {
+                    setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = "${app.label} icon"
+                }
+                item.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(12) })
+                item.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(TextView(this@OeaSystemToolsActivity).apply {
+                        text = app.label
+                        textSize = 14f
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        setTypeface(typeface, android.graphics.Typeface.BOLD)
+                        setTextColor(textColor())
+                    })
+                    addView(TextView(this@OeaSystemToolsActivity).apply {
+                        text = app.packageName
+                        textSize = 10f
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                        setTextColor(mutedColor())
+                        setPadding(0, dp(3), 0, 0)
+                    })
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                item.addView(TextView(this).apply {
+                    text = "↗"
+                    textSize = 20f
+                    setTextColor(textColor())
+                    gravity = Gravity.CENTER
+                }, LinearLayout.LayoutParams(dp(28), dp(42)))
+                list.addView(item, LinearLayout.LayoutParams(-1, -2).apply {
+                    bottomMargin = dp(6)
+                })
+            }
+        }
+
+        search.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                render(s?.toString().orEmpty())
+            }
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+        })
+        render("")
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle("OEA Multitask")
+            .setView(panel)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.show()
     }
 
     private fun chooseSplitApps() {
