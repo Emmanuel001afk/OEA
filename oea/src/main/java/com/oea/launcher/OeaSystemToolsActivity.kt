@@ -6,7 +6,6 @@ import android.app.admin.DevicePolicyManager
 import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.appwidget.AppWidgetManager
-import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -157,15 +156,14 @@ class OeaSystemToolsActivity : Activity() {
             })
             if (backend == OeaAppFreezer.Backend.NONE || backend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
                 addView(TextView(this@OeaSystemToolsActivity).apply {
-                    text = "DEVICE OWNER SETUP  ↗"
+                    text = "SYSTEM RESTRICTION"
                     textSize = 11f
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     setTextColor(if (lightUi) Color.rgb(35, 95, 210) else Color.rgb(135, 177, 255))
                     setPadding(0, dp(12), 0, 0)
                 })
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { requestDeviceOwner() }
+                isClickable = false
+                isFocusable = false
             }
         }
         box.addView(authorityCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
@@ -358,7 +356,7 @@ class OeaSystemToolsActivity : Activity() {
                     runOnUiThread {
                         freezerOperationRunning = false
                         val message = if (authority == OeaAppFreezer.Backend.NONE || authority == OeaAppFreezer.Backend.DEVICE_ADMIN)
-                            "Device Owner or root authority is required. Use the access card above."
+                            "This Android device does not grant OEA system-level app-freezing access. Device Admin approval alone cannot enable it."
                         else "$succeeded apps updated, $failed failed."
                         Toast.makeText(this@OeaSystemToolsActivity, message, Toast.LENGTH_LONG).show()
                         rerender?.invoke()
@@ -427,7 +425,7 @@ class OeaSystemToolsActivity : Activity() {
                         Thread {
                             val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
                             val result = if (activeBackend == OeaAppFreezer.Backend.NONE || activeBackend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
-                                OeaAppFreezer.Result(false, "Device Owner or root authority is required. Use the access card above for setup.")
+                                OeaAppFreezer.Result(false, "This Android device does not grant OEA system-level app-freezing access. Device Admin approval alone cannot enable it.")
                             } else {
                                 OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, app.packageName, !isFrozen)
                             }
@@ -1247,27 +1245,6 @@ class OeaSystemToolsActivity : Activity() {
         } else {
             "Device Admin is not activated. Activating it still will not grant authority to freeze other apps."
         }
-    }
-
-    private fun requestDeviceOwner() {
-        val admin = getSystemService(DevicePolicyManager::class.java)
-            ?.isAdminActive(ComponentName(this, OeaDeviceAdminReceiver::class.java)) == true
-        val command = "adb shell dpm set-device-owner " + packageName + "/" + OeaDeviceAdminReceiver::class.java.name
-        AlertDialog.Builder(this)
-            .setTitle(if (admin) "Device Admin already active" else "Freezer authority required")
-            .setMessage(
-                (if (admin) "OEA recognizes Device Admin is already active. You do not need to activate it again.\\n\\n" else "") +
-                "Android does not let ordinary Device Admin freeze arbitrary apps. OEA can verify real suspension only with Device Owner authority or root.\\n\\n" +
-                "Device Owner must be provisioned using ADB from a computer and commonly requires a freshly reset device. Repeating the Device Admin screen cannot unlock freezing."
-            )
-            .setPositiveButton("Copy Device Owner command") { _, _ ->
-                getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(
-                    ClipData.newPlainText("OEA device-owner command", command)
-                )
-                Toast.makeText(this, "Command copied. Run it from a computer only if you understand the device-owner provisioning requirements.", Toast.LENGTH_LONG).show()
-            }
-            .setNegativeButton("Close", null)
-            .show()
     }
 
     private fun homeRoleStatus(): String {
