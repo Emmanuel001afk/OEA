@@ -14,8 +14,10 @@ object OeaSplitLauncher {
         if (Build.VERSION.SDK_INT < 24) return Result(false, "Android 7.0 or newer is required for split screen.")
         val a = pm.getLaunchIntentForPackage(first) ?: return Result(false, "The first app cannot be launched.")
         val b = pm.getLaunchIntentForPackage(second) ?: return Result(false, "The second app cannot be launched.")
-        a.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        b.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // Preserve existing task state; CLEAR_TOP can destroy/recreate an app's
+        // activity stack and is not required to request adjacent placement.
+        a.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        b.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
         return runCatching {
             context.startActivity(a)
             context.startActivity(b)
