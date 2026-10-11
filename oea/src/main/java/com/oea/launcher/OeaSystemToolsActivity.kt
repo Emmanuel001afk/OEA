@@ -660,7 +660,7 @@ class OeaSystemToolsActivity : Activity() {
                 } else {
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     runCatching { startActivity(launch) }.onFailure {
-                        Toast.makeText(this, "Android could not open \${app.label}.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Android could not open ${app.label}.", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -668,7 +668,7 @@ class OeaSystemToolsActivity : Activity() {
 
         fun showOtherAppForSplit(current: OeaAppInfo) {
             val others = choices.filter { it.packageName != current.packageName }.sortedBy { it.label.lowercase() }
-            AlertDialog.Builder(this).setTitle("Split \${current.label} with…")
+            AlertDialog.Builder(this).setTitle("Split ${current.label} with…")
                 .setItems(others.map { it.label }.toTypedArray()) { _, which ->
                     val other = others[which]
                     protectedLaunch(current) {
@@ -691,7 +691,7 @@ class OeaSystemToolsActivity : Activity() {
                 when (item.title.toString()) {
                     "Open" -> launchApp(app)
                     "App info / force stop" -> runCatching {
-                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:\${app.packageName}")))
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}")))
                     }.onFailure {
                         Toast.makeText(this, "Android could not open app info.", Toast.LENGTH_SHORT).show()
                     }
@@ -735,13 +735,13 @@ class OeaSystemToolsActivity : Activity() {
                     }
                     isClickable = true
                     isFocusable = true
-                    contentDescription = "Switch to \${app.label}"
+                    contentDescription = "Switch to ${app.label}"
                     setOnClickListener { launchApp(app) }
                 }
                 val icon = ImageView(this).apply {
                     setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
                     scaleType = ImageView.ScaleType.FIT_CENTER
-                    contentDescription = "\${app.label} icon"
+                    contentDescription = "${app.label} icon"
                 }
                 card.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(13) })
                 card.addView(LinearLayout(this).apply {
@@ -773,7 +773,7 @@ class OeaSystemToolsActivity : Activity() {
                     textSize = 27f
                     gravity = Gravity.CENTER
                     setTextColor(textColor())
-                    contentDescription = "Actions for \${app.label}"
+                    contentDescription = "Actions for ${app.label}"
                     isClickable = true
                     isFocusable = true
                     setOnClickListener { showAppMenu(this, app) }
