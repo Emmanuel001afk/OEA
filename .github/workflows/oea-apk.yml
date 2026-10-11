@@ -54,6 +54,8 @@ jobs:
           grep -Fq "options.launchBounds = bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "Intent.FLAG_ACTIVITY_NEW_TASK" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT" oea/src/main/java/com/oea/launcher/split/OeaSplitLauncher.kt
+          ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" oea/src/main/java/com/oea/launcher/split/OeaSplitLauncher.kt
           grep -Fq "Search apps or package names" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "Overview" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "UsageStatsManager" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
