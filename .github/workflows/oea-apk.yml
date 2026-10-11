@@ -43,6 +43,9 @@ jobs:
           grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "freezerOperationRunning" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          ! grep -Fq "adb shell dpm set-device-owner" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          ! grep -Fq "Copy Device Owner command" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          ! grep -Fq "DEVICE OWNER SETUP" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "loadInstalledFreezerApps" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
           grep -Fq "originalDndFilter" oea/src/main/java/com/oea/launcher/gameboost/OeaGameBoostService.kt
