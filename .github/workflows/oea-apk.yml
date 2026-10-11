@@ -56,6 +56,9 @@ jobs:
           ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "Search apps or package names" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "OEA Multitask" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "android.widget.FrameLayout.LayoutParams(-1, -2)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "currentWindowMetrics.bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "android.software.freeform_window_management" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
       - name: Build standalone OEA Launcher APK
         run: ./gradlew :oea:assembleRelease --stacktrace
       - name: Verify APK identity
