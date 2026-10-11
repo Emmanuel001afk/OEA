@@ -66,6 +66,8 @@ jobs:
           grep -Fq "android:excludeFromRecents=\"true\"" oea/src/main/AndroidManifest.xml
           grep -Fq "box.addView(list, LinearLayout.LayoutParams(-1, -2))" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "currentWindowMetrics.bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "preferredWidthDp = 420" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "preferredHeightDp = 560" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.software.freeform_window_management" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
       - name: Build standalone OEA Launcher APK
         run: ./gradlew :oea:assembleRelease --stacktrace
