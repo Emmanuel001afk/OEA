@@ -634,24 +634,57 @@ class OeaSystemToolsActivity : Activity() {
                 setColor(surfaceColor())
             }
         }
-        box.addView(search, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(12) })
+        box.addView(search, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(10) })
+
+        var showAllApps = false
+        val tabs = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(12))
+        }
+        fun overviewTab(label: String) = TextView(this).apply {
+            text = label
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(surfaceColor())
+            }
+        }
+        val recentTab = overviewTab("Recent")
+        val allAppsTab = overviewTab("All apps")
+        tabs.addView(recentTab, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        tabs.addView(allAppsTab, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
+        box.addView(tabs, LinearLayout.LayoutParams(-1, -2))
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         box.addView(list, LinearLayout.LayoutParams(-1, -2))
+        val overviewNow = System.currentTimeMillis()
+        val sevenDaysMillis = 7L * 24L * 60L * 60L * 1000L
         val usageManager = getSystemService(android.app.usage.UsageStatsManager::class.java)
         val lastUsed = if (usageAccess && usageManager != null) {
             runCatching {
-                val now = System.currentTimeMillis()
                 usageManager.queryUsageStats(
                     android.app.usage.UsageStatsManager.INTERVAL_DAILY,
-                    now - 7L * 24L * 60L * 60L * 1000L, now
-                ).associate { it.packageName to it.lastTimeUsed }
+                    overviewNow - sevenDaysMillis, overviewNow
+                ).groupBy { it.packageName }
+                    .mapValues { (_, records) -> records.maxOfOrNull { it.lastTimeUsed } ?: 0L }
             }.getOrDefault(emptyMap())
         } else emptyMap()
-        val recentChoices = choices.sortedWith(
+        val allChoices = choices.sortedWith(
             compareByDescending<OeaAppInfo> { lastUsed[it.packageName] ?: 0L }
                 .thenBy { it.label.lowercase() }
         )
+        // This is usage history, not Android's private active-task stack. Keep
+        // the Recent tab honest by excluding apps with no recorded use this week.
+        val recentChoices = allChoices.filter {
+            val usedAt = lastUsed[it.packageName] ?: 0L
+            usedAt > 0L && overviewNow - usedAt <= sevenDaysMillis
+        }
 
         fun launchApp(app: OeaAppInfo) {
             protectedLaunch(app) {
@@ -682,15 +715,46 @@ class OeaSystemToolsActivity : Activity() {
         }
 
         fun showAppMenu(anchor: View, app: OeaAppInfo) {
+            val lockKey = app.packageName + "/" + app.className
+            val locked = OeaAppLockStore.isLocked(this, lockKey)
+            val lockAction = if (locked) "Unlock this app" else "Lock this app"
             val popup = PopupMenu(this, anchor)
             popup.menu.add("Open")
-            popup.menu.add("App info / force stop")
+            popup.menu.add(lockAction)
             popup.menu.add("App Lock settings")
+            popup.menu.add("App info / force stop")
             popup.menu.add("Open as floating window")
             popup.menu.add("Split screen with…")
             popup.setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
                     "Open" -> launchApp(app)
+                    "Lock this app" -> {
+                        if (OeaAppLockStore.hasPin(this)) {
+                            OeaAppLockStore.setLocked(this, lockKey, true)
+                            Toast.makeText(this, "${app.label} locked by OEA.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val input = pinInput()
+                            AlertDialog.Builder(this)
+                                .setTitle("Create App Lock PIN")
+                                .setMessage("Set a 4–8 digit PIN to lock ${app.label}.")
+                                .setView(input)
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Create and lock") { _, _ ->
+                                    val pin = input.text.toString()
+                                    if (pin.length in 4..8 && pin.all(Char::isDigit)) {
+                                        OeaAppLockStore.setPin(this, pin)
+                                        OeaAppLockStore.setLocked(this, lockKey, true)
+                                        Toast.makeText(this, "${app.label} locked by OEA.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(this, "PIN must be 4–8 digits.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }.show()
+                        }
+                    }
+                    "Unlock this app" -> {
+                        OeaAppLockStore.setLocked(this, lockKey, false)
+                        Toast.makeText(this, "${app.label} unlocked by OEA.", Toast.LENGTH_SHORT).show()
+                    }
                     "App info / force stop" -> runCatching {
                         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}")))
                     }.onFailure {
@@ -708,20 +772,36 @@ class OeaSystemToolsActivity : Activity() {
             popup.show()
         }
 
+        fun relativeUseTime(timestamp: Long): String {
+            if (timestamp <= 0L) return "Not used in the last 7 days"
+            val elapsed = (overviewNow - timestamp).coerceAtLeast(0L)
+            return when {
+                elapsed < 60_000L -> "Used just now"
+                elapsed < 3_600_000L -> "Used ${elapsed / 60_000L} min ago"
+                elapsed < 86_400_000L -> "Used ${elapsed / 3_600_000L} hr ago"
+                else -> "Used ${elapsed / 86_400_000L} days ago"
+            }
+        }
+
         fun render(query: String) {
             list.removeAllViews()
             val normalized = query.trim()
-            val visible = recentChoices.filter { app ->
+            val source = if (showAllApps) allChoices else recentChoices
+            val visible = source.filter { app ->
                 normalized.isBlank() || app.label.contains(normalized, ignoreCase = true) ||
                     app.packageName.contains(normalized, ignoreCase = true)
             }
             if (visible.isEmpty()) {
                 list.addView(TextView(this).apply {
-                    text = "No matching apps"
+                    text = when {
+                        !showAllApps && !usageAccess -> "Grant Usage access to see recent-use history, or switch to All apps."
+                        !showAllApps -> "No launchable apps were used in the last 7 days."
+                        else -> "No matching apps"
+                    }
                     textSize = 14f
                     gravity = Gravity.CENTER
                     setTextColor(mutedColor())
-                    setPadding(0, dp(28), 0, dp(28))
+                    setPadding(dp(16), dp(28), dp(16), dp(28))
                 })
                 return
             }
@@ -736,7 +816,7 @@ class OeaSystemToolsActivity : Activity() {
                     }
                     isClickable = true
                     isFocusable = true
-                    contentDescription = "Switch to ${app.label}"
+                    contentDescription = "Open ${app.label}"
                     setOnClickListener { launchApp(app) }
                 }
                 val icon = ImageView(this).apply {
@@ -757,10 +837,15 @@ class OeaSystemToolsActivity : Activity() {
                         setTextColor(textColor())
                     })
                     addView(TextView(this@OeaSystemToolsActivity).apply {
-                        text = when {
-                            (lastUsed[app.packageName] ?: 0L) > 0L -> "Recently used"
-                            !usageAccess -> "Enable Usage access for recent order"
-                            else -> app.packageName
+                        val locked = OeaAppLockStore.isLocked(
+                            this@OeaSystemToolsActivity, app.packageName + "/" + app.className
+                        )
+                        text = if (showAllApps) {
+                            relativeUseTime(lastUsed[app.packageName] ?: 0L) +
+                                if (locked) " • App locked" else ""
+                        } else {
+                            relativeUseTime(lastUsed[app.packageName] ?: 0L) +
+                                if (locked) " • App locked" else ""
                         }
                         textSize = 11f
                         maxLines = 1
@@ -784,6 +869,30 @@ class OeaSystemToolsActivity : Activity() {
             }
         }
 
+        fun updateTabStyle() {
+            val activeColor = if (lightUi) Color.rgb(52, 103, 230) else Color.rgb(56, 105, 235)
+            val inactiveColor = surfaceColor()
+            recentTab.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(if (showAllApps) inactiveColor else activeColor)
+            }
+            allAppsTab.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(if (showAllApps) activeColor else inactiveColor)
+            }
+            recentTab.setTextColor(if (showAllApps) textColor() else Color.WHITE)
+            allAppsTab.setTextColor(if (showAllApps) Color.WHITE else textColor())
+        }
+        recentTab.setOnClickListener {
+            showAllApps = false
+            updateTabStyle()
+            render(search.text?.toString().orEmpty())
+        }
+        allAppsTab.setOnClickListener {
+            showAllApps = true
+            updateTabStyle()
+            render(search.text?.toString().orEmpty())
+        }
         search.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -791,6 +900,7 @@ class OeaSystemToolsActivity : Activity() {
             }
             override fun afterTextChanged(s: android.text.Editable?) = Unit
         })
+        updateTabStyle()
         render("")
         setRoot(box)
     }
