@@ -79,14 +79,21 @@ object OeaMultitaskLauncher {
 
         if (width <= 0 || height <= 0) return null
 
-        // Leave enough room to see the underlying app and keep practical minimum
-        // dimensions on small phones. launchBounds are screen pixels, not dp.
-        val minWidth = (280f * context.resources.displayMetrics.density).toInt()
-        val minHeight = (320f * context.resources.displayMetrics.density).toInt()
-        val floatingWidth = (width * 0.78f).toInt().coerceIn(minWidth.coerceAtMost(width), width)
-        val floatingHeight = (height * 0.66f).toInt().coerceIn(minHeight.coerceAtMost(height), height)
+        // Use a practical dp-based starting size rather than a percentage preset.
+        // The OS/OEM window manager remains responsible for interactive resizing.
+        val density = context.resources.displayMetrics.density
+        val preferredWidthDp = 420
+        val preferredHeightDp = 560
+        val horizontalMargin = (24f * density).toInt()
+        val verticalMargin = (32f * density).toInt()
+        val preferredWidth = (preferredWidthDp * density).toInt()
+        val preferredHeight = (preferredHeightDp * density).toInt()
+        val availableWidth = (width - horizontalMargin * 2).coerceAtLeast(1)
+        val availableHeight = (height - verticalMargin * 2).coerceAtLeast(1)
+        val floatingWidth = preferredWidth.coerceAtMost(availableWidth)
+        val floatingHeight = preferredHeight.coerceAtMost(availableHeight)
         val left = ((width - floatingWidth) / 2).coerceAtLeast(0)
-        val top = ((height - floatingHeight) / 3).coerceAtLeast(0)
+        val top = ((height - floatingHeight) / 4).coerceAtLeast(0)
         return Rect(left, top, left + floatingWidth, top + floatingHeight)
     }
 }
