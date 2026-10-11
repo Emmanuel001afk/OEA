@@ -426,7 +426,7 @@ class OeaSystemToolsActivity : Activity() {
                         Thread {
                             val activeBackend = OeaAppFreezer.backend(this@OeaSystemToolsActivity)
                             val result = if (activeBackend == OeaAppFreezer.Backend.NONE || activeBackend == OeaAppFreezer.Backend.DEVICE_ADMIN) {
-                                OeaAppFreezer.Result(false, "Device Owner or root authority is required. Use the access card above for setup.")
+                                OeaAppFreezer.Result(false, "This Android device does not grant OEA system-level app-freezing access. Device Admin approval alone cannot enable it.")
                             } else {
                                 OeaAppFreezer.setFrozen(this@OeaSystemToolsActivity, app.packageName, !isFrozen)
                             }
