@@ -20,6 +20,7 @@ import android.provider.Settings
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import com.oea.launcher.data.OeaDataStore
@@ -634,7 +635,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setPadding(dp(24), dp(8), dp(24), dp(4))
         }
         val iconView = ImageView(context).apply {
-            setImageDrawable(icon(app.packageName))
+            setImageDrawable(icon(app.packageName, app.className))
+                applyIconShape(this)
             contentDescription = app.label + " locked"
             scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
@@ -984,15 +986,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             columnCount = 3
             useDefaultMargins = false
         }
-        listOf(
+        // System-only tools remain available from the Home menu and OEA Settings,
+        // not as experimental shortcuts mixed into the normal All Apps drawer.
+        val tools = listOf(
             "⚙" to "OEA Settings",
-            "❄" to "App Freezer",
             "☎" to "Phone & Calls",
             "⛔" to "Call Blocker",
             "🎮" to "Game Boost",
-            "▣" to "Multitask",
-            "▤" to "Split Screen",
-        ).forEachIndexed { index, (iconText, title) ->
+        )
+        tools.forEachIndexed { index, (iconText, title) ->
             row.addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -1013,10 +1015,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
                 addView(TextView(context).apply {
                     text = iconText
-                    textSize = 22f
+                    textSize = 28f
                     gravity = Gravity.CENTER
                     setTextColor(themeText)
-                }, LinearLayout.LayoutParams(-1, dp(34)))
+                }, LinearLayout.LayoutParams(-1, dp(42)))
                 addView(TextView(context).apply {
                     text = title
                     textSize = 10f
@@ -1024,16 +1026,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setTextColor(themeText)
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
-                }, LinearLayout.LayoutParams(-1, dp(30)))
+                }, LinearLayout.LayoutParams(-1, dp(26)))
             }, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(72)
+                height = dp(76)
                 columnSpec = GridLayout.spec(index % 3, 1, 1f)
                 rowSpec = GridLayout.spec(index / 3)
                 setMargins(dp(1), dp(1), dp(1), dp(3))
             })
         }
-        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(220)))
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(((tools.size + 2) / 3) * 80)))
     }
 
     private fun drawerTile(app: OeaAppInfo) = LinearLayout(context).apply {
@@ -1045,7 +1047,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         setOnClickListener { launch(app) }
         addView(FrameLayout(context).apply {
             val iconView = ImageView(context).apply {
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
             }
@@ -1081,7 +1084,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setPadding(dp(12), 0, dp(8), 0)
             background = rounded(themeSurface, 16)
             addView(ImageView(context).apply {
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, LinearLayout.LayoutParams(dp(42), dp(42)))
             addView(TextView(context).apply {
@@ -1141,7 +1145,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
         folder.members.mapNotNull(::find).take(4).forEach { app ->
             preview.addView(ImageView(context).apply {
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, GridLayout.LayoutParams().apply {
                 width = dp(22); height = dp(22)
@@ -1173,7 +1178,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             val iconView = ImageView(context).apply {
                 // Use the app's real launcher drawable as-is. OEA must not wrap, pad,
                 // clip, or paint a second rectangular/circular background around it.
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
                 alpha = if (OeaAppFreezer.frozenPackages(context).contains(app.packageName)) 0.45f else 1f
@@ -1446,7 +1452,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         contentDescription = "Open " + app.label
         setOnClickListener { launch(app) }
         addView(ImageView(context).apply {
-            setImageDrawable(icon(app.packageName))
+            setImageDrawable(icon(app.packageName, app.className))
+                applyIconShape(this)
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             adjustViewBounds = true
@@ -1556,22 +1563,29 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
     }
 
-    private fun iconShapeBackground(): Drawable = GradientDrawable().apply {
-        val radius = when (store.iconShape()) {
-            "circle" -> 999f
-            "square" -> 4f
-            else -> 14f
+    private fun applyIconShape(view: ImageView) {
+        val shape = store.iconShape()
+        val outline = GradientDrawable().apply {
+            setColor(Color.TRANSPARENT)
+            cornerRadius = when (shape) {
+                "circle" -> dp(999).toFloat()
+                "square" -> 0f
+                "squircle" -> dp(15).toFloat()
+                else -> dp(10).toFloat()
+            }
         }
-        setColor(themeSurface)
-        cornerRadius = dp(radius.toInt()).toFloat()
+        view.background = outline
+        view.outlineProvider = ViewOutlineProvider.BACKGROUND
+        view.clipToOutline = true
     }
 
     private fun openIconShapeSettings() {
-        val values = arrayOf("Rounded", "Circle", "Square")
-        val current = when (store.iconShape()) { "circle" -> 1; "square" -> 2; else -> 0 }
+        val labels = arrayOf("Circle", "Rounded square", "Squircle", "Square")
+        val values = arrayOf("circle", "rounded", "squircle", "square")
+        val current = values.indexOf(store.iconShape()).takeIf { it >= 0 } ?: 1
         AlertDialog.Builder(hostActivity ?: context).setTitle("Icon shape")
-            .setSingleChoiceItems(values, current) { dialog, which ->
-                store.setIconShape(when (which) { 1 -> "circle"; 2 -> "square"; else -> "rounded" })
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                store.setIconShape(values[which])
                 rebuild()
                 renderDrawer(drawerSearch.text.toString())
                 dialog.dismiss()
@@ -1622,7 +1636,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(6), dp(4), dp(6), dp(4))
                 addView(ImageView(context).apply {
-                    setImageDrawable(icon(app.packageName))
+                    setImageDrawable(icon(app.packageName, app.className))
+                applyIconShape(this)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                 }, LinearLayout.LayoutParams(dp(42), dp(42)))
                 addView(TextView(context).apply {
@@ -1749,6 +1764,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             store.setShowAppLabels(!store.showAppLabels()); rebuild()
         }
         action("Theme", "System / wallpaper, dark, or light") { openThemeSettings() }
+        action("Icon shape", store.iconShape()) { openIconShapeSettings() }
         action("Wallpaper", "Change the OEA wallpaper") { openWallpaperChooser() }
 
         section("APPS")
@@ -1926,7 +1942,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
         }
     }
-    private fun icon(pkg: String): Drawable? = iconController.icon(pkg)
+    private fun icon(pkg: String, className: String? = null): Drawable? = iconController.icon(pkg, className)
     private fun selectable(): Drawable? = context.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).let { a ->
         a.getDrawable(0).also { a.recycle() }
     }
