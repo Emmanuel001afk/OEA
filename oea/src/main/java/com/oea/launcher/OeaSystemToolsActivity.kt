@@ -23,6 +23,7 @@ import com.oea.launcher.callblocker.OeaCallBlockRules
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.gameboost.OeaGameBoostService
 import com.oea.launcher.gameboost.OeaGameBoostStore
+import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.model.OeaAppModel
 import com.oea.launcher.multitask.OeaMultitaskLauncher
@@ -95,6 +96,8 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Default launcher", homeRoleStatus()) { openHomeSettings() }
         row(box, "Wallpaper", "Choose an image and apply it to OEA + Android Home") { pickWallpaper() }
         row(box, "Theme", themeLabel()) { themeDialog() }
+        row(box, "Icon shape", iconShapeLabel()) { iconShapeDialog() }
+        row(box, "External icon pack", iconPackLabel()) { iconPackDialog() }
         row(box, "Home grid", dataStore.gridColumns().toString() + " columns") { gridDialog() }
         row(box, "App labels", if (dataStore.showAppLabels()) "Shown under app icons" else "Hidden") {
             dataStore.setShowAppLabels(!dataStore.showAppLabels()); showSettings()
@@ -1338,6 +1341,58 @@ class OeaSystemToolsActivity : Activity() {
                     showCallBlocker()
                 }
             }.show()
+    }
+
+    private fun iconShapeLabel(): String = when (dataStore.iconShape()) {
+        "circle" -> "Circle"
+        "squircle" -> "Squircle"
+        "square" -> "Square"
+        else -> "Rounded square"
+    }
+
+    private fun iconShapeDialog() {
+        val labels = arrayOf("Circle", "Rounded square", "Squircle", "Square")
+        val values = arrayOf("circle", "rounded", "squircle", "square")
+        val selected = values.indexOf(dataStore.iconShape()).takeIf { it >= 0 } ?: 1
+        AlertDialog.Builder(this).setTitle("Icon shape")
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                dataStore.setIconShape(values[which])
+                dialog.dismiss()
+                showSettings()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun iconPackLabel(): String {
+        val selected = dataStore.iconPackPackage() ?: return "System app icons"
+        return OeaIconController(this).installedPacks()
+            .firstOrNull { it.packageName == selected }?.label
+            ?: "Pack unavailable — using system icons"
+    }
+
+    private fun iconPackDialog() {
+        val packs = OeaIconController(this).installedPacks()
+        val labels = listOf("System app icons") + packs.map { it.label }
+        val selectedPackage = dataStore.iconPackPackage()
+        val selected = packs.indexOfFirst { it.packageName == selectedPackage }
+            .let { if (selectedPackage == null || it < 0) 0 else it + 1 }
+        AlertDialog.Builder(this).setTitle("External icon pack")
+            .setMessage("Choose an installed ADW/Nova-style icon pack. Apps missing from the pack keep their original icons.")
+            .setSingleChoiceItems(labels.toTypedArray(), selected) { dialog, which ->
+                dataStore.setIconPackPackage(packs.getOrNull(which - 1)?.packageName)
+                dialog.dismiss()
+                showSettings()
+            }
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Find icon packs") { _, _ ->
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=icon%20pack&c=apps")))
+                }.onFailure {
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/search?q=icon%20pack&c=apps"))) }
+                }
+            }
+            .show()
     }
 
     private fun themeDialog() {
