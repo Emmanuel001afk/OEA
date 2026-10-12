@@ -116,7 +116,7 @@ class OeaPhoneActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(4), 0, dp(10))
         }
-        listOf(TAB_DIAL to "Dial", TAB_RECENT to "Recent", TAB_CONTACTS to "Contacts", TAB_BLOCKED to "Blocked").forEach { (tab, label) ->
+        listOf(TAB_DIAL to "Dial", TAB_RECENT to "Recent", TAB_MISSED to "Missed", TAB_CONTACTS to "Contacts", TAB_BLOCKED to "Blocked").forEach { (tab, label) ->
             tabs.addView(smallButton(label) {
                 selectedTab = tab
                 updateTabs()
@@ -232,6 +232,7 @@ class OeaPhoneActivity : Activity() {
         when (selectedTab) {
             TAB_DIAL -> addEmptyState("Enter a number, use the keypad, then tap Call.")
             TAB_RECENT -> loadCallLog()
+            TAB_MISSED -> loadCallLog(missedOnly = true)
             TAB_CONTACTS -> {
                 loadContacts()
                 renderContacts()
@@ -386,7 +387,7 @@ class OeaPhoneActivity : Activity() {
             .onFailure { toast("Open Android Settings and choose OEA as the default phone app.") }
     }
 
-    private fun loadCallLog() {
+    private fun loadCallLog(missedOnly: Boolean = false) {
         if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
             addEmptyState("Call history permission is needed to show recent calls.", "Grant permission") {
                 requestPermissions(arrayOf(Manifest.permission.READ_CALL_LOG), REQUEST_CALL_LOG)
@@ -398,9 +399,11 @@ class OeaPhoneActivity : Activity() {
         runCatching {
             contentResolver.query(CallLog.Calls.CONTENT_URI, projection, null, null, CallLog.Calls.DATE + " DESC")?.use { cursor ->
                 while (cursor.moveToNext() && count < 100) {
+                    val callType = cursor.getInt(1)
+                    if (missedOnly && callType != CallLog.Calls.MISSED_TYPE) continue
                     count++
                     val phone = cursor.getString(0).orEmpty().ifBlank { "Unknown number" }
-                    val type = when (cursor.getInt(1)) {
+                    val type = when (callType) {
                         CallLog.Calls.INCOMING_TYPE -> "Incoming"
                         CallLog.Calls.OUTGOING_TYPE -> "Outgoing"
                         CallLog.Calls.MISSED_TYPE -> "Missed"
@@ -414,6 +417,7 @@ class OeaPhoneActivity : Activity() {
             }
         }.onFailure { addEmptyState("Could not read call history on this device.") }
         if (count == 0 && list.childCount == 0) addEmptyState("No recent calls found.")
+        if (missedOnly && count == 0 && list.childCount == 0) addEmptyState("No missed calls found.")
         addSectionAction("Open dial pad") {
             selectedTab = TAB_DIAL
             updateTabs()
@@ -555,7 +559,7 @@ class OeaPhoneActivity : Activity() {
         if (!::tabs.isInitialized) return
         for (i in 0 until tabs.childCount) {
             val button = tabs.getChildAt(i) as? Button ?: continue
-            val tab = listOf(TAB_DIAL, TAB_RECENT, TAB_CONTACTS, TAB_BLOCKED).getOrNull(i)
+            val tab = listOf(TAB_DIAL, TAB_RECENT, TAB_MISSED, TAB_CONTACTS, TAB_BLOCKED).getOrNull(i)
             val active = tab == selectedTab
             button.alpha = 1f
             button.isSelected = active
@@ -623,6 +627,7 @@ class OeaPhoneActivity : Activity() {
     companion object {
         private const val TAB_DIAL = "dial"
         private const val TAB_RECENT = "recent"
+        private const val TAB_MISSED = "missed"
         private const val TAB_CONTACTS = "contacts"
         private const val TAB_BLOCKED = "blocked"
         private const val REQUEST_DIALER_ROLE = 9002
