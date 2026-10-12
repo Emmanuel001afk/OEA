@@ -464,7 +464,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         grid.removeAllViews()
         val items = ws.items().filter { it.page == page && it.folderId == null }.associateBy { it.cell }
         val folders = ws.folders().filter { it.page == page }.associateBy { it.cell }
-        val count = maxOf(cols() * 4, (items.keys.maxOrNull() ?: -1) + 1, (folders.keys.maxOrNull() ?: -1) + 1)
+        // The workspace is exactly four rows tall; overflow is moved to another page by normalizeHomeLayout().
+        val count = cols() * 4
         for (cell in 0 until count) {
             val view = folders[cell]?.let { folderTile(it) } ?: items[cell]?.let { homeTile(it) } ?: emptyCell()
             grid.addView(view, GridLayout.LayoutParams().apply {
