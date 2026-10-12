@@ -798,7 +798,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openCallBlockerSettings() {
-        launchOeaTool("call_blocker")
+        runCatching {
+            (hostActivity ?: context).startActivity(
+                Intent(context, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            )
+        }.onFailure {
+            Toast.makeText(context, "OEA Call Blocker could not be opened.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun openMultitaskDialog() {
