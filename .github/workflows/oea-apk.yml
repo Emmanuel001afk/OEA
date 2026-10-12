@@ -81,6 +81,7 @@ jobs:
           grep -Fq '"squircle"' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq 'outline.setConvexPath(path)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq 'widgetScroll' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'val count = cols() * 4' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq 'row(box, "Animation speed"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq 'store.animationDuration(180)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq '.removePrefix("oea_widget:")?.toIntOrNull()' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
