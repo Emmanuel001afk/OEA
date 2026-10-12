@@ -377,8 +377,14 @@ class OeaSystemToolsActivity : Activity() {
         bulkActions.addView(bulkButton("Freeze selected", true), LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
         bulkActions.addView(bulkButton("Restore selected", false), LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
         box.addView(bulkActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        box.addView(list, LinearLayout.LayoutParams(-1, -2))
+        val cardRail = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(0, dp(2), dp(12), dp(10))
+        }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        cardRail.addView(list, FrameLayout.LayoutParams(-2, -2))
+        box.addView(cardRail, LinearLayout.LayoutParams(-1, -2))
 
         fun renderApps() {
             // Use the cached installed-app snapshot; filtering/searching must stay lightweight.
@@ -804,78 +810,112 @@ class OeaSystemToolsActivity : Activity() {
             if (visible.isEmpty()) {
                 list.addView(TextView(this).apply {
                     text = when {
-                        !showAllApps && !usageAccess -> "Grant Usage access to see recent-use history, or switch to All apps."
-                        !showAllApps -> "No launchable apps were used in the last 7 days."
-                        else -> "No matching apps"
+                        !showAllApps && !usageAccess -> "Enable Usage access for recent-use cards, or choose All apps."
+                        !showAllApps -> "No launchable apps have recorded use in the last 7 days."
+                        else -> "No matching apps."
                     }
                     textSize = 14f
                     gravity = Gravity.CENTER
                     setTextColor(mutedColor())
-                    setPadding(dp(16), dp(28), dp(16), dp(28))
-                })
+                    setPadding(dp(18), dp(32), dp(18), dp(32))
+                }, LinearLayout.LayoutParams(dp(280), dp(280)))
                 return
             }
             visible.forEach { app ->
+                val lockKey = app.packageName + "/" + app.className
+                val locked = OeaAppLockStore.isLocked(this, lockKey)
                 val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(13), dp(12), dp(7), dp(12))
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(12), dp(12), dp(12))
                     background = android.graphics.drawable.GradientDrawable().apply {
-                        cornerRadius = dp(20).toFloat()
+                        cornerRadius = dp(24).toFloat()
                         setColor(surfaceColor())
+                        setStroke(dp(1), if (lightUi) Color.rgb(215, 220, 230) else Color.rgb(48, 57, 74))
                     }
-                    isClickable = true
-                    isFocusable = true
-                    contentDescription = "Open ${app.label}"
-                    setOnClickListener { launchApp(app) }
                 }
-                val icon = ImageView(this).apply {
+                val preview = FrameLayout(this).apply {
+                    background = android.graphics.drawable.GradientDrawable(
+                        android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                        intArrayOf(
+                            if (lightUi) Color.rgb(225, 232, 246) else Color.rgb(39, 53, 77),
+                            if (lightUi) Color.rgb(244, 237, 230) else Color.rgb(24, 31, 43)
+                        )
+                    ).apply { cornerRadius = dp(18).toFloat() }
+                    contentDescription = "App card illustration; Android does not provide OEA a live task snapshot"
+                }
+                val previewIcon = ImageView(this).apply {
                     setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
                     scaleType = ImageView.ScaleType.FIT_CENTER
-                    contentDescription = "${app.label} icon"
+                    contentDescription = app.label + " icon"
                 }
-                card.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(13) })
-                card.addView(LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
+                preview.addView(previewIcon, FrameLayout.LayoutParams(dp(88), dp(88), Gravity.CENTER))
+                preview.addView(TextView(this).apply {
+                    text = if (usageAccess) relativeUseTime(lastUsed[app.packageName] ?: 0L) else "Usage access off"
+                    textSize = 11f
+                    gravity = Gravity.CENTER
+                    setTextColor(if (lightUi) Color.rgb(60, 68, 83) else Color.rgb(216, 225, 240))
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(10).toFloat()
+                        setColor(if (lightUi) Color.argb(220, 255, 255, 255) else Color.argb(190, 10, 14, 22))
+                    }
+                }, FrameLayout.LayoutParams(-2, dp(28), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                    bottomMargin = dp(10)
+                })
+                card.addView(preview, LinearLayout.LayoutParams(dp(260), dp(270)).apply { bottomMargin = dp(12) })
+                val appRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
+                }
+                appRow.addView(ImageView(this).apply {
+                    setImageDrawable(runCatching { packageManager.getApplicationIcon(app.packageName) }.getOrNull())
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = app.label + " icon"
+                }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { rightMargin = dp(9) })
+                appRow.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
                     addView(TextView(this@OeaSystemToolsActivity).apply {
-                        text = app.label
-                        textSize = 15f
+                        text = app.label + if (locked) " • Locked" else ""
+                        textSize = 14f
                         maxLines = 1
                         ellipsize = android.text.TextUtils.TruncateAt.END
                         setTypeface(typeface, android.graphics.Typeface.BOLD)
                         setTextColor(textColor())
                     })
                     addView(TextView(this@OeaSystemToolsActivity).apply {
-                        val locked = OeaAppLockStore.isLocked(
-                            this@OeaSystemToolsActivity, app.packageName + "/" + app.className
-                        )
-                        text = if (showAllApps) {
-                            relativeUseTime(lastUsed[app.packageName] ?: 0L) +
-                                if (locked) " • App locked" else ""
-                        } else {
-                            relativeUseTime(lastUsed[app.packageName] ?: 0L) +
-                                if (locked) " • App locked" else ""
-                        }
-                        textSize = 11f
+                        text = app.packageName
+                        textSize = 10f
                         maxLines = 1
                         ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
                         setTextColor(mutedColor())
-                        setPadding(0, dp(4), 0, 0)
                     })
                 }, LinearLayout.LayoutParams(0, -2, 1f))
-                val more = TextView(this).apply {
+                appRow.addView(TextView(this).apply {
                     text = "⋮"
-                    textSize = 27f
+                    textSize = 25f
                     gravity = Gravity.CENTER
                     setTextColor(textColor())
-                    contentDescription = "Actions for ${app.label}"
+                    contentDescription = "Actions for " + app.label
                     isClickable = true
                     isFocusable = true
                     setOnClickListener { showAppMenu(this, app) }
-                }
-                card.addView(more, LinearLayout.LayoutParams(dp(42), dp(48)))
-                list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+                }, LinearLayout.LayoutParams(dp(36), dp(44)))
+                card.addView(appRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+                card.addView(TextView(this).apply {
+                    text = "Open app"
+                    textSize = 13f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(14).toFloat()
+                        setColor(Color.rgb(56, 105, 235))
+                    }
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { launchApp(app) }
+                }, LinearLayout.LayoutParams(-1, dp(42)))
+                list.addView(card, LinearLayout.LayoutParams(dp(284), -2).apply { rightMargin = dp(12) })
             }
         }
 
