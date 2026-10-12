@@ -1543,19 +1543,37 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openDrawer() {
+        if (drawerOpen) return
         drawerOpen = true
+        drawer.animate().cancel()
+        homeRoot.animate().cancel()
+        homeRoot.animate().alpha(0f).setDuration(100).start()
         homeRoot.visibility = View.GONE
+        drawer.alpha = 0f
+        drawer.translationY = dp(12).toFloat()
         drawer.visibility = View.VISIBLE
         drawerSearch.setText(search.text.toString())
         drawerSearch.setSelection(drawerSearch.text.length)
         renderDrawer(drawerSearch.text.toString())
+        drawer.animate().alpha(1f).translationY(0f).setDuration(180)
+            .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
         drawerSearch.requestFocus()
     }
 
     private fun closeDrawer() {
+        if (!drawerOpen) return
         drawerOpen = false
-        drawer.visibility = View.GONE
-        homeRoot.visibility = View.VISIBLE
+        drawer.animate().cancel()
+        drawer.animate().alpha(0f).translationY(dp(10).toFloat()).setDuration(120)
+            .withEndAction {
+                drawer.visibility = View.GONE
+                drawer.translationY = 0f
+                drawer.alpha = 1f
+                homeRoot.alpha = 0f
+                homeRoot.visibility = View.VISIBLE
+                homeRoot.animate().alpha(1f).setDuration(150)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+            }.start()
         search.setText("")
         drawerSearch.setText("")
         search.clearFocus()
