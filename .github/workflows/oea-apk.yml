@@ -131,6 +131,15 @@ jobs:
           grep -Fq 'Phone number or USSD code' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'TAB_CONTACTS' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'ACTION_CHANGE_DEFAULT_DIALER' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'Choose SIM for this call' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'callCapablePhoneAccounts' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'Compact floating card' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'Incoming-call flash alert' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'setTorchMode' oea/src/main/java/com/oea/launcher/phone/OeaInCallService.kt
+          grep -Fq 'child.tag = widget.appWidgetId' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'val childId = child.tag as? Int' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'renderedPages.toList().forEach { refreshPage(it) }' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           python3 - <<'PY'
           from pathlib import Path
           source = Path("oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt").read_text()
