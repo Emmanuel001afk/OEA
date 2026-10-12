@@ -303,7 +303,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     when (event.action) {
                         DragEvent.ACTION_DRAG_STARTED -> true
                         DragEvent.ACTION_DROP -> {
-                            val sourceId = event.clipData?.getItemAt(0)?.text?.toString()?.toIntOrNull()
+                            val sourceId = event.clipData?.getItemAt(0)?.text?.toString()
+                                ?.removePrefix("oea_widget:")?.toIntOrNull()
                             if (sourceId != null) {
                                 val container = host as FrameLayout
                                 var targetId: Int? = null
@@ -1427,6 +1428,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             dialog.window?.setDimAmount(0.55f)
         }
         dialog.show()
+        dialog.window?.decorView?.apply {
+            alpha = 0f
+            scaleX = 0.94f
+            scaleY = 0.94f
+            animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(store.animationDuration(180))
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        }
     }
 
     private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
