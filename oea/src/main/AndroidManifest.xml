@@ -48,6 +48,7 @@
             android:name="com.oea.launcher.phone.OeaPhoneActivity"
             android:exported="true"
             android:label="Phone"
+            android:icon="@drawable/ic_oea_phone"
             android:theme="@style/OeaTheme">
             <!-- The no-data DIAL filter is required for Android's default-dialer
                  role resolver; the tel filter handles links and prefilled numbers. -->
@@ -108,7 +109,7 @@
             android:name="com.oea.launcher.callblocker.OeaCallBlockerActivity"
             android:exported="true"
             android:label="Call Blocker"
-            android:icon="@drawable/oea_logo"
+            android:icon="@drawable/ic_oea_call_blocker"
             android:theme="@style/OeaTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
