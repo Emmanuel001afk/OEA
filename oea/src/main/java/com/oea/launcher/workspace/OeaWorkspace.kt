@@ -310,16 +310,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                                 var targetId: Int? = null
                                 for (i in 0 until container.childCount) {
                                     val child = container.getChildAt(i)
-                                    if (child is android.appwidget.AppWidgetHostView &&
+                                    val childId = child.tag as? Int
+                                    if (childId != null &&
                                         event.x >= child.left && event.x <= child.right &&
                                         event.y >= child.top && event.y <= child.bottom) {
-                                        targetId = child.appWidgetId
+                                        targetId = childId
                                         break
                                     }
                                 }
                                 widgetController.moveBefore(sourceId, targetId)
                                 widgetController.setPage(sourceId, p)
-                                refreshPage(p)
+                                renderedPages.toList().forEach { refreshPage(it) }
                             }
                             true
                         }
@@ -1218,7 +1219,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     ?.removePrefix("oea_widget:")?.toIntOrNull()
                 if (widgetId != null) {
                     widgetController.setPage(widgetId, page)
-                    refreshPage(page)
+                    renderedPages.toList().forEach { refreshPage(it) }
                     return@OnDragListener true
                 }
                 val key = dragged ?: return@OnDragListener true
@@ -2033,6 +2034,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
             val wrapper = FrameLayout(context).apply {
                 clipChildren = false
+                tag = widget.appWidgetId
             }
             wrapper.addView(widget, FrameLayout.LayoutParams(widthPx, dp(heightDp), Gravity.CENTER))
             wrapper.addView(TextView(context).apply {
