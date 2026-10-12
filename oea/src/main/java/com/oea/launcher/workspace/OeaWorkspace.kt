@@ -19,6 +19,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import android.provider.AlarmClock
 import android.provider.Settings
 import android.view.DragEvent
 import android.view.Gravity
@@ -177,7 +178,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val glance = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), 0, dp(4), 0)
+            // At a Glance behaves like a real widget: tapping the clock and date
+            // jumps straight into the alarms/clock surface.
+            contentDescription = "Open clock and alarms"
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { openClockAndAlarms() }
         }
+        attachPressAnimation(glance)
         glanceClock.textSize = 26f
         glanceClock.setTextColor(themeText)
         glanceClock.setSingleLine(true)
@@ -354,6 +362,23 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val locale = Locale.getDefault()
         glanceClock.text = SimpleDateFormat(CLOCK_FORMAT, locale).format(now)
         glanceDate.text = SimpleDateFormat(DATE_FORMAT, locale).format(now) + " • OEA Engine"
+    }
+
+    /** At-a-Glance tap target: the system clock / alarms surface. */
+    private fun openClockAndAlarms() {
+        val attempts = listOf(
+            Intent(AlarmClock.ACTION_SHOW_ALARMS),
+            Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setPackage("com.google.android.deskclock"),
+        )
+        for (intent in attempts) {
+            val opened = runCatching {
+                (hostActivity ?: context).startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+            if (opened) return
+        }
+        Toast.makeText(context, "No clock app is installed.", Toast.LENGTH_SHORT).show()
     }
 
     private fun buildDefaultHomeBanner() {
