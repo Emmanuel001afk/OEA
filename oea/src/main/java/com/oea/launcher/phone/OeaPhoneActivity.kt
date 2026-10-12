@@ -416,8 +416,7 @@ class OeaPhoneActivity : Activity() {
                 }
             }
         }.onFailure { addEmptyState("Could not read call history on this device.") }
-        if (count == 0 && list.childCount == 0) addEmptyState("No recent calls found.")
-        if (missedOnly && count == 0 && list.childCount == 0) addEmptyState("No missed calls found.")
+        if (count == 0 && list.childCount == 0) addEmptyState(if (missedOnly) "No missed calls found." else "No recent calls found.")
         addSectionAction("Open dial pad") {
             selectedTab = TAB_DIAL
             updateTabs()
