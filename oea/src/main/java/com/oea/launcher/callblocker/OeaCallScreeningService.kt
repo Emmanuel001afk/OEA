@@ -18,7 +18,7 @@ class OeaCallScreeningService : CallScreeningService() {
         val isPrivate = presentation == TelecomManager.PRESENTATION_RESTRICTED ||
             presentation == TelecomManager.PRESENTATION_UNKNOWN ||
             presentation == TelecomManager.PRESENTATION_PAYPHONE
-        val blockUnknown = (number.isEmpty() || isPrivate) && OeaCallBlockRules.blockUnknown(this)
+        val blockUnknown = OeaCallBlockRules.enabled(this) && (number.isEmpty() || isPrivate) && OeaCallBlockRules.blockUnknown(this)
         if (!blockUnknown && (number.isEmpty() || isPrivate || !OeaCallBlockRules.shouldBlock(this, number))) {
             respondToCall(callDetails, CallResponse.Builder().build())
             return
