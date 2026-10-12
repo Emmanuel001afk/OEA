@@ -1610,8 +1610,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         val t = (2.0 * Math.PI * step / 64.0)
                         val cos = kotlin.math.cos(t)
                         val sin = kotlin.math.sin(t)
-                        val x = halfW + halfW * kotlin.math.sign(cos) * kotlin.math.pow(kotlin.math.abs(cos), 0.5)
-                        val y = halfH + halfH * kotlin.math.sign(sin) * kotlin.math.pow(kotlin.math.abs(sin), 0.5)
+                        val x = halfW + halfW * Math.signum(cos) * Math.pow(Math.abs(cos), 0.5)
+                        val y = halfH + halfH * Math.signum(sin) * Math.pow(Math.abs(sin), 0.5)
                         if (step == 0) path.moveTo(x.toFloat(), y.toFloat()) else path.lineTo(x.toFloat(), y.toFloat())
                     }
                     path.close()
