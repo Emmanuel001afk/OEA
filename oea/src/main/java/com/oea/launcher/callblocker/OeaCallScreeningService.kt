@@ -8,16 +8,22 @@ import android.net.Uri
 import android.provider.ContactsContract
 import android.telecom.Call
 import android.telecom.CallScreeningService
+import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
 
 class OeaCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
         val number = callDetails.handle?.schemeSpecificPart?.let(::normalize).orEmpty()
-        if (number.isEmpty() || !OeaCallBlockRules.shouldBlock(this, number)) {
+        val presentation = callDetails.handlePresentation
+        val isPrivate = presentation == TelecomManager.PRESENTATION_RESTRICTED ||
+            presentation == TelecomManager.PRESENTATION_UNKNOWN ||
+            presentation == TelecomManager.PRESENTATION_PAYPHONE
+        val blockUnknown = (number.isEmpty() || isPrivate) && OeaCallBlockRules.blockUnknown(this)
+        if (!blockUnknown && (number.isEmpty() || isPrivate || !OeaCallBlockRules.shouldBlock(this, number))) {
             respondToCall(callDetails, CallResponse.Builder().build())
             return
         }
-        OeaCallBlockRules.recordBlocked(this, number)
+        OeaCallBlockRules.recordBlocked(this, if (blockUnknown) "Unknown/private" else number)
         respondToCall(callDetails, CallResponse.Builder().setDisallowCall(true).setRejectCall(true).setSkipNotification(true).setSkipCallLog(true).build())
     }
     private fun normalize(value: String): String = value.filter(Char::isDigit).takeLast(15)
@@ -26,6 +32,7 @@ class OeaCallScreeningService : CallScreeningService() {
 object OeaCallBlockRules {
     private const val PREFS = "oea_call_blocker"
     private const val ENABLED = "enabled"
+    private const val BLOCK_UNKNOWN = "block_unknown"
     private const val EXACT = "exact"
     private const val PREFIX = "prefix"
     private const val SUFFIX = "suffix"
@@ -38,6 +45,8 @@ object OeaCallBlockRules {
 
     fun enabled(context: Context) = prefs(context).getBoolean(ENABLED, false)
     fun setEnabled(context: Context, value: Boolean) = prefs(context).edit().putBoolean(ENABLED, value).apply()
+    fun blockUnknown(context: Context) = prefs(context).getBoolean(BLOCK_UNKNOWN, false)
+    fun setBlockUnknown(context: Context, value: Boolean) = prefs(context).edit().putBoolean(BLOCK_UNKNOWN, value).apply()
     fun setRules(context: Context, exact: Set<String>, prefix: Set<String>, suffix: Set<String>) {
         prefs(context).edit()
             .putStringSet(EXACT, exact.map(::normalize).filter(String::isNotEmpty).toSet())
@@ -84,7 +93,7 @@ object OeaCallBlockRules {
 
     fun recordBlockedAt(context: Context, number: String, timestamp: Long) {
         val old = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
-        old.add(normalize(number) + "|" + timestamp)
+        old.add(normalize(number).ifEmpty { "Unknown/private" } + "|" + timestamp)
         while (old.size > 100) {
             val oldest = old.minByOrNull { it.substringAfterLast('|').toLongOrNull() ?: Long.MIN_VALUE } ?: break
             old.remove(oldest)

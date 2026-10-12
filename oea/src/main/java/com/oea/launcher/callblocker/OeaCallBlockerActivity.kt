@@ -88,6 +88,11 @@ class OeaCallBlockerActivity : Activity() {
             if (!roleHeld()) "Tap to set up Android call screening first." else "Tap to ${if (enabled) "pause" else "enable"} matching incoming-call rejection.") {
             if (!roleHeld()) requestRole() else { OeaCallBlockRules.setEnabled(this, !enabled); render() }
         }
+        row(if (OeaCallBlockRules.blockUnknown(this)) "Block private / unknown callers: ON" else "Block private / unknown callers: OFF",
+            "Applies only to callers whose number is hidden or unavailable. Off by default.") {
+            OeaCallBlockRules.setBlockUnknown(this, !OeaCallBlockRules.blockUnknown(this))
+            render()
+        }
         if (!roleHeld()) action("Choose OEA for call screening", true) { requestRole() }
         section("EXEMPTIONS")
         val contactsPermission = checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
