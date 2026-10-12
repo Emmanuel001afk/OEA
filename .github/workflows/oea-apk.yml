@@ -82,6 +82,13 @@ jobs:
           grep -Fq 'External icon pack' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq 'private fun applyIconShape' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq '"squircle"' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'fun getAllowList' oea/src/main/java/com/oea/launcher/callblocker/OeaCallScreeningService.kt
+          grep -Fq 'fun blockedHistory' oea/src/main/java/com/oea/launcher/callblocker/OeaCallScreeningService.kt
+          grep -Fq 'BLOCKED CALL HISTORY' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'WHITELIST' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'Phone number or USSD code' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'TAB_CONTACTS' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'ACTION_CHANGE_DEFAULT_DIALER' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           python3 - <<'PY'
           from pathlib import Path
           source = Path("oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt").read_text()

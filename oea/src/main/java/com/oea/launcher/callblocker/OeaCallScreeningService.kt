@@ -31,7 +31,10 @@ object OeaCallBlockRules {
     private const val SUFFIX = "suffix"
     private const val ALLOW_CONTACTS = "allow_contacts"
     private const val ALLOW_STARRED = "allow_starred"
+    private const val ALLOW_LIST = "allow_list"
     private const val HISTORY = "history"
+
+    data class BlockedCall(val number: String, val timestamp: Long)
 
     fun enabled(context: Context) = prefs(context).getBoolean(ENABLED, false)
     fun setEnabled(context: Context, value: Boolean) = prefs(context).edit().putBoolean(ENABLED, value).apply()
@@ -49,8 +52,23 @@ object OeaCallBlockRules {
     fun allowStarred(context: Context) = prefs(context).getBoolean(ALLOW_STARRED, true)
     fun setAllowContacts(context: Context, value: Boolean) = prefs(context).edit().putBoolean(ALLOW_CONTACTS, value).apply()
     fun setAllowStarred(context: Context, value: Boolean) = prefs(context).edit().putBoolean(ALLOW_STARRED, value).apply()
+    fun getAllowList(context: Context): Set<String> = prefs(context).getStringSet(ALLOW_LIST, emptySet()).orEmpty()
+    fun setAllowList(context: Context, numbers: Set<String>) {
+        prefs(context).edit().putStringSet(ALLOW_LIST, numbers.map(::normalize).filter(String::isNotEmpty).toSet()).apply()
+    }
+    fun blockedHistory(context: Context): List<BlockedCall> = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty()
+        .mapNotNull { entry ->
+            val split = entry.lastIndexOf('|')
+            if (split <= 0) null else {
+                val timestamp = entry.substring(split + 1).toLongOrNull() ?: return@mapNotNull null
+                BlockedCall(entry.substring(0, split), timestamp)
+            }
+        }.sortedByDescending { it.timestamp }
+    fun clearBlockedHistory(context: Context) { prefs(context).edit().remove(HISTORY).apply() }
     fun shouldBlock(context: Context, number: String): Boolean {
         if (!enabled(context)) return false
+        val normalized = normalize(number)
+        if (normalized.isEmpty() || getAllowList(context).contains(normalized)) return false
         val p = prefs(context)
         val exact = p.getStringSet(EXACT, emptySet()).orEmpty()
         val prefix = p.getStringSet(PREFIX, emptySet()).orEmpty()
@@ -60,12 +78,17 @@ object OeaCallBlockRules {
         // controls would appear to work while never actually exempting contacts.
         if (allowContacts(context) && isInContacts(context, number, false)) return false
         if (allowStarred(context) && isInContacts(context, number, true)) return false
-        return exact.contains(number) || prefix.any(number::startsWith) || suffix.any(number::endsWith)
+        return exact.contains(normalized) || prefix.any(normalized::startsWith) || suffix.any(normalized::endsWith)
     }
-    fun recordBlocked(context: Context, number: String) {
+    fun recordBlocked(context: Context, number: String) = recordBlockedAt(context, number, System.currentTimeMillis())
+
+    fun recordBlockedAt(context: Context, number: String, timestamp: Long) {
         val old = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
-        old.add(number + "|" + System.currentTimeMillis())
-        while (old.size > 100) old.remove(old.first())
+        old.add(normalize(number) + "|" + timestamp)
+        while (old.size > 100) {
+            val oldest = old.minByOrNull { it.substringAfterLast('|').toLongOrNull() ?: Long.MIN_VALUE } ?: break
+            old.remove(oldest)
+        }
         prefs(context).edit().putStringSet(HISTORY, old).apply()
     }
     private fun isInContacts(context: Context, number: String, starredOnly: Boolean): Boolean {

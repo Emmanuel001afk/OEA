@@ -30,6 +30,8 @@ import com.oea.launcher.multitask.OeaMultitaskLauncher
 import com.oea.launcher.split.OeaSplitLauncher
 import com.oea.launcher.widgets.OeaWidgetController
 import java.io.InputStream
+import java.text.DateFormat
+import java.util.Date
 
 class OeaSystemToolsActivity : Activity() {
     private val freezerIconCache = mutableMapOf<String, android.graphics.drawable.Drawable?>()
@@ -539,10 +541,60 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Starred contacts", if (OeaCallBlockRules.allowStarred(this)) "Allowed" else "Not exempt") {
             OeaCallBlockRules.setAllowStarred(this, !OeaCallBlockRules.allowStarred(this)); showCallBlocker()
         }
+
+        section(box, "WHITELIST")
+        val allowedNumbers = OeaCallBlockRules.getAllowList(this).sorted()
+        if (allowedNumbers.isEmpty()) {
+            row(box, "No manually allowed numbers", "Add a number to exempt it from every block rule") {}
+        }
+        allowedNumbers.forEach { number ->
+            row(box, number, "Tap to remove from whitelist") {
+                OeaCallBlockRules.setAllowList(this, OeaCallBlockRules.getAllowList(this) - number)
+                showCallBlocker()
+            }
+        }
+        row(box, "Add whitelisted number", "Always allow this number, even when a blocking rule matches") {
+            addCallRule("allow")
+        }
+
         addDivider(box)
         ruleSection(box, "Exact numbers", OeaCallBlockRules.getExact(this).toList(), "exact")
         ruleSection(box, "Prefixes", OeaCallBlockRules.getPrefix(this).toList(), "prefix")
         ruleSection(box, "Suffixes", OeaCallBlockRules.getSuffix(this).toList(), "suffix")
+
+        section(box, "BLOCKED CALL HISTORY")
+        val history = OeaCallBlockRules.blockedHistory(this)
+        if (history.isEmpty()) {
+            row(box, "No blocked calls yet", "Blocked calls recorded by OEA will appear here") {}
+        } else {
+            history.take(30).forEach { call ->
+                val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(call.timestamp))
+                row(box, call.number, "Blocked • $time • tap for actions") {
+                    AlertDialog.Builder(this).setTitle(call.number)
+                        .setItems(arrayOf("Always allow this number", "Remove this history entry")) { _, which ->
+                            when (which) {
+                                0 -> {
+                                    OeaCallBlockRules.setAllowList(this, OeaCallBlockRules.getAllowList(this) + call.number)
+                                    showCallBlocker()
+                                }
+                                1 -> {
+                                    val retained = history.filterNot { it.number == call.number && it.timestamp == call.timestamp }
+                                    OeaCallBlockRules.clearBlockedHistory(this)
+                                    retained.forEach { OeaCallBlockRules.recordBlockedAt(this, it.number, it.timestamp) }
+                                    showCallBlocker()
+                                }
+                            }
+                        }.setNegativeButton("Cancel", null).show()
+                }
+            }
+            row(box, "Clear blocked history", "${history.size} saved entries") {
+                AlertDialog.Builder(this).setTitle("Clear blocked history?")
+                    .setMessage("This removes OEA's local blocked-call records. It does not change your blocking rules.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Clear") { _, _ -> OeaCallBlockRules.clearBlockedHistory(this); showCallBlocker() }
+                    .show()
+            }
+        }
         setRoot(box)
     }
 
@@ -1324,20 +1376,30 @@ class OeaSystemToolsActivity : Activity() {
     private fun addCallRule(type: String) {
         val input = EditText(this).apply {
             setSingleLine(true)
-            hint = when (type) { "prefix" -> "e.g. 0803"; "suffix" -> "e.g. 1234"; else -> "Full phone number" }
+            hint = when (type) {
+                "prefix" -> "e.g. 0803"
+                "suffix" -> "e.g. 1234"
+                "allow" -> "Number to always allow"
+                else -> "Full phone number"
+            }
             inputType = android.text.InputType.TYPE_CLASS_PHONE
         }
-        AlertDialog.Builder(this).setTitle("Add " + type + " rule").setView(input)
+        val title = if (type == "allow") "Add whitelisted number" else "Add " + type + " rule"
+        AlertDialog.Builder(this).setTitle(title).setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
                 val value = input.text.toString().trim()
                 if (value.isNotEmpty()) {
-                    val exact = OeaCallBlockRules.getExact(this).toMutableSet()
-                    val prefix = OeaCallBlockRules.getPrefix(this).toMutableSet()
-                    val suffix = OeaCallBlockRules.getSuffix(this).toMutableSet()
-                    when (type) { "prefix" -> prefix.add(value); "suffix" -> suffix.add(value); else -> exact.add(value) }
-                    OeaCallBlockRules.setRules(this, exact, prefix, suffix)
-                    OeaCallBlockRules.setEnabled(this, true)
+                    if (type == "allow") {
+                        OeaCallBlockRules.setAllowList(this, OeaCallBlockRules.getAllowList(this) + value)
+                    } else {
+                        val exact = OeaCallBlockRules.getExact(this).toMutableSet()
+                        val prefix = OeaCallBlockRules.getPrefix(this).toMutableSet()
+                        val suffix = OeaCallBlockRules.getSuffix(this).toMutableSet()
+                        when (type) { "prefix" -> prefix.add(value); "suffix" -> suffix.add(value); else -> exact.add(value) }
+                        OeaCallBlockRules.setRules(this, exact, prefix, suffix)
+                        OeaCallBlockRules.setEnabled(this, true)
+                    }
                     showCallBlocker()
                 }
             }.show()
