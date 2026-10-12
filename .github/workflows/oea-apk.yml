@@ -94,6 +94,8 @@ jobs:
           grep -Fq 'private fun loadBlockedHistory()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'private const val TAB_DIAL' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'private fun renderContacts()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'rowClick: (() -> Unit)? = null' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'action = { placeCall(contact.phone) }' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'addTextChangedListener' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'placeCall(contact.phone)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'private fun openDialer(uri: Uri)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
