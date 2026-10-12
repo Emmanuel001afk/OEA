@@ -984,15 +984,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             columnCount = 3
             useDefaultMargins = false
         }
-        listOf(
+        // System-only tools remain available from the Home menu and OEA Settings,
+        // not as experimental shortcuts mixed into the normal All Apps drawer.
+        val tools = listOf(
             "⚙" to "OEA Settings",
-            "❄" to "App Freezer",
             "☎" to "Phone & Calls",
             "⛔" to "Call Blocker",
             "🎮" to "Game Boost",
-            "▣" to "Multitask",
-            "▤" to "Split Screen",
-        ).forEachIndexed { index, (iconText, title) ->
+        )
+        tools.forEachIndexed { index, (iconText, title) ->
             row.addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -1013,10 +1013,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
                 addView(TextView(context).apply {
                     text = iconText
-                    textSize = 22f
+                    textSize = 28f
                     gravity = Gravity.CENTER
                     setTextColor(themeText)
-                }, LinearLayout.LayoutParams(-1, dp(34)))
+                }, LinearLayout.LayoutParams(-1, dp(42)))
                 addView(TextView(context).apply {
                     text = title
                     textSize = 10f
@@ -1024,16 +1024,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setTextColor(themeText)
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
-                }, LinearLayout.LayoutParams(-1, dp(30)))
+                }, LinearLayout.LayoutParams(-1, dp(26)))
             }, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(72)
+                height = dp(76)
                 columnSpec = GridLayout.spec(index % 3, 1, 1f)
                 rowSpec = GridLayout.spec(index / 3)
                 setMargins(dp(1), dp(1), dp(1), dp(3))
             })
         }
-        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(220)))
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(((tools.size + 2) / 3) * 80)))
     }
 
     private fun drawerTile(app: OeaAppInfo) = LinearLayout(context).apply {
