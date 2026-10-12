@@ -51,7 +51,7 @@ class OeaSystemToolsActivity : Activity() {
     private val widgets by lazy { OeaWidgetController(this) }
     private val wallpaperRequestCode = 0x4F58
     private var refreshOverviewOnResume = false
-    private var callBlockerTab = "overview"
+    private var callBlockerTab = "blocked"
 
     private val lightUi: Boolean
         get() = when (dataStore.themeMode()) {
@@ -526,7 +526,7 @@ class OeaSystemToolsActivity : Activity() {
             gravity = Gravity.CENTER
         }
         listOf(
-            "overview" to "Overview",
+            "blocked" to "Blocked",
             "allowed" to "Allowed",
             "rules" to "Rules",
             "history" to "History"
@@ -549,7 +549,7 @@ class OeaSystemToolsActivity : Activity() {
         box.addView(navigation, LinearLayout.LayoutParams(-1, -2))
 
         when (callBlockerTab) {
-            "overview" -> {
+            "blocked" -> {
                 val role = if (android.os.Build.VERSION.SDK_INT >= 29)
                     getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true else false
                 row(box, if (role) "Screening role active" else "Enable screening role",
@@ -561,7 +561,7 @@ class OeaSystemToolsActivity : Activity() {
                         requestCallRole()
                     } else {
                         OeaCallBlockRules.setEnabled(this, !blocking)
-                        showCallBlocker("overview")
+                        showCallBlocker("blocked")
                     }
                 }
                 if (android.os.Build.VERSION.SDK_INT >= 23 &&
@@ -572,11 +572,11 @@ class OeaSystemToolsActivity : Activity() {
                 }
                 row(box, "Allow saved contacts", if (OeaCallBlockRules.allowContacts(this)) "Enabled • saved contacts bypass blocking rules" else "Disabled • saved contacts are checked against rules") {
                     OeaCallBlockRules.setAllowContacts(this, !OeaCallBlockRules.allowContacts(this))
-                    showCallBlocker("overview")
+                    showCallBlocker("blocked")
                 }
                 row(box, "Allow starred contacts", if (OeaCallBlockRules.allowStarred(this)) "Enabled • starred contacts bypass blocking rules" else "Disabled • starred contacts are checked against rules") {
                     OeaCallBlockRules.setAllowStarred(this, !OeaCallBlockRules.allowStarred(this))
-                    showCallBlocker("overview")
+                    showCallBlocker("blocked")
                 }
                 row(box, "Allowed numbers", "${OeaCallBlockRules.getAllowList(this).size} manually allowed • manage in Allowed") { showCallBlocker("allowed") }
                 row(box, "Blocking rules", "${OeaCallBlockRules.getExact(this).size} exact • ${OeaCallBlockRules.getPrefix(this).size} prefix • ${OeaCallBlockRules.getSuffix(this).size} suffix") { showCallBlocker("rules") }
@@ -657,7 +657,7 @@ class OeaSystemToolsActivity : Activity() {
                     }
                 }
             }
-            else -> showCallBlocker("overview")
+            else -> showCallBlocker("blocked")
         }
         setRoot(box)
     }
@@ -743,7 +743,7 @@ class OeaSystemToolsActivity : Activity() {
         }
 
         val box = base(
-            "Overview",
+            "Blocked",
             "OEA app overview • Recent-use history, not Android’s live task stack. Open apps, use floating windows, or pair apps for split screen."
         )
         val usageAccess = getSystemService(AppOpsManager::class.java).checkOpNoThrow(
