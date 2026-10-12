@@ -2,7 +2,10 @@ package com.oea.launcher.phone
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.role.RoleManager
+import android.content.Context
+import android.telecom.PhoneAccountHandle
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
@@ -44,6 +47,7 @@ class OeaPhoneActivity : Activity() {
     private var selectedTab = TAB_RECENT
     private var contactRows: List<ContactRow> = emptyList()
     private var pendingCallNumber: String? = null
+    private val phonePrefs by lazy { getSharedPreferences("oea_phone_prefs", Context.MODE_PRIVATE) }
 
     private data class ContactRow(val name: String, val phone: String)
 
@@ -153,6 +157,8 @@ class OeaPhoneActivity : Activity() {
         dialPanel.addView(callActions, LinearLayout.LayoutParams(-1, dp(54)))
         val defaultPhone = smallButton("Set default phone") { requestDefaultDialer() }
         dialPanel.addView(defaultPhone, LinearLayout.LayoutParams(-1, dp(42)))
+        val callOptions = smallButton("Call appearance & flash alerts") { showCallOptions() }
+        dialPanel.addView(callOptions, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(5) })
         root.addView(dialPanel, LinearLayout.LayoutParams(-1, -2))
 
         search = EditText(this).apply {
@@ -232,15 +238,91 @@ class OeaPhoneActivity : Activity() {
         val uri = Uri.parse("tel:" + Uri.encode(raw, "*#"))
         if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
             pendingCallNumber = raw
-            if (Build.VERSION.SDK_INT >= 23) {
-                requestPermissions(arrayOf(Manifest.permission.CALL_PHONE), REQUEST_CALL_PHONE)
-            } else {
-                openDialer(uri)
-            }
+            requestPermissions(arrayOf(Manifest.permission.CALL_PHONE), REQUEST_CALL_PHONE)
             return
         }
-        runCatching { startActivity(Intent(Intent.ACTION_CALL, uri)) }
-            .onFailure { openDialer(uri) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            pendingCallNumber = raw
+            requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE), REQUEST_PHONE_STATE)
+            return
+        }
+        val telecom = getSystemService(TelecomManager::class.java)
+        val accounts = runCatching { telecom?.callCapablePhoneAccounts.orEmpty() }.getOrDefault(emptyList())
+        if (accounts.isEmpty()) {
+            runCatching { startActivity(Intent(Intent.ACTION_CALL, uri)) }
+                .onFailure { openDialer(uri) }
+            return
+        }
+        val labels = accounts.mapIndexed { index, handle ->
+            val label = runCatching { telecom?.getPhoneAccount(handle)?.label?.toString().orEmpty() }.getOrDefault("")
+            label.ifBlank { "SIM / phone account ${index + 1}" }
+        }.toTypedArray()
+        val savedId = phonePrefs.getString("preferred_phone_account", null)
+        val preferred = accounts.firstOrNull { it.id == savedId }
+        if (accounts.size == 1) {
+            startCallWithAccount(raw, accounts.first())
+        } else {
+            val checked = accounts.indexOf(preferred).coerceAtLeast(0)
+            AlertDialog.Builder(this)
+                .setTitle("Choose SIM for this call")
+                .setSingleChoiceItems(labels, checked) { dialog, which ->
+                    val handle = accounts.getOrNull(which) ?: return@setSingleChoiceItems
+                    phonePrefs.edit().putString("preferred_phone_account", handle.id).apply()
+                    dialog.dismiss()
+                    startCallWithAccount(raw, handle)
+                }
+                .setNegativeButton("Cancel", null)
+                .setNeutralButton("Use Android's choice") { _, _ ->
+                    runCatching { startActivity(Intent(Intent.ACTION_CALL, uri)) }
+                        .onFailure { openDialer(uri) }
+                }
+                .show()
+        }
+    }
+
+    private fun startCallWithAccount(raw: String, handle: PhoneAccountHandle) {
+        val uri = Uri.parse("tel:" + Uri.encode(raw, "*#"))
+        runCatching {
+            val extras = Bundle().apply {
+                putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle)
+            }
+            getSystemService(TelecomManager::class.java).placeCall(uri, extras)
+        }.onFailure {
+            toast("Could not start the call through the selected SIM. Opening Android's dialer.")
+            openDialer(uri)
+        }
+    }
+
+    private fun showCallOptions() {
+        val modes = arrayOf("Full screen", "Popup window", "Compact floating card")
+        val keys = arrayOf("fullscreen", "popup", "compact")
+        val current = phonePrefs.getString("call_ui_mode", "fullscreen") ?: "fullscreen"
+        AlertDialog.Builder(this)
+            .setTitle("Incoming and active call display")
+            .setSingleChoiceItems(modes, keys.indexOf(current).coerceAtLeast(0)) { dialog, which ->
+                phonePrefs.edit().putString("call_ui_mode", keys[which]).apply()
+                dialog.dismiss()
+                toast("${modes[which]} selected for call screens.")
+            }
+            .setNegativeButton("Close", null)
+            .show()
+        AlertDialog.Builder(this)
+            .setTitle("Flash alert")
+            .setMessage("Blink the camera flash while an incoming call is ringing. This needs Camera permission and may be unavailable while another app uses the camera.")
+            .setPositiveButton(if (phonePrefs.getBoolean("flash_alert", false)) "Turn off" else "Turn on") { _, _ ->
+                if (phonePrefs.getBoolean("flash_alert", false)) {
+                    phonePrefs.edit().putBoolean("flash_alert", false).apply()
+                    toast("Call flash alert disabled.")
+                } else if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                    phonePrefs.edit().putBoolean("flash_alert", true).apply()
+                    toast("Call flash alert enabled.")
+                } else {
+                    requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
+                }
+            }
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
     private fun openDialer(uri: Uri) {
@@ -486,13 +568,19 @@ class OeaPhoneActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
             REQUEST_CALL_LOG, REQUEST_CONTACTS -> renderList()
-            REQUEST_CALL_PHONE -> {
+            REQUEST_CALL_PHONE, REQUEST_PHONE_STATE -> {
                 val raw = pendingCallNumber
                 pendingCallNumber = null
                 if (raw != null) {
                     if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) placeCall(raw)
                     else openDialer(Uri.parse("tel:" + Uri.encode(raw, "*#")))
                 }
+            }
+            REQUEST_CAMERA -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                    phonePrefs.edit().putBoolean("flash_alert", true).apply()
+                    toast("Call flash alert enabled.")
+                } else toast("Camera permission denied; flash alert remains off.")
             }
         }
     }
@@ -517,5 +605,7 @@ class OeaPhoneActivity : Activity() {
         private const val REQUEST_CALL_LOG = 9003
         private const val REQUEST_CONTACTS = 9004
         private const val REQUEST_CALL_PHONE = 9005
+        private const val REQUEST_PHONE_STATE = 9006
+        private const val REQUEST_CAMERA = 9007
     }
 }
