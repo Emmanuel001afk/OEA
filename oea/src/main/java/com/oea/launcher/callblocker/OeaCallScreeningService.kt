@@ -80,9 +80,11 @@ object OeaCallBlockRules {
         if (allowStarred(context) && isInContacts(context, number, true)) return false
         return exact.contains(normalized) || prefix.any(normalized::startsWith) || suffix.any(normalized::endsWith)
     }
-    fun recordBlocked(context: Context, number: String) {
+    fun recordBlocked(context: Context, number: String) = recordBlockedAt(context, number, System.currentTimeMillis())
+
+    fun recordBlockedAt(context: Context, number: String, timestamp: Long) {
         val old = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
-        old.add(normalize(number) + "|" + System.currentTimeMillis())
+        old.add(normalize(number) + "|" + timestamp)
         while (old.size > 100) {
             val oldest = old.minByOrNull { it.substringAfterLast('|').toLongOrNull() ?: Long.MIN_VALUE } ?: break
             old.remove(oldest)
