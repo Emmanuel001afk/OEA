@@ -346,8 +346,11 @@ class OeaPhoneActivity : Activity() {
             return
         }
         val query = search.text.toString().trim().lowercase(Locale.ROOT)
+        val numericQuery = query.filter(Char::isDigit)
         val filtered = contactRows.filter {
-            query.isEmpty() || it.name.lowercase(Locale.ROOT).contains(query) || it.phone.filter(Char::isDigit).contains(query.filter(Char::isDigit))
+            query.isEmpty() ||
+                it.name.lowercase(Locale.ROOT).contains(query) ||
+                (numericQuery.isNotEmpty() && it.phone.filter(Char::isDigit).contains(numericQuery))
         }
         if (filtered.isEmpty()) addEmptyState(if (query.isEmpty()) "No phone contacts found." else "No contacts match “$query”.")
         filtered.forEach { contact ->
@@ -443,14 +446,18 @@ class OeaPhoneActivity : Activity() {
             val button = tabs.getChildAt(i) as? Button ?: continue
             val tab = listOf(TAB_DIAL, TAB_RECENT, TAB_CONTACTS, TAB_BLOCKED).getOrNull(i)
             val active = tab == selectedTab
-            button.alpha = if (active) 1f else 0.68f
+            button.alpha = 1f
             button.isSelected = active
+            button.setTextColor(0xFFFFFFFF.toInt())
+            button.background = rounded(if (active) 0xFF2D8C74.toInt() else 0xFF1E2431.toInt(), 16)
         }
     }
 
     private fun smallButton(label: String, action: () -> Unit) = Button(this).apply {
         text = label
         textSize = 11f
+        setTextColor(0xFFFFFFFF.toInt())
+        background = rounded(0xFF1E2431.toInt(), 16)
         setOnClickListener { action() }
     }
 
