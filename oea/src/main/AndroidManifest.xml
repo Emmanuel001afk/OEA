@@ -104,6 +104,17 @@
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
+        <activity
+            android:name="com.oea.launcher.callblocker.OeaCallBlockerActivity"
+            android:exported="true"
+            android:label="Call Blocker"
+            android:icon="@drawable/oea_logo"
+            android:theme="@style/OeaTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <service
             android:name="com.oea.launcher.callblocker.OeaCallScreeningService"
             android:exported="true"
