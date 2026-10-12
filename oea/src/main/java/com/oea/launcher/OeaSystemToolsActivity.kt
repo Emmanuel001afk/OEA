@@ -534,8 +534,13 @@ class OeaSystemToolsActivity : Activity() {
             navigation.addView(Button(this).apply {
                 text = label
                 textSize = 11f
-                alpha = if (key == callBlockerTab) 1f else 0.68f
+                alpha = 1f
                 isSelected = key == callBlockerTab
+                setTextColor(textColor())
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(if (key == callBlockerTab) surfaceColor() else backgroundColor())
+                    cornerRadius = 18f
+                }
                 setOnClickListener { showCallBlocker(key) }
             }, LinearLayout.LayoutParams(0, 44, 1f).apply {
                 setMargins(2, 0, 2, 10)
