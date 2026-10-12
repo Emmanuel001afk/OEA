@@ -77,6 +77,20 @@ jobs:
           grep -Fq "preferredWidthDp = 420" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "preferredHeightDp = 560" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.software.freeform_window_management" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
+          grep -Fq 'org.adw.launcher.THEMES' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
+          grep -Fq 'com.novalauncher.THEME' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
+          grep -Fq 'External icon pack' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'private fun applyIconShape' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq '"squircle"' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt").read_text()
+          drawer_tools = source.split("private fun renderOeaTools()", 1)[1].split("private fun drawerTile", 1)[0]
+          forbidden = ("App Freezer", "Multitask", "Split Screen")
+          found = [name for name in forbidden if name in drawer_tools]
+          if found:
+              raise SystemExit("System-only tools leaked into All Apps OEA Systems grid: " + ", ".join(found))
+          PY
       - name: Build standalone OEA Launcher APK
         run: ./gradlew :oea:assembleRelease --stacktrace
       - name: Verify APK identity
