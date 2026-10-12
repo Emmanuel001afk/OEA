@@ -69,6 +69,10 @@ class OeaIconController(private val context: Context) {
         val key = "$selectedPack|$packageName/$className"
         if (!cache.containsKey(key)) {
             cache[key] = loadPackIcon(selectedPack, packageName, className)
+                ?: runCatching {
+                    if (!className.isNullOrBlank()) packageManager.getActivityIcon(ComponentName(packageName, className)).constantState
+                    else packageManager.getApplicationIcon(packageName).constantState
+                }.getOrNull()
                 ?: runCatching { packageManager.getApplicationIcon(packageName).constantState }.getOrNull()
         }
         return cache[key]?.newDrawable()?.mutate()
