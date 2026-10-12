@@ -743,7 +743,7 @@ class OeaSystemToolsActivity : Activity() {
         }
 
         val box = base(
-            "Blocked",
+            "Overview",
             "OEA app overview • Recent-use history, not Android’s live task stack. Open apps, use floating windows, or pair apps for split screen."
         )
         val usageAccess = getSystemService(AppOpsManager::class.java).checkOpNoThrow(
