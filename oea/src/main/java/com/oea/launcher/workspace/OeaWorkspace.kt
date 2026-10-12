@@ -635,7 +635,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setPadding(dp(24), dp(8), dp(24), dp(4))
         }
         val iconView = ImageView(context).apply {
-            setImageDrawable(icon(app.packageName))
+            setImageDrawable(icon(app.packageName, app.className))
                 applyIconShape(this)
             contentDescription = app.label + " locked"
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -1047,7 +1047,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         setOnClickListener { launch(app) }
         addView(FrameLayout(context).apply {
             val iconView = ImageView(context).apply {
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
                 applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
@@ -1084,7 +1084,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setPadding(dp(12), 0, dp(8), 0)
             background = rounded(themeSurface, 16)
             addView(ImageView(context).apply {
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
                 applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, LinearLayout.LayoutParams(dp(42), dp(42)))
@@ -1145,7 +1145,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
         folder.members.mapNotNull(::find).take(4).forEach { app ->
             preview.addView(ImageView(context).apply {
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
                 applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, GridLayout.LayoutParams().apply {
@@ -1178,7 +1178,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             val iconView = ImageView(context).apply {
                 // Use the app's real launcher drawable as-is. OEA must not wrap, pad,
                 // clip, or paint a second rectangular/circular background around it.
-                setImageDrawable(icon(app.packageName))
+                setImageDrawable(icon(app.packageName, app.className))
                 applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
@@ -1452,7 +1452,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         contentDescription = "Open " + app.label
         setOnClickListener { launch(app) }
         addView(ImageView(context).apply {
-            setImageDrawable(icon(app.packageName))
+            setImageDrawable(icon(app.packageName, app.className))
                 applyIconShape(this)
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
@@ -1636,7 +1636,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(6), dp(4), dp(6), dp(4))
                 addView(ImageView(context).apply {
-                    setImageDrawable(icon(app.packageName))
+                    setImageDrawable(icon(app.packageName, app.className))
                 applyIconShape(this)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                 }, LinearLayout.LayoutParams(dp(42), dp(42)))
@@ -1942,7 +1942,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
         }
     }
-    private fun icon(pkg: String): Drawable? = iconController.icon(pkg)
+    private fun icon(pkg: String, className: String? = null): Drawable? = iconController.icon(pkg, className)
     private fun selectable(): Drawable? = context.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).let { a ->
         a.getDrawable(0).also { a.recycle() }
     }
