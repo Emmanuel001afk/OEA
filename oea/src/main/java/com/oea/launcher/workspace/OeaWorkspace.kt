@@ -3,11 +3,13 @@ package com.oea.launcher.workspace
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.WallpaperManager
+import android.app.role.RoleManager
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
@@ -16,13 +18,22 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.view.DragEvent
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewOutlineProvider
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.drawer.OeaAppDrawerController
 import com.oea.launcher.folders.OeaFolderController
@@ -51,20 +62,36 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val ws = OeaWorkspaceStore.get(context)
     private val pages = LinearLayout(context)
     private val pager = HorizontalScrollView(context)
+    private val pagerGestures = OeaGestureController(
+        pager,
+        onSwipeUp = { openDrawer() },
+        onSwipeDown = { closeDrawer() },
+        // Horizontal movement belongs to the native pager. The gesture layer
+        // must not steal it, otherwise page scrolling becomes inconsistent.
+        consumeTouchEvents = false,
+    )
     private val dock = GridLayout(context)
+    private val dockCard = FrameLayout(context)
     private val drawer = LinearLayout(context)
     private val drawerScroll = ScrollView(context)
     private val drawerBody = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val drawerGrid = GridLayout(context)
     private val drawerSearch = EditText(context)
+    private val drawerModeButtons = mutableListOf<Pair<TextView, OeaDataStore.DrawerMode>>()
+    private val glanceButtons = mutableListOf<TextView>()
     private val search = EditText(context)
-    private val dots = TextView(context)
+    private val dots = LinearLayout(context)
     private val dockIndicator = TextView(context)
     private val wallpaperView = ImageView(context)
+    private val wallpaperScrim = View(context)
+    private val glanceClock = TextView(context)
+    private val glanceDate = TextView(context)
+    private val defaultHomeBanner = LinearLayout(context)
     private val homeRoot = LinearLayout(context)
     private lateinit var homeHeader: View
     private lateinit var homeSearch: EditText
     private val wallpaperRequestCode = 0x4F57
+    private val defaultHomeRequestCode = 0x4F58
     private var apps: List<OeaAppInfo> = emptyList()
     private val drawerController = OeaAppDrawerController()
     private val folderController = OeaFolderController()
@@ -80,9 +107,26 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private var themeSurface = Color.rgb(30, 36, 49)
     private var themeText = Color.WHITE
     private var themeMuted = Color.rgb(154, 162, 177)
+    private var themeShadow = Color.argb(170, 0, 0, 0)
     private var wallpaperLightHint: Boolean? = null
     private var wallpaperLoadToken = 0
     private var renderedPages = mutableSetOf<Int>()
+    private var pagerVelocityTracker: VelocityTracker? = null
+    private var pagerTouchStartX = 0f
+    private var pagerTouchStartY = 0f
+    private var pagerSnapRunnable: Runnable? = null
+    private var pageWidthSyncAttempts = 0
+
+    /**
+     * At-a-Glance ticker. It re-posts itself only while OEA Home is attached, so
+     * the clock keeps time without a long-lived handler keeping the view alive.
+     */
+    private val clockTicker = object : Runnable {
+        override fun run() {
+            updateClock()
+            postDelayed(this, CLOCK_TICK_MILLIS)
+        }
+    }
 
     fun attachHost(activity: Activity?) {
         hostActivity = activity
@@ -92,9 +136,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         widgetController.start()
+        removeCallbacks(clockTicker)
+        clockTicker.run()
     }
 
     override fun onDetachedFromWindow() {
+        removeCallbacks(clockTicker)
+        pagerVelocityTracker?.recycle()
+        pagerVelocityTracker = null
         widgetController.stop()
         super.onDetachedFromWindow()
     }
@@ -104,58 +153,50 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         wallpaperView.scaleType = ImageView.ScaleType.CENTER_CROP
         wallpaperView.alpha = 0.98f
         addView(wallpaperView, FrameLayout.LayoutParams(-1, -1))
+        // Subtle top-to-bottom scrim: keeps the At-a-Glance text and icons legible
+        // on bright or busy wallpapers without hiding the wallpaper itself.
+        addView(wallpaperScrim, FrameLayout.LayoutParams(-1, -1))
         homeRoot.orientation = LinearLayout.VERTICAL
         homeRoot.setPadding(dp(16), dp(12), dp(16), dp(8))
         addView(homeRoot, FrameLayout.LayoutParams(-1, -1))
         val root = homeRoot
         loadOeaWallpaper()
 
-        val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(8), dp(10), dp(8))
+            background = rounded(themeSurface, 26)
+        }
         homeHeader = header
         header.addView(ImageView(context).apply {
             setImageResource(R.drawable.oea_logo)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             contentDescription = "OEA"
-        }, LinearLayout.LayoutParams(dp(46), dp(46)))
-        header.addView(TextView(context).apply {
-            text = "OEA"
-            textSize = 28f
-            setTextColor(themeText)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(dp(6), 0, 0, 0)
-        }, LinearLayout.LayoutParams(0, dp(52), 1f))
-        header.addView(TextView(context).apply {
-            text = "▢"
-            textSize = 24f
-            gravity = Gravity.CENTER
-            setTextColor(themeText)
-            background = rounded(themeSurface, 18)
-            contentDescription = "Open OEA multitasking overview"
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                val overview = Intent(context, OeaSystemToolsActivity::class.java)
-                    .putExtra(OeaSystemToolsActivity.EXTRA_SCREEN, "multitask")
-                runCatching { context.startActivity(overview) }
-                    .onFailure { android.widget.Toast.makeText(context, "Could not open OEA overview.", android.widget.Toast.LENGTH_SHORT).show() }
-            }
-        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
-            leftMargin = dp(6)
-        })
-        header.addView(TextView(context).apply {
-            text = "⋮"
-            textSize = 26f
-            gravity = Gravity.CENTER
-            setTextColor(themeText)
-            background = rounded(themeSurface, 18)
-            contentDescription = "OEA home menu"
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { menu(this) }
-        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
-            leftMargin = dp(6)
-        })
-        root.addView(header)
+        }, LinearLayout.LayoutParams(dp(42), dp(42)))
+        val glance = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, dp(4), 0)
+        }
+        glanceClock.textSize = 26f
+        glanceClock.setTextColor(themeText)
+        glanceClock.setSingleLine(true)
+        glanceClock.setTypeface(glanceClock.typeface, android.graphics.Typeface.BOLD)
+        glance.addView(glanceClock, LinearLayout.LayoutParams(-1, dp(32)))
+        glanceDate.textSize = 11f
+        glanceDate.setTextColor(themeMuted)
+        glanceDate.setSingleLine(true)
+        glanceDate.ellipsize = android.text.TextUtils.TruncateAt.END
+        glance.addView(glanceDate, LinearLayout.LayoutParams(-1, dp(18)))
+        header.addView(glance, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(glanceButton("⊞", "Open OEA All Apps drawer") { openDrawer() }, glanceButtonParams())
+        header.addView(glanceButton("▢", "Open OEA multitasking overview") { openOverview() }, glanceButtonParams())
+        header.addView(glanceButton("⋮", "OEA home menu") { menu(it) }, glanceButtonParams())
+        root.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        updateClock()
+
+        buildDefaultHomeBanner()
+        root.addView(defaultHomeBanner, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
 
         homeSearch = search
         search.hint = "Search apps"
@@ -175,30 +216,32 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         root.addView(search, LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(8) })
 
         pager.isHorizontalScrollBarEnabled = false
+        pager.overScrollMode = View.OVER_SCROLL_NEVER
         pager.setOnScrollChangeListener { _, scrollX, _, _, _ ->
-            val pageWidth = pages.getChildAt(0)?.width ?: pager.width
+            val pageWidth = currentPageWidth()
             if (pageWidth > 0) {
                 val page = (scrollX.toFloat() / pageWidth).roundToInt().coerceIn(0, ws.pages() - 1)
                 if (page != ws.getCurrentPage()) ws.setCurrentPage(page)
-                dots.text = List(ws.pages()) { if (it == page) "●" else "•" }.joinToString(" ")
+                updatePageDots(page)
                 ensurePageRendered(page)
                 ensurePageRendered(page - 1)
                 ensurePageRendered(page + 1)
             }
+            // Safety net: whenever paging comes to rest between two pages, glide
+            // into the nearest one so a half-dragged page never stays half shown.
+            schedulePagerSnap()
         }
-        pager.setOnTouchListener(OeaGestureController(
-            pager,
-            onSwipeUp = { openDrawer() },
-            onSwipeDown = { closeDrawer() },
-            // Horizontal movement belongs to the native pager. The gesture layer
-            // must not steal it, otherwise page scrolling becomes inconsistent.
-            consumeTouchEvents = false,
-        ))
+        pager.setOnTouchListener { view, event ->
+            // Vertical swipes still open/close the All Apps drawer; horizontal
+            // movement stays with the native pager.
+            pagerGestures.onTouch(view, event)
+            handlePagerSnapTouch(view, event)
+        }
         pages.orientation = LinearLayout.HORIZONTAL
         pager.addView(pages, FrameLayout.LayoutParams(-2, -1))
         root.addView(pager, LinearLayout.LayoutParams(-1, 0, 1f))
+        dots.orientation = LinearLayout.HORIZONTAL
         dots.gravity = Gravity.CENTER
-        dots.setTextColor(themeMuted)
         root.addView(dots, LinearLayout.LayoutParams(-1, dp(22)))
         dockIndicator.gravity = Gravity.CENTER
         dockIndicator.setTextColor(themeMuted)
@@ -215,7 +258,23 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         dock.setUseDefaultMargins(false)
         dock.setPadding(dp(2), dp(2), dp(2), dp(2))
         dock.setOnDragListener { _, e -> dockDrop(e) }
-        root.addView(dock, LinearLayout.LayoutParams(-1, dp(72)))
+        attachVerticalHomeSwipe(dock)
+        // The dock floats inside a rounded translucent card so it reads as one
+        // surface above the wallpaper instead of a bare row of icons.
+        dockCard.setPadding(dp(6), dp(4), dp(6), dp(4))
+        dockCard.background = rounded(themeSurface, 28)
+        dockCard.elevation = dp(4).toFloat()
+        dockCard.setOnDragListener { _, e -> dockDrop(e) }
+        attachVerticalHomeSwipe(dockCard)
+        dockCard.addView(dock, FrameLayout.LayoutParams(-1, -1))
+        root.addView(
+            dockCard,
+            LinearLayout.LayoutParams(-1, dp(76)).apply {
+                leftMargin = dp(8)
+                rightMargin = dp(8)
+                bottomMargin = dp(2)
+            },
+        )
 
         buildDrawer()
         widgetController.start()
@@ -230,13 +289,32 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawer.setPadding(dp(12), dp(12), dp(12), dp(12))
         drawer.setBackgroundColor(themeBackground)
 
-        val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         header.addView(TextView(context).apply {
             text = "‹  All apps"
             textSize = 20f
             setTextColor(themeText)
+            setSingleLine(true)
+            contentDescription = "Close All apps"
             setOnClickListener { closeDrawer() }
-        }, LinearLayout.LayoutParams(-1, dp(52)))
+        }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        // Layout mode switcher: Grid, vertical List and paged drawer layouts.
+        header.addView(drawerModeButton("Grid ⊞", OeaDataStore.DrawerMode.GRID), drawerModeParams())
+        header.addView(drawerModeButton("List ☰", OeaDataStore.DrawerMode.VERTICAL), drawerModeParams())
+        header.addView(drawerModeButton("Pages ◫", OeaDataStore.DrawerMode.HORIZONTAL), drawerModeParams())
+        header.addView(TextView(context).apply {
+            text = "⋮"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(themeMuted)
+            contentDescription = "More All apps layout options"
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { drawerLayoutMenu(this) }
+        }, LinearLayout.LayoutParams(dp(36), dp(44)))
         drawer.addView(header)
         drawerSearch.hint = "Search all apps"
         drawerSearch.setSingleLine(true)
@@ -251,6 +329,190 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawer.addView(drawerScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         addView(drawer, FrameLayout.LayoutParams(-1, -1))
         drawer.visibility = View.GONE
+        updateDrawerModeButtons()
+    }
+
+    private fun glanceButtonParams() = LinearLayout.LayoutParams(dp(42), dp(42)).apply { leftMargin = dp(6) }
+
+    private fun glanceButton(glyph: String, description: String, action: (View) -> Unit) = TextView(context).apply {
+        text = glyph
+        textSize = 20f
+        gravity = Gravity.CENTER
+        setTextColor(themeText)
+        background = rounded(themeSurface, 16)
+        contentDescription = description
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { view -> action(view) }
+        glanceButtons.add(this)
+        attachPressAnimation(this)
+    }
+
+    /** At-a-Glance header: live HH:mm clock plus date and the OEA engine label. */
+    private fun updateClock() {
+        val now = Date()
+        val locale = Locale.getDefault()
+        glanceClock.text = SimpleDateFormat(CLOCK_FORMAT, locale).format(now)
+        glanceDate.text = SimpleDateFormat(DATE_FORMAT, locale).format(now) + " • OEA Engine"
+    }
+
+    private fun buildDefaultHomeBanner() {
+        defaultHomeBanner.orientation = LinearLayout.HORIZONTAL
+        defaultHomeBanner.gravity = Gravity.CENTER_VERTICAL
+        defaultHomeBanner.setPadding(dp(14), dp(10), dp(12), dp(10))
+        defaultHomeBanner.background = rounded(themeSurface, 20)
+        defaultHomeBanner.isClickable = true
+        defaultHomeBanner.isFocusable = true
+        defaultHomeBanner.contentDescription = "Set OEA as Default Home Launcher"
+        defaultHomeBanner.addView(TextView(context).apply {
+            text = "⌂"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(themeText)
+        }, LinearLayout.LayoutParams(dp(28), dp(28)))
+        defaultHomeBanner.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), 0, dp(8), 0)
+            addView(TextView(context).apply {
+                text = "Set OEA as Default Home Launcher"
+                textSize = 14f
+                setTextColor(themeText)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setSingleLine(true)
+            })
+            addView(TextView(context).apply {
+                text = "One tap to give OEA the Android Home role"
+                textSize = 11f
+                setTextColor(themeMuted)
+                setSingleLine(true)
+            })
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        defaultHomeBanner.addView(TextView(context).apply {
+            text = "SET"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(themeText)
+            background = rounded(withAlpha(themeText, 42), 14)
+            setPadding(dp(12), dp(5), dp(12), dp(5))
+        }, LinearLayout.LayoutParams(-2, -2))
+        defaultHomeBanner.setOnClickListener { requestDefaultHomeLauncher() }
+        attachPressAnimation(defaultHomeBanner)
+        defaultHomeBanner.visibility = View.GONE
+    }
+
+    /** The banner is only useful while another launcher still owns the Home role. */
+    private fun renderDefaultHomeBanner() {
+        defaultHomeBanner.visibility = if (isDefaultHomeLauncher()) View.GONE else View.VISIBLE
+    }
+
+    private fun isDefaultHomeLauncher(): Boolean =
+        roleHomeHeld() ?: run {
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolved = runCatching {
+                context.packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+            }.getOrNull()
+            resolved?.activityInfo?.packageName == context.packageName
+        }
+
+    /**
+     * Android 10+ Home role, kept isolated behind one SDK check so pre-Q devices
+     * never resolve RoleManager. Null means "this Android has no Home role".
+     */
+    private fun roleHomeHeld(): Boolean? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        val roleManager = context.getSystemService(RoleManager::class.java) ?: return null
+        if (!roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) return null
+        return runCatching { roleManager.isRoleHeld(RoleManager.ROLE_HOME) }.getOrNull()
+    }
+
+    private fun roleHomeIntent(): Intent? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        val roleManager = context.getSystemService(RoleManager::class.java) ?: return null
+        if (!roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) return null
+        return runCatching { roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME) }.getOrNull()
+    }
+
+    private fun requestDefaultHomeLauncher() {
+        if (roleHomeHeld() == true) {
+            Toast.makeText(context, "OEA is already your default Home launcher.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val activity = hostActivity
+        val roleIntent = roleHomeIntent()
+        if (activity != null && roleIntent != null) {
+            val requested = runCatching { activity.startActivityForResult(roleIntent, defaultHomeRequestCode) }.isSuccess
+            if (requested) return
+        }
+        openHomeSettings()
+    }
+
+    private fun openHomeSettings() {
+        val intent = if (Build.VERSION.SDK_INT >= 29) {
+            Intent(Settings.ACTION_HOME_SETTINGS)
+        } else {
+            Intent(Settings.ACTION_SETTINGS)
+        }
+        runCatching { (hostActivity ?: context).startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { Toast.makeText(context, "Open Android Home settings to choose OEA.", Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun openOverview() {
+        val overview = Intent(context, OeaSystemToolsActivity::class.java)
+            .putExtra(OeaSystemToolsActivity.EXTRA_SCREEN, "multitask")
+        runCatching { (hostActivity ?: context).startActivity(overview) }
+            .onFailure { Toast.makeText(context, "Could not open OEA overview.", Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun drawerModeParams() = LinearLayout.LayoutParams(-2, dp(34)).apply { leftMargin = dp(4) }
+
+    private fun drawerModeButton(label: String, mode: OeaDataStore.DrawerMode) = TextView(context).apply {
+        text = label
+        textSize = 11f
+        gravity = Gravity.CENTER
+        setSingleLine(true)
+        setPadding(dp(8), 0, dp(8), 0)
+        contentDescription = label + " layout"
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            store.setDrawerMode(mode)
+            updateDrawerModeButtons()
+            renderDrawer(drawerSearch.text.toString())
+        }
+        drawerModeButtons.add(this to mode)
+    }
+
+    private fun updateDrawerModeButtons() {
+        val current = store.drawerMode()
+        drawerModeButtons.forEach { (view, mode) ->
+            val active = mode == current
+            view.background = rounded(if (active) withAlpha(themeText, 40) else Color.TRANSPARENT, 14)
+            view.setTextColor(if (active) themeText else themeMuted)
+        }
+    }
+
+    private fun withAlpha(color: Int, alpha: Int) =
+        Color.argb(alpha.coerceIn(0, 255), Color.red(color), Color.green(color), Color.blue(color))
+
+    /** Re-tints the fixed home chrome after the wallpaper/theme changes. */
+    private fun applyHomeChromeColors() {
+        if (::homeHeader.isInitialized) homeHeader.background = rounded(themeSurface, 26)
+        glanceClock.setTextColor(themeText)
+        glanceDate.setTextColor(themeMuted)
+        glanceButtons.forEach {
+            it.setTextColor(themeText)
+            it.background = rounded(withAlpha(themeText, 34), 16)
+        }
+        dockCard.background = rounded(withAlpha(themeSurface, 214), 28)
+        dockIndicator.setTextColor(themeMuted)
+        search.background = rounded(withAlpha(themeSurface, 214), 28)
+        defaultHomeBanner.background = rounded(withAlpha(themeSurface, 214), 20)
+        wallpaperScrim.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(withAlpha(themeBackground, 118), withAlpha(themeBackground, 46), Color.TRANSPARENT),
+        )
+        updatePageDots(ws.getCurrentPage())
+        updateDrawerModeButtons()
     }
 
     fun bind(value: List<OeaAppInfo>) {
@@ -259,6 +521,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ws.ensureSeeded(apps.filterNot { it.packageName == context.packageName }.map { Triple(it.packageName, it.className, it.label) })
         ws.clearMissing(apps.map { OeaWorkspaceStore.key(it.packageName, it.className) }.toSet())
         rebuild()
+        renderDefaultHomeBanner()
         renderDrawer(drawerSearch.text.toString())
     }
 
@@ -267,7 +530,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         normalizeHomeLayout()
         renderedPages.clear()
         pages.removeAllViews()
-        val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        // Pages are exactly one pager viewport wide. The full screen width is
+        // wrong here: the pager is inset by the home padding, so screen-wide
+        // pages made horizontal scrolling drift out of alignment.
+        val pageWidth = currentPageWidth()
         for (p in 0 until ws.pages()) {
             // Keep the four-row icon grid fixed in the visible home viewport.
             // Only the widget area can scroll, so a large widget stack never turns
@@ -345,8 +611,238 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ensurePageRendered(current)
         ensurePageRendered(current - 1)
         ensurePageRendered(current + 1)
-        dots.text = List(ws.pages()) { if (it == current) "●" else "•" }.joinToString(" ")
+        updatePageDots(current)
         renderDock()
+        // rebuild() can run before the pager has been measured; re-apply the real
+        // viewport width to every child page once layout has happened.
+        pager.post { syncPageWidths() }
+    }
+
+    /** Width of a single home page: the pager viewport, never the whole screen. */
+    private fun currentPageWidth(): Int {
+        pages.getChildAt(0)?.width?.takeIf { it > 0 }?.let { return it }
+        pager.width.takeIf { it > 0 }?.let { return it }
+        val root = homeRoot
+        (root.width - root.paddingLeft - root.paddingRight).takeIf { it > 0 }?.let { return it }
+        return resources.displayMetrics.widthPixels
+    }
+
+    /**
+     * Keeps every child page exactly as wide as the pager viewport and restores
+     * the selected page. Retries briefly while the pager is still unmeasured.
+     */
+    private fun syncPageWidths() {
+        val target = pager.width
+        if (target <= 0) {
+            if (pageWidthSyncAttempts < MAX_PAGE_WIDTH_SYNC_ATTEMPTS) {
+                pageWidthSyncAttempts++
+                pager.post { syncPageWidths() }
+            }
+            return
+        }
+        pageWidthSyncAttempts = 0
+        var changed = false
+        for (index in 0 until pages.childCount) {
+            val child = pages.getChildAt(index)
+            val params = child.layoutParams as? LinearLayout.LayoutParams ?: continue
+            if (params.width != target) {
+                params.width = target
+                child.layoutParams = params
+                changed = true
+            }
+        }
+        if (changed) pages.requestLayout()
+        val current = ws.getCurrentPage()
+        val x = current * target
+        if (pager.scrollX != x) pager.scrollTo(x, 0)
+        updatePageDots(current)
+    }
+
+    /**
+     * Page snapping on top of the native pager. The pager keeps its own
+     * horizontal scrolling; this only decides where a released gesture settles,
+     * so slow drags and fast flicks both land on a whole page.
+     */
+    private fun handlePagerSnapTouch(view: View, event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                pagerTouchStartX = event.rawX
+                pagerTouchStartY = event.rawY
+                pagerVelocityTracker?.recycle()
+                pagerVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val tracker = pagerVelocityTracker
+                if (tracker == null) {
+                    // A drag that starts on a home tile only reaches the pager
+                    // once the pager intercepts it, so the DOWN event is missing:
+                    // start tracking from the first intercepted move instead.
+                    pagerTouchStartX = event.rawX
+                    pagerTouchStartY = event.rawY
+                    pagerVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+                } else {
+                    tracker.addMovement(event)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val tracker = pagerVelocityTracker
+                pagerVelocityTracker = null
+                val dx = event.rawX - pagerTouchStartX
+                val dy = event.rawY - pagerTouchStartY
+                var velocityX = 0f
+                if (tracker != null) {
+                    tracker.computeCurrentVelocity(1000)
+                    velocityX = tracker.xVelocity
+                    tracker.recycle()
+                }
+                // Mostly-vertical gestures belong to the All Apps swipe instead.
+                if (abs(dy) > abs(dx) && abs(dy) > dp(SWIPE_UP_DISTANCE_DP)) return false
+                val pageWidth = currentPageWidth()
+                if (pageWidth <= 0) return false
+                val settled = nearestPage()
+                val flingThreshold = dp(PAGER_FLING_VELOCITY_DP).toFloat()
+                val target = when {
+                    velocityX <= -flingThreshold -> settled + 1
+                    velocityX >= flingThreshold -> settled - 1
+                    else -> settled
+                }
+                // Posted so the snap replaces the pager's own fling animation.
+                view.post { snapToPage(target) }
+            }
+        }
+        return false
+    }
+
+    private fun nearestPage(): Int {
+        val pageWidth = currentPageWidth()
+        if (pageWidth <= 0) return ws.getCurrentPage()
+        return ((pager.scrollX + pageWidth / 2f) / pageWidth).toInt().coerceIn(0, ws.pages() - 1)
+    }
+
+    /** Glides into the nearest page once paging has come to rest. */
+    private fun schedulePagerSnap() {
+        pagerSnapRunnable?.let { pager.removeCallbacks(it) }
+        val runnable = Runnable {
+            pagerSnapRunnable = null
+            snapToPage(nearestPage())
+        }
+        pagerSnapRunnable = runnable
+        pager.postDelayed(runnable, PAGER_SNAP_IDLE_MILLIS)
+    }
+
+    /** Snaps the pager to one whole page and renders that page and its neighbours. */
+    private fun snapToPage(page: Int) {
+        val pageWidth = currentPageWidth()
+        if (pageWidth <= 0) return
+        val target = page.coerceIn(0, ws.pages() - 1)
+        val x = target * pageWidth
+        if (pager.scrollX != x) pager.smoothScrollTo(x, 0)
+        if (ws.getCurrentPage() != target) ws.setCurrentPage(target)
+        ensurePageRendered(target)
+        ensurePageRendered(target - 1)
+        ensurePageRendered(target + 1)
+        updatePageDots(target)
+    }
+
+    /** Interactive page indicator: tap a dot to jump straight to that page. */
+    private fun updatePageDots(current: Int) {
+        val total = ws.pages()
+        if (dots.childCount != total) {
+            dots.removeAllViews()
+            repeat(total) { index ->
+                val dot = View(context).apply {
+                    contentDescription = "Go to home page " + (index + 1)
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { snapToPage(index) }
+                }
+                dots.addView(
+                    dot,
+                    LinearLayout.LayoutParams(dp(7), dp(7)).apply {
+                        leftMargin = dp(4)
+                        rightMargin = dp(4)
+                    },
+                )
+            }
+        }
+        for (index in 0 until dots.childCount) {
+            val active = index == current
+            dots.getChildAt(index).background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (active) themeText else withAlpha(themeText, 74))
+            }
+        }
+        dots.contentDescription = "Home page " + (current + 1) + " of " + total
+    }
+
+    /**
+     * Swipe up anywhere on the home screen. Tiles, folder tiles, empty cells and
+     * the dock all open the All Apps drawer, so the gesture never depends on
+     * finding a free patch of wallpaper first.
+     */
+    private fun attachVerticalHomeSwipe(view: View) {
+        var downX = 0f
+        var downY = 0f
+        var triggered = false
+        view.setOnTouchListener { target, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    triggered = false
+                    pressIn(target)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = event.rawY - downY
+                    val dx = event.rawX - downX
+                    if (!triggered && dy < -dp(SWIPE_UP_DISTANCE_DP) && abs(dy) > abs(dx) * 1.3f) {
+                        triggered = true
+                        pressOut(target)
+                        openDrawer()
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> pressOut(target)
+            }
+            // Never consume: taps, long-press drags and horizontal paging win.
+            false
+        }
+    }
+
+    /** Press feedback only: springy scale-down while held, back to 1f on release. */
+    private fun attachPressAnimation(view: View) {
+        view.setOnTouchListener { target, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> pressIn(target)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> pressOut(target)
+            }
+            false
+        }
+    }
+
+    private fun pressIn(view: View) {
+        view.animate().cancel()
+        view.animate()
+            .scaleX(PRESS_SCALE)
+            .scaleY(PRESS_SCALE)
+            .setDuration(store.animationDuration(PRESS_IN_MILLIS))
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun pressOut(view: View) {
+        view.animate().cancel()
+        view.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(store.animationDuration(PRESS_OUT_MILLIS))
+            .setInterpolator(OvershootInterpolator(PRESS_SPRING_TENSION))
+            .start()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // Rotation and freeform resizes change the viewport: keep page widths in sync.
+        pager.post { syncPageWidths() }
     }
 
     private fun ensurePageRendered(page: Int) {
@@ -364,7 +860,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (page !in 0 until ws.pages()) return
         renderedPages.remove(page)
         ensurePageRendered(page)
-        dots.text = List(ws.pages()) { if (it == ws.getCurrentPage()) "●" else "•" }.joinToString(" ")
+        updatePageDots(ws.getCurrentPage())
     }
     private fun refreshPages(vararg pageValues: Int) {
         pageValues.distinct().forEach { refreshPage(it) }
@@ -449,7 +945,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             all.filter { it.folderId == null }.maxOfOrNull { it.page } ?: 0,
             folders.maxOfOrNull { it.page } ?: 0,
         )
-        val requiredPages = (highestPage + 1).coerceIn(1, OeaWorkspaceStore.MAX_PAGES)
+        // Never shrink the page count: pages the user added from the Home menu
+        // stay even while they are still empty.
+        val requiredPages = maxOf(ws.pages(), highestPage + 1).coerceIn(1, OeaWorkspaceStore.MAX_PAGES)
         if (ws.pages() != requiredPages) {
             ws.setPages(requiredPages)
             ws.setCurrentPage(ws.getCurrentPage())
@@ -496,6 +994,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     true
                 } else e.action == DragEvent.ACTION_DRAG_STARTED
             }
+            attachVerticalHomeSwipe(this)
         }
     }
 
@@ -901,6 +1400,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             }
         }
         if (query.isNotBlank()) renderSearchActions(query)
+        updateDrawerModeButtons()
     }
 
     private fun renderSearchActions(query: String) {
@@ -1061,29 +1561,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
             }
-            addView(iconView, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
+            addView(iconView, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
             val count = OeaNotificationState.countForPackage(app.packageName)
             if (count > 0) {
                 addView(TextView(context).apply {
                     text = if (count > 99) "99+" else count.toString()
-                    textSize = 7f
+                    textSize = 8f
                     gravity = Gravity.CENTER
                     setTextColor(Color.WHITE)
-                    background = rounded(Color.rgb(210, 60, 70), 10)
-                    minWidth = dp(16)
-                    minHeight = dp(16)
-                    setPadding(dp(2), 0, dp(2), 0)
-                }, FrameLayout.LayoutParams(-2, dp(16), Gravity.TOP or Gravity.END))
+                    background = rounded(Color.rgb(210, 60, 70), 11)
+                    minWidth = dp(17)
+                    minHeight = dp(17)
+                    setPadding(dp(3), 0, dp(3), 0)
+                }, FrameLayout.LayoutParams(-2, dp(17), Gravity.TOP or Gravity.END))
             }
-        }, LinearLayout.LayoutParams(dp(40), dp(40)))
-        if (store.showAppLabels()) addView(TextView(context).apply {
-            text = app.label
-            textSize = 9f
-            gravity = Gravity.CENTER
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setTextColor(themeText)
-        }, LinearLayout.LayoutParams(-1, dp(20)))
+        }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        if (store.showAppLabels()) {
+            addView(tileLabel(app.label), LinearLayout.LayoutParams(-1, dp(20)))
+        }
     }
 
     private fun drawerRow(app: OeaAppInfo): View {
@@ -1146,33 +1641,60 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 else -> false
             }
         }
+        attachVerticalHomeSwipe(this)
+        // Framed 2x2 preview: four slots always, so a nearly empty folder still
+        // reads as a folder instead of a stray icon.
         val preview = GridLayout(context).apply {
             columnCount = 2
+            rowCount = 2
             useDefaultMargins = false
             setPadding(dp(4), dp(4), dp(4), dp(4))
-            background = rounded(themeSurface, 16)
+            background = GradientDrawable().apply {
+                setColor(withAlpha(themeSurface, 205))
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), withAlpha(themeText, 54))
+            }
         }
-        folder.members.mapNotNull(::find).take(4).forEach { app ->
-            preview.addView(ImageView(context).apply {
-                setImageDrawable(icon(app.packageName, app.className))
-                applyIconShape(this)
+        val previewApps = folder.members.mapNotNull(::find).take(4)
+        repeat(4) { index ->
+            val app = previewApps.getOrNull(index)
+            val cell = ImageView(context).apply {
                 scaleType = ImageView.ScaleType.FIT_CENTER
-            }, GridLayout.LayoutParams().apply {
-                width = dp(22); height = dp(22)
+                if (app != null) {
+                    setImageDrawable(icon(app.packageName, app.className))
+                    applyIconShape(this)
+                } else {
+                    background = rounded(withAlpha(themeText, 26), 9)
+                }
+            }
+            preview.addView(cell, GridLayout.LayoutParams().apply {
+                width = dp(20)
+                height = dp(20)
+                columnSpec = GridLayout.spec(index % 2)
+                rowSpec = GridLayout.spec(index / 2)
                 setMargins(dp(1), dp(1), dp(1), dp(1))
             })
         }
-        addView(preview, LinearLayout.LayoutParams(dp(56), dp(56)))
-        addView(TextView(context).apply {
-            text = folder.title
-            textSize = 11f
-            gravity = Gravity.CENTER
-            setTextColor(themeText)
-        }, LinearLayout.LayoutParams(-1, dp(28)))
+        addView(preview, LinearLayout.LayoutParams(dp(52), dp(52)))
+        addView(tileLabel(folder.title), LinearLayout.LayoutParams(-1, dp(20)))
     }
 
     private fun emptyCell() = TextView(context).apply {
         setOnLongClickListener { menu(this); true }
+        attachVerticalHomeSwipe(this)
+    }
+
+    /** Crisp single-line tile label with a soft drop shadow for busy wallpapers. */
+    private fun tileLabel(text: String) = TextView(context).apply {
+        this.text = text
+        textSize = 11f
+        gravity = Gravity.CENTER
+        setSingleLine(true)
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        setTextColor(themeText)
+        setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), themeShadow)
+        setPadding(dp(2), 0, dp(2), 0)
     }
 
     private fun tile(app: OeaAppInfo) = LinearLayout(context).apply {
@@ -1194,7 +1716,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 alpha = if (OeaAppFreezer.frozenPackages(context).contains(app.packageName)) 0.45f else 1f
                 setPadding(0, 0, 0, 0)
             }
-            addView(iconView, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER))
+            addView(iconView, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
             val count = OeaNotificationState.countForPackage(app.packageName)
             if (count > 0) {
                 addView(TextView(context).apply {
@@ -1208,14 +1730,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     setPadding(dp(3), 0, dp(3), 0)
                 }, FrameLayout.LayoutParams(-2, dp(18), Gravity.TOP or Gravity.END))
             }
-        }, LinearLayout.LayoutParams(dp(46), dp(46)))
-        if (store.showAppLabels()) addView(TextView(context).apply {
-            text = app.label
-            textSize = 10f
-            gravity = Gravity.CENTER
-            maxLines = 2
-            setTextColor(themeText)
-        }, LinearLayout.LayoutParams(-1, dp(22)))
+        }, LinearLayout.LayoutParams(dp(50), dp(50)))
+        if (store.showAppLabels()) {
+            addView(tileLabel(app.label), LinearLayout.LayoutParams(-1, dp(20)))
+        }
     }
 
     private fun pageDrop(page: Int) = View.OnDragListener { view, e ->
@@ -1429,9 +1947,30 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             addView(grid, FrameLayout.LayoutParams(-1, -2))
         }
         box.addView(folderScroll, LinearLayout.LayoutParams(-1, dp(260)))
+        var folderDialog: AlertDialog? = null
+        val actions = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        actions.addView(
+            folderActionButton("Add / Remove Apps") {
+                folderDialog?.dismiss()
+                openFolderAppManager(folder)
+            },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(4) },
+        )
+        actions.addView(
+            folderActionButton("Rename") {
+                folderDialog?.dismiss()
+                showFolderRename(folder)
+            },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(4) },
+        )
+        box.addView(actions, LinearLayout.LayoutParams(-1, -2))
         val dialog = AlertDialog.Builder(activity).setView(box)
-            .setNeutralButton("Rename") { _, _ -> showFolderRename(folder) }
             .setPositiveButton("Done", null).create()
+        folderDialog = dialog
         dialog.setOnShowListener {
             dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             dialog.window?.setDimAmount(0.55f)
@@ -1446,6 +1985,105 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .start()
         }
+    }
+
+    private fun folderActionButton(label: String, action: () -> Unit) = TextView(context).apply {
+        text = label
+        textSize = 13f
+        gravity = Gravity.CENTER
+        setSingleLine(true)
+        setTextColor(themeText)
+        background = rounded(withAlpha(themeText, 34), 16)
+        setPadding(dp(14), dp(10), dp(14), dp(10))
+        contentDescription = label
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { action() }
+        attachPressAnimation(this)
+    }
+
+    /**
+     * Multi-select manager for one folder: tick an app to move it in, untick it
+     * to send it back to the home grid. Changes apply on Save.
+     */
+    private fun openFolderAppManager(folder: OeaWorkspaceStore.Folder) {
+        val activity = hostActivity ?: run {
+            Toast.makeText(context, "OEA Home is not ready for folders.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val current = ws.folders().firstOrNull { it.id == folder.id } ?: return
+        val choices = apps
+            .filterNot { store.isHidden(it.packageName, it.className) }
+            .sortedBy { it.label.lowercase(Locale.getDefault()) }
+        val keys = choices.map { OeaWorkspaceStore.key(it.packageName, it.className) }
+        val selected = keys.map { current.members.contains(it) }.toBooleanArray()
+        AlertDialog.Builder(activity)
+            .setTitle("Add / Remove Apps")
+            .setMultiChoiceItems(choices.map { it.label }.toTypedArray(), selected) { _, which, value ->
+                selected[which] = value
+            }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val additions = keys.filterIndexed { index, key ->
+                    selected[index] && !current.members.contains(key)
+                }
+                val removals = current.members.filter { member ->
+                    val index = keys.indexOf(member)
+                    index >= 0 && !selected[index]
+                }
+                applyFolderMembership(current, additions, removals)
+            }
+            .show()
+    }
+
+    private fun applyFolderMembership(
+        folder: OeaWorkspaceStore.Folder,
+        additions: List<String>,
+        removals: List<String>,
+    ) {
+        if (additions.isEmpty() && removals.isEmpty()) return
+        val pagesBefore = ws.pages()
+        val affected = mutableSetOf(folder.page)
+        var members = ws.folders().firstOrNull { it.id == folder.id }?.members?.toMutableList() ?: return
+        var items = ws.items().toMutableList()
+
+        if (additions.isNotEmpty()) {
+            items.filter { it.id in additions }.forEach { affected.add(it.page) }
+            items = items.filterNot { it.id in additions }.toMutableList()
+            ws.setDock(ws.dock().filterNot { additions.contains(it) })
+            additions.forEach { key -> if (!members.contains(key)) members.add(key) }
+        }
+
+        removals.forEach { key ->
+            members.remove(key)
+            val app = find(key) ?: return@forEach
+            val spot = findFreeCell(items) ?: return@forEach
+            items.add(OeaWorkspaceStore.Item(key, app.packageName, app.className, spot.first, spot.second))
+            affected.add(spot.first)
+        }
+
+        ws.replaceItems(items)
+        if (members.isEmpty()) {
+            ws.replaceFolders(ws.folders().filterNot { it.id == folder.id })
+        } else {
+            val title = if (folder.title == "Folder") suggestFolderName(members) else folder.title
+            ws.replaceFolders(
+                ws.folders().map { if (it.id == folder.id) it.copy(members = members, title = title) else it },
+            )
+        }
+        if (ws.pages() != pagesBefore) rebuild() else refreshPages(*affected.toIntArray())
+        renderDrawer(drawerSearch.text.toString())
+    }
+
+    /** First free home cell, opening one more page when every page is full. */
+    private fun findFreeCell(items: List<OeaWorkspaceStore.Item>): Pair<Int, Int>? {
+        for (page in 0 until ws.pages()) {
+            firstFree(items, page, 0)?.let { return page to it }
+        }
+        if (ws.pages() >= OeaWorkspaceStore.MAX_PAGES) return null
+        val page = ws.pages()
+        ws.setPages(page + 1)
+        return firstFree(items, page, 0)?.let { page to it }
     }
 
     private fun showFolderRename(folder: OeaWorkspaceStore.Folder) {
@@ -1475,7 +2113,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             adjustViewBounds = true
-        }, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER))
+        }, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER))
+        attachVerticalHomeSwipe(this)
     }
 
     private fun renderDock() {
@@ -1545,19 +2184,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun nextPage() {
-        val target = (ws.getCurrentPage() + 1).coerceAtMost(ws.pages() - 1)
-        if (target == ws.getCurrentPage()) return
-        ws.setCurrentPage(target)
-        pager.post { ensurePageRendered(target); pager.smoothScrollTo(target * pager.width, 0) }
-        dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
+        snapToPage(ws.getCurrentPage() + 1)
     }
 
     private fun previousPage() {
-        val target = (ws.getCurrentPage() - 1).coerceAtLeast(0)
-        if (target == ws.getCurrentPage()) return
-        ws.setCurrentPage(target)
-        pager.post { ensurePageRendered(target); pager.smoothScrollTo(target * pager.width, 0) }
-        dots.text = List(ws.pages()) { if (it == target) "●" else "•" }.joinToString(" ")
+        snapToPage(ws.getCurrentPage() - 1)
     }
 
     private fun openDrawer() {
@@ -1565,16 +2196,34 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerOpen = true
         drawer.animate().cancel()
         homeRoot.animate().cancel()
-        homeRoot.animate().alpha(0f).setDuration(store.animationDuration(100)).start()
-        homeRoot.visibility = View.GONE
+        // Home shrinks and fades while the drawer scales and slides in, so the
+        // swipe-up reads as one continuous transition instead of a hard cut.
+        homeRoot.animate()
+            .alpha(0f)
+            .scaleX(HOME_EXIT_SCALE)
+            .scaleY(HOME_EXIT_SCALE)
+            .translationY(dp(20).toFloat())
+            .setDuration(store.animationDuration(140))
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction { if (drawerOpen) homeRoot.visibility = View.GONE }
+            .start()
         drawer.alpha = 0f
-        drawer.translationY = dp(12).toFloat()
+        drawer.scaleX = DRAWER_ENTER_SCALE
+        drawer.scaleY = DRAWER_ENTER_SCALE
+        drawer.translationY = dp(28).toFloat()
         drawer.visibility = View.VISIBLE
         drawerSearch.setText(search.text.toString())
         drawerSearch.setSelection(drawerSearch.text.length)
         renderDrawer(drawerSearch.text.toString())
-        drawer.animate().alpha(1f).translationY(0f).setDuration(store.animationDuration(180))
-            .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+        updateDrawerModeButtons()
+        drawer.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .translationY(0f)
+            .setDuration(store.animationDuration(220))
+            .setInterpolator(DecelerateInterpolator())
+            .start()
         drawerSearch.requestFocus()
     }
 
@@ -1582,16 +2231,36 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (!drawerOpen) return
         drawerOpen = false
         drawer.animate().cancel()
-        drawer.animate().alpha(0f).translationY(dp(10).toFloat()).setDuration(store.animationDuration(120))
+        drawer.animate()
+            .alpha(0f)
+            .scaleX(DRAWER_ENTER_SCALE)
+            .scaleY(DRAWER_ENTER_SCALE)
+            .translationY(dp(24).toFloat())
+            .setDuration(store.animationDuration(140))
+            .setInterpolator(DecelerateInterpolator())
             .withEndAction {
                 drawer.visibility = View.GONE
                 drawer.translationY = 0f
+                drawer.scaleX = 1f
+                drawer.scaleY = 1f
                 drawer.alpha = 1f
+                if (drawerOpen) return@withEndAction
+                homeRoot.animate().cancel()
                 homeRoot.alpha = 0f
+                homeRoot.scaleX = HOME_EXIT_SCALE
+                homeRoot.scaleY = HOME_EXIT_SCALE
+                homeRoot.translationY = dp(20).toFloat()
                 homeRoot.visibility = View.VISIBLE
-                homeRoot.animate().alpha(1f).setDuration(store.animationDuration(150))
-                    .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-            }.start()
+                homeRoot.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .translationY(0f)
+                    .setDuration(store.animationDuration(180))
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+            .start()
         search.setText("")
         drawerSearch.setText("")
         search.clearFocus()
@@ -1851,6 +2520,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         action("Split Screen", "Two apps in Android adjacent-window mode") { openSplitPairDialog() }
 
         section("ANDROID ACCESS")
+        action(
+            "Set OEA as Default Home Launcher",
+            if (isDefaultHomeLauncher()) "OEA already holds the Android Home role"
+            else "Ask Android to make OEA the default Home app",
+        ) { requestDefaultHomeLauncher() }
         action("Notification access", "Required for notification badges and media integration") { openNotificationAccessSettings() }
 
         scroll.addView(body)
@@ -1896,11 +2570,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             themeSurface = Color.rgb(228, 231, 238)
             themeText = Color.rgb(20, 24, 31)
             themeMuted = Color.rgb(82, 89, 103)
+            themeShadow = Color.argb(110, 255, 255, 255)
         } else {
             themeBackground = Color.rgb(12, 15, 21)
             themeSurface = Color.rgb(30, 36, 49)
             themeText = Color.WHITE
             themeMuted = Color.rgb(154, 162, 177)
+            themeShadow = Color.argb(170, 0, 0, 0)
         }
         setBackgroundColor(Color.TRANSPARENT)
         search.setTextColor(themeText)
@@ -1908,6 +2584,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         drawerSearch.setTextColor(themeText)
         drawerSearch.setHintTextColor(themeMuted)
         drawer.setBackgroundColor(Color.TRANSPARENT)
+        applyHomeChromeColors()
     }
 
     private fun loadOeaWallpaper(rebuildAfterLoad: Boolean = false) {
@@ -2061,15 +2738,41 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             })
         }
         if (widgets.isEmpty()) {
-            host.addView(TextView(context).apply {
-                text = "Long-press here to add a widget"
-                textSize = 12f
+            // Styled widget slot: a framed card instead of loose grey text, so the
+            // empty widget area reads as a place to put something.
+            host.addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
-                setTextColor(themeMuted)
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+                background = GradientDrawable().apply {
+                    setColor(withAlpha(themeSurface, 150))
+                    cornerRadius = dp(20).toFloat()
+                    setStroke(dp(1), withAlpha(themeText, 46))
+                }
+                isClickable = true
+                isFocusable = true
+                contentDescription = "Add an Android widget"
+                addView(TextView(context).apply {
+                    text = "＋"
+                    textSize = 18f
+                    gravity = Gravity.CENTER
+                    setTextColor(themeMuted)
+                }, LinearLayout.LayoutParams(dp(26), dp(26)))
+                addView(TextView(context).apply {
+                    text = "Long-press here to add a widget"
+                    textSize = 12f
+                    gravity = Gravity.CENTER_VERTICAL
+                    setTextColor(themeMuted)
+                    setSingleLine(true)
+                }, LinearLayout.LayoutParams(0, -2, 1f))
                 // This placeholder belongs to the page being rendered; never use the
                 // globally selected page here because adjacent pages can already be rendered.
                 setOnClickListener { hostActivity?.let { widgetController.pickWidget(it, page) } }
-            }, FrameLayout.LayoutParams(-1, dp(56)))
+            }, FrameLayout.LayoutParams(-1, dp(60), Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = dp(4)
+                rightMargin = dp(4)
+                topMargin = dp(6)
+            })
         }
     }
 
@@ -2111,6 +2814,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         // rendered surfaces so returning Home does not recreate every page.
         renderedPages.toList().forEach { refreshPage(it) }
         renderDock()
+        renderDefaultHomeBanner()
         if (drawerOpen) renderDrawer(drawerSearch.text.toString())
     }
 
@@ -2125,6 +2829,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 store.setWallpaperUri(uri.toString())
                 loadOeaWallpaper(true)
             }
+            return true
+        }
+        if (requestCode == defaultHomeRequestCode) {
+            // Android answered the Home-role request: show or hide the banner.
+            renderDefaultHomeBanner()
             return true
         }
         val handled = widgetController.handleActivityResult(requestCode, resultCode, data)
@@ -2154,5 +2863,34 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { change(s?.toString().orEmpty()) }
         override fun afterTextChanged(s: android.text.Editable?) = Unit
+    }
+
+    companion object {
+        /** At-a-Glance ticker cadence: often enough to always show the minute. */
+        private const val CLOCK_TICK_MILLIS = 15_000L
+        private const val CLOCK_FORMAT = "HH:mm"
+        private const val DATE_FORMAT = "EEE, MMM d"
+
+        /** Vertical distance that turns a touch into "open All Apps". */
+        private const val SWIPE_UP_DISTANCE_DP = 56
+
+        /** Released speed (dp/s) that carries the pager one extra page. */
+        private const val PAGER_FLING_VELOCITY_DP = 120
+
+        /** Quiet period after the last scroll event before the pager snaps. */
+        private const val PAGER_SNAP_IDLE_MILLIS = 90L
+
+        /** Layout passes to wait for the pager to be measured. */
+        private const val MAX_PAGE_WIDTH_SYNC_ATTEMPTS = 3
+
+        /** Spring press feedback: scale down while held, overshoot back to 1f. */
+        private const val PRESS_SCALE = 0.93f
+        private const val PRESS_IN_MILLIS = 90L
+        private const val PRESS_OUT_MILLIS = 240L
+        private const val PRESS_SPRING_TENSION = 2.4f
+
+        /** Home / All Apps transition scales. */
+        private const val HOME_EXIT_SCALE = 0.94f
+        private const val DRAWER_ENTER_SCALE = 0.96f
     }
 }
