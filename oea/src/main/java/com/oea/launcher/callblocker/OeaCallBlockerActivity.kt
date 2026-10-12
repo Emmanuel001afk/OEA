@@ -90,11 +90,24 @@ class OeaCallBlockerActivity : Activity() {
         }
         if (!roleHeld()) action("Choose OEA for call screening", true) { requestRole() }
         section("EXEMPTIONS")
-        row("Allow saved contacts", if (OeaCallBlockRules.allowContacts(this)) "On · contacts bypass block rules" else "Off · contacts are checked against rules") {
-            OeaCallBlockRules.setAllowContacts(this, !OeaCallBlockRules.allowContacts(this)); render()
+        val contactsPermission = checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+        row("Allow saved contacts", when {
+            OeaCallBlockRules.allowContacts(this) && !contactsPermission -> "On · Contacts permission missing, so this exemption is not active yet"
+            OeaCallBlockRules.allowContacts(this) -> "On · saved contacts bypass matching block rules"
+            else -> "Off · saved contacts are checked against block rules"
+        }) {
+            val enabledNow = OeaCallBlockRules.allowContacts(this)
+            if (!enabledNow && !contactsPermission) requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS)
+            else { OeaCallBlockRules.setAllowContacts(this, !enabledNow); render() }
         }
-        row("Allow starred contacts", if (OeaCallBlockRules.allowStarred(this)) "On · starred contacts bypass rules" else "Off · starred contacts are checked") {
-            OeaCallBlockRules.setAllowStarred(this, !OeaCallBlockRules.allowStarred(this)); render()
+        row("Allow starred contacts", when {
+            OeaCallBlockRules.allowStarred(this) && !contactsPermission -> "On · Contacts permission missing, so this exemption is not active yet"
+            OeaCallBlockRules.allowStarred(this) -> "On · starred contacts bypass matching rules"
+            else -> "Off · starred contacts are checked against block rules"
+        }) {
+            val enabledNow = OeaCallBlockRules.allowStarred(this)
+            if (!enabledNow && !contactsPermission) requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS)
+            else { OeaCallBlockRules.setAllowStarred(this, !enabledNow); render() }
         }
         if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED)
             action("Grant contacts access", false) { requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS) }
