@@ -85,6 +85,7 @@ jobs:
           grep -Fq 'store.animationDuration(180)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq '.removePrefix("oea_widget:")?.toIntOrNull()' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq 'animate().alpha(1f).scaleX(1f).scaleY(1f)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'ActivityOptions.makeCustomAnimation' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq 'section(box, "WHITELIST")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq 'section(box, "BLOCKED CALL HISTORY")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq 'class OeaPhoneActivity' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
