@@ -1582,18 +1582,48 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun applyIconShape(view: ImageView) {
         val shape = store.iconShape()
-        val outline = GradientDrawable().apply {
+        val radius = when (shape) {
+            "circle" -> dp(999).toFloat()
+            "square" -> 0f
+            "squircle" -> dp(15).toFloat()
+            else -> dp(10).toFloat()
+        }
+        view.background = GradientDrawable().apply {
             setColor(Color.TRANSPARENT)
-            cornerRadius = when (shape) {
-                "circle" -> dp(999).toFloat()
-                "square" -> 0f
-                "squircle" -> dp(15).toFloat()
-                else -> dp(10).toFloat()
+            cornerRadius = radius
+        }
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(target: View, outline: android.graphics.Outline) {
+                val w = target.width
+                val h = target.height
+                if (w <= 0 || h <= 0) {
+                    outline.setRoundRect(0, 0, dp(40), dp(40), radius)
+                    return
+                }
+                if (shape == "squircle" && android.os.Build.VERSION.SDK_INT >= 30) {
+                    // A convex superellipse produces the squarer, softer mask used by
+                    // modern adaptive icon systems instead of a generic rounded rect.
+                    val path = android.graphics.Path()
+                    val halfW = w / 2f
+                    val halfH = h / 2f
+                    for (step in 0..64) {
+                        val t = (2.0 * Math.PI * step / 64.0)
+                        val cos = kotlin.math.cos(t)
+                        val sin = kotlin.math.sin(t)
+                        val x = halfW + halfW * kotlin.math.sign(cos) * kotlin.math.pow(kotlin.math.abs(cos), 0.5)
+                        val y = halfH + halfH * kotlin.math.sign(sin) * kotlin.math.pow(kotlin.math.abs(sin), 0.5)
+                        if (step == 0) path.moveTo(x.toFloat(), y.toFloat()) else path.lineTo(x.toFloat(), y.toFloat())
+                    }
+                    path.close()
+                    outline.setConvexPath(path)
+                } else {
+                    val r = if (shape == "circle") minOf(w, h) / 2f else radius
+                    outline.setRoundRect(0, 0, w, h, r)
+                }
             }
         }
-        view.background = outline
-        view.outlineProvider = ViewOutlineProvider.BACKGROUND
         view.clipToOutline = true
+        view.invalidateOutline()
     }
 
     private fun openIconShapeSettings() {
