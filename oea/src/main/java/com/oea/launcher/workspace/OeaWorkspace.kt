@@ -124,6 +124,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setPadding(dp(6), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, dp(52), 1f))
         header.addView(TextView(context).apply {
+            text = "▢"
+            textSize = 24f
+            gravity = Gravity.CENTER
+            setTextColor(themeText)
+            background = rounded(themeSurface, 18)
+            contentDescription = "Open OEA multitasking overview"
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val overview = Intent(context, OeaSystemToolsActivity::class.java)
+                    .putExtra(OeaSystemToolsActivity.EXTRA_SCREEN, "multitask")
+                runCatching { context.startActivity(overview) }
+                    .onFailure { android.widget.Toast.makeText(context, "Could not open OEA overview.", android.widget.Toast.LENGTH_SHORT).show() }
+            }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+            leftMargin = dp(6)
+        })
+        header.addView(TextView(context).apply {
             text = "⋮"
             textSize = 26f
             gravity = Gravity.CENTER
@@ -133,7 +151,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             isClickable = true
             isFocusable = true
             setOnClickListener { menu(this) }
-        }, LinearLayout.LayoutParams(dp(48), dp(44)).apply {
+        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
             leftMargin = dp(6)
         })
         root.addView(header)
