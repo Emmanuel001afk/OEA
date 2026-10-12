@@ -213,11 +213,10 @@ class OeaPhoneActivity : Activity() {
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val blocker = smallButton("Call Blocker settings") {
+        val blocker = smallButton("Open Call Blocker") {
             runCatching {
-                startActivity(Intent(this@OeaPhoneActivity, OeaSystemToolsActivity::class.java)
-                    .putExtra(OeaSystemToolsActivity.EXTRA_SCREEN, "call_blocker"))
-            }.onFailure { toast("Could not open Call Blocker settings.") }
+                startActivity(Intent(this@OeaPhoneActivity, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java))
+            }.onFailure { toast("Could not open OEA Call Blocker.") }
         }
         root.addView(blocker, LinearLayout.LayoutParams(-1, dp(42)))
         setContentView(root)
