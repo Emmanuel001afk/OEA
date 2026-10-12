@@ -66,7 +66,10 @@ jobs:
           grep -Fq "Open as floating window" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "App info / force stop" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "android:excludeFromRecents=\"true\"" oea/src/main/AndroidManifest.xml
-          grep -Fq "box.addView(list, LinearLayout.LayoutParams(-1, -2))" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "val cardRail = android.widget.HorizontalScrollView(this)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "dp(284)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "does not provide OEA a live task snapshot" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "Open OEA multitasking overview" oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq "currentWindowMetrics.bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "preferredWidthDp = 420" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "preferredHeightDp = 560" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
