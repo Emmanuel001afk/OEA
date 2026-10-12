@@ -8,17 +8,22 @@ import android.net.Uri
 import android.provider.ContactsContract
 import android.telecom.Call
 import android.telecom.CallScreeningService
+import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
 
 class OeaCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
         val number = callDetails.handle?.schemeSpecificPart?.let(::normalize).orEmpty()
-        val blockUnknown = number.isEmpty() && OeaCallBlockRules.blockUnknown(this)
-        if (!blockUnknown && (number.isEmpty() || !OeaCallBlockRules.shouldBlock(this, number))) {
+        val presentation = callDetails.handlePresentation
+        val isPrivate = presentation == TelecomManager.PRESENTATION_RESTRICTED ||
+            presentation == TelecomManager.PRESENTATION_UNKNOWN ||
+            presentation == TelecomManager.PRESENTATION_PAYPHONE
+        val blockUnknown = (number.isEmpty() || isPrivate) && OeaCallBlockRules.blockUnknown(this)
+        if (!blockUnknown && (number.isEmpty() || isPrivate || !OeaCallBlockRules.shouldBlock(this, number))) {
             respondToCall(callDetails, CallResponse.Builder().build())
             return
         }
-        OeaCallBlockRules.recordBlocked(this, number.ifEmpty { "Unknown/private" })
+        OeaCallBlockRules.recordBlocked(this, if (blockUnknown) "Unknown/private" else number)
         respondToCall(callDetails, CallResponse.Builder().setDisallowCall(true).setRejectCall(true).setSkipNotification(true).setSkipCallLog(true).build())
     }
     private fun normalize(value: String): String = value.filter(Char::isDigit).takeLast(15)
