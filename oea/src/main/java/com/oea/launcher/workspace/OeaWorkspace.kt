@@ -635,6 +635,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
         val iconView = ImageView(context).apply {
             setImageDrawable(icon(app.packageName))
+                applyIconShape(this)
             contentDescription = app.label + " locked"
             scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
@@ -1046,6 +1047,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         addView(FrameLayout(context).apply {
             val iconView = ImageView(context).apply {
                 setImageDrawable(icon(app.packageName))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
             }
@@ -1082,6 +1084,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             background = rounded(themeSurface, 16)
             addView(ImageView(context).apply {
                 setImageDrawable(icon(app.packageName))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, LinearLayout.LayoutParams(dp(42), dp(42)))
             addView(TextView(context).apply {
@@ -1142,6 +1145,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         folder.members.mapNotNull(::find).take(4).forEach { app ->
             preview.addView(ImageView(context).apply {
                 setImageDrawable(icon(app.packageName))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, GridLayout.LayoutParams().apply {
                 width = dp(22); height = dp(22)
@@ -1174,6 +1178,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 // Use the app's real launcher drawable as-is. OEA must not wrap, pad,
                 // clip, or paint a second rectangular/circular background around it.
                 setImageDrawable(icon(app.packageName))
+                applyIconShape(this)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
                 alpha = if (OeaAppFreezer.frozenPackages(context).contains(app.packageName)) 0.45f else 1f
@@ -1447,6 +1452,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         setOnClickListener { launch(app) }
         addView(ImageView(context).apply {
             setImageDrawable(icon(app.packageName))
+                applyIconShape(this)
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(0, 0, 0, 0)
             adjustViewBounds = true
@@ -1556,22 +1562,29 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
     }
 
-    private fun iconShapeBackground(): Drawable = GradientDrawable().apply {
-        val radius = when (store.iconShape()) {
-            "circle" -> 999f
-            "square" -> 4f
-            else -> 14f
+    private fun applyIconShape(view: ImageView) {
+        val shape = store.iconShape()
+        val outline = GradientDrawable().apply {
+            setColor(Color.TRANSPARENT)
+            cornerRadius = when (shape) {
+                "circle" -> dp(999).toFloat()
+                "square" -> 0f
+                "squircle" -> dp(15).toFloat()
+                else -> dp(10).toFloat()
+            }
         }
-        setColor(themeSurface)
-        cornerRadius = dp(radius.toInt()).toFloat()
+        view.background = outline
+        view.outlineProvider = ViewOutlineProvider.BACKGROUND
+        view.clipToOutline = true
     }
 
     private fun openIconShapeSettings() {
-        val values = arrayOf("Rounded", "Circle", "Square")
-        val current = when (store.iconShape()) { "circle" -> 1; "square" -> 2; else -> 0 }
+        val labels = arrayOf("Circle", "Rounded square", "Squircle", "Square")
+        val values = arrayOf("circle", "rounded", "squircle", "square")
+        val current = values.indexOf(store.iconShape()).takeIf { it >= 0 } ?: 1
         AlertDialog.Builder(hostActivity ?: context).setTitle("Icon shape")
-            .setSingleChoiceItems(values, current) { dialog, which ->
-                store.setIconShape(when (which) { 1 -> "circle"; 2 -> "square"; else -> "rounded" })
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                store.setIconShape(values[which])
                 rebuild()
                 renderDrawer(drawerSearch.text.toString())
                 dialog.dismiss()
@@ -1623,6 +1636,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setPadding(dp(6), dp(4), dp(6), dp(4))
                 addView(ImageView(context).apply {
                     setImageDrawable(icon(app.packageName))
+                applyIconShape(this)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                 }, LinearLayout.LayoutParams(dp(42), dp(42)))
                 addView(TextView(context).apply {
@@ -1749,6 +1763,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             store.setShowAppLabels(!store.showAppLabels()); rebuild()
         }
         action("Theme", "System / wallpaper, dark, or light") { openThemeSettings() }
+        action("Icon shape", store.iconShape()) { openIconShapeSettings() }
         action("Wallpaper", "Change the OEA wallpaper") { openWallpaperChooser() }
 
         section("APPS")
