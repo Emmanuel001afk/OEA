@@ -88,7 +88,7 @@ object OeaCallBlockRules {
 
     fun recordBlockedAt(context: Context, number: String, timestamp: Long) {
         val old = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
-        old.add(normalize(number) + "|" + timestamp)
+        old.add(normalize(number).ifEmpty { "Unknown/private" } + "|" + timestamp)
         while (old.size > 100) {
             val oldest = old.minByOrNull { it.substringAfterLast('|').toLongOrNull() ?: Long.MIN_VALUE } ?: break
             old.remove(oldest)
