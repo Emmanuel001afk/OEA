@@ -269,24 +269,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         for (p in 0 until ws.pages()) {
-            // Each OEA home page has its own vertical scroll surface. Horizontal
-            // paging remains the page-to-page navigation; vertical scrolling is reserved
-            // for a page whose icons/widgets extend beyond the visible viewport.
+            // Keep the four-row icon grid fixed in the visible home viewport.
+            // Only the widget area can scroll, so a large widget stack never turns
+            // the entire home page into a long vertical document.
             val pageFrame = FrameLayout(context).apply {
                 clipChildren = true
                 clipToPadding = true
                 tag = p
                 setBackgroundColor(Color.TRANSPARENT)
             }
-            val pageScroll = ScrollView(context).apply {
-                isFillViewport = false
-                isVerticalScrollBarEnabled = false
-                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-                tag = "pageScroll"
-            }
             val pageContent = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(4), 0, dp(12))
+                setPadding(0, dp(4), 0, dp(8))
                 clipChildren = true
             }
             val grid = GridLayout(context).apply {
@@ -332,11 +326,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     }
                 }
             }
-            // Widgets are content on the page, not a weighted remainder. This prevents
-            // their size from being forced by the viewport and lets the page scroll.
-            pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
-            pageScroll.addView(pageContent, FrameLayout.LayoutParams(-1, -2))
-            pageFrame.addView(pageScroll, FrameLayout.LayoutParams(-1, -1))
+            // Give widgets the remaining viewport below the fixed icon grid.
+            // Their own region scrolls if multiple widgets exceed that available area.
+            val widgetScroll = ScrollView(context).apply {
+                isFillViewport = false
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                tag = "widgetScroll"
+            }
+            widgetScroll.addView(widgetHost, FrameLayout.LayoutParams(-1, -2))
+            pageContent.addView(widgetScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            pageFrame.addView(pageContent, FrameLayout.LayoutParams(-1, -1))
             pages.addView(pageFrame, LinearLayout.LayoutParams(pageWidth, -1))
         }
         val current = ws.getCurrentPage()
@@ -350,8 +350,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun ensurePageRendered(page: Int) {
         if (page !in 0 until ws.pages() || renderedPages.contains(page)) return
         val pageFrame = pages.getChildAt(page) as? FrameLayout ?: return
-        val pageScroll = pageFrame.getChildAt(0) as? ScrollView ?: return
-        val content = pageScroll.getChildAt(0) as? LinearLayout ?: return
+        val content = pageFrame.getChildAt(0) as? LinearLayout ?: return
         val grid = content.findViewWithTag<GridLayout>("grid") ?: return
         val widgetHost = content.findViewWithTag<FrameLayout>("widgets") ?: return
         renderPage(grid, page)
