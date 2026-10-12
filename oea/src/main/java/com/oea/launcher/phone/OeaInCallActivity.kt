@@ -138,7 +138,7 @@ class OeaInCallActivity : Activity() {
             val scroll = ScrollView(this).apply {
                 isFillViewport = true
                 isVerticalScrollBarEnabled = false
-                addView(root, android.widget.ScrollView.LayoutParams(-1, -2))
+                addView(root, android.widget.FrameLayout.LayoutParams(-1, -2))
             }
             setContentView(scroll)
         } else {
