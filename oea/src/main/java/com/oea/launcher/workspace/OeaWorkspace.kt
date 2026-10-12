@@ -1001,7 +1001,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 background = rounded(themeSurface, 18)
                 isClickable = true
                 isFocusable = true
-                setPadding(dp(4), dp(3), dp(4), dp(3))
+                setPadding(dp(3), dp(2), dp(3), dp(2))
                 setOnClickListener {
                     when (title) {
                         "OEA Settings" -> openSystemsSettings()
@@ -1015,13 +1015,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }
                 addView(TextView(context).apply {
                     text = iconText
-                    textSize = 28f
+                    textSize = 30f
                     gravity = Gravity.CENTER
                     setTextColor(themeText)
-                }, LinearLayout.LayoutParams(-1, dp(42)))
+                }, LinearLayout.LayoutParams(-1, dp(40)))
                 addView(TextView(context).apply {
                     text = title
-                    textSize = 10f
+                    textSize = 9f
                     gravity = Gravity.CENTER
                     setTextColor(themeText)
                     maxLines = 2
@@ -1029,13 +1029,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 }, LinearLayout.LayoutParams(-1, dp(26)))
             }, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(76)
+                height = dp(70)
                 columnSpec = GridLayout.spec(index % 3, 1, 1f)
                 rowSpec = GridLayout.spec(index / 3)
-                setMargins(dp(1), dp(1), dp(1), dp(3))
+                setMargins(dp(1), dp(1), dp(1), dp(2))
             })
         }
-        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(((tools.size + 2) / 3) * 80)))
+        drawerBody.addView(row, LinearLayout.LayoutParams(-1, dp(((tools.size + 2) / 3) * 73)))
     }
 
     private fun drawerTile(app: OeaAppInfo) = LinearLayout(context).apply {
