@@ -550,10 +550,18 @@ class OeaSystemToolsActivity : Activity() {
 
         when (callBlockerTab) {
             "blocked" -> {
-                val role = if (android.os.Build.VERSION.SDK_INT >= 29)
-                    getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true else false
-                row(box, if (role) "Screening role active" else "Enable screening role",
-                    if (role) "OEA can screen matching incoming calls." else "Grant OEA the Android call-screening role.") { requestCallRole() }
+                val roleManager = if (android.os.Build.VERSION.SDK_INT >= 29) getSystemService(RoleManager::class.java) else null
+                val role = roleManager?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true
+                val roleAvailable = roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true
+                row(box, when {
+                    role -> "Screening role active"
+                    roleAvailable -> "Enable screening role"
+                    else -> "Open call-screening settings"
+                }, when {
+                    role -> "OEA is selected to screen matching incoming calls."
+                    roleAvailable -> "Grant OEA the Android call-screening role."
+                    else -> "On older Android versions, choose OEA under the available caller ID / spam or call-screening default-app setting."
+                }) { requestCallRole() }
                 val blocking = OeaCallBlockRules.enabled(this)
                 row(box, if (blocking) "Blocking enabled" else "Blocking disabled",
                     if (role) "Tap to toggle" else "Enable the screening role first") {
@@ -1632,12 +1640,19 @@ class OeaSystemToolsActivity : Activity() {
     private fun requestCallRole() {
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             val rm = getSystemService(RoleManager::class.java)
-            if (rm?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true && !rm.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
-                startActivity(rm.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+            if (rm?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true) {
+                Toast.makeText(this, "OEA is already selected as the call-screening app.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (rm?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true) {
+                runCatching { startActivity(rm.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING)) }
+                    .onFailure { Toast.makeText(this, "Could not open Android's call-screening role request.", Toast.LENGTH_LONG).show() }
                 return
             }
         }
-        Toast.makeText(this, "Android does not expose the call-screening role on this device.", Toast.LENGTH_LONG).show()
+        runCatching { startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+            .onSuccess { Toast.makeText(this, "If available, choose OEA under Caller ID / spam or call-screening apps.", Toast.LENGTH_LONG).show() }
+            .onFailure { Toast.makeText(this, "This Android version does not expose a call-screening selection page.", Toast.LENGTH_LONG).show() }
     }
 
     private fun openNotificationAccess() {
