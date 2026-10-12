@@ -55,6 +55,26 @@ class OeaPhoneActivity : Activity() {
         super.onCreate(state)
         selectedTab = state?.getString("phone_tab") ?: TAB_RECENT
         build()
+        consumeDialIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeDialIntent(intent)
+    }
+
+    private fun consumeDialIntent(source: Intent?) {
+        val action = source?.action ?: return
+        if (action != Intent.ACTION_DIAL && action != Intent.ACTION_VIEW && action != Intent.ACTION_CALL) return
+        val data = source.data ?: return
+        if (data.scheme != "tel") return
+        val raw = data.schemeSpecificPart?.takeIf { it.isNotBlank() } ?: return
+        if (action == Intent.ACTION_CALL) {
+            placeCall(raw)
+        } else {
+            fillNumber(raw)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -252,7 +272,7 @@ class OeaPhoneActivity : Activity() {
         val telecom = getSystemService(TelecomManager::class.java)
         val accounts = runCatching { telecom?.callCapablePhoneAccounts.orEmpty() }.getOrDefault(emptyList())
         if (accounts.isEmpty()) {
-            runCatching { startActivity(Intent(Intent.ACTION_CALL, uri)) }
+            runCatching { telecom?.placeCall(uri, Bundle()) ?: openDialer(uri) }
                 .onFailure { openDialer(uri) }
             return
         }
@@ -276,7 +296,7 @@ class OeaPhoneActivity : Activity() {
                 }
                 .setNegativeButton("Cancel", null)
                 .setNeutralButton("Use Android's choice") { _, _ ->
-                    runCatching { startActivity(Intent(Intent.ACTION_CALL, uri)) }
+                    runCatching { telecom?.placeCall(uri, Bundle()) ?: openDialer(uri) }
                         .onFailure { openDialer(uri) }
                 }
                 .show()
