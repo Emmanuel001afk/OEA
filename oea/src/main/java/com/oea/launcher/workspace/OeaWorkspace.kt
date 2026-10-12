@@ -1989,10 +1989,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun launch(app: OeaAppInfo) {
         unlockForLaunch(app) {
             runCatching {
-                (hostActivity ?: context).startActivity(Intent(Intent.ACTION_MAIN).apply {
+                val launchIntent = Intent(Intent.ACTION_MAIN).apply {
                     addCategory(Intent.CATEGORY_LAUNCHER)
                     component = ComponentName(app.packageName, app.className)
-                })
+                }
+                val launchContext = hostActivity ?: context
+                launchContext.startActivity(
+                    launchIntent,
+                    android.app.ActivityOptions.makeCustomAnimation(
+                        launchContext,
+                        android.R.anim.fade_in,
+                        android.R.anim.fade_out,
+                    ).toBundle(),
+                )
                 store.recordLaunch(app.packageName, app.className)
             }.onFailure {
                 Toast.makeText(context, "Unable to open " + app.label, Toast.LENGTH_SHORT).show()
