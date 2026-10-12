@@ -303,7 +303,7 @@ class OeaPhoneActivity : Activity() {
                     }
                     val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(cursor.getLong(2)))
                     val name = cursor.getString(3).orEmpty().ifBlank { phone }
-                    addEntry(name, "$phone • $type • $date", "Call") { placeCall(phone) }
+                    addEntry(name, "$phone • $type • $date", "Call", action = { placeCall(phone) }, rowClick = { fillNumber(phone) })
                 }
             }
         }.onFailure { addEmptyState("Could not read call history on this device.") }
@@ -356,7 +356,7 @@ class OeaPhoneActivity : Activity() {
         }
         if (filtered.isEmpty()) addEmptyState(if (query.isEmpty()) "No phone contacts found." else "No contacts match “$query”.")
         filtered.forEach { contact ->
-            addEntry(contact.name, contact.phone, "Call") { placeCall(contact.phone) }
+            addEntry(contact.name, contact.phone, "Call", action = { placeCall(contact.phone) }, rowClick = { fillNumber(contact.phone) })
         }
         addSectionAction("Open dial pad") {
             selectedTab = TAB_DIAL
@@ -369,7 +369,7 @@ class OeaPhoneActivity : Activity() {
         val history = OeaCallBlockRules.blockedHistory(this)
         history.forEach { entry ->
             val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.timestamp))
-            addEntry(entry.number, "Blocked • $date", "Call") { placeCall(entry.number) }
+            addEntry(entry.number, "Blocked • $date", "Call", action = { placeCall(entry.number) }, rowClick = { fillNumber(entry.number) })
         }
         if (history.isEmpty()) addEmptyState("No blocked calls recorded by OEA.")
         addSectionAction("Open dial pad") {
@@ -379,7 +379,13 @@ class OeaPhoneActivity : Activity() {
         }
     }
 
-    private fun addEntry(title: String, subtitle: String, actionLabel: String, action: () -> Unit) {
+    private fun addEntry(
+        title: String,
+        subtitle: String,
+        actionLabel: String,
+        action: () -> Unit,
+        rowClick: (() -> Unit)? = null,
+    ) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -401,12 +407,9 @@ class OeaPhoneActivity : Activity() {
                 setTextColor(0xFF9AA2B1.toInt())
                 maxLines = 2
             })
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                if (::number.isInitialized) fillNumber(subtitle.substringBefore(" • ").takeIf { it.any(Char::isDigit) } ?: title)
-                action()
-            }
+            isClickable = rowClick != null
+            isFocusable = rowClick != null
+            setOnClickListener { rowClick?.invoke() }
         }
         card.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
         card.addView(actionButton(actionLabel, true, action), LinearLayout.LayoutParams(dp(78), dp(40)))
