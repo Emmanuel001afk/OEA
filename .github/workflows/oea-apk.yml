@@ -91,6 +91,16 @@ jobs:
           grep -Fq 'class OeaPhoneActivity' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'private fun loadContacts()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'private fun loadBlockedHistory()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'private const val TAB_DIAL' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun renderContacts()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'addTextChangedListener' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'placeCall(contact.phone)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun openDialer(uri: Uri)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'private var callBlockerTab = "overview"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq '"overview" to "Overview"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq '"allowed" to "Allowed"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq '"rules" to "Rules"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq '"history" to "History"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           python3 - <<'PY'
           from pathlib import Path
           source = Path("oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt").read_text()
