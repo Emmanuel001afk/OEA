@@ -51,6 +51,7 @@ class OeaSystemToolsActivity : Activity() {
     private val widgets by lazy { OeaWidgetController(this) }
     private val wallpaperRequestCode = 0x4F58
     private var refreshOverviewOnResume = false
+    private var callBlockerTab = "overview"
 
     private val lightUi: Boolean
         get() = when (dataStore.themeMode()) {
@@ -514,87 +515,144 @@ class OeaSystemToolsActivity : Activity() {
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
 
-    private fun showCallBlocker() {
-        val box = base("Call Blocker", "OEA call-screening rules. Android controls the required screening role.")
-        val role = if (android.os.Build.VERSION.SDK_INT >= 29)
-            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true else false
-        row(box, if (role) "Screening role active" else "Enable screening role",
-            if (role) "OEA can screen matching incoming calls." else "Grant OEA the Android call-screening role.") { requestCallRole() }
-        val blocking = OeaCallBlockRules.enabled(this)
-        row(box, if (blocking) "Blocking enabled" else "Blocking disabled",
-            if (role) "Tap to toggle" else "Enable the screening role first") {
-            if (!role) {
-                requestCallRole()
-            } else {
-                OeaCallBlockRules.setEnabled(this, !blocking)
-                showCallBlocker()
-            }
+    private fun showCallBlocker(tab: String = callBlockerTab) {
+        callBlockerTab = tab
+        val box = base(
+            "Call Blocker",
+            "Manage OEA screening in separate sections. Existing match rules and screening behaviour are unchanged."
+        )
+        val navigation = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
         }
-        if (android.os.Build.VERSION.SDK_INT >= 23 &&
-            checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            row(box, "Contacts permission required", "Needed for contact/starred exemptions") {
-                requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 9101)
-            }
+        listOf(
+            "overview" to "Overview",
+            "allowed" to "Allowed",
+            "rules" to "Rules",
+            "history" to "History"
+        ).forEach { (key, label) ->
+            navigation.addView(Button(this).apply {
+                text = label
+                textSize = 11f
+                alpha = if (key == callBlockerTab) 1f else 0.68f
+                isSelected = key == callBlockerTab
+                setOnClickListener { showCallBlocker(key) }
+            }, LinearLayout.LayoutParams(0, 44, 1f).apply {
+                setMargins(2, 0, 2, 10)
+            })
         }
-        row(box, "Contacts", if (OeaCallBlockRules.allowContacts(this)) "Allowed" else "Not exempt") {
-            OeaCallBlockRules.setAllowContacts(this, !OeaCallBlockRules.allowContacts(this)); showCallBlocker()
-        }
-        row(box, "Starred contacts", if (OeaCallBlockRules.allowStarred(this)) "Allowed" else "Not exempt") {
-            OeaCallBlockRules.setAllowStarred(this, !OeaCallBlockRules.allowStarred(this)); showCallBlocker()
-        }
+        box.addView(navigation, LinearLayout.LayoutParams(-1, -2))
 
-        section(box, "WHITELIST")
-        val allowedNumbers = OeaCallBlockRules.getAllowList(this).sorted()
-        if (allowedNumbers.isEmpty()) {
-            row(box, "No manually allowed numbers", "Add a number to exempt it from every block rule") {}
-        }
-        allowedNumbers.forEach { number ->
-            row(box, number, "Tap to remove from whitelist") {
-                OeaCallBlockRules.setAllowList(this, OeaCallBlockRules.getAllowList(this) - number)
-                showCallBlocker()
+        when (callBlockerTab) {
+            "overview" -> {
+                val role = if (android.os.Build.VERSION.SDK_INT >= 29)
+                    getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true else false
+                row(box, if (role) "Screening role active" else "Enable screening role",
+                    if (role) "OEA can screen matching incoming calls." else "Grant OEA the Android call-screening role.") { requestCallRole() }
+                val blocking = OeaCallBlockRules.enabled(this)
+                row(box, if (blocking) "Blocking enabled" else "Blocking disabled",
+                    if (role) "Tap to toggle" else "Enable the screening role first") {
+                    if (!role) {
+                        requestCallRole()
+                    } else {
+                        OeaCallBlockRules.setEnabled(this, !blocking)
+                        showCallBlocker("overview")
+                    }
+                }
+                if (android.os.Build.VERSION.SDK_INT >= 23 &&
+                    checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    row(box, "Contacts permission required", "Needed for contact/starred exemptions") {
+                        requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 9101)
+                    }
+                }
+                row(box, "Allow saved contacts", if (OeaCallBlockRules.allowContacts(this)) "Enabled • saved contacts bypass blocking rules" else "Disabled • saved contacts are checked against rules") {
+                    OeaCallBlockRules.setAllowContacts(this, !OeaCallBlockRules.allowContacts(this))
+                    showCallBlocker("overview")
+                }
+                row(box, "Allow starred contacts", if (OeaCallBlockRules.allowStarred(this)) "Enabled • starred contacts bypass blocking rules" else "Disabled • starred contacts are checked against rules") {
+                    OeaCallBlockRules.setAllowStarred(this, !OeaCallBlockRules.allowStarred(this))
+                    showCallBlocker("overview")
+                }
+                row(box, "Allowed numbers", "${OeaCallBlockRules.getAllowList(this).size} manually allowed • manage in Allowed") { showCallBlocker("allowed") }
+                row(box, "Blocking rules", "${OeaCallBlockRules.getExact(this).size} exact • ${OeaCallBlockRules.getPrefix(this).size} prefix • ${OeaCallBlockRules.getSuffix(this).size} suffix") { showCallBlocker("rules") }
+                row(box, "Blocked history", "${OeaCallBlockRules.blockedHistory(this).size} saved entries") { showCallBlocker("history") }
             }
-        }
-        row(box, "Add whitelisted number", "Always allow this number, even when a blocking rule matches") {
-            addCallRule("allow")
-        }
-
-        addDivider(box)
-        ruleSection(box, "Exact numbers", OeaCallBlockRules.getExact(this).toList(), "exact")
-        ruleSection(box, "Prefixes", OeaCallBlockRules.getPrefix(this).toList(), "prefix")
-        ruleSection(box, "Suffixes", OeaCallBlockRules.getSuffix(this).toList(), "suffix")
-
-        section(box, "BLOCKED CALL HISTORY")
-        val history = OeaCallBlockRules.blockedHistory(this)
-        if (history.isEmpty()) {
-            row(box, "No blocked calls yet", "Blocked calls recorded by OEA will appear here") {}
-        } else {
-            history.take(30).forEach { call ->
-                val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(call.timestamp))
-                row(box, call.number, "Blocked • $time • tap for actions") {
-                    AlertDialog.Builder(this).setTitle(call.number)
-                        .setItems(arrayOf("Always allow this number", "Remove this history entry")) { _, which ->
-                            when (which) {
-                                0 -> {
-                                    OeaCallBlockRules.setAllowList(this, OeaCallBlockRules.getAllowList(this) + call.number)
-                                    showCallBlocker()
-                                }
-                                1 -> {
-                                    val retained = history.filterNot { it.number == call.number && it.timestamp == call.timestamp }
-                                    OeaCallBlockRules.clearBlockedHistory(this)
-                                    retained.forEach { OeaCallBlockRules.recordBlockedAt(this, it.number, it.timestamp) }
-                                    showCallBlocker()
-                                }
-                            }
-                        }.setNegativeButton("Cancel", null).show()
+            "allowed" -> {
+                section(box, "ALLOWED NUMBERS")
+                val allowedNumbers = OeaCallBlockRules.getAllowList(this).sorted()
+                if (allowedNumbers.isEmpty()) {
+                    row(box, "No manually allowed numbers", "Add a number to exempt it from every block rule") {}
+                }
+                allowedNumbers.forEach { number ->
+                    row(box, number, "Tap to remove from the allow-list") {
+                        OeaCallBlockRules.setAllowList(this, OeaCallBlockRules.getAllowList(this) - number)
+                        showCallBlocker("allowed")
+                    }
+                }
+                row(box, "Add allowed number", "Always allow this number, even when a blocking rule matches") { addCallRule("allow") }
+                section(box, "CONTACT EXCEPTIONS")
+                row(box, "Allow saved contacts", if (OeaCallBlockRules.allowContacts(this)) "On" else "Off") {
+                    OeaCallBlockRules.setAllowContacts(this, !OeaCallBlockRules.allowContacts(this))
+                    showCallBlocker("allowed")
+                }
+                row(box, "Allow starred contacts", if (OeaCallBlockRules.allowStarred(this)) "On" else "Off") {
+                    OeaCallBlockRules.setAllowStarred(this, !OeaCallBlockRules.allowStarred(this))
+                    showCallBlocker("allowed")
                 }
             }
-            row(box, "Clear blocked history", "${history.size} saved entries") {
-                AlertDialog.Builder(this).setTitle("Clear blocked history?")
-                    .setMessage("This removes OEA's local blocked-call records. It does not change your blocking rules.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Clear") { _, _ -> OeaCallBlockRules.clearBlockedHistory(this); showCallBlocker() }
-                    .show()
+            "rules" -> {
+                section(box, "MATCH RULES")
+                TextView(this).apply {
+                    text = "Exact matches block a full number. Prefix and suffix rules match the start or end of a number."
+                    textSize = 13f
+                    setTextColor(mutedColor())
+                    setPadding(0, 0, 0, 12)
+                }.also { box.addView(it) }
+                ruleSection(box, "Exact numbers", OeaCallBlockRules.getExact(this).toList(), "exact")
+                addDivider(box)
+                ruleSection(box, "Prefixes", OeaCallBlockRules.getPrefix(this).toList(), "prefix")
+                addDivider(box)
+                ruleSection(box, "Suffixes", OeaCallBlockRules.getSuffix(this).toList(), "suffix")
             }
+            "history" -> {
+                section(box, "BLOCKED CALL HISTORY")
+                val history = OeaCallBlockRules.blockedHistory(this)
+                if (history.isEmpty()) {
+                    row(box, "No blocked calls yet", "Blocked calls recorded by OEA will appear here") {}
+                } else {
+                    history.take(100).forEach { call ->
+                        val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(call.timestamp))
+                        row(box, call.number, "Blocked • $time • tap for actions") {
+                            AlertDialog.Builder(this).setTitle(call.number)
+                                .setItems(arrayOf("Always allow this number", "Remove this history entry")) { _, which ->
+                                    when (which) {
+                                        0 -> {
+                                            OeaCallBlockRules.setAllowList(this, OeaCallBlockRules.getAllowList(this) + call.number)
+                                            showCallBlocker("history")
+                                        }
+                                        1 -> {
+                                            val retained = history.filterNot { it.number == call.number && it.timestamp == call.timestamp }
+                                            OeaCallBlockRules.clearBlockedHistory(this)
+                                            retained.forEach { OeaCallBlockRules.recordBlockedAt(this, it.number, it.timestamp) }
+                                            showCallBlocker("history")
+                                        }
+                                    }
+                                }.setNegativeButton("Cancel", null).show()
+                        }
+                    }
+                    row(box, "Clear blocked history", "${history.size} saved entries") {
+                        AlertDialog.Builder(this).setTitle("Clear blocked history?")
+                            .setMessage("This removes OEA's local blocked-call records. It does not change your blocking rules.")
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Clear") { _, _ ->
+                                OeaCallBlockRules.clearBlockedHistory(this)
+                                showCallBlocker("history")
+                            }
+                            .show()
+                    }
+                }
+            }
+            else -> showCallBlocker("overview")
         }
         setRoot(box)
     }
