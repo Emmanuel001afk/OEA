@@ -269,24 +269,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pages.removeAllViews()
         val pageWidth = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         for (p in 0 until ws.pages()) {
-            // Each OEA home page has its own vertical scroll surface. Horizontal
-            // paging remains the page-to-page navigation; vertical scrolling is reserved
-            // for a page whose icons/widgets extend beyond the visible viewport.
+            // Keep the four-row icon grid fixed in the visible home viewport.
+            // Only the widget area can scroll, so a large widget stack never turns
+            // the entire home page into a long vertical document.
             val pageFrame = FrameLayout(context).apply {
                 clipChildren = true
                 clipToPadding = true
                 tag = p
                 setBackgroundColor(Color.TRANSPARENT)
             }
-            val pageScroll = ScrollView(context).apply {
-                isFillViewport = false
-                isVerticalScrollBarEnabled = false
-                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-                tag = "pageScroll"
-            }
             val pageContent = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(4), 0, dp(12))
+                setPadding(0, dp(4), 0, dp(8))
                 clipChildren = true
             }
             val grid = GridLayout(context).apply {
@@ -332,11 +326,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                     }
                 }
             }
-            // Widgets are content on the page, not a weighted remainder. This prevents
-            // their size from being forced by the viewport and lets the page scroll.
-            pageContent.addView(widgetHost, LinearLayout.LayoutParams(-1, -2))
-            pageScroll.addView(pageContent, FrameLayout.LayoutParams(-1, -2))
-            pageFrame.addView(pageScroll, FrameLayout.LayoutParams(-1, -1))
+            // Give widgets the remaining viewport below the fixed icon grid.
+            // Their own region scrolls if multiple widgets exceed that available area.
+            val widgetScroll = ScrollView(context).apply {
+                isFillViewport = false
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                tag = "widgetScroll"
+            }
+            widgetScroll.addView(widgetHost, FrameLayout.LayoutParams(-1, -2))
+            pageContent.addView(widgetScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            pageFrame.addView(pageContent, FrameLayout.LayoutParams(-1, -1))
             pages.addView(pageFrame, LinearLayout.LayoutParams(pageWidth, -1))
         }
         val current = ws.getCurrentPage()
@@ -350,8 +350,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun ensurePageRendered(page: Int) {
         if (page !in 0 until ws.pages() || renderedPages.contains(page)) return
         val pageFrame = pages.getChildAt(page) as? FrameLayout ?: return
-        val pageScroll = pageFrame.getChildAt(0) as? ScrollView ?: return
-        val content = pageScroll.getChildAt(0) as? LinearLayout ?: return
+        val content = pageFrame.getChildAt(0) as? LinearLayout ?: return
         val grid = content.findViewWithTag<GridLayout>("grid") ?: return
         val widgetHost = content.findViewWithTag<FrameLayout>("widgets") ?: return
         renderPage(grid, page)
@@ -1543,19 +1542,37 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun openDrawer() {
+        if (drawerOpen) return
         drawerOpen = true
+        drawer.animate().cancel()
+        homeRoot.animate().cancel()
+        homeRoot.animate().alpha(0f).setDuration(store.animationDuration(100)).start()
         homeRoot.visibility = View.GONE
+        drawer.alpha = 0f
+        drawer.translationY = dp(12).toFloat()
         drawer.visibility = View.VISIBLE
         drawerSearch.setText(search.text.toString())
         drawerSearch.setSelection(drawerSearch.text.length)
         renderDrawer(drawerSearch.text.toString())
+        drawer.animate().alpha(1f).translationY(0f).setDuration(store.animationDuration(180))
+            .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
         drawerSearch.requestFocus()
     }
 
     private fun closeDrawer() {
+        if (!drawerOpen) return
         drawerOpen = false
-        drawer.visibility = View.GONE
-        homeRoot.visibility = View.VISIBLE
+        drawer.animate().cancel()
+        drawer.animate().alpha(0f).translationY(dp(10).toFloat()).setDuration(store.animationDuration(120))
+            .withEndAction {
+                drawer.visibility = View.GONE
+                drawer.translationY = 0f
+                drawer.alpha = 1f
+                homeRoot.alpha = 0f
+                homeRoot.visibility = View.VISIBLE
+                homeRoot.animate().alpha(1f).setDuration(store.animationDuration(150))
+                    .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+            }.start()
         search.setText("")
         drawerSearch.setText("")
         search.clearFocus()
@@ -1565,18 +1582,48 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun applyIconShape(view: ImageView) {
         val shape = store.iconShape()
-        val outline = GradientDrawable().apply {
+        val radius = when (shape) {
+            "circle" -> dp(999).toFloat()
+            "square" -> 0f
+            "squircle" -> dp(15).toFloat()
+            else -> dp(10).toFloat()
+        }
+        view.background = GradientDrawable().apply {
             setColor(Color.TRANSPARENT)
-            cornerRadius = when (shape) {
-                "circle" -> dp(999).toFloat()
-                "square" -> 0f
-                "squircle" -> dp(15).toFloat()
-                else -> dp(10).toFloat()
+            cornerRadius = radius
+        }
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(target: View, outline: android.graphics.Outline) {
+                val w = target.width
+                val h = target.height
+                if (w <= 0 || h <= 0) {
+                    outline.setRoundRect(0, 0, dp(40), dp(40), radius)
+                    return
+                }
+                if (shape == "squircle" && android.os.Build.VERSION.SDK_INT >= 30) {
+                    // A convex superellipse produces the squarer, softer mask used by
+                    // modern adaptive icon systems instead of a generic rounded rect.
+                    val path = android.graphics.Path()
+                    val halfW = w / 2f
+                    val halfH = h / 2f
+                    for (step in 0..64) {
+                        val t = (2.0 * Math.PI * step / 64.0)
+                        val cos = kotlin.math.cos(t)
+                        val sin = kotlin.math.sin(t)
+                        val x = halfW + halfW * Math.signum(cos) * Math.pow(Math.abs(cos), 0.5)
+                        val y = halfH + halfH * Math.signum(sin) * Math.pow(Math.abs(sin), 0.5)
+                        if (step == 0) path.moveTo(x.toFloat(), y.toFloat()) else path.lineTo(x.toFloat(), y.toFloat())
+                    }
+                    path.close()
+                    outline.setConvexPath(path)
+                } else {
+                    val r = if (shape == "circle") minOf(w, h) / 2f else radius
+                    outline.setRoundRect(0, 0, w, h, r)
+                }
             }
         }
-        view.background = outline
-        view.outlineProvider = ViewOutlineProvider.BACKGROUND
         view.clipToOutline = true
+        view.invalidateOutline()
     }
 
     private fun openIconShapeSettings() {

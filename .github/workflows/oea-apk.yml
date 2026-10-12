@@ -72,6 +72,32 @@ jobs:
           grep -Fq "val cardRail = android.widget.HorizontalScrollView(this)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "dp(284)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "does not provide OEA a live task snapshot" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'private fun openDrawer()' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'DecelerateInterpolator' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'org.adw.launcher.THEMES' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
+          grep -Fq 'com.novalauncher.THEME' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
+          grep -Fq 'External icon pack' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'private fun applyIconShape' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq '"squircle"' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'outline.setConvexPath(path)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'widgetScroll' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'row(box, "Animation speed"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'store.animationDuration(180)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'section(box, "WHITELIST")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'section(box, "BLOCKED CALL HISTORY")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'class OeaPhoneActivity' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun loadContacts()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun loadBlockedHistory()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt").read_text()
+          render_block = source.split("private fun renderOeaTools()", 1)[1].split("private fun drawerTile", 1)[0]
+          tools_list = render_block.split("val tools = listOf(", 1)[1].split(")", 1)[0]
+          forbidden = ("App Freezer", "Multitask", "Split Screen")
+          found = [name for name in forbidden if name in tools_list]
+          if found:
+              raise SystemExit("System-only tools leaked into All Apps OEA Systems grid: " + ", ".join(found))
+          PY
           grep -Fq "Open OEA multitasking overview" oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq "currentWindowMetrics.bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
           grep -Fq "preferredWidthDp = 420" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt

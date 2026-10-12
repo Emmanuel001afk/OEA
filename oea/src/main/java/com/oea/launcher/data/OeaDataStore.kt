@@ -58,6 +58,9 @@ class OeaDataStore private constructor(context: Context) {
     fun setShowMostUsed(v: Boolean) { prefs.edit().putBoolean(KEY_SHOW_MOST_USED, v).apply() }
     fun iconShape() = prefs.getString(KEY_ICON_SHAPE, "rounded") ?: "rounded"
     fun setIconShape(v: String) { prefs.edit().putString(KEY_ICON_SHAPE, v).apply() }
+    fun animationSpeed() = prefs.getInt(KEY_ANIMATION_SPEED, 1).coerceIn(0, 2)
+    fun setAnimationSpeed(value: Int) { prefs.edit().putInt(KEY_ANIMATION_SPEED, value.coerceIn(0, 2)).apply() }
+    fun animationDuration(baseMillis: Long): Long = (baseMillis * when (animationSpeed()) { 0 -> 1.25; 2 -> 0.75; else -> 1.0 }).toLong().coerceAtLeast(60L)
     fun iconPackPackage() = prefs.getString(KEY_ICON_PACK_PACKAGE, null)
     fun setIconPackPackage(packageName: String?) {
         prefs.edit().apply {
@@ -105,6 +108,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_SHOW_MOST_USED = "show_most_used"
         private const val KEY_ICON_SHAPE = "icon_shape"
         private const val KEY_ICON_PACK_PACKAGE = "icon_pack_package"
+        private const val KEY_ANIMATION_SPEED = "animation_speed"
         private const val KEY_WALLPAPER_URI = "wallpaper_uri"
         private const val KEY_RECENTS = "recent_launches"
         private const val KEY_LAUNCH_COUNT_PREFIX = "launch_count:"

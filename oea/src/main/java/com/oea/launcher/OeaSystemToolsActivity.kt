@@ -99,6 +99,7 @@ class OeaSystemToolsActivity : Activity() {
         row(box, "Wallpaper", "Choose an image and apply it to OEA + Android Home") { pickWallpaper() }
         row(box, "Theme", themeLabel()) { themeDialog() }
         row(box, "Icon shape", iconShapeLabel()) { iconShapeDialog() }
+        row(box, "Animation speed", animationSpeedLabel()) { animationSpeedDialog() }
         row(box, "External icon pack", iconPackLabel()) { iconPackDialog() }
         row(box, "Home grid", dataStore.gridColumns().toString() + " columns") { gridDialog() }
         row(box, "App labels", if (dataStore.showAppLabels()) "Shown under app icons" else "Hidden") {
@@ -1403,6 +1404,24 @@ class OeaSystemToolsActivity : Activity() {
                     showCallBlocker()
                 }
             }.show()
+    }
+
+    private fun animationSpeedLabel(): String = when (dataStore.animationSpeed()) {
+        0 -> "Relaxed"
+        2 -> "Fast"
+        else -> "Standard"
+    }
+
+    private fun animationSpeedDialog() {
+        val labels = arrayOf("Relaxed", "Standard", "Fast")
+        AlertDialog.Builder(this).setTitle("Animation speed")
+            .setSingleChoiceItems(labels, dataStore.animationSpeed()) { dialog, which ->
+                dataStore.setAnimationSpeed(which)
+                dialog.dismiss()
+                showSettings()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun iconShapeLabel(): String = when (dataStore.iconShape()) {
