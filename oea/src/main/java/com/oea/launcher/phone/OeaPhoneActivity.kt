@@ -128,6 +128,8 @@ class OeaPhoneActivity : Activity() {
                 text = digit
                 textSize = 20f
                 contentDescription = "Dial $digit"
+                setTextColor(0xFFFFFFFF.toInt())
+                background = rounded(0xFF1E2431.toInt(), 18)
                 setOnClickListener { insertDigit(digit) }
             }, GridLayout.LayoutParams().apply {
                 width = 0
