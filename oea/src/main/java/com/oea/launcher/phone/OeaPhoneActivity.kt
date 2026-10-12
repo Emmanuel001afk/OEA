@@ -157,8 +157,10 @@ class OeaPhoneActivity : Activity() {
         dialPanel.addView(callActions, LinearLayout.LayoutParams(-1, dp(54)))
         val defaultPhone = smallButton("Set default phone") { requestDefaultDialer() }
         dialPanel.addView(defaultPhone, LinearLayout.LayoutParams(-1, dp(42)))
-        val callOptions = smallButton("Call appearance & flash alerts") { showCallOptions() }
+        val callOptions = smallButton("Call display mode") { showCallOptions() }
         dialPanel.addView(callOptions, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(5) })
+        val flashOptions = smallButton("Incoming-call flash alert") { showFlashOptions() }
+        dialPanel.addView(flashOptions, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(4) })
         root.addView(dialPanel, LinearLayout.LayoutParams(-1, -2))
 
         search = EditText(this).apply {
@@ -307,8 +309,11 @@ class OeaPhoneActivity : Activity() {
             }
             .setNegativeButton("Close", null)
             .show()
+    }
+
+    private fun showFlashOptions() {
         AlertDialog.Builder(this)
-            .setTitle("Flash alert")
+            .setTitle("Incoming-call flash alert")
             .setMessage("Blink the camera flash while an incoming call is ringing. This needs Camera permission and may be unavailable while another app uses the camera.")
             .setPositiveButton(if (phonePrefs.getBoolean("flash_alert", false)) "Turn off" else "Turn on") { _, _ ->
                 if (phonePrefs.getBoolean("flash_alert", false)) {
@@ -321,7 +326,7 @@ class OeaPhoneActivity : Activity() {
                     requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
                 }
             }
-            .setNegativeButton("Not now", null)
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
