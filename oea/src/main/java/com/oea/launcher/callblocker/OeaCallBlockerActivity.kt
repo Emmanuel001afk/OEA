@@ -69,7 +69,7 @@ class OeaCallBlockerActivity : Activity() {
         root.addView(nav, LinearLayout.LayoutParams(-1, -2))
         val scroll = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = false }
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(12)) }
-        scroll.addView(content, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(content, android.widget.FrameLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         when (selectedTab) {
