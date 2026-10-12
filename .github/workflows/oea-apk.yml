@@ -100,7 +100,7 @@ jobs:
           grep -Fq 'placeCall(contact.phone)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'private fun openDialer(uri: Uri)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'private var callBlockerTab = "overview"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq '"overview" to "Overview"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq '"blocked" to "Blocked"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq '"allowed" to "Allowed"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq '"rules" to "Rules"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq '"history" to "History"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
