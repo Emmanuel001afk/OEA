@@ -47,12 +47,23 @@
         <activity
             android:name="com.oea.launcher.phone.OeaPhoneActivity"
             android:exported="true"
-            android:label="OEA Phone"
+            android:label="Phone"
             android:theme="@style/OeaTheme">
+            <!-- The no-data DIAL filter is required for Android's default-dialer
+                 role resolver; the tel filter handles links and prefilled numbers. -->
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.DIAL" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="tel" />
+            </intent-filter>
+            <!-- Expose Phone as a normal launchable app, not only a system-tools row. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.CALL" />
