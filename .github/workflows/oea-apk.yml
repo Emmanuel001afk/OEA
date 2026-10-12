@@ -59,7 +59,10 @@ jobs:
           grep -Fq "Search apps or package names" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "Overview" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "UsageStatsManager" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'overviewTab("Recent")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq 'overviewTab("Recent use")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "Clear OEA list" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "Restore cards" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          grep -Fq "Android tasks were not closed" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq 'overviewTab("All apps")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "overviewNow - usedAt <= sevenDaysMillis" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq '"Lock this app"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt

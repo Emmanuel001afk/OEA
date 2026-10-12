@@ -625,7 +625,7 @@ class OeaSystemToolsActivity : Activity() {
 
         val box = base(
             "Overview",
-            "Recently used apps. Tap a card to switch to it, or tap ⋮ for app actions, floating multitasking, and split screen."
+            "OEA app overview • Recent-use history, not Android’s live task stack. Open apps, use floating windows, or pair apps for split screen."
         )
         val usageAccess = getSystemService(AppOpsManager::class.java).checkOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName
@@ -671,7 +671,7 @@ class OeaSystemToolsActivity : Activity() {
                 setColor(surfaceColor())
             }
         }
-        val recentTab = overviewTab("Recent")
+        val recentTab = overviewTab("Recent use")
         val allAppsTab = overviewTab("All apps")
         tabs.addView(recentTab, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
         tabs.addView(allAppsTab, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
@@ -701,6 +701,47 @@ class OeaSystemToolsActivity : Activity() {
             val usedAt = lastUsed[it.packageName] ?: 0L
             usedAt > 0L && overviewNow - usedAt <= sevenDaysMillis
         }
+        val overviewPrefs = getSharedPreferences("oea_overview", Context.MODE_PRIVATE)
+        val hiddenRecent = overviewPrefs.getStringSet("hidden_recent_packages", emptySet())
+            ?.toMutableSet() ?: mutableSetOf()
+        var renderOverview: (() -> Unit)? = null
+        var currentOverviewQuery = ""
+
+        // These controls manage only OEA's local recent-use list; they do not
+        // claim to dismiss or terminate Android system tasks.
+        val overviewControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(10))
+        }
+        fun overviewControl(label: String, action: () -> Unit) = TextView(this).apply {
+            text = label
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            setTextColor(textColor())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(surfaceColor())
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { action() }
+        }
+        overviewControls.addView(overviewControl("Clear OEA list") {
+            hiddenRecent.addAll(recentChoices.map { it.packageName })
+            overviewPrefs.edit().putStringSet("hidden_recent_packages", hiddenRecent.toSet()).apply()
+            renderOverview?.invoke()
+            Toast.makeText(this, "Cleared OEA's recent-use list. Android tasks were not closed.", Toast.LENGTH_LONG).show()
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(5) })
+        overviewControls.addView(overviewControl("Restore cards") {
+            hiddenRecent.clear()
+            overviewPrefs.edit().remove("hidden_recent_packages").apply()
+            renderOverview?.invoke()
+            Toast.makeText(this, "Recent-use cards restored.", Toast.LENGTH_SHORT).show()
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(5) })
+        box.addView(overviewControls, box.indexOfChild(list))
 
         fun launchApp(app: OeaAppInfo) {
             protectedLaunch(app) {
@@ -800,9 +841,11 @@ class OeaSystemToolsActivity : Activity() {
         }
 
         fun render(query: String) {
+            currentOverviewQuery = query
             list.removeAllViews()
             val normalized = query.trim()
-            val source = if (showAllApps) allChoices else recentChoices
+            val source = if (showAllApps) allChoices else recentChoices.filterNot { it.packageName in hiddenRecent }
+            overviewControls.visibility = if (showAllApps) View.GONE else View.VISIBLE
             val visible = source.filter { app ->
                 normalized.isBlank() || app.label.contains(normalized, ignoreCase = true) ||
                     app.packageName.contains(normalized, ignoreCase = true)
@@ -811,6 +854,7 @@ class OeaSystemToolsActivity : Activity() {
                 list.addView(TextView(this).apply {
                     text = when {
                         !showAllApps && !usageAccess -> "Enable Usage access for recent-use cards, or choose All apps."
+                        !showAllApps && recentChoices.isNotEmpty() && hiddenRecent.containsAll(recentChoices.map { it.packageName }) -> "Your OEA recent-use list is cleared. Tap Restore cards to show it again."
                         !showAllApps -> "No launchable apps have recorded use in the last 7 days."
                         else -> "No matching apps."
                     }
@@ -933,6 +977,7 @@ class OeaSystemToolsActivity : Activity() {
             recentTab.setTextColor(if (showAllApps) textColor() else Color.WHITE)
             allAppsTab.setTextColor(if (showAllApps) Color.WHITE else textColor())
         }
+        renderOverview = { render(currentOverviewQuery) }
         recentTab.setOnClickListener {
             showAllApps = false
             updateTabStyle()
