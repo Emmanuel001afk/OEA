@@ -113,7 +113,8 @@ class OeaIconController(private val context: Context) {
                         val drawable = parser.getAttributeValue(null, "drawable")
                         if (!rawComponent.isNullOrBlank() && !drawable.isNullOrBlank()) {
                             val flattened = rawComponent.removePrefix("ComponentInfo{").removeSuffix("}")
-                            result[flattened] = drawable
+                            val canonical = ComponentName.unflattenFromString(flattened)?.flattenToString() ?: flattened
+                            result[canonical] = drawable
                         }
                     }
                     event = parser.next()
