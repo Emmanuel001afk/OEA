@@ -137,7 +137,7 @@ jobs:
           grep -Fq 'Compact floating card' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'Incoming-call flash alert' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'setTorchMode' oea/src/main/java/com/oea/launcher/phone/OeaInCallService.kt
-          grep -Fq 'child.tag = widget.appWidgetId' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          grep -Fq 'tag = widget.appWidgetId' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq 'val childId = child.tag as? Int' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           grep -Fq 'renderedPages.toList().forEach { refreshPage(it) }' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
           python3 - <<'PY'
