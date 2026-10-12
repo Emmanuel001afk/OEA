@@ -383,7 +383,7 @@ class OeaSystemToolsActivity : Activity() {
             setPadding(0, dp(2), dp(12), dp(10))
         }
         val list = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        cardRail.addView(list, android.widget.HorizontalScrollView.LayoutParams(-2, -2))
+        cardRail.addView(list, FrameLayout.LayoutParams(-2, -2))
         box.addView(cardRail, LinearLayout.LayoutParams(-1, -2))
 
         fun renderApps() {
