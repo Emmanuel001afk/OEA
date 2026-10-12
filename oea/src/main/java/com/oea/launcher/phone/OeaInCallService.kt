@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.telecom.Call
 import android.telecom.InCallService
+import com.oea.launcher.callblocker.OeaCallBlockRules
 
 class OeaInCallService : InCallService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -41,12 +42,20 @@ class OeaInCallService : InCallService() {
 
     private val callback = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) {
-            if (state == Call.STATE_RINGING) startFlash() else stopFlash()
+            if (state == Call.STATE_RINGING) {
+                if (interceptIfBlocked(call)) return
+                startFlash()
+            } else {
+                stopFlash()
+            }
         }
     }
 
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
+        if (call.state == Call.STATE_RINGING && interceptIfBlocked(call)) {
+            return
+        }
         observed?.unregisterCallback(callback)
         observed = call
         OeaCallState.current = call
@@ -58,6 +67,21 @@ class OeaInCallService : InCallService() {
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
             )
         }
+    }
+
+    private fun interceptIfBlocked(call: Call): Boolean {
+        val details = call.details ?: return false
+        val rawNumber = details.handle?.schemeSpecificPart.orEmpty()
+        if (!OeaCallBlockRules.shouldBlockIncomingCall(this, rawNumber, details.handlePresentation)) {
+            return false
+        }
+        stopFlash()
+        val label = OeaCallBlockRules.normalizeNumber(rawNumber).ifEmpty { "Unknown/private" }
+        OeaCallBlockRules.recordBlocked(this, label)
+        runCatching { call.reject(false, null) }.onFailure {
+            runCatching { call.disconnect() }
+        }
+        return true
     }
 
     override fun onCallRemoved(call: Call) {
