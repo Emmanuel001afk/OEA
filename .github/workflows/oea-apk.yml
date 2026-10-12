@@ -131,6 +131,9 @@ jobs:
           grep -Fq 'Phone number or USSD code' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'TAB_CONTACTS' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'ACTION_CHANGE_DEFAULT_DIALER' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'consumeDialIntent(intent)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun consumeDialIntent(source: Intent?)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
+          ! grep -Fq 'startActivity(Intent(Intent.ACTION_CALL' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'Choose SIM for this call' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'callCapablePhoneAccounts' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
           grep -Fq 'TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
