@@ -97,6 +97,18 @@ class OeaLauncherEngine(context: Context) {
         }
     }
 
+    /**
+     * A recoverable refresh problem must never look like a broken launcher.
+     *
+     * Home only shows its blocking retry affordance when there is genuinely
+     * nothing to show — i.e. no app catalogue has ever been bound successfully.
+     * When a previous good workspace is on screen, a transient PackageManager or
+     * bind failure keeps that workspace visible and is logged instead. This is
+     * what made the old build claim Home had failed while the user could see a
+     * fully working launcher behind the message.
+     */
+    private val hasUsableWorkspace: Boolean get() = lastBoundApps.isNotEmpty()
+
     private fun finishReload(result: Result<List<OeaAppInfo>>) {
         loading = false
         result.fold(
@@ -111,7 +123,11 @@ class OeaLauncherEngine(context: Context) {
                         val error = IllegalStateException("Workspace rejected the refreshed app catalogue")
                         Log.e(TAG, "Could not bind app catalogue; keeping the last good workspace", error)
                         _state.value = _state.value.copy(loadingApps = false, lastError = error.message)
-                        workspace.setAppLoadStatus("Home could not refresh · tap to retry") { reloadAsync() }
+                        if (hasUsableWorkspace) {
+                            workspace.setAppLoadStatus(null)
+                        } else {
+                            workspace.setAppLoadStatus("Home could not refresh · tap to retry") { reloadAsync() }
+                        }
                         return@fold
                     }
                     _state.value = EngineState(
@@ -127,11 +143,15 @@ class OeaLauncherEngine(context: Context) {
                         appCount = lastBoundApps.size,
                         lastSuccessfulLoadMillis = System.currentTimeMillis(),
                     )
-                    if (lastBoundApps.isEmpty()) {
-                        workspace.setAppLoadStatus("No launchable apps found · tap to retry") { reloadAsync() }
-                    } else {
+                    if (hasUsableWorkspace) {
+                        // An empty reply is transient on many devices (profile
+                        // switch, package install, direct-boot window). Keep the
+                        // workspace the user can already see and retry quietly.
                         dirty = true
-                        workspace.setAppLoadStatus("Home apps could not refresh · tap to retry") { reloadAsync() }
+                        Log.w(TAG, "App catalogue came back empty; keeping the last good workspace")
+                        workspace.setAppLoadStatus(null)
+                    } else {
+                        workspace.setAppLoadStatus("No launchable apps found · tap to retry") { reloadAsync() }
                     }
                 }
             },
@@ -145,11 +165,8 @@ class OeaLauncherEngine(context: Context) {
                     lastSuccessfulLoadMillis = _state.value.lastSuccessfulLoadMillis,
                     lastError = message,
                 )
-                if (lastBoundApps.isEmpty()) {
-                    workspace.setAppLoadStatus("Apps could not be loaded · tap to retry") { reloadAsync() }
-                } else {
-                    workspace.setAppLoadStatus(null)
-                }
+                if (hasUsableWorkspace) workspace.setAppLoadStatus(null)
+                else workspace.setAppLoadStatus("Apps could not be loaded · tap to retry") { reloadAsync() }
             },
         )
 

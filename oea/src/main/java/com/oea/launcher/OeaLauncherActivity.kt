@@ -23,6 +23,17 @@ class OeaLauncherActivity : Activity() {
     private lateinit var home: OeaHomeController
     private var resumedAndFocused = false
 
+    /**
+     * True once OEA Home's view tree was created and attached successfully.
+     *
+     * The failure screen is a *startup* boundary: it replaces the activity's
+     * content view, so it may only be used when there is no working Home
+     * surface to keep. Once Home has rendered, a later transient error is
+     * logged and the running workspace is left alone instead of blanking a
+     * launcher the user can still see and use.
+     */
+    private var surfaceReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
@@ -32,6 +43,7 @@ class OeaLauncherActivity : Activity() {
             OeaRuntime.initialize(application)
             home = OeaHomeController(this)
             setContentView(home.createHomeSurface())
+            surfaceReady = true
             if (Build.VERSION.SDK_INT >= 33) {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
@@ -39,14 +51,33 @@ class OeaLauncherActivity : Activity() {
             }
             consumeHomeAction(intent)
         } catch (error: Exception) {
-            OeaScreenFailure.show(this, "OEA Home", error)
+            reportFailure("OEA Home", error)
         }
+    }
+
+    /**
+     * Shows the last-resort error screen only when Home never came up.
+     *
+     * A resume, rotation or resize failure on an already-rendered Home must not
+     * tear down a working launcher. Those recoverable errors are logged so they
+     * stay diagnosable, and the existing workspace keeps the screen.
+     */
+    private fun reportFailure(screen: String, error: Throwable) {
+        if (surfaceReady) {
+            android.util.Log.w("OeaLauncherActivity", "$screen hit a recoverable error; keeping the running Home surface", error)
+            return
+        }
+        OeaScreenFailure.show(this, screen, error)
     }
 
     private fun consumeHomeAction(source: Intent?) {
         val action = source?.getStringExtra(EXTRA_HOME_ACTION) ?: return
         source.removeExtra(EXTRA_HOME_ACTION)
-        window.decorView.post { home.performAction(action) }
+        window.decorView.post {
+            if (!::home.isInitialized) return@post
+            runCatching { home.performAction(action) }
+                .onFailure { reportFailure("OEA Home", it) }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -59,12 +90,16 @@ class OeaLauncherActivity : Activity() {
             return
         }
         if (::home.isInitialized && Intent.ACTION_MAIN == intent.action) {
-            home.onHomeIntent(alreadyOnHome = resumedAndFocused)
+            runCatching { home.onHomeIntent(alreadyOnHome = resumedAndFocused) }
+                .onFailure { reportFailure("OEA Home", it) }
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (home.handleActivityResult(requestCode, resultCode, data)) return
+        val handled = ::home.isInitialized && runCatching { home.handleActivityResult(requestCode, resultCode, data) }
+            .onFailure { reportFailure("OEA Home", it) }
+            .getOrDefault(false)
+        if (handled) return
         super.onActivityResult(requestCode, resultCode, data)
     }
 
@@ -72,7 +107,7 @@ class OeaLauncherActivity : Activity() {
         super.onResume()
         if (::home.isInitialized) {
             runCatching { home.refresh() }
-                .onFailure { OeaScreenFailure.show(this, "OEA Home", it) }
+                .onFailure { reportFailure("OEA Home", it) }
         }
         resumeGameBoostMonitoring()
     }
@@ -92,7 +127,7 @@ class OeaLauncherActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         if (::home.isInitialized) {
             runCatching { home.onConfigurationChanged(newConfig) }
-                .onFailure { OeaScreenFailure.show(this, "OEA Home", it) }
+                .onFailure { reportFailure("OEA Home", it) }
         }
     }
 

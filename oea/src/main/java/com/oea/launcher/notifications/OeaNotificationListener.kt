@@ -82,12 +82,13 @@ object OeaNotificationState {
     }
 
     /**
-     * Best notification-backed activity for the Home capsule. Calls and media
-     * sessions are prioritized over generic ongoing/actionable notifications.
-     * Only notifications with useful content are returned.
+     * Best notification-backed activity for a Home live-activity surface.
+     * Calls and media sessions are prioritized over generic ongoing/actionable
+     * notifications. Only notifications with useful content are returned;
+     * [accept] limits the choice to the apps routed to one surface.
      */
-    fun dynamicIslandNotification(): StatusBarNotification? = synchronized(lock) {
-        active.values.mapNotNull { value ->
+    fun dynamicIslandNotification(accept: (StatusBarNotification) -> Boolean = { true }): StatusBarNotification? = synchronized(lock) {
+        active.values.filter { value -> runCatching { accept(value) }.getOrDefault(false) }.mapNotNull { value ->
             val notification = runCatching { value.notification }.getOrNull() ?: return@mapNotNull null
             if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return@mapNotNull null
 

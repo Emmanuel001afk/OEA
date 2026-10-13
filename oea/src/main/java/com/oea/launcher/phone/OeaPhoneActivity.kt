@@ -513,14 +513,19 @@ class OeaPhoneActivity : Activity() {
 
     private fun showCallOptions() {
         val modes = arrayOf("Full screen", "Popup window", "Compact floating card")
+        val details = arrayOf(
+            "Full screen • over your wallpaper",
+            "Popup window • a card over the app you're using",
+            "Compact floating card • a small card at the top; keep using your phone",
+        )
         val keys = arrayOf("fullscreen", "popup", "compact")
         val current = phonePrefs.getString("call_ui_mode", "fullscreen") ?: "fullscreen"
         AlertDialog.Builder(this)
             .setTitle("Incoming and active call display")
-            .setSingleChoiceItems(modes, keys.indexOf(current).coerceAtLeast(0)) { dialog, which ->
+            .setSingleChoiceItems(details, keys.indexOf(current).coerceAtLeast(0)) { dialog, which ->
                 phonePrefs.edit().putString("call_ui_mode", keys[which]).apply()
                 dialog.dismiss()
-                toast("${modes[which]} selected for call screens.")
+                toast("${modes[which]} selected. Locked phones always show calls full screen; you can switch during a call.")
             }
             .setNegativeButton("Close", null)
             .show()

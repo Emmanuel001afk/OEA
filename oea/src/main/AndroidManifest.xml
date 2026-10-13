@@ -14,6 +14,10 @@
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Phone: incoming-call screen over the lock screen / other apps, and the
+         proximity sensor that turns the screen off near the ear. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Launcher essentials: apply wallpapers, pull down the notification shade
          from a Home gesture, and open Android's uninstall confirmation. -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
@@ -97,6 +101,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Freezer: a standalone app with its own icon and task, like Game Boost,
+             Phone and Call Blocker, so it can be opened and placed on Home. -->
+        <activity
+            android:name="com.oea.launcher.freezer.OeaFreezerActivity"
+            android:exported="true"
+            android:label="Freezer"
+            android:icon="@drawable/ic_oea_freezer"
+            android:roundIcon="@drawable/ic_oea_freezer"
+            android:taskAffinity="com.oea.launcher.freezer"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <!-- "Add to Home screen" requests (pinned shortcuts and widgets). -->
         <activity
             android:name=".OeaPinRequestActivity"
@@ -162,10 +183,28 @@
                 <data android:scheme="tel" />
             </intent-filter>
         </activity>
+        <!-- Call screens. Full screen shows the wallpaper behind a dark scrim;
+             popup and floating card use a translucent activity so the app
+             underneath stays visible and usable. -->
         <activity
             android:name="com.oea.launcher.phone.OeaInCallActivity"
             android:exported="false"
-            android:theme="@style/OeaTheme" />
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.oea.launcher.incall"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/OeaInCallTheme" />
+        <activity
+            android:name="com.oea.launcher.phone.OeaInCallPopupActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.oea.launcher.incall"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/OeaInCallPopupTheme" />
+        <receiver
+            android:name="com.oea.launcher.phone.OeaCallActionReceiver"
+            android:exported="false" />
         <service
             android:name="com.oea.launcher.phone.OeaInCallService"
             android:exported="true"
@@ -173,9 +212,12 @@
             <meta-data
                 android:name="android.telecom.IN_CALL_SERVICE_UI"
                 android:value="true" />
+            <!-- false: Telecom plays the ringtone and vibration (respecting ringer
+                 mode and Do Not Disturb). "true" told Android that OEA rings
+                 itself, which left incoming calls silent. -->
             <meta-data
                 android:name="android.telecom.IN_CALL_SERVICE_RINGING"
-                android:value="true" />
+                android:value="false" />
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
             </intent-filter>
