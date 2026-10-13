@@ -17,19 +17,25 @@ import java.util.concurrent.Executors
 /**
  * Owns the app model and the single OEA Home workspace.
  *
- * Apps are loaded once, then kept current through LauncherApps package
- * callbacks and background reloads, so returning Home never re-queries the
- * package manager on the main thread.
+ * The engine is available application-wide, but the heavyweight Home view is
+ * created only when Home actually requests it. App discovery runs off the UI
+ * thread; the first frame can appear while Android's package manager responds.
  */
 class OeaLauncherEngine(private val context: Context) {
     val model = OeaAppModel(context)
-    val workspace = OeaWorkspace(ContextThemeWrapper(context, R.style.OeaHomeTheme))
+    private val workspaceDelegate = lazy {
+        OeaWorkspace(ContextThemeWrapper(context, R.style.OeaHomeTheme))
+    }
+    val workspace: OeaWorkspace get() = workspaceDelegate.value
+
     private var lastBoundApps: List<OeaAppInfo> = emptyList()
+    private var workspaceBound = false
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var dirty = true
     private var loading = false
     private var reloadPending = false
+
     private val packageCallback = object : LauncherApps.Callback() {
         override fun onPackageRemoved(packageName: String, user: UserHandle) = packagesChanged(arrayOf(packageName))
         override fun onPackageAdded(packageName: String, user: UserHandle) = packagesChanged(arrayOf(packageName))
@@ -42,19 +48,14 @@ class OeaLauncherEngine(private val context: Context) {
         runCatching { context.getSystemService(LauncherApps::class.java)?.registerCallback(packageCallback, main) }
     }
 
-    /** Called on every Home resume; cheap unless packages changed. */
+    /** Called on every Home resume; never performs package discovery on the UI thread. */
     fun start() {
-        if (lastBoundApps.isEmpty()) {
-            // First start: load synchronously so Home never flashes empty.
-            model.load()
-            if (model.apps.isNotEmpty()) {
-                bind(model.apps)
-                dirty = false
-                preloadIcons(model.apps)
-            }
-            return
+        // Package callbacks can populate the model before Home is first shown.
+        // Bind that cached result once the Home workspace has actually been created.
+        if (workspaceDelegate.isInitialized() && !workspaceBound && model.apps.isNotEmpty()) {
+            bind(model.apps)
         }
-        if (dirty) reloadAsync()
+        if (lastBoundApps.isEmpty() || dirty) reloadAsync()
     }
 
     fun reloadAsync() {
@@ -70,7 +71,9 @@ class OeaLauncherEngine(private val context: Context) {
                 // Never bind an empty result: that would wipe the saved layout.
                 if (!apps.isNullOrEmpty()) {
                     model.setApps(apps)
-                    if (apps != lastBoundApps) bind(apps)
+                    if (apps != lastBoundApps || (workspaceDelegate.isInitialized() && !workspaceBound)) {
+                        bind(apps)
+                    }
                     dirty = false
                     preloadIcons(apps)
                 }
@@ -83,7 +86,10 @@ class OeaLauncherEngine(private val context: Context) {
     }
 
     private fun bind(apps: List<OeaAppInfo>) {
-        workspace.bind(apps)
+        if (workspaceDelegate.isInitialized()) {
+            workspaceDelegate.value.bind(apps)
+            workspaceBound = true
+        }
         lastBoundApps = apps.toList()
     }
 
