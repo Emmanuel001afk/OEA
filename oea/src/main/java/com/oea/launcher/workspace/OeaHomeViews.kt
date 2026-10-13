@@ -343,8 +343,8 @@ class OeaTileView(context: Context) : View(context) {
 
 /**
  * Fixed rows × columns grid. Children declare their cell with [LayoutParams];
- * widgets span every column and several rows. Empty space reports taps,
- * double-taps and long-presses for Home gestures.
+ * widgets span a rectangle of cells. Empty space reports taps, double-taps
+ * and long-presses for Home gestures.
  */
 class OeaCellLayout(context: Context) : ViewGroup(context) {
     class LayoutParams(var cellX: Int, var cellY: Int, var spanX: Int = 1, var spanY: Int = 1) :
@@ -358,6 +358,9 @@ class OeaCellLayout(context: Context) : ViewGroup(context) {
     var highlightCell = -1
         set(value) { if (field != value) { field = value; invalidate() } }
     var highlightColor = Color.argb(60, 255, 255, 255)
+    /** Drop preview for a widget, in cells (left/top inclusive, right/bottom exclusive). */
+    var highlightRect: Rect? = null
+        set(value) { if (field != value) { field = value; invalidate() } }
     var emptyGestures: GestureDetector? = null
     private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
@@ -432,15 +435,22 @@ class OeaCellLayout(context: Context) : ViewGroup(context) {
     override fun generateLayoutParams(p: ViewGroup.LayoutParams?): ViewGroup.LayoutParams = LayoutParams(0, 0)
 
     override fun onDraw(canvas: Canvas) {
-        if (highlightCell < 0) return
         val cw = cellWidth()
         val ch = cellHeight()
+        val inset = min(cw, ch) * 0.08f
+        highlightPaint.color = highlightColor
+        highlightRect?.let { cells ->
+            rect.set(paddingLeft + cells.left * cw + inset, paddingTop + cells.top * ch + inset,
+                paddingLeft + cells.right * cw - inset, paddingTop + cells.bottom * ch - inset)
+            val radius = min(cw, ch) * 0.24f
+            canvas.drawRoundRect(rect, radius, radius, highlightPaint)
+            return
+        }
+        if (highlightCell < 0) return
         val cx = highlightCell % cols
         val cy = highlightCell / cols
-        val inset = min(cw, ch) * 0.08f
         rect.set(paddingLeft + cx * cw + inset, paddingTop + cy * ch + inset,
             paddingLeft + (cx + 1) * cw - inset, paddingTop + (cy + 1) * ch - inset)
-        highlightPaint.color = highlightColor
         val radius = min(rect.width(), rect.height()) * 0.28f
         canvas.drawRoundRect(rect, radius, radius, highlightPaint)
     }

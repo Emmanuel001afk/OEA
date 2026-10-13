@@ -20,6 +20,10 @@ exifinterface = "1.4.2"
 
 guava = "33.5.0-android"
 junitVersion = "4.13.2"
+
+# OEA Game Engine: open-source WebRTC (data channels only) and ZXing QR codes.
+webrtcSdk = "150.7871.01"
+zxing = "3.5.3"
 mockito = "5.23.0"
 mockitoKotlin = "6.3.0"
 truth = "1.4.5"
@@ -161,6 +165,8 @@ androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterfa
 # Testing (Merged)
 google-truth = { group = "com.google.truth", name = "truth", version.ref = "truth" }
 junit = { group = "junit", name = "junit", version.ref = "junitVersion" }
+webrtc-android = { group = "io.github.webrtc-sdk", name = "android-prefixed-stripped", version.ref = "webrtcSdk" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 mockito-kotlin = { group = "org.mockito.kotlin", name = "mockito-kotlin", version.ref = "mockitoKotlin" }
 mockito-robolectric = { group = "org.mockito", name = "mockito-core", version.ref = "mockito" }
 mockito-robolectric-bytebuddy = "net.bytebuddy:byte-buddy:1.18.8"

@@ -9,8 +9,10 @@ android {
         applicationId "com.oea.launcher"
         minSdk 26
         targetSdk 36
-        versionCode 4
-        versionName "0.2.0-alpha4"
+        versionCode 5
+        versionName "0.3.0-alpha5"
+        // WebRTC ships native code; every current phone is covered by these two ABIs.
+        ndk { abiFilters.addAll(["arm64-v8a", "armeabi-v7a"]) }
     }
     buildTypes { release { minifyEnabled false; signingConfig signingConfigs.debug } }
     compileOptions {
@@ -21,6 +23,8 @@ android {
 kotlin { jvmToolchain(21) }
 
 dependencies {
+    implementation project(":oea-engine")
+    implementation project(":oea-games")
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
 }

@@ -125,6 +125,7 @@ class OeaGameBoostActivity : Activity() {
             val apps = runCatching { OeaAppModel(this).query() }.getOrDefault(emptyList())
                 .filter { it.packageName != packageName }
                 .distinctBy { it.packageName }
+            OeaGameBoostStore.invalidateDetectedGames()
             val found = runCatching { OeaGameBoostStore.detectedGames(this) }.getOrDefault(emptySet())
             if (OeaGameBoostStore.enabled(this)) runCatching { OeaGameBoostStore.syncDetectedGames(this) }
             runCatching {
@@ -458,6 +459,11 @@ class OeaGameBoostActivity : Activity() {
             p.edit().putBoolean("ram_handle_visible", on).apply()
             refreshService()
         }
+        kit.switchRow(group, R.drawable.oic_wifi, "Network speed on the button", "Download and upload speed in a small readout under the floating button. The panel always shows it.",
+            p.getBoolean(OeaGameBoostService.PREF_NETWORK_BADGE, true)) { on ->
+            p.edit().putBoolean(OeaGameBoostService.PREF_NETWORK_BADGE, on).apply()
+            refreshService()
+        }
         val sizes = listOf("small", "medium", "large")
         val sizeBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(14)) }
         sizeBox.addView(kit.text("Size", 13f, palette.textSecondary, OeaType.medium).apply { setPadding(dp(2), 0, 0, dp(8)) })
@@ -488,7 +494,7 @@ class OeaGameBoostActivity : Activity() {
         val swatches = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         modes.forEach { mode ->
             swatches.addView(Swatch(this, if (mode == "rgb") null else accentFor(mode), mode == selected, palette.text).apply {
-                contentDescription = if (mode == "rgb") "RGB spectrum" else "$mode pulse"
+                contentDescription = if (mode == "rgb") "Rainbow, cycles through every colour" else "$mode pulse"
                 setOnClickListener {
                     p.edit().putString("ram_color_mode", mode).apply()
                     refreshService()
@@ -497,6 +503,11 @@ class OeaGameBoostActivity : Activity() {
             }, LinearLayout.LayoutParams(0, dp(40), 1f))
         }
         sizeBox.addView(swatches)
+        if (selected == "rgb") {
+            sizeBox.addView(kit.text("Rainbow: the button and panel smoothly cycle through every colour while you play.", 12f, palette.textTertiary).apply {
+                setPadding(dp(2), dp(8), 0, 0)
+            })
+        }
         group.addView(View(this).apply { setBackgroundColor(palette.stroke) }, LinearLayout.LayoutParams(-1, maxOf(1, dp(1) / 2)).apply { leftMargin = dp(16); rightMargin = dp(16) })
         group.addView(sizeBox)
     }
@@ -661,10 +672,37 @@ class OeaGameBoostActivity : Activity() {
     }
 
     /** Colour swatch; null colour draws the RGB spectrum. */
+    /**
+     * Colour choice. A null [color] is the rainbow option: its spectrum slowly
+     * spins so it reads as a live, cycling colour rather than a static picture.
+     */
     private class Swatch(context: Context, private val color: Int?, private val selected: Boolean, private val ring: Int) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var spin = 0f
+        private var spinner: android.animation.ValueAnimator? = null
 
         init { isClickable = true }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            if (color != null || spinner != null) return
+            spinner = android.animation.ValueAnimator.ofFloat(0f, 360f).apply {
+                duration = 6_000L
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                interpolator = android.view.animation.LinearInterpolator()
+                addUpdateListener {
+                    spin = it.animatedValue as Float
+                    invalidate()
+                }
+                start()
+            }
+        }
+
+        override fun onDetachedFromWindow() {
+            spinner?.cancel()
+            spinner = null
+            super.onDetachedFromWindow()
+        }
 
         override fun onDraw(canvas: Canvas) {
             val d = resources.displayMetrics.density
@@ -674,11 +712,14 @@ class OeaGameBoostActivity : Activity() {
             paint.style = Paint.Style.FILL
             if (color == null) {
                 paint.shader = SweepGradient(cx, cy, intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED), null)
+                canvas.save()
+                canvas.rotate(spin, cx, cy)
             } else {
                 paint.shader = null
                 paint.color = color
             }
             canvas.drawCircle(cx, cy, if (selected) r * 0.78f else r * 0.86f, paint)
+            if (color == null) canvas.restore()
             paint.shader = null
             if (selected) {
                 paint.style = Paint.Style.STROKE

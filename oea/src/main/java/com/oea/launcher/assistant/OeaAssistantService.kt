@@ -1,14 +1,29 @@
 package com.oea.launcher.assistant
 
 import android.accessibilityservice.AccessibilityService
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import android.view.animation.LinearInterpolator
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
 
 /**
  * OEA Assistant: the accessibility service behind OEA's system actions.
@@ -16,7 +31,9 @@ import android.view.accessibility.AccessibilityNodeInfo
  * It stays idle (no screen content is read) until the user triggers an OEA
  * action. Global actions (lock, notifications, Recents, split screen) are one
  * call. The App Freezer's no-root mode drives Android's own App info page and
- * presses Force stop, one app at a time, then returns to OEA.
+ * presses Force stop, one app at a time, then returns to OEA. While it does,
+ * a full-screen accessibility overlay shows a clean "Freezing apps" progress
+ * screen instead of Settings pages flashing past.
  */
 class OeaAssistantService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -46,18 +63,81 @@ class OeaAssistantService : AccessibilityService() {
         instance = this
         applyEventMask(active = false)
         OeaAssistant.notifyStateChanged()
+        // A freeze requested while Android was (re)starting the service runs now.
+        OeaAssistant.onServiceConnected()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val watch = foregroundWatch
+        if (watch != null && event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.packageName?.toString() == watch.packageName) {
+            finishForegroundWatch(true)
+        }
         val active = job ?: return
         val pkg = event?.packageName?.toString() ?: return
         if (pkg in active.settingsPackages) scheduleStep(90L)
     }
 
+    // ======================================================= foreground watch
+
+    private class ForegroundWatch(val packageName: String, val callback: (Boolean) -> Unit)
+
+    private var foregroundWatch: ForegroundWatch? = null
+    private val foregroundTimeout = Runnable { finishForegroundWatch(false) }
+
+    /** Used by split screen to start the second app only once the first is really in front. */
+    fun watchForeground(packageName: String, timeoutMs: Long, callback: (Boolean) -> Unit): Boolean {
+        if (job != null) return false
+        foregroundWatch?.let {
+            foregroundWatch = null
+            handler.removeCallbacks(foregroundTimeout)
+            runCatching { it.callback(false) }
+        }
+        val front = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        if (front == packageName) {
+            handler.post { callback(true) }
+            return true
+        }
+        foregroundWatch = ForegroundWatch(packageName, callback)
+        applyEventMask(active = false)
+        handler.postDelayed(foregroundTimeout, timeoutMs)
+        return true
+    }
+
+    private fun finishForegroundWatch(found: Boolean) {
+        val watch = foregroundWatch ?: return
+        foregroundWatch = null
+        handler.removeCallbacks(foregroundTimeout)
+        applyEventMask(active = job != null)
+        runCatching { watch.callback(found) }
+    }
+
+    /**
+     * Two app windows sharing the screen, or a split-screen divider, means
+     * Android really entered split screen (rather than stacking the apps).
+     */
+    fun isSplitScreenActive(): Boolean {
+        val all = runCatching { windows }.getOrNull().orEmpty()
+        if (all.any { it.type == AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER }) return true
+        val metrics = resources.displayMetrics
+        val screenArea = metrics.widthPixels.toLong() * metrics.heightPixels.toLong()
+        if (screenArea <= 0L) return false
+        val bounds = android.graphics.Rect()
+        val partialApps = all.count { window ->
+            if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@count false
+            window.getBoundsInScreen(bounds)
+            val area = bounds.width().toLong() * bounds.height().toLong()
+            area > 0L && area < screenArea * 8 / 10
+        }
+        return partialApps >= 2
+    }
+
     override fun onInterrupt() = Unit
 
     override fun onUnbind(intent: Intent?): Boolean {
+        finishForegroundWatch(false)
         abortJob()
+        hideProgressOverlay(immediately = true)
         if (instance === this) instance = null
         OeaAssistant.notifyStateChanged()
         return super.onUnbind(intent)
@@ -65,6 +145,7 @@ class OeaAssistantService : AccessibilityService() {
 
     override fun onDestroy() {
         abortJob()
+        hideProgressOverlay(immediately = true)
         if (instance === this) instance = null
         OeaAssistant.notifyStateChanged()
         super.onDestroy()
@@ -92,6 +173,7 @@ class OeaAssistantService : AccessibilityService() {
             callback = callback,
         )
         applyEventMask(active = true)
+        showProgressOverlay()
         nextPackage()
         return true
     }
@@ -107,6 +189,7 @@ class OeaAssistantService : AccessibilityService() {
         }
         active.current = pkg
         active.stage = Stage.FIND_BUTTON
+        updateProgressOverlay(active, pkg)
         val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
             .addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -132,11 +215,27 @@ class OeaAssistantService : AccessibilityService() {
         handler.postDelayed(timeoutRunnable, STAGE_TIMEOUT_MS)
     }
 
+    /**
+     * The Settings window being driven. Normally the active window, but the
+     * progress overlay or a stray touch can briefly become active, so fall back
+     * to the interactive window list (flagRetrieveInteractiveWindows).
+     */
+    private fun settingsRoot(active: ForceStopJob): AccessibilityNodeInfo? {
+        val root = runCatching { rootInActiveWindow }.getOrNull()
+        if (root?.packageName?.toString() in active.settingsPackages) return root
+        val fromWindows = runCatching {
+            windows.asSequence()
+                .mapNotNull { window -> runCatching { window.root }.getOrNull() }
+                .firstOrNull { it.packageName?.toString() in active.settingsPackages }
+        }.getOrNull()
+        return fromWindows ?: root
+    }
+
     private fun step() {
         val active = job ?: return
         val pkg = active.current ?: return
         if (active.stage == Stage.SETTLE) return
-        val root = rootInActiveWindow
+        val root = settingsRoot(active)
         if (root == null) {
             scheduleStep(250L)
             return
@@ -209,7 +308,7 @@ class OeaAssistantService : AccessibilityService() {
         val active = job ?: return
         val pkg = active.current ?: return
         if (active.stage == Stage.CONFIRM) {
-            val root = rootInActiveWindow
+            val root = settingsRoot(active)
             val pageButton = root?.let { findLabeled(it, active.stopLabels) }
             if (pageButton != null && !pageButton.isEnabled) active.stopped += pkg else active.failed += pkg
         } else if (active.stage == Stage.FIND_BUTTON) {
@@ -231,8 +330,227 @@ class OeaAssistantService : AccessibilityService() {
         } else {
             performGlobalAction(GLOBAL_ACTION_BACK)
         }
+        // Keep the progress screen up until OEA is back in front, so the last
+        // App info page never flashes on its way out.
+        showProgressDone(finished)
+        hideProgressOverlay(immediately = false)
         finished.callback?.invoke(finished.stopped.toList(), finished.failed.toList())
         OeaAssistant.notifyStateChanged()
+    }
+
+    /** Stops the run on the user's request; apps already stopped stay stopped, all stay frozen in OEA. */
+    private fun cancelForceStop() {
+        val running = job ?: return
+        val back = running.returnTo
+        abortJob()
+        applyEventMask(active = false)
+        if (back != null) {
+            runCatching { startActivity(Intent(back).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { performGlobalAction(GLOBAL_ACTION_BACK) }
+        } else {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+        }
+        hideProgressOverlay(immediately = false)
+        OeaAssistant.notifyStateChanged()
+    }
+
+    // ============================================================ progress overlay
+
+    private var progressOverlay: View? = null
+    private var progressTitle: TextView? = null
+    private var progressApp: TextView? = null
+    private var progressCount: TextView? = null
+    private var progressIcon: ImageView? = null
+    private var progressBar: View? = null
+    private var progressTrack: FrameLayout? = null
+    private var progressSpinner: ObjectAnimator? = null
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    /**
+     * A calm full-screen "Freezing apps" screen drawn as an accessibility
+     * overlay (no extra permission). It covers the App info pages OEA has to
+     * drive, while OEA Assistant still reads and presses Settings underneath.
+     */
+    private fun showProgressOverlay() {
+        if (progressOverlay != null) return
+        val wm = getSystemService(WindowManager::class.java) ?: return
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(0xF2070C16.toInt())
+            isClickable = true
+            isFocusable = false
+        }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(32), dp(24), dp(32), dp(24))
+        }
+        val badge = FrameLayout(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF0E4C8F.toInt(), 0xFF3FD5F5.toInt()),
+            ).apply { shape = GradientDrawable.OVAL }
+            elevation = dp(8).toFloat()
+        }
+        val flake = ImageView(this).apply {
+            setImageDrawable(getDrawable(com.oea.launcher.R.drawable.oic_ac_unit_fill)?.mutate()?.apply { setTint(Color.WHITE) })
+        }
+        badge.addView(flake, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER))
+        column.addView(badge, LinearLayout.LayoutParams(dp(84), dp(84)).apply { bottomMargin = dp(22) })
+        val title = TextView(this).apply {
+            text = "Freezing apps"
+            textSize = 22f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            gravity = Gravity.CENTER
+        }
+        column.addView(title, LinearLayout.LayoutParams(-2, -2))
+        val appRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(16), dp(10))
+            background = GradientDrawable().apply {
+                setColor(0x1AFFFFFF)
+                cornerRadius = dp(18).toFloat()
+            }
+        }
+        val icon = ImageView(this)
+        appRow.addView(icon, LinearLayout.LayoutParams(dp(32), dp(32)).apply { rightMargin = dp(12) })
+        val appLabel = TextView(this).apply {
+            textSize = 15f
+            setTextColor(0xFFE6EEF8.toInt())
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        appRow.addView(appLabel, LinearLayout.LayoutParams(-2, -2))
+        column.addView(appRow, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
+        val track = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                setColor(0x22FFFFFF)
+                cornerRadius = dp(3).toFloat()
+            }
+        }
+        val bar = View(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(0xFF3FA9F5.toInt(), 0xFF7BE7FF.toInt()),
+            ).apply { cornerRadius = dp(3).toFloat() }
+        }
+        track.addView(bar, FrameLayout.LayoutParams(0, -1))
+        column.addView(track, LinearLayout.LayoutParams(dp(220), dp(6)).apply { topMargin = dp(22) })
+        val count = TextView(this).apply {
+            textSize = 13f
+            setTextColor(0xFF9FB2C8.toInt())
+            gravity = Gravity.CENTER
+        }
+        column.addView(count, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
+        val note = TextView(this).apply {
+            text = "OEA is stopping each app through Android's App info so it stays asleep. This only takes a moment."
+            textSize = 12.5f
+            setTextColor(0xFF7F8EA3.toInt())
+            gravity = Gravity.CENTER
+            setLineSpacing(dp(2).toFloat(), 1f)
+        }
+        column.addView(note, LinearLayout.LayoutParams(dp(280), -2).apply { topMargin = dp(18) })
+        root.addView(column, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+        val cancel = TextView(this).apply {
+            text = "Cancel"
+            textSize = 15f
+            setTextColor(0xFFBFD3EA.toInt())
+            gravity = Gravity.CENTER
+            setPadding(dp(28), dp(12), dp(28), dp(12))
+            background = GradientDrawable().apply {
+                setColor(0x14FFFFFF)
+                cornerRadius = dp(22).toFloat()
+                setStroke(maxOf(1, dp(1) / 2), 0x33FFFFFF)
+            }
+            isClickable = true
+            setOnClickListener { cancelForceStop() }
+        }
+        root.addView(cancel, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(56) })
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            if (Build.VERSION.SDK_INT >= 28) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        val added = runCatching { wm.addView(root, params) }.isSuccess
+        if (!added) return
+        progressOverlay = root
+        progressTitle = title
+        progressApp = appLabel
+        progressCount = count
+        progressIcon = icon
+        progressBar = bar
+        progressTrack = track
+        root.alpha = 0f
+        root.animate().alpha(1f).setDuration(160L).start()
+        progressSpinner = ObjectAnimator.ofFloat(flake, View.ROTATION, 0f, 360f).apply {
+            duration = 4_000L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            start()
+        }
+    }
+
+    private fun updateProgressOverlay(active: ForceStopJob, pkg: String) {
+        if (progressOverlay == null) return
+        val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
+            .getOrDefault(pkg)
+        progressApp?.text = label
+        progressIcon?.setImageDrawable(runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull())
+        val index = (active.total - active.queue.size).coerceIn(1, active.total)
+        progressCount?.text = if (active.total == 1) "Stopping $label" else "$index of ${active.total}"
+        setProgressFraction((index - 1).toFloat() / active.total.coerceAtLeast(1))
+    }
+
+    private fun showProgressDone(finished: ForceStopJob) {
+        if (progressOverlay == null) return
+        progressTitle?.text = if (finished.failed.isEmpty()) "Apps frozen" else "Frozen in OEA"
+        progressCount?.text = when {
+            finished.failed.isEmpty() -> if (finished.stopped.size == 1) "1 app is asleep" else "${finished.stopped.size} apps are asleep"
+            else -> "${finished.stopped.size} stopped • ${finished.failed.size} not confirmed by Android"
+        }
+        setProgressFraction(1f)
+    }
+
+    private fun setProgressFraction(fraction: Float) {
+        val bar = progressBar ?: return
+        val track = progressTrack ?: return
+        track.post {
+            val lp = bar.layoutParams ?: return@post
+            lp.width = (track.width * fraction.coerceIn(0f, 1f)).toInt()
+            bar.layoutParams = lp
+        }
+    }
+
+    private fun hideProgressOverlay(immediately: Boolean) {
+        val overlay = progressOverlay ?: return
+        progressOverlay = null
+        progressSpinner?.cancel()
+        progressSpinner = null
+        progressTitle = null
+        progressApp = null
+        progressCount = null
+        progressIcon = null
+        progressBar = null
+        progressTrack = null
+        val remove = { runCatching { getSystemService(WindowManager::class.java)?.removeView(overlay) } }
+        if (immediately) {
+            remove()
+        } else {
+            overlay.animate().alpha(0f).setStartDelay(PROGRESS_LINGER_MS).setDuration(180L)
+                .withEndAction { remove() }.start()
+        }
     }
 
     private fun abortJob() {
@@ -305,13 +623,20 @@ class OeaAssistantService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         }
         // Idle: only OEA's own windows. Active: only the Settings app being driven.
-        info.packageNames = if (active) job?.settingsPackages?.toTypedArray() else arrayOf(packageName)
+        // Watching for split screen: every package, window-state changes only.
+        info.packageNames = when {
+            active -> job?.settingsPackages?.toTypedArray()
+            foregroundWatch != null -> null
+            else -> arrayOf(packageName)
+        }
         info.notificationTimeout = if (active) 60L else 250L
         runCatching { serviceInfo = info }
     }
 
     companion object {
         private const val STAGE_TIMEOUT_MS = 5_000L
+        /** How long the finished progress screen stays while OEA returns to the front. */
+        private const val PROGRESS_LINGER_MS = 650L
 
         @Volatile
         var instance: OeaAssistantService? = null

@@ -9,7 +9,14 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/** Last-resort, native error surface so a recoverable screen error is not a force-close. */
+/**
+ * Last-resort, native error surface so a recoverable screen error is not a force-close.
+ *
+ * This replaces the whole activity content, so callers must only use it when
+ * the screen genuinely failed to render. OEA Home uses it strictly as a
+ * startup boundary (see OeaLauncherActivity); once Home is on screen, later
+ * recoverable errors are logged and the running workspace is kept.
+ */
 object OeaScreenFailure {
     fun show(activity: Activity, screen: String, error: Throwable) {
         Log.e(TAG, "$screen failed to render", error)

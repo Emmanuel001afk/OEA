@@ -51,7 +51,18 @@ object OeaAssistant {
     fun openRecents(): Boolean = perform(AccessibilityService.GLOBAL_ACTION_RECENTS)
     fun toggleSplitScreen(): Boolean = perform(AccessibilityService.GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN)
 
-    fun isForceStopping(): Boolean = OeaAssistantService.instance?.isForceStopping() == true
+    /**
+     * Calls [callback] on the main thread once [packageName] has a window in
+     * front (true) or after [timeoutMs] (false). Returns false when OEA
+     * Assistant is not running or is busy, in which case nothing is called.
+     */
+    fun watchForeground(packageName: String, timeoutMs: Long, callback: (Boolean) -> Unit): Boolean =
+        OeaAssistantService.instance?.watchForeground(packageName, timeoutMs, callback) == true
+
+    /** True when two app windows currently share the screen (Android split screen). */
+    fun isSplitScreenActive(): Boolean = OeaAssistantService.instance?.isSplitScreenActive() == true
+
+    fun isForceStopping(): Boolean = OeaAssistantService.instance?.isForceStopping() == true || pending != null
 
     /**
      * Force-stops [packages] through Android's App info page. [returnTo] is
@@ -62,6 +73,75 @@ object OeaAssistant {
         returnTo: Intent?,
         callback: ((stopped: List<String>, failed: List<String>) -> Unit)? = null,
     ): Boolean = OeaAssistantService.instance?.startForceStop(packages, returnTo, callback) == true
+
+    enum class ForceStopStart {
+        /** OEA Assistant is running and the force-stop has begun. */
+        STARTED,
+        /** Granted, but Android has not (re)started the service yet; it runs as soon as it connects. */
+        QUEUED,
+        /** Another force-stop run is in progress. */
+        BUSY,
+        /** The user has not switched OEA Assistant on. Only this case should ever ask for it. */
+        NOT_ENABLED,
+    }
+
+    private class PendingForceStop(
+        val packages: List<String>,
+        val returnTo: Intent?,
+        val callback: ((stopped: List<String>, failed: List<String>) -> Unit)?,
+    )
+
+    private var pending: PendingForceStop? = null
+    private val expirePending = Runnable {
+        val expired = pending ?: return@Runnable
+        pending = null
+        // Apps stay frozen in OEA; only Android's force-stop could not run yet.
+        runCatching { expired.callback?.invoke(emptyList(), expired.packages) }
+        notifyStateChanged()
+    }
+
+    /**
+     * Force-stops [packages] as soon as OEA Assistant can.
+     *
+     * Being *granted* and being *running* are different: Android (and many OEM
+     * battery managers) can stop an accessibility service in the background
+     * while it stays switched on in Settings. Asking the user to "turn on" a
+     * service that is already on is wrong, so a granted-but-stopped service
+     * gets a short grace period to be rebound instead of a permission prompt.
+     */
+    fun forceStopWhenReady(
+        context: Context,
+        packages: List<String>,
+        returnTo: Intent?,
+        callback: ((stopped: List<String>, failed: List<String>) -> Unit)? = null,
+    ): ForceStopStart {
+        if (isConnected()) {
+            if (pending != null) return ForceStopStart.BUSY
+            return if (forceStop(packages, returnTo, callback)) ForceStopStart.STARTED else ForceStopStart.BUSY
+        }
+        if (!isEnabled(context)) return ForceStopStart.NOT_ENABLED
+        if (pending != null) return ForceStopStart.BUSY
+        pending = PendingForceStop(packages.distinct(), returnTo, callback)
+        main.removeCallbacks(expirePending)
+        main.postDelayed(expirePending, PENDING_FORCE_STOP_MS)
+        return ForceStopStart.QUEUED
+    }
+
+    /** Called by OEA Assistant once Android binds it; runs a force-stop the user has just asked for. */
+    internal fun onServiceConnected() {
+        main.post {
+            val request = pending ?: return@post
+            pending = null
+            main.removeCallbacks(expirePending)
+            val started = OeaAssistantService.instance?.startForceStop(request.packages, request.returnTo, request.callback) == true
+            if (!started) runCatching { request.callback?.invoke(emptyList(), request.packages) }
+        }
+    }
+
+    /** True when the user has switched OEA Assistant on but Android is not running it right now. */
+    fun isGrantedButStopped(context: Context): Boolean = !isConnected() && isEnabled(context)
+
+    private const val PENDING_FORCE_STOP_MS = 8_000L
 
     /** Opens the most direct Android page for switching OEA Assistant on. */
     fun openSetup(context: Context) {

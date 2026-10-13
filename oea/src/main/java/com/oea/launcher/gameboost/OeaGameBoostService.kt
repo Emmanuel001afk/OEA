@@ -213,6 +213,23 @@ class OeaGameBoostService : Service() {
     private var lastForegroundEventAt = 0L
     private var lastForegroundSource = "not-queried"
     private var lastForegroundQueryError: String? = null
+    /**
+     * True when the latest foreground answer came from an ACTIVITY_RESUMED
+     * event (or the cache built from one). Only that kind of answer is treated
+     * as evidence that an app really moved to the front.
+     *
+     * UsageStats is bucketed history that Android flushes periodically. Under
+     * sustained load its `lastTimeUsed` values lag behind, so a package picked
+     * from it is a guess, not a transition. Ending a live session on a guess is
+     * what removed the floating control while the user was still in the game.
+     */
+    private var lastForegroundEvidenceFresh = false
+    /**
+     * Cold-start value from UsageStats. Kept strictly separate from
+     * [lastKnownForegroundPackage] so a coarse guess can never displace a real
+     * resumed-event cache and then be treated as fresh on the next poll.
+     */
+    private var bootstrapPackage: String? = null
 
     // Keep diagnostics in Logcat only; temporary Downloads file generation has
     // been removed now that the overlay failure has been isolated.
@@ -240,6 +257,13 @@ class OeaGameBoostService : Service() {
     private var lastLoggedForegroundPackage: String? = null
     private var lastForegroundDecisionLogAt = 0L
     private var lastLoggedHandleVisibility: Int? = null
+    // Continuous spectrum for the "rgb" colour mode (the last Game Boost swatch).
+    private var lastGameSyncAt = 0L
+    private var rainbowAnimator: android.animation.ValueAnimator? = null
+    private var rainbowHue = 0f
+    private var lastPaintedHue = -1f
+    private val argb = android.animation.ArgbEvaluator()
+    private val networkMeter = OeaNetworkSpeedMeter()
     private val tick = object : Runnable {
         override fun run() {
             diagnosticHeartbeatTicks++
@@ -266,7 +290,13 @@ class OeaGameBoostService : Service() {
             }
 
             try {
-                runCatching { OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService) }
+                // Category detection scans every installed app; doing it every
+                // second added real CPU load while a game was running.
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastGameSyncAt >= GAME_SYNC_INTERVAL_MS) {
+                    lastGameSyncAt = now
+                    runCatching { OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService) }
+                }
                 val game = foregroundPackage()
                 if (game != lastLoggedForegroundPackage) {
                     diagnostic(android.util.Log.INFO, "foreground package changed from=$lastLoggedForegroundPackage to=$game activeGame=$activeGame samples=$nonGameForegroundSamples source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass queryError=$lastForegroundQueryError")
@@ -321,6 +351,17 @@ class OeaGameBoostService : Service() {
                         lastNonGamePackage = null
                         ensureOverlayForActiveGame()
                         updateOverlay()
+                    } else if (!lastForegroundEvidenceFresh) {
+                        // The only answer available this poll came from UsageStats
+                        // history, not from a real lifecycle transition. Under heavy
+                        // load that history lags by seconds and routinely points at
+                        // a system or launcher package even while the game is still
+                        // in front. Never end a live session on that guess: keep the
+                        // floating control and wait for a resumed event.
+                        lastNonGamePackage = null
+                        nonGameForegroundSamples = 0
+                        ensureOverlayForActiveGame()
+                        updateOverlay()
                     } else {
                         if (lastNonGamePackage == game) {
                             nonGameForegroundSamples++
@@ -328,12 +369,14 @@ class OeaGameBoostService : Service() {
                             lastNonGamePackage = game
                             nonGameForegroundSamples = 1
                         }
-                        // A confirmed different foreground app ends the session
-                        // quickly. Closing the panel never extends game eligibility.
-                        // End promptly after two consecutive confirmed samples outside
-                        // the selected game; the old five-sample delay left the handle
-                        // visible for several seconds after returning Home.
-                        if (nonGameForegroundSamples < 2) {
+                        // A confirmed different foreground app ends the session.
+                        // Confirmation means consecutive *fresh* resumed events for
+                        // the same non-game package; closing the panel never extends
+                        // game eligibility. Home ends it quickly; another app needs a
+                        // little longer, so a brief interruption while the game loads
+                        // (an ad, a sign-in sheet) doesn't remove the button.
+                        val needed = if (isHomePackage(game)) LEAVE_CONFIRM_SAMPLES else LEAVE_CONFIRM_SAMPLES_OTHER_APP
+                        if (nonGameForegroundSamples < needed) {
                             ensureOverlayForActiveGame()
                             updateOverlay()
                         } else {
@@ -384,6 +427,7 @@ class OeaGameBoostService : Service() {
         if (intent?.action == ACTION_REFRESH) {
             // Settings edits should refresh the existing session, not tear down
             // the WindowManager handle by stopping and recreating this service.
+            restartPaletteAnimation()
             activeGame?.let {
                 ensureOverlayForActiveGame()
                 updateOverlay()
@@ -437,19 +481,25 @@ class OeaGameBoostService : Service() {
         // Returning to OEA (including its All Apps drawer) must end the game
         // session so the in-game floating control is removed.
         // Only short-lived system surfaces below are ignored.
-        return packageName in setOf(
-            "com.android.systemui",
-            "com.android.settings",
-            "com.android.permissioncontroller",
-            "com.google.android.permissioncontroller",
-            "com.android.packageinstaller",
-            "com.google.android.packageinstaller",
-            "com.google.android.inputmethod.latin",
-            "com.google.android.apps.inputmethod",
-            "com.android.inputmethod.latin",
-            // Do not include Home launcher packages here. Their resumed
-            // activity is positive evidence that the selected app was left.
-        )
+        if (packageName in TRANSIENT_PACKAGES) return true
+        // The active keyboard can resume its own settings/emoji activities.
+        val ime = runCatching {
+            Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                ?.substringBefore('/')
+        }.getOrNull()
+        return ime != null && packageName == ime
+    }
+
+    private var homePackagesCache: Set<String>? = null
+
+    /** Launchers (including OEA): returning to one means the game was left. */
+    private fun isHomePackage(packageName: String): Boolean {
+        val homes = homePackagesCache ?: runCatching {
+            packageManager.queryIntentActivities(
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0,
+            ).mapNotNull { it.activityInfo?.packageName }.toSet()
+        }.getOrDefault(emptySet()).also { homePackagesCache = it }
+        return packageName in homes || packageName == this.packageName
     }
 
     /**
@@ -532,16 +582,8 @@ class OeaGameBoostService : Service() {
             setPadding(dp(4), 0, dp(4), 0)
             contentDescription = "Live RAM and virtual RAM circular gauges"
         }
-        val device = TextView(this).apply {
-            setTextColor(0xFFD7E8F8.toInt()); textSize = 10f
-            text = "Battery • reading…"
-            setPadding(dp(8), dp(5), dp(8), dp(5))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0x332D8EC9)
-                cornerRadius = dp(9).toFloat()
-                setStroke(dp(1), 0x3349BFFF)
-            }
-        }
+        // Network speed (down/up) and battery in one tidy, labelled strip.
+        val device = OeaGameStatusStripView(this)
         val controls = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             alpha = 0.98f
@@ -576,7 +618,9 @@ class OeaGameBoostService : Service() {
             }.start()
             updateBoostButton(boost)
         }
-        panel.addView(title); panel.addView(gameName); panel.addView(metrics); panel.addView(device); panel.addView(controls)
+        panel.addView(title); panel.addView(gameName); panel.addView(metrics)
+        panel.addView(device, android.widget.LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2); bottomMargin = dp(6) })
+        panel.addView(controls)
 
         val handleSize = handleSizePx()
         val handle = android.widget.FrameLayout(this).apply {
@@ -608,6 +652,14 @@ class OeaGameBoostService : Service() {
         root.addView(handle, android.widget.LinearLayout.LayoutParams(handleSize, handleSize).apply {
             gravity = Gravity.END
             topMargin = dp(6)
+        })
+        // Compact down/up speed directly under the button (optional in Game Boost settings).
+        val networkBadge = OeaNetworkBadgeView(this).apply {
+            visibility = if (networkBadgeEnabled()) View.VISIBLE else View.GONE
+        }
+        root.addView(networkBadge, android.widget.LinearLayout.LayoutParams(handleSize, dp(NETWORK_BADGE_HEIGHT_DP)).apply {
+            gravity = Gravity.END
+            topMargin = dp(4)
         })
         // Keep the same floating handle above the panel if their bounds overlap.
         handle.bringToFront()
@@ -641,7 +693,7 @@ class OeaGameBoostService : Service() {
             overlay = root
             diagnostic(android.util.Log.INFO, "overlay added game=$packageName rootAttached=${root.parent != null} handleVisibility=${handle.visibility} handleAlpha=${handle.alpha} paramsType=${params.type} flags=${params.flags}")
 
-                handle.setOnTouchListener(object : View.OnTouchListener {
+            val dragListener = object : View.OnTouchListener {
                 private var downRawX = 0f
                 private var downRawY = 0f
                 private var startX = 0
@@ -705,13 +757,19 @@ class OeaGameBoostService : Service() {
                     }
                     return false
                 }
-            })
+            }
+            // The badge is part of the button: it drags and taps exactly like it.
+            handle.setOnTouchListener(dragListener)
+            networkBadge.setOnTouchListener(dragListener)
             handle.alpha = 0f
             handle.translationX = dp(10).toFloat()
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
                 .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).start()
             applyHandlePalette(handle)
             applyPanelPalette(panel)
+            networkMeter.reset()
+            networkMeter.sample()
+            startRainbowAnimation()
             updateOverlay()
         }.onFailure { error -> diagnostic(android.util.Log.ERROR, "overlay creation failed game=$packageName error=${error.javaClass.name}:${error.message} stack=${android.util.Log.getStackTraceString(error).take(1800)}") }
     }
@@ -956,9 +1014,9 @@ class OeaGameBoostService : Service() {
     private fun applyActionChipPalette(chip: TextView, panelBase: Int, panelAccent: Int) {
         val background = chip.background as? android.graphics.drawable.GradientDrawable ?: return
         val accent = actionAccent(chip.text.toString())
-        val base = android.animation.ArgbEvaluator().evaluate(0.20f, panelBase, accent) as Int
-        val edge = android.animation.ArgbEvaluator().evaluate(0.18f, accent, panelAccent) as Int
-        val surface = android.animation.ArgbEvaluator().evaluate(0.12f, base, edge) as Int
+        val base = argb.evaluate(0.20f, panelBase, accent) as Int
+        val edge = argb.evaluate(0.18f, accent, panelAccent) as Int
+        val surface = argb.evaluate(0.12f, base, edge) as Int
         background.setColors(intArrayOf(base, surface))
         background.setStroke(dp(1), edge.withAlpha(190))
     }
@@ -1012,7 +1070,7 @@ class OeaGameBoostService : Service() {
         }
         val gameName = panel.getChildAt(1) as? TextView ?: return
         val metrics = panel.getChildAt(2) as? TextView ?: return
-        val device = panel.getChildAt(3) as? TextView ?: return
+        val device = panel.getChildAt(3) as? OeaGameStatusStripView ?: return
         val panelLayout = panel as? android.widget.LinearLayout
                 val controls = panelLayout?.getChildAt(4) as? android.widget.LinearLayout ?: return
         val rowOne = controls.getChildAt(0) as? android.widget.LinearLayout ?: return
@@ -1042,7 +1100,18 @@ class OeaGameBoostService : Service() {
 
         val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
         val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        device.text = if (level in 0..100) "Battery $level% • Game focus active" else "Game focus active"
+        val charging = runCatching { battery.isCharging }.getOrDefault(false)
+        networkMeter.sample()
+        device.update(
+            OeaNetworkSpeedMeter.formatRate(networkMeter.downBytesPerSecond),
+            OeaNetworkSpeedMeter.formatRate(networkMeter.upBytesPerSecond),
+            if (level in 0..100) "$level%" else "—",
+            charging,
+        )
+        (root.getChildAt(NETWORK_BADGE_INDEX) as? OeaNetworkBadgeView)?.update(
+            OeaNetworkSpeedMeter.formatCompact(networkMeter.downBytesPerSecond),
+            OeaNetworkSpeedMeter.formatCompact(networkMeter.upBytesPerSecond),
+        )
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
         updateBoostButton(boost)
@@ -1063,6 +1132,7 @@ class OeaGameBoostService : Service() {
         val handle = root.getChildAt(0) as? android.widget.FrameLayout
         val handleVisible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
         handle?.visibility = if (handleVisible) View.VISIBLE else View.GONE
+        syncNetworkBadge(root, handleVisible)
         val handleVisibilityNow = handle?.visibility
         if (handleVisibilityNow != lastLoggedHandleVisibility) {
             diagnostic(android.util.Log.INFO, "handle visibility changed old=$lastLoggedHandleVisibility new=$handleVisibilityNow preferenceVisible=$handleVisible activeGame=$activeGame overlayAttached=${root.parent != null} overlayIsShown=${root.isShown} handleIsShown=${handle?.isShown}")
@@ -1097,10 +1167,21 @@ class OeaGameBoostService : Service() {
         button.text = if (OeaGameBoostStore.prefs(this).getBoolean("boost", true)) "BOOST ON" else "BOOST OFF"
     }
 
+    // =============================================================== palette
+
+    private fun colorMode(): String =
+        OeaGameBoostStore.prefs(this).getString("ram_color_mode", COLOR_MODE_BLUE) ?: COLOR_MODE_BLUE
+
+    private fun isRainbowMode() = colorMode() == COLOR_MODE_RGB
+
+    /**
+     * The floating handle and the panel share one palette source so a colour
+     * change updates both at once.
+     */
     private fun applyHandlePalette(handle: View) {
-        // The floating handle stays calm/readable. Palette animation belongs
-        // to the opened Game Boost panel, not to this button.
         val palette = handlePalette()
+        ((overlay as? android.widget.LinearLayout)?.getChildAt(NETWORK_BADGE_INDEX) as? OeaNetworkBadgeView)
+            ?.setColors(palette[0], palette[1])
         val bg = handle.background as? android.graphics.drawable.GradientDrawable ?: return
         bg.setColors(intArrayOf(palette[0], palette[1], palette[0]))
         bg.setStroke(dp(1), palette[1].withAlpha(170))
@@ -1119,8 +1200,9 @@ class OeaGameBoostService : Service() {
         val bg = content.background as? android.graphics.drawable.GradientDrawable
         bg?.setColors(intArrayOf(palette[0], palette[0], palette[1].withAlpha(75)))
         bg?.setStroke(dp(1), palette[1].withAlpha(150))
+        (content.getChildAt(PANEL_STATUS_INDEX) as? OeaGameStatusStripView)?.setColors(palette[0], palette[1])
 
-        val controls = content.getChildAt(4) as? android.widget.LinearLayout ?: return
+        val controls = content.getChildAt(PANEL_CONTROLS_INDEX) as? android.widget.LinearLayout ?: return
         for (rowIndex in 0 until controls.childCount) {
             val row = controls.getChildAt(rowIndex) as? android.view.ViewGroup ?: continue
             for (index in 0 until row.childCount) {
@@ -1130,27 +1212,33 @@ class OeaGameBoostService : Service() {
         }
     }
 
+    /**
+     * Gentle two-colour breathing for the fixed palettes.
+     *
+     * The rainbow palette is driven by [startRainbowAnimation] instead, because
+     * a REVERSE pulse between two colours cannot express a continuous spectrum.
+     */
     private fun startPanelColorAnimation(panel: View) {
+        if (isRainbowMode()) return
         val content = panel as? android.widget.LinearLayout ?: return
         val palette = handlePalette()
         val bg = content.background as? android.graphics.drawable.GradientDrawable ?: return
-        val controls = content.getChildAt(4) as? android.widget.LinearLayout
+        val controls = content.getChildAt(PANEL_CONTROLS_INDEX) as? android.widget.LinearLayout
 
         val start = palette[0]
         val accent = palette[1]
         val end = palette[2]
-        val isRgb = OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue") == "rgb"
 
         (content.tag as? android.animation.ValueAnimator)?.cancel()
         val animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = if (isRgb) 1800L else 1500L
+            duration = 1500L
             repeatCount = android.animation.ValueAnimator.INFINITE
             repeatMode = android.animation.ValueAnimator.REVERSE
             addUpdateListener { value ->
                 val t = value.animatedFraction
-                val middle = android.animation.ArgbEvaluator().evaluate(t, start, if (isRgb) accent else start) as Int
-                val highlight = android.animation.ArgbEvaluator().evaluate(t, accent, end) as Int
-                bg.setColors(intArrayOf(middle, middle, highlight.withAlpha(if (isRgb) 105 else 70)))
+                val middle = start
+                val highlight = argb.evaluate(t, accent, end) as Int
+                bg.setColors(intArrayOf(middle, middle, highlight.withAlpha(70)))
                 bg.setStroke(dp(1), highlight.withAlpha(170))
                 if (controls != null) {
                     for (rowIndex in 0 until controls.childCount) {
@@ -1174,16 +1262,81 @@ class OeaGameBoostService : Service() {
         applyPanelPalette(content)
     }
 
+    /**
+     * Continuous spectrum: the accent walks the whole hue circle instead of
+     * oscillating between two fixed colours, so the last swatch in Game Boost
+     * behaves like a rainbow while a session is running.
+     */
+    private fun startRainbowAnimation() {
+        if (!isRainbowMode()) {
+            stopRainbowAnimation()
+            return
+        }
+        if (rainbowAnimator?.isRunning == true) return
+        rainbowAnimator = android.animation.ValueAnimator.ofFloat(0f, 360f).apply {
+            duration = RAINBOW_PERIOD_MS
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            repeatMode = android.animation.ValueAnimator.RESTART
+            interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener { value ->
+                rainbowHue = value.animatedValue as Float
+                // Wrap-around (359° → 0°) is a large jump, so it always repaints.
+                if (lastPaintedHue < 0f || kotlin.math.abs(rainbowHue - lastPaintedHue) >= RAINBOW_MIN_STEP_DEGREES) {
+                    lastPaintedHue = rainbowHue
+                    paintPalette()
+                }
+            }
+            start()
+        }
+    }
+
+    private fun stopRainbowAnimation() {
+        rainbowAnimator?.cancel()
+        rainbowAnimator = null
+    }
+
+    /** Re-applies the palette after a settings change or a colour-mode switch. */
+    private fun restartPaletteAnimation() {
+        stopRainbowAnimation()
+        rainbowHue = 0f
+        lastPaintedHue = -1f
+        if (isRainbowMode()) {
+            if (overlay != null) startRainbowAnimation()
+        } else {
+            panelView?.let { if (it.visibility == View.VISIBLE) startPanelColorAnimation(it) }
+        }
+        paintPalette()
+    }
+
+    /** Repaints whatever part of the overlay is currently on screen. */
+    private fun paintPalette() {
+        if (overlay == null) return
+        (overlay as? android.widget.LinearLayout)?.getChildAt(0)?.let { handle ->
+            if (handle.visibility == View.VISIBLE) applyHandlePalette(handle)
+        }
+        panelView?.let { panel ->
+            if (panel.visibility == View.VISIBLE) applyPanelPalette(panel)
+        }
+    }
+
     private fun handlePalette(): IntArray {
-        return when (OeaGameBoostStore.prefs(this).getString("ram_color_mode", "blue") ?: "blue") {
+        if (isRainbowMode()) return rainbowPalette()
+        return when (colorMode()) {
             "green" -> intArrayOf(0xFF0B281B.toInt(), 0xFF27E37A.toInt(), 0xFF9BFFC5.toInt())
             "purple" -> intArrayOf(0xFF170B2C.toInt(), 0xFF9B5CFF.toInt(), 0xFFE1C4FF.toInt())
             "cyan" -> intArrayOf(0xFF071F27.toInt(), 0xFF25D9FF.toInt(), 0xFFB9F5FF.toInt())
             "red" -> intArrayOf(0xFF2B0B10.toInt(), 0xFFFF3D68.toInt(), 0xFFFFB3C2.toInt())
             "amber" -> intArrayOf(0xFF2A1A05.toInt(), 0xFFFFB52E.toInt(), 0xFFFFE0A0.toInt())
-            "rgb" -> intArrayOf(0xFF171126.toInt(), 0xFF9C55FF.toInt(), 0xFF31D8FF.toInt())
             else -> intArrayOf(0xFF0A1020.toInt(), 0xFF2357FF.toInt(), 0xFF78B9FF.toInt())
         }
+    }
+
+    /** [base, accent, highlight] for the current point of the hue circle. */
+    private fun rainbowPalette(): IntArray {
+        val base = Color.HSVToColor(floatArrayOf(rainbowHue, 0.62f, 0.20f))
+        val accent = Color.HSVToColor(floatArrayOf(rainbowHue, 0.82f, 1f))
+        val highlight = Color.HSVToColor(floatArrayOf((rainbowHue + 45f) % 360f, 0.55f, 1f))
+        return intArrayOf(base, accent, highlight)
     }
 
     private fun Int.withAlpha(alpha: Int): Int =
@@ -1207,6 +1360,7 @@ class OeaGameBoostService : Service() {
         }
         applyPanelPalette(panel)
         startPanelColorAnimation(panel)
+        (overlay as? android.widget.LinearLayout)?.let { syncNetworkBadge(it, OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) }
         panel.alpha = 0f
         panel.scaleX = 0.96f
         panel.scaleY = 0.96f
@@ -1288,18 +1442,41 @@ class OeaGameBoostService : Service() {
         }
     }
 
+    /** True for the floating button and its speed badge: both toggle the panel. */
     private fun isPointInsideFloatingHandle(rawX: Float, rawY: Float): Boolean {
         val root = overlay as? android.widget.LinearLayout ?: return false
-        val handle = root.getChildAt(0) ?: return false
-        if (handle.visibility != View.VISIBLE || !handle.isShown || handle.width <= 0 || handle.height <= 0) {
-            return false
+        return listOf(0, NETWORK_BADGE_INDEX).any { index ->
+            val part = root.getChildAt(index) ?: return@any false
+            if (part.visibility != View.VISIBLE || !part.isShown || part.width <= 0 || part.height <= 0) return@any false
+            val location = IntArray(2)
+            part.getLocationOnScreen(location)
+            val x = rawX.toInt()
+            val y = rawY.toInt()
+            x >= location[0] && x < location[0] + part.width && y >= location[1] && y < location[1] + part.height
         }
-        val location = IntArray(2)
-        handle.getLocationOnScreen(location)
-        val x = rawX.toInt()
-        val y = rawY.toInt()
-        return x >= location[0] && x < location[0] + handle.width &&
-            y >= location[1] && y < location[1] + handle.height
+    }
+
+    private fun networkBadgeEnabled() = OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_BADGE, true)
+
+    /**
+     * Keeps the speed badge the same width as the button and hides it while
+     * the panel is open (the panel shows the full readout). INVISIBLE, not
+     * GONE, so opening the panel never moves the button.
+     */
+    private fun syncNetworkBadge(root: android.widget.LinearLayout, handleVisible: Boolean) {
+        val badge = root.getChildAt(NETWORK_BADGE_INDEX) as? OeaNetworkBadgeView ?: return
+        val wanted = when {
+            !handleVisible || !networkBadgeEnabled() -> View.GONE
+            panelView?.visibility == View.VISIBLE -> View.INVISIBLE
+            else -> View.VISIBLE
+        }
+        if (badge.visibility != wanted) badge.visibility = wanted
+        val lp = badge.layoutParams as? android.widget.LinearLayout.LayoutParams ?: return
+        val size = handleSizePx()
+        if (lp.width != size) {
+            lp.width = size
+            badge.layoutParams = lp
+        }
     }
 
     /**
@@ -1355,7 +1532,7 @@ class OeaGameBoostService : Service() {
         val title = content.getChildAt(0) as? TextView
         val game = content.getChildAt(1) as? TextView
         val metrics = content.getChildAt(2) as? TextView
-        val battery = content.getChildAt(3) as? TextView
+        val battery = content.getChildAt(PANEL_STATUS_INDEX)
         val controls = content.getChildAt(4) as? android.widget.LinearLayout
 
         listOf(title, game, metrics, battery).forEachIndexed { index, view ->
@@ -1447,6 +1624,9 @@ class OeaGameBoostService : Service() {
             .onFailure { error -> diagnostic(android.util.Log.ERROR, "closePanel hide failed=${error.javaClass.name}:${error.message}") }
         runCatching { panel.alpha = 1f; panel.scaleX = 1f; panel.scaleY = 1f; panel.translationX = 0f }
             .onFailure { error -> diagnostic(android.util.Log.ERROR, "closePanel reset animation properties failed=${error.javaClass.name}:${error.message}") }
+        runCatching {
+            (overlay as? android.widget.LinearLayout)?.let { syncNetworkBadge(it, OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) }
+        }
         diagnostic(android.util.Log.INFO, "closePanel completed activeGame=$activeGame overlayAttached=${overlay?.parent != null} overlayVisibility=${overlay?.visibility} panelAttached=${panel.parent != null} panelVisibility=${panel.visibility} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)} handleAlpha=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.alpha)}")
         // Deliberately do not call ensureOverlayForActiveGame() here.
         // That recovery function is allowed to remove and rebuild the entire
@@ -1534,6 +1714,7 @@ class OeaGameBoostService : Service() {
     }
 
     private fun removeOverlay() {
+        stopRainbowAnimation()
         diagnostic(android.util.Log.WARN, "removeOverlay entered activeGame=$activeGame overlayExists=${overlay != null} overlayAttached=${overlay?.parent != null} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)} panelExists=${panelView != null} panelAttached=${panelView?.parent != null}")
         panelView?.let { panel ->
             runCatching { panel.animate().cancel() }.onFailure { error -> diagnostic(android.util.Log.ERROR, "removeOverlay panel animation cancel failed=${error.javaClass.name}:${error.message}") }
@@ -1548,10 +1729,25 @@ class OeaGameBoostService : Service() {
         panelView = null
         diagnostic(android.util.Log.WARN, "removeOverlay completed activeGame=$activeGame overlayExists=${overlay != null} panelExists=${panelView != null}")
     }
+    /**
+     * Best-effort foreground package.
+     *
+     * Two rules keep an active game session alive under load:
+     *  1. Only a resumed lifecycle event (or the cache built from one) is fresh
+     *     evidence. See [lastForegroundEvidenceFresh].
+     *  2. The UsageStats bootstrap may supply a *value* on cold start but never
+     *     overwrites the event cache, so a stale or late-flushed guess can not
+     *     become the package the next poll trusts.
+     */
     private fun foregroundPackage(): String? {
-        val usm = getSystemService(UsageStatsManager::class.java) ?: return lastKnownForegroundPackage
+        val usm = getSystemService(UsageStatsManager::class.java)
+        if (usm == null) {
+            lastForegroundSource = "usage-manager-unavailable"
+            lastForegroundEvidenceFresh = false
+            return lastKnownForegroundPackage
+        }
         val end = System.currentTimeMillis()
-        val start = end - 30_000L
+        val start = end - FOREGROUND_WINDOW_MS
 
         return runCatching {
             val events = usm.queryEvents(start, end)
@@ -1576,6 +1772,7 @@ class OeaGameBoostService : Service() {
                 lastForegroundEventAt = latestTime
                 lastForegroundSource = "usage-events-resumed"
                 lastForegroundQueryError = null
+                lastForegroundEvidenceFresh = true
                 return latestPackage
             }
 
@@ -1583,43 +1780,84 @@ class OeaGameBoostService : Service() {
             // remains open for minutes. It is not evidence that the user left.
             // A real transition to Home/another app produces a new resumed event
             // and replaces this cache before the next foreground decision.
-            lastKnownForegroundPackage?.let {
+            lastKnownForegroundPackage?.let { cached ->
                 lastForegroundSource = "cached-last-resumed"
-                return it
+                lastForegroundEvidenceFresh = true
+                return cached
             }
 
-            // On service start, there may be no cached event yet. Use UsageStats
-            // once as a bootstrap rather than treating an empty event window as
-            // proof that no app is foreground.
-            val stats = runCatching {
+            // Cold start (e.g. Android restarted this service under memory
+            // pressure mid-game): the last resumed event further back is real
+            // lifecycle evidence, unlike UsageStats' bucketed lastTimeUsed.
+            lastResumedSince(end - COLD_START_LOOKBACK_MS, end)?.let { (pkg, at) ->
+                lastKnownForegroundPackage = pkg
+                lastForegroundEventAt = at
+                lastForegroundSource = "usage-events-lookback"
+                lastForegroundEvidenceFresh = true
+                return pkg
+            }
+
+            // Still nothing: UsageStats supplies a starting value without ever
+            // becoming the trusted cache.
+            val fallbackStat = runCatching {
                 usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
-            }.getOrNull().orEmpty()
-            val fallbackStat = stats.maxByOrNull { it.lastTimeUsed }
+            }.getOrNull().orEmpty().maxByOrNull { it.lastTimeUsed }
             val fallback = fallbackStat?.packageName
             if (fallback != null) {
-                lastKnownForegroundPackage = fallback
+                bootstrapPackage = fallback
                 lastForegroundEventAt = fallbackStat?.lastTimeUsed ?: 0L
                 lastForegroundSource = "usage-stats-bootstrap"
+                lastForegroundEvidenceFresh = false
+            } else {
+                lastForegroundSource = "no-foreground-evidence"
+                lastForegroundEvidenceFresh = false
             }
             fallback
         }.getOrElse { error ->
             lastForegroundQueryError = "${error.javaClass.simpleName}:${error.message}"
-            val stats = runCatching {
+            val fallbackStat = runCatching {
                 usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
-            }.getOrNull().orEmpty()
-            val fallbackStat = stats.maxByOrNull { it.lastTimeUsed }
-            val fallback = fallbackStat?.packageName
+            }.getOrNull().orEmpty().maxByOrNull { it.lastTimeUsed }
+            val fallback = fallbackStat?.packageName ?: bootstrapPackage
+            lastKnownForegroundPackage?.let { cached ->
+                lastForegroundSource = "cached-after-query-error"
+                lastForegroundEvidenceFresh = true
+                diagnostic(android.util.Log.WARN, "foregroundPackage query failed=${error.javaClass.name}:${error.message} using cached=$cached")
+                return@getOrElse cached
+            }
             if (fallback != null) {
-                lastKnownForegroundPackage = fallback
+                bootstrapPackage = fallback
                 lastForegroundEventAt = fallbackStat?.lastTimeUsed ?: 0L
                 lastForegroundSource = "usage-stats-after-query-error"
+                lastForegroundEvidenceFresh = false
             } else {
-                lastForegroundSource = "cached-after-query-error"
+                lastForegroundSource = "no-foreground-evidence"
+                lastForegroundEvidenceFresh = false
             }
-            diagnostic(android.util.Log.ERROR, "foregroundPackage query failed=${error.javaClass.name}:${error.message} fallback=$fallback cached=$lastKnownForegroundPackage")
-            fallback ?: lastKnownForegroundPackage
+            diagnostic(android.util.Log.ERROR, "foregroundPackage query failed=${error.javaClass.name}:${error.message} fallback=$fallback")
+            fallback
         }
     }
+    /** Latest resumed activity between [start] and [end], as (package, time). */
+    private fun lastResumedSince(start: Long, end: Long): Pair<String, Long>? = runCatching {
+        val usm = getSystemService(UsageStatsManager::class.java) ?: return null
+        val events = usm.queryEvents(start, end)
+        val event = android.app.usage.UsageEvents.Event()
+        var latest: Pair<String, Long>? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val resumed = if (Build.VERSION.SDK_INT >= 29) {
+                event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED
+            } else {
+                event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND
+            }
+            if (resumed && (latest == null || event.timeStamp >= latest.second)) {
+                latest = event.packageName to event.timeStamp
+            }
+        }
+        latest
+    }.getOrNull()
+
     private fun isUsageAccessGranted() = runCatching {
         val appOps = getSystemService(AppOpsManager::class.java)
         appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName) == AppOpsManager.MODE_ALLOWED
@@ -1631,6 +1869,57 @@ class OeaGameBoostService : Service() {
         const val ACTION_REFRESH = "com.oea.launcher.gameboost.REFRESH"
         private const val CHANNEL = "oea_game_boost"
         private const val NOTIFICATION_ID = 4107
+
+        const val COLOR_MODE_BLUE = "blue"
+        /** The rainbow swatch. The stored key stays "rgb" for existing installs. */
+        const val COLOR_MODE_RGB = "rgb"
+
+        /** Panel children: title, game name, RAM gauges, status strip, controls. */
+        private const val PANEL_STATUS_INDEX = 3
+        private const val PANEL_CONTROLS_INDEX = 4
+        /** Overlay root children: the button (0) and its network badge (1). */
+        private const val NETWORK_BADGE_INDEX = 1
+        private const val NETWORK_BADGE_HEIGHT_DP = 28
+        const val PREF_NETWORK_BADGE = "net_badge_visible"
+        /** One full trip around the hue circle. Slow enough to stay readable in-game. */
+        private const val RAINBOW_PERIOD_MS = 6_000L
+        /** Repaint only when the hue moved this far, so high-refresh screens do not repaint needlessly. */
+        private const val RAINBOW_MIN_STEP_DEGREES = 1.5f
+        private const val FOREGROUND_WINDOW_MS = 30_000L
+        /** After a service restart, how far back to look for the app that was in front. */
+        private const val COLD_START_LOOKBACK_MS = 6 * 60 * 60 * 1000L
+        private const val GAME_SYNC_INTERVAL_MS = 60_000L
+        /** Consecutive fresh resumed events for Home before a session ends. */
+        private const val LEAVE_CONFIRM_SAMPLES = 2
+        /** Another app must stay in front a little longer (interruptions while a game loads). */
+        private const val LEAVE_CONFIRM_SAMPLES_OTHER_APP = 6
+
+        /**
+         * Short-lived surfaces that appear over a game without the user leaving
+         * it: system UI and dialogs, permission and installer sheets, keyboards,
+         * Google Play sign-in/purchase sheets and OEM game toolbars. Home
+         * launchers are deliberately absent: returning Home ends the session.
+         */
+        private val TRANSIENT_PACKAGES = setOf(
+            "android",
+            "com.android.systemui",
+            "com.android.settings",
+            "com.android.permissioncontroller",
+            "com.google.android.permissioncontroller",
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+            "com.google.android.inputmethod.latin",
+            "com.google.android.apps.inputmethod",
+            "com.android.inputmethod.latin",
+            "com.google.android.gms",
+            "com.google.android.gsf",
+            "com.google.android.play.games",
+            "com.google.android.apps.games",
+            "com.android.vending",
+            "com.samsung.android.game.gametools",
+            "com.samsung.android.game.gamehome",
+            "com.samsung.android.game.gos",
+        )
     }
 }
 object OeaGameBoostStore {
@@ -1650,8 +1939,31 @@ object OeaGameBoostStore {
         return mode(context) == "manual_automatic" || detectedGames(context).contains(packageName)
     }
 
-    /** Uses Android's declared application category where available, with a conservative legacy fallback. */
+    @Volatile private var detectedCache: Set<String>? = null
+    @Volatile private var detectedAt = 0L
+
+    /**
+     * Uses Android's declared application category where available, with a
+     * conservative legacy fallback. Cached briefly: scanning every installed
+     * app is expensive and the result rarely changes during a game.
+     */
     fun detectedGames(context: Context): Set<String> {
+        val now = android.os.SystemClock.elapsedRealtime()
+        detectedCache?.let { if (now - detectedAt < DETECTED_CACHE_MS) return it }
+        return scanGames(context).also {
+            detectedCache = it
+            detectedAt = now
+        }
+    }
+
+    private const val DETECTED_CACHE_MS = 60_000L
+
+    /** Forces the next lookup to rescan installed apps (e.g. when Game Boost is opened). */
+    fun invalidateDetectedGames() {
+        detectedCache = null
+    }
+
+    private fun scanGames(context: Context): Set<String> {
         val pm = context.packageManager
         return pm.getInstalledApplications(0).asSequence()
             .filter { it.packageName != context.packageName }

@@ -260,7 +260,10 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             }
             val actions = mutableListOf<Action>()
             if (ref.source == OeaWorkspace.Source.DRAWER) {
-                if (!w.isOnHome(key)) actions += Action(R.drawable.oic_home, "Add to Home") { w.addAppToHome(app) }
+                // Built-in OEA apps (Game Boost, Phone, Call Blocker, Freezer, OEA
+                // Settings) start inside the seeded "OEA" folder. Being in a folder
+                // or the dock must not stop an app from also getting its own icon.
+                if (!w.isHomeIcon(key)) actions += Action(R.drawable.oic_home, "Add to Home") { w.addAppToHome(app) }
             } else {
                 actions += Action(R.drawable.oic_close, if (ref.memberOf != null) "Take out" else "Remove") { w.removeHomeItem(ref) }
             }
@@ -272,7 +275,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                 actions += Action(R.drawable.oic_visibility_off, "Hide") {
                     w.store.setHidden(pkg, app.className, true)
                     w.drawer.refresh()
-                    w.toast("${app.label} hidden. Restore it from the drawer menu › Hidden apps.")
+                    w.hiddenSpace.refresh()
+                    w.toast("${app.label} moved to Hidden apps (drawer ⋮ › Hidden apps)")
                 }
             }
             val focused = w.focusStore.isFocused(key)
@@ -353,7 +357,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         val store = w.store
         showPopup(bounds(anchor), 260) { card ->
             popupRow(card, kit.icon(R.drawable.oic_settings, palette.text), "OEA Settings") { w.openSystemTool(null) }
-            popupRow(card, kit.icon(R.drawable.oic_visibility_off, palette.text), "Hidden apps") { editHiddenApps() }
+            val hiddenCount = w.hiddenSpace.hiddenApps().size
+            popupRow(card, kit.icon(R.drawable.oic_visibility_off, palette.text), if (hiddenCount > 0) "Hidden apps ($hiddenCount)" else "Hidden apps") { w.openHiddenApps() }
             val list = store.drawerMode() == OeaDataStore.DrawerMode.VERTICAL
             popupRow(card, kit.icon(if (list) R.drawable.oic_grid_view else R.drawable.oic_view_list, palette.text),
                 if (list) "Show as grid" else "Show as list") {
@@ -368,16 +373,6 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                 if (store.showMostUsed()) "Hide suggestions" else "Show suggestions") { store.setShowMostUsed(!store.showMostUsed()) }
             popupRow(card, kit.icon(R.drawable.oic_interests, palette.text),
                 if (store.drawerCategories()) "Hide categories" else "Show categories") { store.setDrawerCategories(!store.drawerCategories()) }
-        }
-    }
-
-    private fun editHiddenApps() {
-        val k = activityKit() ?: return
-        val all = w.apps.filter { it.packageName != context.packageName || !it.className.endsWith("OeaSettingsAlias") }
-        val hidden = all.filter { w.store.isHidden(it.packageName, it.className) }.map { w.appKey(it) }.toSet()
-        k.pickApps("Hidden apps", "Hidden apps stay installed but don't appear in the drawer or search.", all, hidden, { w.appKey(it) }, confirmLabel = "Save") { chosen ->
-            all.forEach { app -> w.store.setHidden(app.packageName, app.className, w.appKey(app) in chosen) }
-            w.drawer.refresh()
         }
     }
 
@@ -566,8 +561,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                     (row.getChildAt(0) as ImageView).setImageDrawable(preview)
                     val texts = row.getChildAt(1) as LinearLayout
                     (texts.getChildAt(0) as TextView).text = info.loadLabel(pm)
-                    val span = w.widgets.defaultSpan(info, w.cellHeightDp(), w.rows())
-                    (texts.getChildAt(1) as TextView).text = "${ownerLabel(info)} • ${span} row" + if (span == 1) "" else "s"
+                    val (spanX, spanY) = w.defaultWidgetSpans(info)
+                    (texts.getChildAt(1) as TextView).text = "${ownerLabel(info)} • $spanX × $spanY"
                     row.background = kit.ripple(kit.rounded(palette.card, 20), 20)
                     return row
                 }
@@ -582,11 +577,14 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             list.setOnItemClickListener { _, _, position, _ ->
                 val info = visible[position]
                 dialog.dismiss()
-                val span = w.widgets.defaultSpan(info, w.cellHeightDp(), w.rows())
-                var target = page
-                while (target < OeaWorkspaceStore.MAX_PAGES && !w.pageHasRoomForWidget(target, span) && w.ws.items().any { it.page == target }) target++
+                val (spanX, spanY) = w.defaultWidgetSpans(info)
+                // Use this page when it has an empty area of the right size,
+                // otherwise the next page that does (a new page if needed).
+                var target = page.coerceAtLeast(0)
+                while (target < OeaWorkspaceStore.MAX_PAGES - 1 && !w.pageHasRoomForWidget(target, spanX, spanY)) target++
                 if (target >= w.ws.pages()) w.ws.setPages(target + 1)
-                w.widgets.addWidget(activity, info, target.coerceAtMost(OeaWorkspaceStore.MAX_PAGES - 1), span)
+                if (target != page) w.ws.setCurrentPage(target)
+                w.widgets.addWidget(activity, info, target, spanX, spanY)
             }
             search.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -603,51 +601,42 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         }
     }
 
+    /**
+     * Long-press menu for a widget, anchored like the app icon popup. Moving
+     * the finger instead drags the widget (handled by the workspace).
+     */
     fun showWidgetOptions(id: Int, frame: View) {
-        val activity = w.hostActivity ?: return
-        val k = activityKit() ?: return
         val info = w.widgets.info(id)
         val title = info?.loadLabel(context.packageManager) ?: "Widget"
-        k.sheet(title, "Widget options") { panel, dialog ->
-            val group = k.group(panel)
-            k.stepperRow(group, R.drawable.oic_open_in_full, "Height", "Rows this widget spans", w.widgets.spanFor(id), 1, w.rows(),
-                { "$it" }) { rows ->
-                w.widgets.setSpan(id, rows)
-                w.rebuild()
+        val rect = w.widgetRect(id)
+        val limits = w.widgetLimits(id)
+        val resizable = limits != null && (limits.horizontal || limits.vertical)
+        val subtitle = buildString {
+            if (rect != null) append("${rect.spanX} × ${rect.spanY} • ")
+            append("Drag to move")
+        }
+        showPopup(bounds(frame), 296) { card ->
+            popupHeader(card, title, subtitle, null)
+            val actions = mutableListOf<Action>()
+            if (resizable) actions += Action(R.drawable.oic_open_in_full, "Resize") { w.startWidgetResize(id) }
+            if (w.widgets.canReconfigure(id)) actions += Action(R.drawable.oic_tune, "Settings") {
+                w.hostActivity?.let { w.widgets.reconfigure(it, id) }
             }
-            val onPage = w.widgets.ids().filter { w.widgets.pageFor(it) == w.widgets.pageFor(id) }
-            val index = onPage.indexOf(id)
-            if (index > 0) k.row(group, R.drawable.oic_keyboard_double_arrow_up, "Move up", null) {
-                w.widgets.moveBefore(id, onPage[index - 1])
-                dialog.dismiss()
-                w.rebuild()
-            }
-            if (index in 0 until onPage.lastIndex) k.row(group, R.drawable.oic_expand_more, "Move down", null) {
-                w.widgets.moveBefore(onPage[index + 1], id)
-                dialog.dismiss()
-                w.rebuild()
-            }
-            k.row(group, R.drawable.oic_view_carousel, "Move to page", "Page ${w.widgets.pageFor(id) + 1} of ${w.ws.pages()}") {
-                dialog.dismiss()
-                val pages = (0 until w.ws.pages()).map { "Page ${it + 1}" } + listOf("New page")
-                k.choose("Move widget", null, pages, w.widgets.pageFor(id)) { choice ->
-                    val target = if (choice >= w.ws.pages()) { w.ws.setPages(w.ws.pages() + 1); w.ws.pages() - 1 } else choice
-                    w.widgets.setPage(id, target)
-                    w.ws.setCurrentPage(target)
-                    w.rebuild()
-                }
-            }
-            if (w.widgets.canReconfigure(id)) k.row(group, R.drawable.oic_tune, "Widget settings", null) {
-                dialog.dismiss()
-                w.widgets.reconfigure(activity, id)
-            }
-            k.row(group, R.drawable.oic_delete, "Remove widget", null, iconBg = OeaTheme.alpha(palette.danger, 0x30), iconTint = palette.danger) {
-                dialog.dismiss()
-                w.widgets.remove(id)
-                w.rebuild()
-            }
+            actions += Action(R.drawable.oic_view_carousel, "Move page") { chooseWidgetPage(id) }
+            actions += Action(R.drawable.oic_delete, "Remove") { w.removeWidget(id) }
+            actionGrid(card, actions)
         }
         frame.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+
+    private fun chooseWidgetPage(id: Int) {
+        val k = activityKit() ?: return
+        val current = w.widgetRect(id)?.page ?: w.widgets.pageFor(id)
+        val pages = (0 until w.ws.pages()).map { "Page ${it + 1}" } +
+            if (w.ws.pages() < OeaWorkspaceStore.MAX_PAGES) listOf("New page") else emptyList()
+        k.choose("Move widget", null, pages, current) { choice ->
+            w.moveWidgetToPage(id, choice)
+        }
     }
 
     // ============================================================ app actions
@@ -722,24 +711,41 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         }
         OeaAppFreezer.setHibernated(context, listOf(pkg), true)
         w.refreshBadges()
-        if (OeaAssistant.isConnected()) {
-            val started = OeaAssistant.forceStop(listOf(pkg), homeIntent()) { stopped, _ ->
-                w.toast(if (pkg in stopped) "${app.label} frozen and stopped" else "${app.label} frozen in OEA. Android didn't confirm Force stop.")
-            }
-            if (!started) w.toast("${app.label} frozen in OEA")
-        } else {
-            val k = activityKit() ?: return
-            k.sheet("${app.label} is frozen in OEA", "OEA blocks it from Home and the drawer. Turn on OEA Assistant so OEA can also force-stop it: no background activity, alarms or notifications until you unfreeze it. No root, ADB or computer needed.") { panel, dialog ->
-                panel.addView(k.buttonRow(
-                    k.quietButton("Not now") { dialog.dismiss() },
-                    k.primaryButton("Turn on") {
-                        dialog.dismiss()
-                        OeaAssistant.openSetup(context)
-                    },
-                ))
-            }
+        val start = OeaAssistant.forceStopWhenReady(context, listOf(pkg), homeIntent()) { stopped, _ ->
+            w.toast(if (pkg in stopped) "${app.label} frozen and asleep" else "${app.label} frozen in OEA. Force stop was skipped; use Freezer › ⋮ › Put frozen apps back to sleep.")
+        }
+        when (start) {
+            OeaAssistant.ForceStopStart.STARTED -> Unit
+            // Granted but paused by Android: reconnect quietly, never re-ask.
+            OeaAssistant.ForceStopStart.QUEUED -> w.toast("${app.label} frozen. Reconnecting OEA Assistant…")
+            OeaAssistant.ForceStopStart.BUSY -> w.toast("${app.label} frozen in OEA")
+            OeaAssistant.ForceStopStart.NOT_ENABLED -> offerAssistantForFreezer(app)
         }
     }
+
+    /**
+     * Shown only when OEA Assistant has never been switched on, and only once
+     * per session; afterwards freezing just confirms with a toast.
+     */
+    private fun offerAssistantForFreezer(app: OeaAppInfo) {
+        if (assistantOfferShown) {
+            w.toast("${app.label} frozen in OEA")
+            return
+        }
+        assistantOfferShown = true
+        val k = activityKit() ?: return
+        k.sheet("${app.label} is frozen in OEA", "OEA blocks it from Home and the drawer. Turn on OEA Assistant once so OEA can also force-stop frozen apps: no background activity, alarms or notifications until you unfreeze them. No root, ADB or computer needed.") { panel, dialog ->
+            panel.addView(k.buttonRow(
+                k.quietButton("Not now") { dialog.dismiss() },
+                k.primaryButton("Turn on") {
+                    dialog.dismiss()
+                    OeaAssistant.openSetup(context)
+                },
+            ))
+        }
+    }
+
+    private var assistantOfferShown = false
 
     fun showFrozenPrompt(app: OeaAppInfo) {
         val k = activityKit() ?: return
@@ -800,7 +806,7 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             if (enabledButDisconnected) append("\n\nOEA Assistant is switched on but Android stopped it. Switch it off and on again.")
             if (OeaAssistant.needsRestrictedSettingsHint()) append("\n\n" + OeaAssistant.RESTRICTED_SETTINGS_HINT)
         }
-        k.sheet("Turn on OEA Assistant", body) { panel, dialog ->
+        k.sheet(if (enabledButDisconnected) "OEA Assistant was paused" else "Turn on OEA Assistant", body) { panel, dialog ->
             if (OeaAssistant.needsRestrictedSettingsHint()) {
                 panel.addView(k.quietButton("Open OEA App info", R.drawable.oic_info) {
                     dialog.dismiss()
@@ -809,7 +815,7 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             }
             panel.addView(k.buttonRow(
                 k.quietButton("Not now") { dialog.dismiss() },
-                k.primaryButton("Turn on") {
+                k.primaryButton(if (enabledButDisconnected) "Open settings" else "Turn on") {
                     dialog.dismiss()
                     OeaAssistant.openSetup(context)
                 },

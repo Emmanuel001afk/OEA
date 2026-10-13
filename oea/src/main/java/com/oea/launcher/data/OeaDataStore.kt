@@ -45,6 +45,10 @@ class OeaDataStore private constructor(context: Context) {
         prefs.edit().putStringSet(KEY_HIDDEN_APPS, u).apply()
     }
 
+    /** Hidden apps space asks for the App Lock PIN before opening. */
+    fun hiddenSpaceLocked() = prefs.getBoolean(KEY_HIDDEN_SPACE_LOCKED, false)
+    fun setHiddenSpaceLocked(v: Boolean) { prefs.edit().putBoolean(KEY_HIDDEN_SPACE_LOCKED, v).apply() }
+
     fun showAppLabels() = prefs.getBoolean(KEY_SHOW_LABELS, true)
     fun setShowAppLabels(v: Boolean) { prefs.edit().putBoolean(KEY_SHOW_LABELS, v).apply() }
     fun gridColumns() = prefs.getInt(KEY_GRID_COLUMNS, 4).coerceIn(3, 6)
@@ -75,6 +79,37 @@ class OeaDataStore private constructor(context: Context) {
     fun setDynamicIslandEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_DYNAMIC_ISLAND_ENABLED, enabled).apply()
     }
+
+    /**
+     * Live activity style: "card" (the capsule card under the status bar),
+     * "camera" (an expandable island around the front camera) or "both".
+     */
+    fun islandStyle() = prefs.getString(KEY_ISLAND_STYLE, ISLAND_CARD)?.takeIf { it in setOf(ISLAND_CARD, ISLAND_CAMERA, ISLAND_BOTH) } ?: ISLAND_CARD
+    fun setIslandStyle(v: String) { prefs.edit().putString(KEY_ISLAND_STYLE, v).apply() }
+
+    /** With both styles: apps whose live activity shows in the camera island. */
+    fun islandCameraApps(): Set<String> = prefs.getStringSet(KEY_ISLAND_CAMERA_APPS, emptySet()).orEmpty()
+    /** With both styles: apps whose live activity shows in the card. */
+    fun islandCardApps(): Set<String> = prefs.getStringSet(KEY_ISLAND_CARD_APPS, emptySet()).orEmpty()
+
+    /** An app belongs to one style at a time, so assigning it to one removes it from the other. */
+    fun setIslandCameraApps(packages: Set<String>) {
+        prefs.edit()
+            .putStringSet(KEY_ISLAND_CAMERA_APPS, packages.toSet())
+            .putStringSet(KEY_ISLAND_CARD_APPS, islandCardApps() - packages)
+            .apply()
+    }
+
+    fun setIslandCardApps(packages: Set<String>) {
+        prefs.edit()
+            .putStringSet(KEY_ISLAND_CARD_APPS, packages.toSet())
+            .putStringSet(KEY_ISLAND_CAMERA_APPS, islandCameraApps() - packages)
+            .apply()
+    }
+
+    /** With both styles: where unassigned apps, calls and charging appear ("card" or "camera"). */
+    fun islandDefaultSurface() = prefs.getString(KEY_ISLAND_DEFAULT_SURFACE, ISLAND_CARD)?.takeIf { it == ISLAND_CARD || it == ISLAND_CAMERA } ?: ISLAND_CARD
+    fun setIslandDefaultSurface(v: String) { prefs.edit().putString(KEY_ISLAND_DEFAULT_SURFACE, v).apply() }
 
     fun themedIcons() = prefs.getBoolean(KEY_THEMED_ICONS, false)
     fun setThemedIcons(v: Boolean) { prefs.edit().putBoolean(KEY_THEMED_ICONS, v).apply() }
@@ -165,6 +200,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_LAST_RESULT = "last_result"
         private const val KEY_FAVORITES = "favorite_apps"
         private const val KEY_HIDDEN_APPS = "hidden_apps"
+        private const val KEY_HIDDEN_SPACE_LOCKED = "hidden_space_locked"
         private const val KEY_SHOW_LABELS = "show_app_labels"
         private const val KEY_GRID_COLUMNS = "grid_columns"
         private const val KEY_DRAWER_MODE = "drawer_mode"
@@ -182,6 +218,13 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_GLANCE_STYLE = "glance_style"
         private const val KEY_BADGE_STYLE = "badge_style"
         private const val KEY_DYNAMIC_ISLAND_ENABLED = "dynamic_island_enabled"
+        private const val KEY_ISLAND_STYLE = "island_style"
+        private const val KEY_ISLAND_CAMERA_APPS = "island_camera_apps"
+        private const val KEY_ISLAND_CARD_APPS = "island_card_apps"
+        private const val KEY_ISLAND_DEFAULT_SURFACE = "island_default_surface"
+        const val ISLAND_CARD = "card"
+        const val ISLAND_CAMERA = "camera"
+        const val ISLAND_BOTH = "both"
         private const val KEY_THEMED_ICONS = "themed_icons"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_SWIPE_DOWN = "gesture_swipe_down"

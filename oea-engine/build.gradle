@@ -1,0 +1,26 @@
+plugins {
+    alias(libs.plugins.android.library)
+}
+
+// OEA Game Engine: rendering, input, audio, physics, ECS, performance,
+// Dynamic Island bridge and multiplayer (local Wi-Fi/hotspot + WebRTC with
+// manual codes/QR). It has no dependency on the launcher, so games built on it
+// only see this module's public API.
+android {
+    namespace "com.oea.engine"
+    compileSdk 36
+    defaultConfig {
+        minSdk 26
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+kotlin { jvmToolchain(21) }
+
+dependencies {
+    implementation libs.webrtc.android
+    implementation libs.zxing.core
+    testImplementation libs.junit
+}

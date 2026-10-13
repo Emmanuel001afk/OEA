@@ -36,6 +36,7 @@ import com.oea.launcher.applock.OeaAppLockStore
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.callblocker.OeaCallBlockerActivity
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.freezer.OeaFreezerActivity
 import com.oea.launcher.gameboost.OeaGameBoostActivity
 import com.oea.launcher.gameboost.OeaGameBoostStore
 import com.oea.launcher.icons.OeaIconController
@@ -60,7 +61,14 @@ import java.util.concurrent.Executors
  * drawer, gestures, notifications, privacy, the App Freezer, multitasking,
  * permissions and the OEA apps (Phone, Call Blocker, Game Boost).
  */
-class OeaSystemToolsActivity : Activity() {
+open class OeaSystemToolsActivity : Activity() {
+    /**
+     * The screen this activity opens on and treats as its top level. OEA
+     * Settings starts at the hub; the standalone Freezer app reuses the same
+     * screens but starts (and finishes) at the freezer.
+     */
+    protected open val rootScreen: String get() = "hub"
+
     companion object {
         const val EXTRA_SCREEN = "oea_screen"
         private const val REQUEST_WALLPAPER = 0x4F58
@@ -214,13 +222,20 @@ class OeaSystemToolsActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        if (rootScreen != "hub") {
+            current = rootScreen
+            show(current)
+            return
+        }
         when (intent.getStringExtra(EXTRA_SCREEN)) {
             "call_blocker" -> { openActivity(OeaCallBlockerActivity::class.java); finish(); return }
             "game_boost" -> { openActivity(OeaGameBoostActivity::class.java); finish(); return }
-            "freezer" -> current = "freezer"
+            "freezer" -> { openActivity(OeaFreezerActivity::class.java); finish(); return }
             "multitask" -> current = "overview"
             "split" -> current = "split"
             "home" -> current = "home"
+            "notifications" -> current = "notifications"
+            "games" -> { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java); finish(); return }
             else -> current = "hub"
         }
         show(current)
@@ -306,7 +321,7 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun page(title: String, subtitle: String?): OeaKit.Page {
-        val root = current == "hub" && stack.isEmpty()
+        val root = current == rootScreen && stack.isEmpty()
         return kit.page(title, subtitle, onBack = if (root) null else ({ back() }))
     }
 
@@ -344,12 +359,14 @@ class OeaSystemToolsActivity : Activity() {
         group = kit.group(box)
         kit.row(group, R.drawable.oic_notifications, "Notification dots", if (notificationAccess()) labelFor(dataStore.badgeStyle(), mapOf("dot" to "Dots", "count" to "Counts", "off" to "Off")) else "Needs notification access") { navigate("notifications") }
         kit.row(group, R.drawable.oic_shield, "Privacy & App Lock", "${OeaAppLockStore.lockedApps(this).size} locked • ${hiddenCount()} hidden") { navigate("privacy") }
-        kit.row(group, R.drawable.oic_ac_unit, "App Freezer", freezerStatus()) { navigate("freezer") }
+        kit.row(group, R.drawable.oic_ac_unit, "Freezer", freezerStatus()) { openActivity(OeaFreezerActivity::class.java) }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_splitscreen, "Multitasking", "Overview, split screen and floating windows") { navigate("multitasking") }
         kit.row(group, R.drawable.oic_sports_esports, "Game Boost", if (OeaGameBoostStore.enabled(this)) "On • ${OeaGameBoostStore.games(this).size} games" else "Off") { openActivity(OeaGameBoostActivity::class.java) }
+        kit.row(group, R.drawable.oic_stadia_controller_fill, "OEA Games", "Runner, Arena, Chess and the OEA Game Engine") { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java) }
         kit.row(group, R.drawable.oic_call, "Phone", "OEA dialer, contacts and in-call screen") { openActivity(OeaPhoneActivity::class.java) }
         kit.row(group, R.drawable.oic_block, "Call Blocker", "Blocked numbers, allow list, rules and history") { openActivity(OeaCallBlockerActivity::class.java) }
+        kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "OEA Games, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_accessibility_new, "Permissions & access", accessSummary()) { navigate("access") }
         kit.row(group, R.drawable.oic_info, "About OEA", "Version $version") { navigate("about") }
@@ -357,6 +374,20 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun labelFor(value: String, labels: Map<String, String>) = labels[value] ?: value
+
+    /** OEA's built-in apps are ordinary launcher entries; let the user pin any of them to Home. */
+    private fun addOeaAppsToHome() {
+        val builtIns = (requireApps() ?: return).filter { it.packageName == packageName }
+        if (builtIns.isEmpty()) {
+            toast("OEA apps are still loading. Try again in a moment.")
+            return
+        }
+        kit.pickApps("Add OEA apps to Home", "Each app gets its own icon on Home, just like any other app.", builtIns, emptySet(),
+            { it.packageName + "/" + it.className }, confirmLabel = "Add to Home") { chosen ->
+            if (chosen.isEmpty()) return@pickApps
+            homeAction(com.oea.launcher.workspace.OeaWorkspace.HOME_ACTION_ADD_APPS + chosen.joinToString(","))
+        }
+    }
 
     // ============================================================ home screen
 
@@ -645,9 +676,68 @@ class OeaSystemToolsActivity : Activity() {
             "Show Dynamic Island",
             "Show active calls, charging status, media and compatible ongoing notifications on OEA Home.",
             dataStore.dynamicIslandEnabled(),
-        ) { dataStore.setDynamicIslandEnabled(it) }
-        kit.note(box, "Tap the capsule on Home to expand it. Media sessions use standard play, pause and skip controls; other apps can provide notification actions. Notification-based details require Notification access. Charging status does not.")
+        ) {
+            dataStore.setDynamicIslandEnabled(it)
+            rerender()
+        }
+        if (dataStore.dynamicIslandEnabled()) {
+            val styles = listOf(
+                OeaDataStore.ISLAND_CARD to "Card under the status bar",
+                OeaDataStore.ISLAND_CAMERA to "Island around the camera",
+                OeaDataStore.ISLAND_BOTH to "Both",
+            )
+            choiceRow(islandGroup, R.drawable.oic_view_agenda, "Style", styles, dataStore.islandStyle()) {
+                dataStore.setIslandStyle(it)
+            }
+            if (dataStore.islandStyle() == OeaDataStore.ISLAND_BOTH) {
+                kit.row(islandGroup, R.drawable.oic_apps, "Camera island apps", islandAppsSummary(dataStore.islandCameraApps())) {
+                    pickIslandApps(camera = true)
+                }
+                kit.row(islandGroup, R.drawable.oic_apps, "Card apps", islandAppsSummary(dataStore.islandCardApps())) {
+                    pickIslandApps(camera = false)
+                }
+                choiceRow(islandGroup, R.drawable.oic_tune, "Everything else",
+                    listOf(OeaDataStore.ISLAND_CARD to "Card", OeaDataStore.ISLAND_CAMERA to "Camera island"),
+                    dataStore.islandDefaultSurface()) {
+                    dataStore.setIslandDefaultSurface(it)
+                }
+            }
+            kit.row(islandGroup, R.drawable.oic_stadia_controller_fill, "OEA Games in the island", "Choose card, camera island, both or automatic for each game") {
+                openActivity(com.oea.launcher.games.OeaGamesActivity::class.java)
+            }
+        }
+        kit.note(box, when (dataStore.islandStyle()) {
+            OeaDataStore.ISLAND_CAMERA -> "The island sits around your front camera. Tap it to expand, tap outside to close, long-press to open the app."
+            OeaDataStore.ISLAND_BOTH -> "Each app shows in the style you assign it to, so music can live in the camera island while chats use the card. Calls, charging and apps you haven't assigned use \"Everything else\"."
+            else -> "Tap the capsule on Home to expand it."
+        } + " Media sessions use standard play, pause and skip controls; other apps can provide notification actions. Notification-based details require Notification access. Charging status does not.")
         present(page)
+    }
+
+    private fun islandAppsSummary(packages: Set<String>): String {
+        if (packages.isEmpty()) return "None yet"
+        val labels = packages.mapNotNull { pkg ->
+            runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrNull()
+        }.sorted()
+        return when {
+            labels.isEmpty() -> "${packages.size} apps"
+            labels.size <= 2 -> labels.joinToString(", ")
+            else -> "${labels.take(2).joinToString(", ")} +${labels.size - 2}"
+        }
+    }
+
+    /** Assigns apps to one live-activity style; an app can only belong to one of them. */
+    private fun pickIslandApps(camera: Boolean) {
+        val choices = (requireApps() ?: return).distinctBy { it.packageName }
+        val selected = if (camera) dataStore.islandCameraApps() else dataStore.islandCardApps()
+        kit.pickApps(
+            if (camera) "Camera island apps" else "Card apps",
+            if (camera) "Live activities from these apps appear in the island around the camera." else "Live activities from these apps appear in the card under the status bar.",
+            choices, selected, { it.packageName }, confirmLabel = "Save",
+        ) { chosen ->
+            if (camera) dataStore.setIslandCameraApps(chosen) else dataStore.setIslandCardApps(chosen)
+            rerender()
+        }
     }
 
     private fun notificationAccess(): Boolean = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
@@ -667,7 +757,8 @@ class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_shield, "Locked apps", "${OeaAppLockStore.lockedApps(this).size} apps ask for your PIN") { openAppLockSettings() }
         kit.sectionTitle(box, "Hidden apps")
         group = kit.group(box)
-        kit.row(group, R.drawable.oic_visibility_off, "Hidden apps", "${hiddenCount()} hidden from the drawer and search") { hiddenAppsDialog() }
+        kit.row(group, R.drawable.oic_visibility_off, "Open hidden apps", "Use your ${hiddenCount()} hidden apps in their own space") { homeAction("hidden") }
+        kit.row(group, R.drawable.oic_edit, "Choose hidden apps", "${hiddenCount()} hidden from Home, the drawer and search") { hiddenAppsDialog() }
         kit.note(box, "Locked apps ask for your PIN when opened from OEA Home, the drawer, Overview and split screen.")
         present(page)
     }
@@ -726,144 +817,307 @@ class OeaSystemToolsActivity : Activity() {
     private fun freezerStatus(): String = when (OeaAppFreezer.backend(this)) {
         OeaAppFreezer.Backend.DEVICE_OWNER -> "System freezer • Device Owner"
         OeaAppFreezer.Backend.ROOT -> "System freezer • Root"
-        else -> "OEA Freeze • ${OeaAppFreezer.allFrozen(this).size} frozen" + if (OeaAssistant.isConnected()) "" else " • Assistant off"
+        else -> "OEA Freeze • ${OeaAppFreezer.allFrozen(this).size} frozen" +
+            if (OeaAssistant.isEnabled(this)) "" else " • Assistant off"
     }
 
-    private fun freezerReturnIntent() = Intent(this, OeaSystemToolsActivity::class.java)
+    /** Where OEA Assistant returns after force-stopping: this Freezer, in its own task. */
+    private fun freezerReturnIntent() = Intent(this, javaClass)
         .putExtra(EXTRA_SCREEN, "freezer")
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
 
+    // Freezer screen state survives re-renders (resume, OEA Assistant changes).
+    private var freezerQuery = ""
+    private var freezerFilter = "all"
+    private var freezerShowSystem = false
+    private val freezerSelected = linkedSetOf<String>()
+    private var freezerApps: List<OeaAppInfo>? = null
+    private var freezerAppsIncludeSystem = false
+    private val freezerBusy = linkedSetOf<String>()
+    private val freezerJustFrozen = HashMap<String, Long>()
+    private var freezerOperationRunning = false
+
+    private fun freezerIce(): Int = if (palette.dark) Color.rgb(112, 212, 255) else Color.rgb(0, 118, 186)
+
+    private fun freezerToast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
     /**
-     * App Freezer. Uses true package suspension when Android grants Device
-     * Owner or root; otherwise OEA Freeze hibernates apps (OEA blocks them and
-     * OEA Assistant force-stops them through Android's App info page).
+     * Freezer: the main screen of the standalone Freezer app (and the App
+     * Freezer page reached from OEA Settings). Uses true package suspension
+     * when Android grants Device Owner or root; otherwise OEA Freeze hibernates
+     * apps: OEA blocks them and OEA Assistant force-stops them through
+     * Android's App info page, behind its own progress screen.
      * CI regression guards retain the previous SELECT VISIBLE and REFRESH STATE control identifiers.
      */
     private fun showFreezer() {
         val backend = OeaAppFreezer.backend(this)
         val systemMode = OeaAppFreezer.mode(this) == OeaAppFreezer.Mode.SYSTEM
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(palette.background)
-        }
+        val standalone = current == rootScreen && stack.isEmpty()
+        val ice = freezerIce()
+        val iceSoft = OeaTheme.blend(palette.card, ice, if (palette.dark) 0.20f else 0.12f)
+        val icons = OeaIconController.shared(this)
+        val grayscale = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0f) })
+
+        val root = FrameLayout(this).apply { setBackgroundColor(palette.background) }
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(column, FrameLayout.LayoutParams(-1, -1))
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(8), dp(18), 0)
         }
+        column.addView(header, LinearLayout.LayoutParams(-1, -2))
+
+        // ---- identity row: icon, name and live status, like Game Boost and Call Blocker
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(kit.circleIconButton(R.drawable.oic_arrow_back, "Back") { back() }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(12) })
-        top.addView(kit.text("App Freezer", 26f, palette.text), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(top, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-        when {
-            systemMode -> kit.banner(header, R.drawable.oic_shield_fill,
-                if (backend == OeaAppFreezer.Backend.ROOT) "System freezer active • Root" else "System freezer active • Device Owner",
-                "Frozen apps are suspended by Android. Each change is verified.", OeaKit.Tone.SUCCESS)
-            OeaAssistant.isConnected() -> kit.banner(header, R.drawable.oic_ac_unit_fill, "OEA Freeze is ready",
-                "Frozen apps are blocked in OEA and force-stopped, so they stay asleep: no background work, alarms or notifications until you unfreeze them.", OeaKit.Tone.SUCCESS)
-            else -> kit.banner(header, R.drawable.oic_ac_unit, "OEA Freeze: turn on OEA Assistant",
-                "Without root or Device Owner, OEA freezes apps by blocking them in OEA and force-stopping them through Android's App info page. OEA Assistant presses Force stop for you. No ADB or computer needed.",
-                OeaKit.Tone.INFO, "Turn on") { OeaAssistant.openSetup(this) }
+        if (!standalone) {
+            top.addView(kit.circleIconButton(R.drawable.oic_arrow_back, "Back") { back() },
+                LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(10) })
         }
-        val searchField = kit.field("Search apps or package names")
+        top.addView(ImageView(this).apply {
+            setImageDrawable(getDrawable(R.drawable.ic_oea_freezer))
+            contentDescription = null
+        }, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(12) })
+        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titles.addView(kit.text("Freezer", 24f, palette.text, OeaType.medium))
+        val assistantGranted = OeaAssistant.isEnabled(this)
+        val modeLine = when {
+            systemMode -> if (backend == OeaAppFreezer.Backend.ROOT) "System freeze • Root" else "System freeze • Device Owner"
+            OeaAssistant.isConnected() -> "OEA Freeze • Assistant ready"
+            assistantGranted -> "OEA Freeze • Assistant on"
+            else -> "OEA Freeze • Assistant off"
+        }
+        titles.addView(kit.text(modeLine, 12.5f, palette.textSecondary).apply { setPadding(0, dp(1), 0, 0) })
+        top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
+        val overflow = kit.circleIconButton(R.drawable.oic_more_vert, "Freezer options", palette.cardHigh, palette.text) {}
+        top.addView(overflow, LinearLayout.LayoutParams(dp(44), dp(44)))
+        header.addView(top, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+
+        // ---- status card
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(OeaTheme.blend(palette.card, ice, if (palette.dark) 0.26f else 0.14f), palette.card),
+            ).apply {
+                cornerRadius = dp(26).toFloat()
+                setStroke(maxOf(1, dp(1)), OeaTheme.alpha(ice, 0x44))
+            }
+        }
+        val heroTop = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val frozenCount = kit.text("0", 34f, palette.text, OeaType.medium)
+        heroTop.addView(frozenCount)
+        heroTop.addView(kit.text("frozen", 15f, palette.textSecondary).apply { setPadding(dp(8), dp(10), 0, 0) },
+            LinearLayout.LayoutParams(0, -2, 1f))
+        heroTop.addView(kit.iconBadge(R.drawable.oic_ac_unit_fill, OeaTheme.alpha(ice, 0x30), ice, 44), LinearLayout.LayoutParams(dp(44), dp(44)))
+        hero.addView(heroTop)
+        hero.addView(kit.text(
+            if (systemMode) "Android suspends frozen apps: they can't open, run in the background or notify until you unfreeze them."
+            else "Frozen apps are blocked in OEA and force-stopped, so they stay asleep: no background work, alarms or notifications.",
+            13f, palette.textSecondary,
+        ).apply { setLineSpacing(dp(2).toFloat(), 1f); setPadding(0, dp(4), 0, 0) })
+        if (!systemMode && !assistantGranted) {
+            // Only when OEA Assistant has genuinely never been switched on.
+            hero.addView(kit.button("Turn on OEA Assistant", ice, if (palette.dark) Color.rgb(6, 22, 34) else Color.WHITE, R.drawable.oic_accessibility_new) {
+                OeaAssistant.openSetup(this)
+            }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
+            hero.addView(kit.text("Needed once so OEA can also force-stop frozen apps. No root, ADB or computer.", 12f, palette.textTertiary)
+                .apply { setPadding(dp(2), dp(6), 0, 0) })
+        } else if (!systemMode && !OeaAssistant.isConnected()) {
+            // Granted, but Android paused it in the background: never ask again,
+            // just explain and offer the setting that keeps it running.
+            hero.addView(kit.text("OEA Assistant is on. Android paused it in the background; OEA reconnects automatically when you freeze an app.",
+                12f, palette.textTertiary).apply { setPadding(0, dp(8), 0, 0); setLineSpacing(dp(2).toFloat(), 1f) })
+            hero.addView(kit.quietButton("Keep OEA running", R.drawable.oic_battery_full) {
+                runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+            }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
+        }
+        header.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+
+        val searchField = kit.field("Search apps or package names", freezerQuery)
         header.addView(searchField, LinearLayout.LayoutParams(-1, -2))
         val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.hscroll(filters), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
-        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        header.addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        val summary = kit.text("", 12.5f, palette.textSecondary).apply { setPadding(dp(4), dp(8), dp(4), dp(6)) }
-        header.addView(summary)
-        val bulk = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        header.addView(bulk, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
-        root.addView(header, LinearLayout.LayoutParams(-1, -2))
+        header.addView(kit.hscroll(filters), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10); bottomMargin = dp(6) })
+
         val list = ListView(this).apply {
             divider = ColorDrawable(Color.TRANSPARENT)
-            dividerHeight = dp(6)
+            dividerHeight = dp(8)
             selector = ColorDrawable(Color.TRANSPARENT)
             isVerticalScrollBarEnabled = false
             clipToPadding = false
-            setPadding(dp(14), dp(4), dp(14), dp(24))
+            setPadding(dp(14), dp(4), dp(14), dp(96))
         }
-        root.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+        column.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        // ---- sticky selection bar
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(10), dp(10))
+            background = kit.rounded(palette.cardHigh, 28, palette.stroke, 1)
+            elevation = dp(10).toFloat()
+            visibility = View.GONE
+        }
+        val barLabel = kit.text("", 14f, palette.text, OeaType.medium)
+        bar.addView(barLabel, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = dp(14); rightMargin = dp(14); bottomMargin = dp(16)
+        })
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = OeaInsets.bars(insets)
-            root.setPadding(bars[0], bars[1], bars[2], 0)
-            list.setPadding(dp(14), dp(4), dp(14), dp(24) + bars[3])
+            column.setPadding(bars[0], bars[1], bars[2], 0)
+            list.setPadding(dp(14), dp(4), dp(14), dp(96) + bars[3])
+            (bar.layoutParams as? FrameLayout.LayoutParams)?.let {
+                it.bottomMargin = dp(16) + bars[3]
+                bar.layoutParams = it
+            }
             insets
         }
 
-        var currentQuery = ""
-        var currentFilter = "all"
-        var showSystemApps = false
-        val selectedPackages = linkedSetOf<String>()
-        var allApps: List<OeaAppInfo> = emptyList()
-        var loadingApps = true
-        var freezerOperationRunning = false
+        var loadingApps = freezerApps == null || freezerAppsIncludeSystem != freezerShowSystem
         var visible: List<OeaAppInfo> = emptyList()
-        var rerenderList: (() -> Unit)? = null
-        val icons = OeaIconController.shared(this)
+        var renderApps: () -> Unit = {}
 
         fun reload() {
             loadingApps = true
-            rerenderList?.invoke()
-            val includeSystem = showSystemApps
+            renderApps()
+            val includeSystem = freezerShowSystem
             Thread {
                 val loaded = runCatching { loadInstalledFreezerApps(includeSystem) }.getOrElse { emptyList() }
                 OeaAppFreezer.syncActualState(this, loaded.map { it.packageName })
                 runOnUiThread {
-                    allApps = loaded
+                    if (isDestroyed) return@runOnUiThread
+                    freezerApps = loaded
+                    freezerAppsIncludeSystem = includeSystem
                     loadingApps = false
-                    rerenderList?.invoke()
+                    renderApps()
                 }
             }.start()
         }
 
+        fun reportForceStop(stopped: List<String>, failed: List<String>) {
+            freezerToast(when {
+                failed.isEmpty() && stopped.size == 1 -> "Frozen and asleep."
+                failed.isEmpty() -> "${stopped.size} apps frozen and asleep."
+                stopped.isEmpty() -> "Frozen in OEA. OEA Assistant wasn't running, so Force stop was skipped (⋮ › Put frozen apps back to sleep)."
+                else -> "${stopped.size} asleep • ${failed.size} frozen in OEA (Android didn't confirm Force stop)."
+            })
+        }
+
         fun apply(packages: List<String>, freeze: Boolean) {
             if (packages.isEmpty()) {
-                toast("Select one or more apps first.")
+                freezerToast("Select one or more apps first.")
                 return
             }
             if (freezerOperationRunning || OeaAssistant.isForceStopping()) {
-                toast("A freezer operation is already running.")
+                freezerToast("A freezer operation is already running.")
                 return
             }
             if (OeaAppFreezer.mode(this) == OeaAppFreezer.Mode.SYSTEM) {
                 freezerOperationRunning = true
-                rerenderList?.invoke()
+                freezerBusy.addAll(packages)
+                renderApps()
                 Thread {
                     var succeeded = 0
                     var failed = 0
                     packages.forEach { pkg -> if (OeaAppFreezer.setFrozen(this, pkg, freeze).success) succeeded++ else failed++ }
                     runOnUiThread {
                         freezerOperationRunning = false
-                        toast(if (packages.size == 1) (if (failed == 0) "Done and verified." else "Android refused this change.") else "$succeeded apps updated, $failed failed.")
-                        selectedPackages.clear()
-                        rerenderList?.invoke()
+                        freezerBusy.removeAll(packages.toSet())
+                        if (freeze) packages.forEach { freezerJustFrozen[it] = System.currentTimeMillis() }
+                        freezerToast(if (packages.size == 1) (if (failed == 0) (if (freeze) "Frozen and verified." else "Unfrozen and verified.") else "Android refused this change.")
+                            else "$succeeded apps updated, $failed failed.")
+                        freezerSelected.clear()
+                        renderApps()
                     }
                 }.start()
                 return
             }
             OeaAppFreezer.setHibernated(this, packages, freeze)
-            selectedPackages.clear()
-            rerenderList?.invoke()
+            freezerSelected.clear()
             if (!freeze) {
-                toast(if (packages.size == 1) "App unfrozen." else "${packages.size} apps unfrozen.")
+                renderApps()
+                freezerToast(if (packages.size == 1) "Unfrozen." else "${packages.size} apps unfrozen.")
                 return
             }
-            if (!OeaAssistant.isConnected()) {
-                toast("Frozen in OEA. Turn on OEA Assistant so OEA can also force-stop them.")
-                return
-            }
+            packages.forEach { freezerJustFrozen[it] = System.currentTimeMillis() }
+            renderApps()
             freezerOperationRunning = true
-            val started = OeaAssistant.forceStop(packages, freezerReturnIntent()) { stopped, failed ->
+            val start = OeaAssistant.forceStopWhenReady(this, packages, freezerReturnIntent()) { stopped, failed ->
                 freezerOperationRunning = false
-                toast(if (failed.isEmpty()) "${stopped.size} app" + (if (stopped.size == 1) "" else "s") + " frozen and stopped." else "${stopped.size} stopped, ${failed.size} not confirmed by Android (still frozen in OEA).")
-                rerenderList?.invoke()
+                reportForceStop(stopped, failed)
+                renderApps()
             }
-            if (!started) {
-                freezerOperationRunning = false
-                toast("Frozen in OEA.")
+            when (start) {
+                OeaAssistant.ForceStopStart.STARTED -> Unit
+                OeaAssistant.ForceStopStart.QUEUED -> freezerToast("Frozen. Reconnecting OEA Assistant to put it to sleep…")
+                OeaAssistant.ForceStopStart.BUSY -> {
+                    freezerOperationRunning = false
+                    freezerToast("Frozen in OEA. Another freezer run is still finishing.")
+                }
+                OeaAssistant.ForceStopStart.NOT_ENABLED -> {
+                    freezerOperationRunning = false
+                    freezerToast(if (packages.size == 1) "Frozen in OEA." else "${packages.size} apps frozen in OEA.")
+                }
             }
         }
+
+        fun putFrozenAppsToSleep() {
+            val sleeping = OeaAppFreezer.hibernatedPackages(this).toList()
+            if (sleeping.isEmpty() || freezerOperationRunning || OeaAssistant.isForceStopping()) return
+            freezerOperationRunning = true
+            val result = OeaAssistant.forceStopWhenReady(this, sleeping, freezerReturnIntent()) { stopped, failed ->
+                freezerOperationRunning = false
+                reportForceStop(stopped, failed)
+            }
+            if (result == OeaAssistant.ForceStopStart.BUSY || result == OeaAssistant.ForceStopStart.NOT_ENABLED) freezerOperationRunning = false
+            if (result == OeaAssistant.ForceStopStart.NOT_ENABLED) OeaAssistant.openSetup(this)
+        }
+
+        fun showOverflow() {
+            kit.sheet("Freezer", null) { panel, dialog ->
+                val group = kit.group(panel)
+                // CI regression guards: SELECT VISIBLE / REFRESH STATE.
+                kit.row(group, R.drawable.oic_check_circle_fill, "Select visible", "${visible.size} apps") {
+                    dialog.dismiss()
+                    freezerSelected.addAll(visible.map { it.packageName })
+                    renderApps()
+                }
+                kit.row(group, R.drawable.oic_refresh, "Refresh state", "Re-read installed apps and Android's frozen state") {
+                    dialog.dismiss()
+                    freezerToast("Refreshing installed apps and frozen state…")
+                    reload()
+                }
+                kit.row(group, R.drawable.oic_settings, if (freezerShowSystem) "Hide system apps" else "Show system apps", null) {
+                    dialog.dismiss()
+                    freezerShowSystem = !freezerShowSystem
+                    freezerSelected.clear()
+                    reload()
+                }
+                if (!systemMode && OeaAppFreezer.hibernatedPackages(this).isNotEmpty() && assistantGranted) {
+                    kit.row(group, R.drawable.oic_bedtime, "Put frozen apps back to sleep", "Force-stops every app frozen in OEA") {
+                        dialog.dismiss()
+                        putFrozenAppsToSleep()
+                    }
+                }
+                val frozenNow = OeaAppFreezer.allFrozen(this).toList()
+                if (frozenNow.isNotEmpty()) {
+                    kit.row(group, R.drawable.oic_restart_alt, "Unfreeze all", "${frozenNow.size} apps") {
+                        dialog.dismiss()
+                        kit.confirm("Unfreeze all apps?", "${frozenNow.size} apps will be able to run again.", "Unfreeze all") {
+                            apply(frozenNow, false)
+                        }
+                    }
+                }
+                if (standalone) {
+                    kit.row(group, R.drawable.oic_settings, "OEA Settings", null) {
+                        dialog.dismiss()
+                        runCatching { startActivity(Intent(this, OeaSystemToolsActivity::class.java)) }
+                    }
+                }
+            }
+        }
+        overflow.setOnClickListener { showOverflow() }
 
         val adapter = object : BaseAdapter() {
             override fun getCount() = if (visible.isEmpty()) 1 else visible.size
@@ -876,136 +1130,182 @@ class OeaSystemToolsActivity : Activity() {
                 if (visible.isEmpty()) {
                     return kit.text(when {
                         loadingApps -> "Loading installed apps…"
-                        currentQuery.isNotBlank() -> "No apps match this search."
-                        currentFilter == "frozen" -> "No frozen apps."
+                        freezerQuery.isNotBlank() -> "No apps match this search."
+                        freezerFilter == "frozen" -> "Nothing is frozen right now."
                         else -> "No apps to show."
                     }, 14f, palette.textSecondary).apply {
                         gravity = Gravity.CENTER
-                        setPadding(dp(16), dp(40), dp(16), dp(40))
+                        setPadding(dp(16), dp(48), dp(16), dp(48))
                     }
                 }
                 val app = visible[position]
                 val frozen = OeaAppFreezer.isFrozen(this@OeaSystemToolsActivity, app.packageName)
-                val selected = app.packageName in selectedPackages
+                val selected = app.packageName in freezerSelected
+                val busy = app.packageName in freezerBusy
                 val row = convertView as? LinearLayout ?: LinearLayout(this@OeaSystemToolsActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(10), dp(10), dp(12), dp(10))
+                    minimumHeight = dp(72)
                     addView(FrameLayout(context), LinearLayout.LayoutParams(dp(24), dp(24)).apply { rightMargin = dp(10) })
-                    addView(ImageView(context), LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(12) })
+                    addView(FrameLayout(context).apply {
+                        addView(ImageView(context), FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER))
+                        addView(FrameLayout(context).apply {
+                            addView(ImageView(context), FrameLayout.LayoutParams(dp(11), dp(11), Gravity.CENTER))
+                        }, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.BOTTOM or Gravity.END))
+                    }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(12) })
                     addView(LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         addView(kit.text("", 15f, palette.text, OeaType.medium).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                         addView(kit.text("", 11.5f, palette.textTertiary).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE })
-                        addView(kit.text("", 11f, palette.textSecondary, OeaType.medium).apply { setPadding(0, dp(3), 0, 0) })
                     }, LinearLayout.LayoutParams(0, -2, 1f))
                     addView(TextView(context).apply {
                         textSize = 13f
                         typeface = OeaType.medium
                         gravity = Gravity.CENTER
-                        setPadding(dp(14), dp(8), dp(14), dp(8))
+                        minWidth = dp(92)
+                        setPadding(dp(14), dp(9), dp(14), dp(9))
                     }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
                 }
                 val mark = row.getChildAt(0) as FrameLayout
                 mark.removeAllViews()
-                mark.background = kit.oval(if (selected) palette.accent else Color.TRANSPARENT, if (selected) palette.accent else palette.textTertiary, 2)
-                if (selected) mark.addView(ImageView(this@OeaSystemToolsActivity).apply { setImageDrawable(kit.icon(R.drawable.oic_check, palette.onAccent)) },
-                    FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
-                mark.contentDescription = "Select ${app.label} for bulk actions"
+                mark.background = kit.oval(if (selected) ice else Color.TRANSPARENT, if (selected) ice else palette.textTertiary, 2)
+                if (selected) mark.addView(ImageView(this@OeaSystemToolsActivity).apply {
+                    setImageDrawable(kit.icon(R.drawable.oic_check, if (palette.dark) Color.rgb(6, 22, 34) else Color.WHITE))
+                }, FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
+                mark.contentDescription = if (selected) "Deselect ${app.label}" else "Select ${app.label}"
                 mark.setOnClickListener {
-                    if (selected) selectedPackages.remove(app.packageName) else selectedPackages.add(app.packageName)
-                    rerenderList?.invoke()
+                    if (app.packageName in freezerSelected) freezerSelected.remove(app.packageName) else freezerSelected.add(app.packageName)
+                    renderApps()
                 }
-                (row.getChildAt(1) as ImageView).apply {
-                    setImageDrawable(icons.icon(app.packageName, null))
-                    alpha = if (frozen) 0.5f else 1f
+                val iconFrame = row.getChildAt(1) as FrameLayout
+                val iconView = iconFrame.getChildAt(0) as ImageView
+                val frost = iconFrame.getChildAt(1) as FrameLayout
+                iconView.setImageDrawable(icons.icon(app.packageName, null))
+                if (frozen) iconView.colorFilter = grayscale else iconView.clearColorFilter()
+                iconView.alpha = if (frozen) 0.55f else 1f
+                frost.background = kit.oval(ice, palette.card, 2)
+                (frost.getChildAt(0) as ImageView).setImageDrawable(kit.icon(R.drawable.oic_ac_unit_fill, Color.WHITE))
+                frost.visibility = if (frozen) View.VISIBLE else View.GONE
+                val justFrozen = freezerJustFrozen.remove(app.packageName)
+                if (frozen && justFrozen != null && System.currentTimeMillis() - justFrozen < 1500L) {
+                    // A short frost "settle" instead of a jarring jump between states.
+                    iconView.scaleX = 0.82f
+                    iconView.scaleY = 0.82f
+                    iconView.animate().scaleX(1f).scaleY(1f).setDuration(260L).setInterpolator(android.view.animation.OvershootInterpolator(1.6f)).start()
+                    frost.alpha = 0f
+                    frost.scaleX = 0.4f
+                    frost.scaleY = 0.4f
+                    frost.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(90L).setDuration(240L).start()
+                } else {
+                    iconView.scaleX = 1f
+                    iconView.scaleY = 1f
+                    frost.alpha = 1f
+                    frost.scaleX = 1f
+                    frost.scaleY = 1f
                 }
                 val texts = row.getChildAt(2) as LinearLayout
-                (texts.getChildAt(0) as TextView).text = app.label
-                (texts.getChildAt(1) as TextView).text = app.packageName
-                (texts.getChildAt(2) as TextView).apply {
-                    text = when {
-                        !frozen -> "Not frozen"
-                        app.packageName in OeaAppFreezer.frozenPackages(this@OeaSystemToolsActivity) -> "Suspended by Android"
-                        else -> "Frozen by OEA"
-                    }
-                    setTextColor(if (frozen) palette.accent else palette.textSecondary)
+                (texts.getChildAt(0) as TextView).apply {
+                    text = app.label
+                    setTextColor(if (frozen) palette.textSecondary else palette.text)
                 }
+                (texts.getChildAt(1) as TextView).text = when {
+                    busy -> "Working…"
+                    !frozen -> app.packageName
+                    app.packageName in OeaAppFreezer.frozenPackages(this@OeaSystemToolsActivity) -> "Frozen • suspended by Android"
+                    else -> "Frozen • asleep"
+                }
+                (texts.getChildAt(1) as TextView).setTextColor(if (frozen || busy) ice else palette.textTertiary)
                 (row.getChildAt(3) as TextView).apply {
-                    text = if (frozen) "Restore" else "Freeze"
-                    setTextColor(if (frozen) palette.onAccentSoft else palette.onAccent)
-                    background = kit.ripple(kit.rounded(if (frozen) palette.accentSoft else palette.accent, 18), 18)
-                    alpha = if (freezerOperationRunning) 0.5f else 1f
-                    contentDescription = if (frozen) app.label + " frozen, tap Restore" else app.label + " not frozen, tap Freeze"
+                    text = when {
+                        busy -> "…"
+                        frozen -> "Unfreeze"
+                        else -> "Freeze"
+                    }
+                    val dark = if (palette.dark) Color.rgb(6, 22, 34) else Color.WHITE
+                    setTextColor(if (frozen) ice else dark)
+                    background = kit.ripple(kit.rounded(if (frozen) OeaTheme.alpha(ice, 0x24) else ice, 20,
+                        if (frozen) OeaTheme.alpha(ice, 0x66) else 0, if (frozen) 1 else 0), 20)
+                    alpha = if (busy || freezerOperationRunning) 0.55f else 1f
+                    isEnabled = !busy
+                    contentDescription = if (frozen) "Unfreeze ${app.label}" else "Freeze ${app.label}"
                     setOnClickListener { apply(listOf(app.packageName), !frozen) }
                 }
-                row.background = kit.rounded(if (selected) palette.accentSoft else palette.card, 20)
+                row.background = kit.rounded(if (selected) iceSoft else palette.card, 22,
+                    if (selected) OeaTheme.alpha(ice, 0x66) else 0, if (selected) 1 else 0)
+                row.setOnClickListener {
+                    if (freezerSelected.isEmpty()) return@setOnClickListener
+                    if (app.packageName in freezerSelected) freezerSelected.remove(app.packageName) else freezerSelected.add(app.packageName)
+                    renderApps()
+                }
+                row.setOnLongClickListener {
+                    if (app.packageName in freezerSelected) freezerSelected.remove(app.packageName) else freezerSelected.add(app.packageName)
+                    row.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    renderApps()
+                    true
+                }
                 return row
             }
         }
         list.adapter = adapter
 
-        fun renderApps() {
+        renderApps = {
+            val all = freezerApps.orEmpty()
             val frozenSet = OeaAppFreezer.allFrozen(this)
-            visible = allApps.filter { app ->
-                val matchesQuery = currentQuery.isBlank() || app.label.contains(currentQuery, true) || app.packageName.contains(currentQuery, true)
-                val matchesFilter = when (currentFilter) {
+            val matching = all.filter { app ->
+                freezerQuery.isBlank() || app.label.contains(freezerQuery, true) || app.packageName.contains(freezerQuery, true)
+            }
+            visible = matching.filter { app ->
+                when (freezerFilter) {
                     "frozen" -> app.packageName in frozenSet
                     "active" -> app.packageName !in frozenSet
                     else -> true
                 }
-                matchesQuery && matchesFilter
-            }
-            summary.text = "${frozenSet.size} frozen  •  ${allApps.size} apps  •  ${visible.size} shown  •  ${selectedPackages.size} selected"
+            }.sortedWith(compareByDescending<OeaAppInfo> { it.packageName in frozenSet && freezerFilter == "all" }.thenBy { it.label.lowercase() })
+            frozenCount.text = frozenSet.size.toString()
             filters.removeAllViews()
-            listOf("all" to "All apps", "frozen" to "Frozen", "active" to "Not frozen").forEach { (mode, label) ->
-                filters.addView(kit.chip(label, mode == currentFilter) {
-                    currentFilter = mode
+            val frozenMatching = matching.count { it.packageName in frozenSet }
+            listOf(
+                "all" to "All ${matching.size}",
+                "frozen" to "Frozen $frozenMatching",
+                "active" to "Not frozen ${matching.size - frozenMatching}",
+            ).forEach { (mode, label) ->
+                filters.addView(kit.chip(label, mode == freezerFilter) {
+                    freezerFilter = mode
                     renderApps()
                 }, LinearLayout.LayoutParams(-2, dp(38)).apply { rightMargin = dp(8) })
             }
-            filters.addView(kit.chip(if (showSystemApps) "System apps shown" else "Show system apps", showSystemApps, R.drawable.oic_settings) {
-                showSystemApps = !showSystemApps
-                selectedPackages.clear()
-                reload()
-            }, LinearLayout.LayoutParams(-2, dp(38)))
-            controls.removeAllViews()
-            // CI regression guards: SELECT VISIBLE / REFRESH STATE.
-            controls.addView(kit.quietButton("Select visible") {
-                selectedPackages.addAll(visible.map { it.packageName })
-                renderApps()
-            }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(6) })
-            controls.addView(kit.quietButton("Clear") {
-                selectedPackages.clear()
-                renderApps()
-            }, LinearLayout.LayoutParams(0, dp(42), 0.7f).apply { rightMargin = dp(6) })
-            controls.addView(kit.quietButton("Refresh state", R.drawable.oic_refresh) {
-                toast("Refreshing installed apps and frozen state…")
-                reload()
-            }, LinearLayout.LayoutParams(0, dp(42), 1.2f))
-            bulk.removeAllViews()
-            bulk.addView(kit.primaryButton("Freeze selected", R.drawable.oic_ac_unit) { apply(selectedPackages.toList(), true) },
-                LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) })
-            bulk.addView(kit.tonalButton("Restore selected") { apply(selectedPackages.toList(), false) },
-                LinearLayout.LayoutParams(0, dp(46), 1f))
-            if (!systemMode && OeaAppFreezer.hibernatedPackages(this).isNotEmpty() && OeaAssistant.isConnected()) {
-                bulk.addView(kit.circleIconButton(R.drawable.oic_bedtime, "Put frozen apps back to sleep", palette.cardHigh, palette.text) {
-                    if (freezerOperationRunning || OeaAssistant.isForceStopping()) return@circleIconButton
-                    freezerOperationRunning = true
-                    val started = OeaAssistant.forceStop(OeaAppFreezer.hibernatedPackages(this).toList(), freezerReturnIntent()) { stopped, _ ->
-                        freezerOperationRunning = false
-                        toast("${stopped.size} frozen apps put back to sleep.")
-                    }
-                    if (!started) freezerOperationRunning = false
-                }, LinearLayout.LayoutParams(dp(46), dp(46)).apply { leftMargin = dp(6) })
+            if (freezerShowSystem) {
+                filters.addView(kit.chip("System apps shown", true, R.drawable.oic_settings) {
+                    freezerShowSystem = false
+                    freezerSelected.clear()
+                    reload()
+                }, LinearLayout.LayoutParams(-2, dp(38)))
+            }
+            if (freezerApps != null) freezerSelected.retainAll(all.map { it.packageName }.toSet())
+            bar.removeAllViews()
+            if (freezerSelected.isEmpty()) {
+                bar.visibility = View.GONE
+            } else {
+                bar.visibility = View.VISIBLE
+                barLabel.text = "${freezerSelected.size} selected"
+                bar.addView(barLabel, LinearLayout.LayoutParams(0, -2, 1f))
+                bar.addView(kit.quietButton("Clear") {
+                    freezerSelected.clear()
+                    renderApps()
+                }, LinearLayout.LayoutParams(-2, dp(42)).apply { rightMargin = dp(6) })
+                bar.addView(kit.tonalButton("Unfreeze") { apply(freezerSelected.toList(), false) },
+                    LinearLayout.LayoutParams(-2, dp(42)).apply { rightMargin = dp(6) })
+                bar.addView(kit.button("Freeze", ice, if (palette.dark) Color.rgb(6, 22, 34) else Color.WHITE, R.drawable.oic_ac_unit) {
+                    apply(freezerSelected.toList(), true)
+                }, LinearLayout.LayoutParams(-2, dp(42)))
             }
             adapter.notifyDataSetChanged()
         }
-        rerenderList = { renderApps() }
         searchField.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                currentQuery = s?.toString().orEmpty()
+                freezerQuery = s?.toString().orEmpty()
                 renderApps()
             }
             override fun afterTextChanged(s: Editable?) = Unit
@@ -1013,6 +1313,7 @@ class OeaSystemToolsActivity : Activity() {
         renderApps()
         setContentView(root)
         currentScroll = null
+        // Show the last list immediately, then refresh it in the background.
         reload()
     }
 
