@@ -84,7 +84,10 @@ class OeaLauncherEngine(context: Context) {
             return
         }
         loading = true
-        if (lastBoundApps.isEmpty()) workspace.setAppLoadStatus("Loading apps…")
+        // Keep an already usable Home completely quiet during background refreshes.
+        // Only a cold start without a bound catalogue gets a neutral loading hint;
+        // genuine initial failures receive the concise retry affordance below.
+        workspace.setAppLoadStatus(if (hasUsableWorkspace) null else "Loading apps…")
         _state.value = _state.value.copy(loadingApps = true, lastError = null)
 
         try {
@@ -126,7 +129,7 @@ class OeaLauncherEngine(context: Context) {
                         if (hasUsableWorkspace) {
                             workspace.setAppLoadStatus(null)
                         } else {
-                            workspace.setAppLoadStatus("Home could not refresh · tap to retry") { reloadAsync() }
+                            workspace.setAppLoadStatus("Apps unavailable · tap to retry") { reloadAsync() }
                         }
                         return@fold
                     }
@@ -151,7 +154,7 @@ class OeaLauncherEngine(context: Context) {
                         Log.w(TAG, "App catalogue came back empty; keeping the last good workspace")
                         workspace.setAppLoadStatus(null)
                     } else {
-                        workspace.setAppLoadStatus("No launchable apps found · tap to retry") { reloadAsync() }
+                        workspace.setAppLoadStatus("No apps available · tap to retry") { reloadAsync() }
                     }
                 }
             },
@@ -166,7 +169,7 @@ class OeaLauncherEngine(context: Context) {
                     lastError = message,
                 )
                 if (hasUsableWorkspace) workspace.setAppLoadStatus(null)
-                else workspace.setAppLoadStatus("Apps could not be loaded · tap to retry") { reloadAsync() }
+                else workspace.setAppLoadStatus("Apps unavailable · tap to retry") { reloadAsync() }
             },
         )
 

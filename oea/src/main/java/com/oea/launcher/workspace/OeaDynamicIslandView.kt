@@ -94,6 +94,8 @@ class OeaDynamicIslandView(
     private val surface: Surface = Surface.CARD,
     /** Inside an OEA game: only calls, game events and (optionally) music are shown. */
     private val inGame: Boolean = false,
+    /** Hosted in its own small application-overlay window for opt-in system-wide display. */
+    private val overlayWindow: Boolean = false,
 ) : FrameLayout(context) {
     enum class Surface { CARD, CAMERA }
 
@@ -151,11 +153,19 @@ class OeaDynamicIslandView(
     /** Card style: extra offset when the camera island sits above it (both styles on). */
     private var extraTop = 0
     private var lastCollapsedHeight = -1
+    private var lastCameraReservedHeight = -1
+    private var lastOverlayGeometryKey: String? = null
+    private var swipeStartRawX = 0f
+    private var swipeStartRawY = 0f
+    private var notificationSwipeTarget: StatusBarNotification? = null
+    private var notificationSwipeIntercepted = false
 
     /** Fired when the user expands/collapses (the camera style tints the status bar). */
     var onExpandedChanged: ((Boolean) -> Unit)? = null
     /** Card style: fired when the space Home must reserve for the capsule changes. */
     var onReservedHeightChanged: (() -> Unit)? = null
+    /** Geometry callback used only by the optional system-wide overlay service. */
+    var onOverlayGeometryChanged: ((width: Int, height: Int, x: Int, y: Int, visible: Boolean) -> Unit)? = null
 
     val isExpanded: Boolean get() = expanded && visibility == VISIBLE
     private val isCamera get() = surface == Surface.CAMERA
@@ -327,7 +337,10 @@ class OeaDynamicIslandView(
      */
     fun reservedHeight(): Int = when {
         visibility != VISIBLE -> 0
-        isCamera -> dp(CAMERA_PILL_DP) + dp(8)
+        isCamera -> {
+            val cameraTop = maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+            (cameraTop + dp(CAMERA_PILL_DP) + dp(8) - statusBarHeight).coerceAtLeast(0)
+        }
         else -> lastCollapsedHeight.coerceAtLeast(0)
     }
 
@@ -365,6 +378,7 @@ class OeaDynamicIslandView(
         OeaGameLiveState.addListener(gameObserver)
         if (!inGame) registerBatteryReceiver()
         render()
+        notifyOverlayGeometry()
     }
 
     override fun onDetachedFromWindow() {
@@ -423,9 +437,15 @@ class OeaDynamicIslandView(
         }
     }
 
-    private fun accepts(packageName: String?): Boolean = OeaIslandRouting.surfaceFor(store, packageName) == surface
+    private fun accepts(packageName: String?): Boolean {
+        if (packageName != null && !store.islandAllApps() && packageName !in store.islandSelectedApps()) return false
+        return OeaIslandRouting.surfaceFor(store, packageName) == surface
+    }
 
     private fun buildPayload(): Payload? {
+        // Once the opt-in overlay service has attached both windows, it becomes
+        // the sole owner; keep Home visible if startup fails or permission is lost.
+        if (store.islandOnOtherApps() && OeaDynamicIslandOverlayService.overlayActive && !overlayWindow) return null
         if (!store.dynamicIslandEnabled()) return null
         if (!OeaIslandRouting.surfaceEnabled(store, surface)) return null
         if (accepts(null)) OeaCallState.current?.let(::callPayload)?.let { return it }
@@ -528,10 +548,16 @@ class OeaDynamicIslandView(
         try {
             renderContent()
         } catch (error: Exception) {
-            Log.w(TAG, "Could not render Home live activity", error)
+            Log.w(TAG, "Could not render live activity", error)
+            val wasVisible = visibility == VISIBLE
+            val wasExpanded = expanded
             current = null
             expanded = false
             visibility = GONE
+            removeCallbacks(callTicker)
+            if (wasExpanded) onExpandedChanged?.invoke(false)
+            if (wasVisible) onReservedHeightChanged?.invoke()
+            notifyOverlayGeometry()
         }
     }
 
@@ -546,11 +572,19 @@ class OeaDynamicIslandView(
             removeCallbacks(callTicker)
             if (wasExpanded) onExpandedChanged?.invoke(false)
             if (wasVisible) onReservedHeightChanged?.invoke()
+            notifyOverlayGeometry()
             return
         }
-        if (current?.key != payload.key && expanded) {
-            expanded = false
-            onExpandedChanged?.invoke(false)
+        if (current?.key != payload.key) {
+            notificationSwipeTarget = null
+            notificationSwipeIntercepted = false
+            card.animate().cancel()
+            card.translationX = 0f
+            card.alpha = 1f
+            if (expanded) {
+                expanded = false
+                onExpandedChanged?.invoke(false)
+            }
         }
         val becameVisible = visibility != VISIBLE
         current = payload
@@ -584,6 +618,78 @@ class OeaDynamicIslandView(
         card.setOnClickListener { toggleExpanded() }
         applyLayout()
         applyPalette()
+    }
+
+    override fun onInterceptTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            val candidate = current?.takeIf { it.kind == Kind.NOTIFICATION }?.notification
+            val location = IntArray(2)
+            card.getLocationOnScreen(location)
+            val downInsideCard = card.visibility == VISIBLE && card.isShown &&
+                event.rawX >= location[0] && event.rawX <= location[0] + card.width &&
+                event.rawY >= location[1] && event.rawY <= location[1] + card.height
+            notificationSwipeTarget = candidate?.takeIf { downInsideCard && it.isClearable && OeaNotificationState.connected }
+            swipeStartRawX = event.rawX
+            swipeStartRawY = event.rawY
+            notificationSwipeIntercepted = false
+        }
+        val notification = notificationSwipeTarget
+        if (notification == null || !notification.isClearable || !OeaNotificationState.connected) return false
+        if (current?.notification?.key != notification.key) {
+            notificationSwipeTarget = null
+            notificationSwipeIntercepted = false
+            return false
+        }
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - swipeStartRawX
+                val dy = event.rawY - swipeStartRawY
+                if (kotlin.math.abs(dx) > dp(40) && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
+                    notificationSwipeIntercepted = true
+                    return true
+                }
+            }
+            android.view.MotionEvent.ACTION_UP,
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                notificationSwipeTarget = null
+                notificationSwipeIntercepted = false
+            }
+        }
+        return false
+    }
+
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (!notificationSwipeIntercepted) return super.onTouchEvent(event)
+        val notification = notificationSwipeTarget
+        val dx = event.rawX - swipeStartRawX
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_MOVE -> {
+                card.translationX = dx
+                card.alpha = (1f - kotlin.math.abs(dx) / dp(360).toFloat()).coerceIn(0.35f, 1f)
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                notificationSwipeIntercepted = false
+                notificationSwipeTarget = null
+                val stillCurrent = notification != null && current?.notification?.key == notification.key
+                if (stillCurrent && kotlin.math.abs(dx) >= dp(72) && OeaNotificationState.dismiss(notification!!)) {
+                    card.animate().cancel()
+                    card.animate()
+                        .translationX(if (dx < 0) -resources.displayMetrics.widthPixels.toFloat() else resources.displayMetrics.widthPixels.toFloat())
+                        .alpha(0f)
+                        .setDuration(180L)
+                        .withEndAction { card.translationX = 0f; card.alpha = 1f }
+                        .start()
+                } else {
+                    card.animate().translationX(0f).alpha(1f).setDuration(160L).start()
+                }
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                notificationSwipeIntercepted = false
+                notificationSwipeTarget = null
+                card.animate().translationX(0f).alpha(1f).setDuration(140L).start()
+            }
+        }
+        return true
     }
 
     private fun labelFor(kind: Kind): String = when (kind) {
@@ -690,6 +796,10 @@ class OeaDynamicIslandView(
         val contentIntent = payload.notification?.notification?.contentIntent
         if (contentIntent != null) {
             addTextAction("Open") { OeaPendingIntents.send(context, contentIntent) }
+        }
+        val clearableNotification = payload.notification?.takeIf { payload.kind == Kind.NOTIFICATION && it.isClearable }
+        if (clearableNotification != null && OeaNotificationState.connected && actions.childCount < 3) {
+            addTextAction("Dismiss") { OeaNotificationState.dismiss(clearableNotification) }
         }
 
         if (actions.childCount == 0) {
@@ -873,18 +983,21 @@ class OeaDynamicIslandView(
             params.height = LayoutParams.WRAP_CONTENT
             params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             params.leftMargin = 0
-            params.topMargin = cardTop + extraTop + dp(4)
+            params.topMargin = if (overlayWindow) 0 else cardTop + extraTop + dp(4)
             card.setPadding(dp(13), dp(9), dp(13), dp(10))
             card.layoutParams = params
+            notifyOverlayGeometry()
             return
         }
-        // The status-bar strip belongs to System UI's window, which takes every
-        // touch there; the island therefore hangs just below it, centred under
-        // the front camera, where it can be tapped.
+        // System UI owns status-bar touches. Anchor just below the greater of
+        // the status bar and the cutout's lower edge, then let the saved Y
+        // offset reposition the island for unusual camera layouts.
         val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
         val pillHeight = dp(CAMERA_PILL_DP)
-        val pillTop = statusBarHeight + dp(3)
-        val centerX = cutout?.centerX() ?: (screenWidth / 2)
+        val cameraX = dp(store.islandCameraOffsetX())
+        val pillTop = cameraPillTop(screenHeight, pillHeight)
+        val centerX = ((cutout?.centerX() ?: (screenWidth / 2)) + cameraX).coerceIn(0, screenWidth)
         if (expanded) {
             compactRow.visibility = GONE
             header.visibility = VISIBLE
@@ -893,8 +1006,8 @@ class OeaDynamicIslandView(
             params.width = width
             params.height = LayoutParams.WRAP_CONTENT
             params.gravity = Gravity.TOP or Gravity.START
-            params.leftMargin = (centerX - width / 2).coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
-            params.topMargin = pillTop
+            params.leftMargin = if (overlayWindow) 0 else (centerX - width / 2).coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
+            params.topMargin = if (overlayWindow) 0 else pillTop
             card.setPadding(dp(16), dp(14), dp(16), dp(14))
         } else {
             compactRow.visibility = VISIBLE
@@ -910,10 +1023,59 @@ class OeaDynamicIslandView(
             params.width = width
             params.height = pillHeight
             params.gravity = Gravity.TOP or Gravity.START
-            params.leftMargin = (centerX - width / 2).coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
-            params.topMargin = pillTop
+            params.leftMargin = if (overlayWindow) 0 else (centerX - width / 2).coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
+            params.topMargin = if (overlayWindow) 0 else pillTop
         }
         card.layoutParams = params
+        notifyOverlayGeometry()
+        val reserved = reservedHeight()
+        if (reserved != lastCameraReservedHeight) {
+            lastCameraReservedHeight = reserved
+            post { onReservedHeightChanged?.invoke() }
+        }
+    }
+
+    private fun cameraPillTop(screenHeight: Int, pillHeight: Int): Int {
+        val anchor = maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+        return anchor.coerceIn(0, (screenHeight - pillHeight).coerceAtLeast(0))
+    }
+
+    /** Requests a WindowManager resize/reposition after a payload or inset change. */
+    fun updateOverlayWindowGeometry() = notifyOverlayGeometry()
+
+    private fun notifyOverlayGeometry() {
+        if (!overlayWindow || !isAttachedToWindow) return
+        post {
+            if (!overlayWindow || !isAttachedToWindow) return@post
+            val callback = onOverlayGeometryChanged ?: return@post
+            val visible = visibility == VISIBLE && card.visibility == VISIBLE
+            val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(1)
+            val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(1)
+            val cardParams = card.layoutParams as? LayoutParams
+            val widthSpec = if (cardParams != null && cardParams.width > 0) {
+                MeasureSpec.makeMeasureSpec(cardParams.width.coerceAtMost(screenWidth), MeasureSpec.EXACTLY)
+            } else {
+                MeasureSpec.makeMeasureSpec(screenWidth, MeasureSpec.AT_MOST)
+            }
+            val heightSpec = if (cardParams != null && cardParams.height > 0) {
+                MeasureSpec.makeMeasureSpec(cardParams.height.coerceAtMost(screenHeight), MeasureSpec.EXACTLY)
+            } else {
+                MeasureSpec.makeMeasureSpec(screenHeight, MeasureSpec.AT_MOST)
+            }
+            card.measure(widthSpec, heightSpec)
+            val width = if (visible) card.measuredWidth.coerceIn(1, screenWidth) else 1
+            val height = if (visible) card.measuredHeight.coerceIn(1, screenHeight) else 1
+            val offsetX = if (isCamera) dp(store.islandCameraOffsetX()) else 0
+            val cameraCenter = cutout?.centerX() ?: screenWidth / 2
+            val centerX = ((if (isCamera) cameraCenter else screenWidth / 2) + offsetX).coerceIn(0, screenWidth)
+            val x = if (visible) (centerX - width / 2).coerceIn(0, (screenWidth - width).coerceAtLeast(0)) else 0
+            val top = if (isCamera) cameraPillTop(screenHeight, height) else cardTop + extraTop + dp(4)
+            val y = if (visible) top.coerceIn(0, (screenHeight - height).coerceAtLeast(0)) else 0
+            val key = "$width:$height:$x:$y:$visible"
+            if (key == lastOverlayGeometryKey) return@post
+            lastOverlayGeometryKey = key
+            callback(width, height, x, y, visible)
+        }
     }
 
     private fun applyPalette() {

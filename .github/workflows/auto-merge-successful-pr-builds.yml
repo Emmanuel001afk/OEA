@@ -68,7 +68,7 @@ jobs:
           grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
       - name: Build standalone OEA Launcher APK
-        run: ./gradlew :oea:assembleRelease --stacktrace
+        run: ./gradlew :oea:assembleRelease :oea-game-arena:assembleRelease :oea-game-chess:assembleRelease :oea-game-runner:assembleRelease --stacktrace
       - name: Verify APK identity
         run: |
           APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"

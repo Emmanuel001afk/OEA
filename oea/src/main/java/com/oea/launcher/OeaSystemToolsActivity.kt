@@ -53,6 +53,7 @@ import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
 import com.oea.launcher.workspace.OeaWorkspaceStore
+import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
 import java.io.InputStream
 import java.util.concurrent.Executors
 
@@ -73,6 +74,7 @@ open class OeaSystemToolsActivity : Activity() {
         const val EXTRA_SCREEN = "oea_screen"
         private const val REQUEST_WALLPAPER = 0x4F58
         private const val REQUEST_CONTACTS = 0x4F59
+        private const val REQUEST_ISLAND_OVERLAY = 0x4F5A
     }
 
     private val dataStore by lazy { OeaDataStore.get(this) }
@@ -95,6 +97,7 @@ open class OeaSystemToolsActivity : Activity() {
     private var currentScroll: android.widget.ScrollView? = null
     private val scrollPositions = HashMap<String, Int>()
     private var refreshOverviewOnResume = false
+    private var pendingIslandOverlayEnable = false
 
     /** Returns the current snapshot immediately and never scans packages on the UI thread. */
     private fun apps(): List<OeaAppInfo> {
@@ -248,6 +251,26 @@ open class OeaSystemToolsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (pendingIslandOverlayEnable) {
+            pendingIslandOverlayEnable = false
+            if (Settings.canDrawOverlays(this)) {
+                dataStore.setIslandOnOtherApps(true)
+                OeaDynamicIslandOverlayService.sync(this)
+                toast("Dynamic Island will appear over other apps.")
+            } else {
+                toast("Allow OEA to display over other apps to enable this option.")
+            }
+        } else if (dataStore.islandOnOtherApps()) {
+            // Keep persisted UI state honest if the user revoked overlay access
+            // from Android Settings while OEA was in the background.
+            if (Settings.canDrawOverlays(this)) {
+                OeaDynamicIslandOverlayService.sync(this)
+            } else {
+                dataStore.setIslandOnOtherApps(false)
+                OeaDynamicIslandOverlayService.sync(this)
+                toast("Display over other apps access was removed; Dynamic Island is paused.")
+            }
+        }
         // Permission screens may have changed what a row says; re-render in place.
         if (current != "overview" || refreshOverviewOnResume) {
             if (refreshOverviewOnResume) {
@@ -465,6 +488,7 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_wallpaper, "Wallpaper & style", "Open Android's wallpaper picker") {
             runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) }
         }
+        kit.row(group, R.drawable.oic_wallpaper, "OEA nature wallpapers", "Choose from the bundled mountain, forest and coast scenes") { chooseBundledWallpaper() }
         kit.row(group, R.drawable.oic_photo_library, "Use a photo as wallpaper", "Pick an image and apply it to Home") { pickWallpaper() }
         present(page)
     }
@@ -548,6 +572,35 @@ open class OeaSystemToolsActivity : Activity() {
         }
     }
 
+    private fun chooseBundledWallpaper() {
+        val choices = listOf(
+            "Mountain dawn" to R.drawable.oea_wallpaper_mountain_dawn,
+            "Forest river" to R.drawable.oea_wallpaper_forest_river,
+            "Desert coast" to R.drawable.oea_wallpaper_desert_coast,
+        )
+        kit.choose(
+            "OEA nature wallpapers",
+            "These bundled images are applied as the Android Home wallpaper. Device wallpapers and your own imported photos remain available too.",
+            choices.map { it.first },
+            0,
+        ) { selected ->
+            val resourceId = choices[selected].second
+            val app = applicationContext
+            toast("Applying wallpaper…")
+            Thread {
+                val applied = runCatching {
+                    app.resources.openRawResource(resourceId).use { stream ->
+                        android.app.WallpaperManager.getInstance(app)
+                            .setStream(stream, null, true, android.app.WallpaperManager.FLAG_SYSTEM)
+                    }
+                }.isSuccess
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) toast(if (applied) "Wallpaper applied." else "Android could not apply that wallpaper.")
+                }
+            }.start()
+        }
+    }
+
     private fun pickWallpaper() {
         runCatching {
             startActivityForResult(
@@ -562,6 +615,19 @@ open class OeaSystemToolsActivity : Activity() {
 
     @Deprecated("Activity results are routed manually for this simple flow")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQUEST_ISLAND_OVERLAY) {
+            if (Settings.canDrawOverlays(this)) {
+                dataStore.setIslandOnOtherApps(true)
+                OeaDynamicIslandOverlayService.sync(this)
+                toast("Dynamic Island will appear over other apps.")
+            } else {
+                dataStore.setIslandOnOtherApps(false)
+                toast("Overlay permission was not granted.")
+            }
+            pendingIslandOverlayEnable = false
+            if (current == "notifications") rerender()
+            return
+        }
         if (requestCode == REQUEST_WALLPAPER) {
             val uri = data?.data
             if (resultCode == RESULT_OK && uri != null) {
@@ -599,6 +665,10 @@ open class OeaSystemToolsActivity : Activity() {
         kit.switchRow(group, R.drawable.oic_interests, "Smart categories", "Social, Games, Music and more, from Android's app categories", dataStore.drawerCategories()) { dataStore.setDrawerCategories(it) }
         kit.switchRow(group, R.drawable.oic_auto_awesome, "Suggestions", "Your pinned and most-used apps at the top", dataStore.showMostUsed()) { dataStore.setShowMostUsed(it) }
         kit.switchRow(group, R.drawable.oic_search, "Open keyboard automatically", "Start typing as soon as the drawer opens", dataStore.drawerKeyboard()) { dataStore.setDrawerKeyboard(it) }
+        kit.switchRow(group, R.drawable.oic_wallpaper, "Show wallpaper in All Apps", "Optional translucent drawer background; off keeps the current plain appearance", dataStore.drawerWallpaperBackground()) {
+            dataStore.setDrawerWallpaperBackground(it)
+            rerender()
+        }
         kit.row(group, R.drawable.oic_visibility_off, "Hidden apps", "${hiddenCount()} hidden") { hiddenAppsDialog() }
         kit.note(box, "Drawer search also finds contacts, Android settings, calculations (try 18% of 2500 as 2500*18%) and web results.")
         present(page)
@@ -674,10 +744,11 @@ open class OeaSystemToolsActivity : Activity() {
             islandGroup,
             R.drawable.oic_music_note,
             "Show Dynamic Island",
-            "Show active calls, charging status, media and compatible ongoing notifications on OEA Home.",
+            "Show active calls, charging, media and compatible notification activities on OEA Home, with an optional system-wide overlay below.",
             dataStore.dynamicIslandEnabled(),
         ) {
             dataStore.setDynamicIslandEnabled(it)
+            OeaDynamicIslandOverlayService.sync(this)
             rerender()
         }
         if (dataStore.dynamicIslandEnabled()) {
@@ -688,6 +759,53 @@ open class OeaSystemToolsActivity : Activity() {
             )
             choiceRow(islandGroup, R.drawable.oic_view_agenda, "Style", styles, dataStore.islandStyle()) {
                 dataStore.setIslandStyle(it)
+            }
+            if (dataStore.islandStyle() == OeaDataStore.ISLAND_CAMERA || dataStore.islandStyle() == OeaDataStore.ISLAND_BOTH) {
+                kit.row(islandGroup, R.drawable.oic_touch_app, "Camera island position", "Move the capsule to match your front-camera layout") {
+                    cameraIslandPositionDialog()
+                }
+            }
+            kit.switchRow(
+                islandGroup,
+                R.drawable.oic_apps,
+                "Show over other apps",
+                "Optional system-wide island. Android requires Display over other apps access and keeps an OEA foreground-service notice; its notification action appears when notifications are allowed.",
+                dataStore.islandOnOtherApps(),
+            ) { enabled ->
+                if (!enabled) {
+                    pendingIslandOverlayEnable = false
+                    dataStore.setIslandOnOtherApps(false)
+                    OeaDynamicIslandOverlayService.sync(this)
+                    rerender()
+                } else if (Settings.canDrawOverlays(this)) {
+                    dataStore.setIslandOnOtherApps(true)
+                    OeaDynamicIslandOverlayService.sync(this)
+                    rerender()
+                } else {
+                    pendingIslandOverlayEnable = true
+                    runCatching {
+                        startActivityForResult(
+                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
+                            REQUEST_ISLAND_OVERLAY,
+                        )
+                    }.onFailure {
+                        pendingIslandOverlayEnable = false
+                        toast("Open Android Settings › Display over other apps for OEA.")
+                        rerender()
+                    }
+                }
+            }
+            if (dataStore.islandOnOtherApps()) {
+                kit.switchRow(islandGroup, R.drawable.oic_apps, "Show for all apps", "When off, choose the apps whose compatible live notifications may appear.", dataStore.islandAllApps()) {
+                    dataStore.setIslandAllApps(it)
+                    OeaDynamicIslandOverlayService.sync(this)
+                    rerender()
+                }
+                if (!dataStore.islandAllApps()) {
+                    kit.row(islandGroup, R.drawable.oic_apps, "Choose apps", islandAppsSummary(dataStore.islandSelectedApps())) {
+                        pickIslandVisibleApps()
+                    }
+                }
             }
             if (dataStore.islandStyle() == OeaDataStore.ISLAND_BOTH) {
                 kit.row(islandGroup, R.drawable.oic_apps, "Camera island apps", islandAppsSummary(dataStore.islandCameraApps())) {
@@ -710,7 +828,8 @@ open class OeaSystemToolsActivity : Activity() {
             OeaDataStore.ISLAND_CAMERA -> "The island sits around your front camera. Tap it to expand, tap outside to close, long-press to open the app."
             OeaDataStore.ISLAND_BOTH -> "Each app shows in the style you assign it to, so music can live in the camera island while chats use the card. Calls, charging and apps you haven't assigned use \"Everything else\"."
             else -> "Tap the capsule on Home to expand it."
-        } + " Media sessions use standard play, pause and skip controls; other apps can provide notification actions. Notification-based details require Notification access. Charging status does not.")
+        } + " Media sessions use standard play, pause and skip controls; other apps can provide notification actions. Notification-based details require Notification access. Charging status does not." +
+            if (dataStore.islandOnOtherApps()) " Across-app display is active only while Android's overlay permission is granted; when notifications are allowed, its ongoing OEA notice includes a Turn off action." else "")
         present(page)
     }
 
@@ -723,6 +842,79 @@ open class OeaSystemToolsActivity : Activity() {
             labels.isEmpty() -> "${packages.size} apps"
             labels.size <= 2 -> labels.joinToString(", ")
             else -> "${labels.take(2).joinToString(", ")} +${labels.size - 2}"
+        }
+    }
+
+    private fun pickIslandVisibleApps() {
+        val choices = (requireApps() ?: return).distinctBy { it.packageName }
+        kit.pickApps(
+            "Dynamic Island apps",
+            "When Show for all apps is off, only compatible live notifications from these apps appear on OEA and its optional overlay. Calls and battery status remain available.",
+            choices,
+            dataStore.islandSelectedApps(),
+            { it.packageName },
+            confirmLabel = "Save",
+        ) { chosen ->
+            dataStore.setIslandSelectedApps(chosen)
+            OeaDynamicIslandOverlayService.sync(this)
+            rerender()
+        }
+    }
+
+    private fun cameraIslandPositionDialog() {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(6), dp(8), dp(4))
+        }
+        val xSeek = android.widget.SeekBar(this).apply {
+            max = 160
+            progress = (dataStore.islandCameraOffsetX() + 80).coerceIn(0, max)
+        }
+        var positionX = xSeek.progress - 80
+        val xLabel = kit.text("Horizontal: ${positionX} dp", 13f, palette.textSecondary)
+        val ySeek = android.widget.SeekBar(this).apply {
+            max = 160
+            progress = (dataStore.islandCameraOffsetY() + 40).coerceIn(0, max)
+        }
+        var positionY = ySeek.progress - 40
+        val yLabel = kit.text("Vertical: ${positionY} dp", 13f, palette.textSecondary).apply { setPadding(0, dp(14), 0, 0) }
+        fun savePosition(x: Int, y: Int) {
+            dataStore.setIslandCameraPosition(x, y)
+            OeaDynamicIslandOverlayService.sync(this)
+        }
+        xSeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                positionX = progress - 80
+                xLabel.text = "Horizontal: ${positionX} dp"
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+        })
+        ySeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                positionY = progress - 40
+                yLabel.text = "Vertical: ${positionY} dp"
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+        })
+        content.addView(xLabel)
+        content.addView(xSeek, LinearLayout.LayoutParams(-1, -2))
+        content.addView(yLabel)
+        content.addView(ySeek, LinearLayout.LayoutParams(-1, -2))
+        kit.sheet("Camera island position", "Adjust the cutout anchor for your phone. Tap Done to save; the new position appears on Home when you return.") { panel, sheet ->
+            panel.addView(content)
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Cancel") { sheet.dismiss() },
+                kit.quietButton("Reset") {
+                    savePosition(0, 0)
+                    sheet.dismiss()
+                },
+                kit.primaryButton("Done") {
+                    savePosition(positionX, positionY)
+                    sheet.dismiss()
+                },
+            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         }
     }
 
@@ -1342,14 +1534,18 @@ open class OeaSystemToolsActivity : Activity() {
         val box = page.content
         val group = kit.group(box)
         kit.row(group, R.drawable.oic_layers, "Overview", "Recently used apps with open, split and floating actions") { navigate("overview") }
-        kit.row(group, R.drawable.oic_splitscreen, "Split screen & app pairs", if (Build.VERSION.SDK_INT >= 32) "Ready on this Android version" else if (OeaAssistant.isConnected()) "Ready with OEA Assistant" else "Needs OEA Assistant on this Android version") { navigate("split") }
+        kit.row(group, R.drawable.oic_splitscreen, "Split screen & app pairs", if (Build.VERSION.SDK_INT >= 32) "Requests Android split screen; OEM and app support vary" else if (OeaAssistant.isConnected()) "Uses OEA Assistant and Android's split toggle; support varies" else "Needs OEA Assistant; Android/OEM may still restrict split screen") { navigate("split") }
         val freeform = OeaMultitaskLauncher.freeformEnabled(this)
-        kit.row(group, R.drawable.oic_select_window, "Floating windows", if (freeform) "Enabled • long-press any app › Float" else "Off • enable in Developer options") {
-            if (freeform) toast("Long-press any app on Home or in the drawer and tap Float.")
-            else kit.confirm("Enable floating windows", "Open Settings › Developer options and turn on \"Enable freeform windows\" (and \"Force activities to be resizable\"), then restart your phone.", "Open Developer options") {
+        kit.row(group, R.drawable.oic_select_window, "Floating windows", if (freeform) "Available on this phone; Android may still deny an individual app" else "Off • enable in Developer options") {
+            if (freeform) toast("Long-press an app on Home or in All Apps and choose Float. Android supplies move/resize handles only when freeform is granted.")
+            else kit.confirm("Enable floating windows", "Open Settings › Developer options and turn on \"Enable freeform windows\" (and \"Force activities to be resizable\"), then restart your phone. Some phones don't expose freeform at all.", "Open Developer options") {
                 if (!OeaMultitaskLauncher.openDeveloperOptions(this)) toast("Turn on Developer options first: Settings › About phone › tap Build number 7 times.")
             }
         }
+        choiceRow(group, R.drawable.oic_tune, "Initial floating size", listOf("small" to "Small", "medium" to "Medium", "large" to "Large"), dataStore.floatingWindowSize()) {
+            dataStore.setFloatingWindowSize(it)
+        }
+        kit.note(box, "OEA requests an initial freeform size; Android/OEM policy owns window movement and resizing. Split-screen placement is also device- and app-dependent, so OEA reports when Android rejects it instead of drawing fake handles.")
         present(page)
     }
 
@@ -1580,9 +1776,9 @@ open class OeaSystemToolsActivity : Activity() {
         val page = page("Split screen", "Two apps side by side, and saved app pairs")
         val box = page.content
         when {
-            Build.VERSION.SDK_INT >= 32 -> kit.banner(box, R.drawable.oic_check_circle_fill, "Ready", "This Android version opens split screen directly from OEA.", OeaKit.Tone.SUCCESS)
-            OeaAssistant.isConnected() -> kit.banner(box, R.drawable.oic_check_circle_fill, "Ready with OEA Assistant", "OEA docks the first app, then opens the second beside it.", OeaKit.Tone.SUCCESS)
-            else -> kit.banner(box, R.drawable.oic_accessibility_new, "Turn on OEA Assistant", "On Android 12 and older, OEA Assistant enters split screen for you.", OeaKit.Tone.INFO, "Turn on") { OeaAssistant.openSetup(this) }
+            Build.VERSION.SDK_INT >= 32 -> kit.banner(box, R.drawable.oic_splitscreen, "Android split-screen request", "OEA asks Android to place both apps side by side; the device, OEM and each app decide whether it is allowed.", OeaKit.Tone.INFO)
+            OeaAssistant.isConnected() -> kit.banner(box, R.drawable.oic_splitscreen, "Split-screen request ready", "OEA Assistant can trigger Android's split toggle, but device and app policy can still reject it.", OeaKit.Tone.INFO)
+            else -> kit.banner(box, R.drawable.oic_accessibility_new, "OEA Assistant needed", "On Android 12 and older, OEA Assistant can trigger Android's split toggle. Device and app policy may still restrict split screen.", OeaKit.Tone.INFO, "Turn on") { OeaAssistant.openSetup(this) }
         }
         box.addView(kit.primaryButton("Choose two apps", R.drawable.oic_splitscreen) { chooseSplitApps() }, LinearLayout.LayoutParams(-1, dp(50)).apply { bottomMargin = dp(6) })
         val pairs = OeaWorkspaceStore.get(this).folders().filter { it.isPair }
@@ -1614,7 +1810,7 @@ open class OeaSystemToolsActivity : Activity() {
                 }
             }
         }
-        kit.note(box, "Some apps opt out of split screen; Android then opens them full screen.")
+        kit.note(box, "Android and device manufacturers own the split-screen divider and final placement. Apps can opt out, and some phones disable split screen entirely; OEA reports the request, not a guarantee.")
         present(page)
     }
 

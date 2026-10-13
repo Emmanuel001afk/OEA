@@ -46,6 +46,7 @@ import com.oea.engine.net.session.SessionListener
 import com.oea.engine.net.session.SessionPhase
 import com.oea.engine.perf.QualityTier
 import com.oea.games.OeaGames
+import com.oea.games.OeaStandaloneGameActivity
 import com.oea.games.lab.EngineLab
 import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
@@ -320,6 +321,30 @@ class OeaGamesActivity : Activity(), SessionListener {
     }
 
     private fun launchGame(d: GameDescriptor, mode: PlayMode, options: Map<String, String>, players: List<LocalPlayer> = emptyList(), session: NetSession? = null) {
+        // If the user installed one of the separate game APKs, route simple
+        // solo launches through its own Android app/icon. Keep the in-hub
+        // engine path as a complete fallback and for same-device/network play.
+        val standalonePackage = when (d.id) {
+            "arena" -> "com.oea.arena"
+            "chess" -> "com.oea.chess"
+            "runner" -> "com.oea.runner"
+            else -> null
+        }
+        if (mode == PlayMode.SOLO && session == null && standalonePackage != null) {
+            val external = runCatching { packageManager.getLaunchIntentForPackage(standalonePackage) }.getOrNull()
+            if (external != null) {
+                val optionBundle = android.os.Bundle().apply { options.forEach { (key, value) -> putString(key, value) } }
+                val gameSeed = System.nanoTime()
+                runCatching {
+                    startActivity(external
+                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_ID, d.id)
+                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_MODE, mode.name)
+                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_OPTIONS, optionBundle)
+                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_SEED, gameSeed))
+                }.onSuccess { return }
+                    .onFailure { toast("Opening the standalone game failed; starting it in OEA instead.") }
+            }
+        }
         val launch = GameLaunch(mode, options, session?.seed ?: System.nanoTime(), players, session)
         OeaGameLauncher.start(this, d.id, launch)
     }

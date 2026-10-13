@@ -182,7 +182,8 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
 
     fun applyPalette() {
         val p = ws.palette
-        background = ws.kit.roundedTop(p.drawer, 28)
+        val drawerColor = if (ws.store.drawerWallpaperBackground()) OeaTheme.alpha(p.drawer, 0xD8) else p.drawer
+        background = ws.kit.roundedTop(drawerColor, 28)
         handle.background = ws.kit.rounded(OeaTheme.alpha(p.textSecondary, 0x55), 3)
         searchBox.background = ws.kit.rounded(p.cardHigh, 26)
         (searchBox.findViewWithTag<ImageView>("searchIcon"))?.setImageDrawable(ws.kit.icon(R.drawable.oic_search, p.textSecondary))

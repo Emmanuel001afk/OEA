@@ -111,6 +111,40 @@ class OeaDataStore private constructor(context: Context) {
     fun islandDefaultSurface() = prefs.getString(KEY_ISLAND_DEFAULT_SURFACE, ISLAND_CARD)?.takeIf { it == ISLAND_CARD || it == ISLAND_CAMERA } ?: ISLAND_CARD
     fun setIslandDefaultSurface(v: String) { prefs.edit().putString(KEY_ISLAND_DEFAULT_SURFACE, v).apply() }
 
+    /** By default, compatible notification activities from any app may appear. */
+    fun islandAllApps() = prefs.getBoolean(KEY_ISLAND_ALL_APPS, true)
+    fun setIslandAllApps(enabled: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_ALL_APPS, enabled).apply() }
+    fun islandSelectedApps(): Set<String> = prefs.getStringSet(KEY_ISLAND_SELECTED_APPS, emptySet()).orEmpty()
+    fun setIslandSelectedApps(packages: Set<String>) {
+        prefs.edit().putStringSet(KEY_ISLAND_SELECTED_APPS, packages.toSet()).apply()
+    }
+
+    /** Camera-island position offsets, in dp from the front-camera default position. */
+    fun islandCameraOffsetX() = prefs.getInt(KEY_ISLAND_CAMERA_OFFSET_X, 0).coerceIn(-4096, 4096)
+    fun islandCameraOffsetY() = prefs.getInt(KEY_ISLAND_CAMERA_OFFSET_Y, 0).coerceIn(-4096, 4096)
+    fun setIslandCameraPosition(xDp: Int, yDp: Int) {
+        prefs.edit()
+            .putInt(KEY_ISLAND_CAMERA_OFFSET_X, xDp.coerceIn(-4096, 4096))
+            .putInt(KEY_ISLAND_CAMERA_OFFSET_Y, yDp.coerceIn(-4096, 4096))
+            .apply()
+    }
+
+    /** Use the current system wallpaper behind the All Apps surface instead of an opaque panel. */
+    fun drawerWallpaperBackground() = prefs.getBoolean(KEY_DRAWER_WALLPAPER_BACKGROUND, false)
+    fun setDrawerWallpaperBackground(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DRAWER_WALLPAPER_BACKGROUND, enabled).apply()
+    }
+
+    /** Preferred initial size for Android-owned freeform windows. */
+    fun floatingWindowSize() = prefs.getString(KEY_FLOATING_WINDOW_SIZE, "medium")?.takeIf { it in FLOATING_WINDOW_SIZES } ?: "medium"
+    fun setFloatingWindowSize(size: String) {
+        prefs.edit().putString(KEY_FLOATING_WINDOW_SIZE, size.takeIf { it in FLOATING_WINDOW_SIZES } ?: "medium").apply()
+    }
+
+    /** Optional system-wide island; requires the user's explicit overlay permission. */
+    fun islandOnOtherApps() = prefs.getBoolean(KEY_ISLAND_ON_OTHER_APPS, false)
+    fun setIslandOnOtherApps(enabled: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_ON_OTHER_APPS, enabled).apply() }
+
     fun themedIcons() = prefs.getBoolean(KEY_THEMED_ICONS, false)
     fun setThemedIcons(v: Boolean) { prefs.edit().putBoolean(KEY_THEMED_ICONS, v).apply() }
 
@@ -222,6 +256,14 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_ISLAND_CAMERA_APPS = "island_camera_apps"
         private const val KEY_ISLAND_CARD_APPS = "island_card_apps"
         private const val KEY_ISLAND_DEFAULT_SURFACE = "island_default_surface"
+        private const val KEY_ISLAND_ALL_APPS = "island_all_apps"
+        private const val KEY_ISLAND_SELECTED_APPS = "island_selected_apps"
+        private const val KEY_ISLAND_CAMERA_OFFSET_X = "island_camera_offset_x_dp"
+        private const val KEY_ISLAND_CAMERA_OFFSET_Y = "island_camera_offset_y_dp"
+        private const val KEY_DRAWER_WALLPAPER_BACKGROUND = "drawer_wallpaper_background"
+        private const val KEY_ISLAND_ON_OTHER_APPS = "island_on_other_apps"
+        private const val KEY_FLOATING_WINDOW_SIZE = "floating_window_size"
+        private val FLOATING_WINDOW_SIZES = setOf("small", "medium", "large")
         const val ISLAND_CARD = "card"
         const val ISLAND_CAMERA = "camera"
         const val ISLAND_BOTH = "both"

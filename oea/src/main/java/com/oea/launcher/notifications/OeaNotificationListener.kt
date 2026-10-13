@@ -9,8 +9,9 @@ import android.os.Looper
 
 /**
  * Process-local notification snapshot shared with Home. Android calls this
- * listener only after the user grants Notification access; it never creates a
- * system overlay. Home renders supported activities inside its own workspace.
+ * listener only after the user grants Notification access; it only keeps a
+ * process-local snapshot. Home or the explicitly enabled overlay service renders
+ * supported activities, and this listener never creates windows itself.
  */
 object OeaNotificationState {
     private data class Candidate(
@@ -42,6 +43,10 @@ object OeaNotificationState {
             notifyChangedLocked()
         }
     }
+
+    /** Dismisses a clearable notification only while Android's listener is connected. */
+    fun dismiss(notification: StatusBarNotification): Boolean =
+        notification.isClearable && connected && OeaNotificationListener.dismiss(notification.key)
 
     fun clear() {
         synchronized(lock) {
@@ -119,7 +124,12 @@ object OeaNotificationState {
                 else -> 0
             }
             if (priority == 0) null else Candidate(value, priority, value.postTime)
-        }.maxWithOrNull(compareBy<Candidate>({ it.priority }, { it.postedAt }))?.notification
+        }.maxWithOrNull(
+            // Keep live calls and media ahead of ordinary notifications. Among
+            // ordinary activities, recency wins so a fresh message can replace
+            // an older ongoing item without the user opening the older one.
+            compareBy<Candidate>({ it.priority >= 4 }, { it.priority == 5 }, { it.postedAt }, { it.priority }),
+        )?.notification
     }
 
     fun addListener(listener: () -> Unit) {
@@ -165,18 +175,40 @@ class OeaNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        activeListener = this
         OeaNotificationState.setConnected(true)
         runCatching { OeaNotificationState.replaceAll(activeNotifications) }
             .onFailure { Log.w(TAG, "Could not restore active notifications", it) }
     }
 
     override fun onListenerDisconnected() {
-        OeaNotificationState.clear()
-        OeaNotificationState.setConnected(false)
+        if (activeListener === this) {
+            activeListener = null
+            OeaNotificationState.clear()
+            OeaNotificationState.setConnected(false)
+        }
         super.onListenerDisconnected()
     }
 
-    private companion object {
-        const val TAG = "OeaNotifications"
+    override fun onDestroy() {
+        if (activeListener === this) {
+            activeListener = null
+            OeaNotificationState.clear()
+            OeaNotificationState.setConnected(false)
+        }
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val TAG = "OeaNotifications"
+        @Volatile private var activeListener: OeaNotificationListener? = null
+
+        fun dismiss(key: String): Boolean {
+            val service = activeListener ?: return false
+            return runCatching {
+                service.cancelNotification(key)
+                true
+            }.getOrDefault(false)
+        }
     }
 }
