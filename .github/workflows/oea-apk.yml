@@ -182,6 +182,30 @@ jobs:
           grep -Fq "OeaCallState" "$ISLAND"
           ! grep -Fq "TYPE_APPLICATION_OVERLAY" "$NOTIFICATIONS"
           ! grep -Fq "WindowManager" "$NOTIFICATIONS"
+      - name: Verify OEA Game Engine and games
+        run: |
+          set -e
+          E=oea-engine/src/main/java/com/oea/engine
+          G=oea-games/src/main/java/com/oea/games
+          L=oea/src/main/java/com/oea/launcher
+          for f in $E/core/GameHost.kt $E/core/GameApi.kt $E/graphics/Renderer3D.kt $E/graphics/Graphics.kt \
+                   $E/net/session/NetSession.kt $E/net/lan/LanDiscovery.kt $E/net/rtc/RtcLink.kt $E/net/rtc/SignalCode.kt \
+                   $E/net/qr/Qr.kt $E/island/Island.kt $E/perf/PerformanceManager.kt $E/math/nd/HyperSpace.kt \
+                   $G/chess/ChessRules.kt $G/chess/ChessAi.kt $G/runner/OeaRunner.kt $G/arena/OeaArena.kt \
+                   $L/games/OeaGamesActivity.kt $L/games/OeaGameActivity.kt $L/games/OeaGameIslandHost.kt; do
+            test -f "$f" || { echo "ERROR: missing $f"; exit 1; }
+          done
+          grep -q "fun perft" $G/chess/ChessRules.kt
+          grep -q "livekit.org.webrtc" $E/net/rtc/RtcLink.kt
+          grep -q "IslandRouting" $E/island/Island.kt
+          grep -q "OeaGameLiveState" $L/workspace/OeaDynamicIslandView.kt
+          grep -q "OeaLauncherIslandHost" $L/OeaApplication.kt
+          grep -q "com.oea.launcher.games.OeaGamesActivity" oea/src/main/AndroidManifest.xml
+          # Online play only ever uses the user's own STUN/TURN servers: no public ones may be hardcoded.
+          if grep -rEn "stun:[a-z0-9.-]+[.](com|org|net|io)|google[.]com:19302" oea-engine/src/main oea-games/src/main oea/src/main; then
+            echo "ERROR: a public STUN/TURN server is hardcoded."
+            exit 1
+          fi
       - name: Build standalone OEA Launcher APK
         run: |
           set -o pipefail
@@ -192,6 +216,19 @@ jobs:
               grep -E '^e: ' "$RUNNER_TEMP/gradle.log" || true
               grep -E '(^|[^A-Za-z])(error|Error|ERROR):' "$RUNNER_TEMP/gradle.log" | grep -vE '^e: ' || true
               grep -A4 'What went wrong' "$RUNNER_TEMP/gradle.log" || true
+            } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -10 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Run engine and game unit tests
+        run: |
+          # Chess rules (perft), connection codes, math and N-D geometry.
+          if ! ./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/tests.log"; then
+            {
+              grep -E '^e: ' "$RUNNER_TEMP/tests.log" || true
+              grep -E 'FAILED|AssertionError|Exception:' "$RUNNER_TEMP/tests.log" | grep -vE '^e: ' || true
+              grep -A4 'What went wrong' "$RUNNER_TEMP/tests.log" || true
             } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -10 | while IFS= read -r line; do
               printf '::error::%s\n' "${line//%/%25}"
             done

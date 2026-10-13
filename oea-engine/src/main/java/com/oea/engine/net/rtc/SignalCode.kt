@@ -79,8 +79,8 @@ object SignalCode {
      * be grouped with spaces; trailing words of a message are tried off.
      */
     private fun candidates(text: String): List<String> {
-        val m = Regex("OEA-[A-Z2-7]{4,}(?:[ \\n\\-]+[A-Z2-7]{1,8})*").find(text)
-            ?: Regex("OEA-[A-Z2-7]{4,}(?:[ \\n\\-]+[A-Z2-7]{1,8})*", RegexOption.IGNORE_CASE).find(text)
+        val m = Regex("OEA-[A-Z2-7]+(?:[ \\n\\-]+[A-Z2-7]{1,8})*").find(text)
+            ?: Regex("OEA-[A-Z2-7]+(?:[ \\n\\-]+[A-Z2-7]{1,8})*", RegexOption.IGNORE_CASE).find(text)
             ?: return emptyList()
         val groups = m.value.trim().split(Regex("[ \\n\\-]+")).filter { it.isNotEmpty() }
         // groups[0] == "OEA"

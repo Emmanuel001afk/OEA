@@ -205,7 +205,7 @@ class OeaChess : OeaGame() {
         camYawTarget = yawFor(viewColor); camYaw = camYawTarget
         remaining[0] = clockBase; remaining[1] = clockBase
         clockRunning = -1
-        if (clockBase > 0 && mode != PlayMode.SOLO || clockBase > 0) startClock(Piece.WHITE)
+        if (clockBase > 0) startClock(Piece.WHITE)
         updateStatus()
         maybeStartAi()
     }
@@ -331,14 +331,27 @@ class OeaChess : OeaGame() {
         val lv = level
         val seed = ctx.launch.seed xor game.board.ply.toLong()
         val startedAt = nowMs()
-        aiJob = ctx.jobs.run({ ai.choose(snapshot, lv, Random(seed)) }) { result ->
+        val expectedHash = game.board.hash
+        // A cancelled search may still be unwinding on a worker: never share its tables.
+        val engine = if (aiBusy.compareAndSet(false, true)) ai else ChessAi(16)
+        aiJob = ctx.jobs.run({ try { engine.choose(snapshot, lv, Random(seed)) } finally { if (engine === ai) aiBusy.set(false) } }) { result ->
             aiJob = null
-            if (result == null || game.isOver) return@run
+            if (result == null || game.isOver || game.board.hash != expectedHash) return@run
             // Don't move instantly: a short pause reads better.
             val wait = 350L - (nowMs() - startedAt)
-            if (wait > 0) pendingAiMove = result.move to nowMs() + wait else commit(result.move, fromNetwork = false)
+            if (wait > 0) pendingAiMove = result.move to nowMs() + wait else playAiMove(result.move)
         }
         updateStatus()
+    }
+
+    private val aiBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Plays the AI's move; if it is somehow not legal any more, any legal move keeps the game going. */
+    private fun playAiMove(move: Int) {
+        if (game.isOver || controllers[game.board.side] != Controller.AI) return
+        val legal = game.board.legalMoves()
+        if (legal.isEmpty()) return
+        commit(if (move in legal) move else legal[Random(ctx.launch.seed).nextInt(legal.size)], fromNetwork = false)
     }
 
     private var pendingAiMove: Pair<Int, Long>? = null
@@ -549,7 +562,7 @@ class OeaChess : OeaGame() {
 
     override fun onUpdate(dt: Float) {
         tickClock()
-        pendingAiMove?.let { (mv, at) -> if (nowMs() >= at) { pendingAiMove = null; if (!game.isOver) commit(mv, false) } }
+        pendingAiMove?.let { (mv, at) -> if (nowMs() >= at) { pendingAiMove = null; playAiMove(mv) } }
         anim?.let { a ->
             a.t += dt / 0.3f
             if (a.t >= 1f) anim = null

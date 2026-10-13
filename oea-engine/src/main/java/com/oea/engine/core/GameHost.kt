@@ -179,11 +179,10 @@ class GameHost(
         stopBackground()
         island.end()
         perf.detach(activity)
-        surface.queueEvent {
-            lock.withLock {
-                if (created) safely { game.onDestroy() }
-                perf.onGlThreadStopped()
-            }
+        // The GL thread is paused by now; game state is only touched under the lock, so finish here.
+        lock.withLock {
+            if (created) safely { game.onDestroy() }
+            perf.onGlThreadStopped()
         }
         audio.release()
         jobs.shutdown()

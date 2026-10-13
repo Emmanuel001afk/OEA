@@ -283,9 +283,6 @@ class OeaArena : OeaGame() {
         inp.slot = slotLatch
         inp.heal = healBtn.pressed
         inp.pickup = pickupLatch
-        // Recoil is applied by the simulation to the player's input; carry it back into the view.
-        val me = local
-        if (me != null && isAuthority) lookPitch = me.input.pitch.coerceIn(-1.2f, 1.1f).let { if (inp.fire) it else lookPitch }
     }
 
     private fun sendCommand(inp: PlayerInput) {
