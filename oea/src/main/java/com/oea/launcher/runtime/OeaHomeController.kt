@@ -12,15 +12,19 @@ class OeaHomeController(private val context: Context) {
     private val surfaceController = OeaHomeSurfaceController()
 
     fun createHomeSurface(): View {
+        // Accessing the workspace is deliberately Home-only: Settings and Game
+        // Boost must not construct the entire launcher view tree at process start.
+        val workspace = engine.workspace
         engine.start()
-        engine.workspace.attachHost(context as? Activity)
+        workspace.attachHost(context as? Activity)
         return surfaceController.attach(engine)
     }
 
     fun refresh() {
+        val workspace = engine.workspace
         engine.start()
-        engine.workspace.attachHost(context as? Activity)
-        engine.workspace.onHostResumed()
+        workspace.attachHost(context as? Activity)
+        workspace.onHostResumed()
     }
 
     fun onPause() = engine.workspace.onHostPaused()
