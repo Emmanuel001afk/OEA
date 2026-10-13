@@ -102,6 +102,10 @@ class OeaGamesActivity : Activity(), SessionListener {
             OeaInsets.edgeToEdge(window, lightBars = false)
             NetSession.current?.let { s -> s.addListener(this); if (s.phase == SessionPhase.LOBBY || s.phase == SessionPhase.PLAYING || s.phase == SessionPhase.CONNECTING) page = Page.Lobby }
             render()
+            // Android 16+ (target SDK 36) delivers Back only through this callback.
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
+            }
         } catch (e: Exception) {
             OeaScreenFailure.show(this, "OEA Games", e)
         }
@@ -121,7 +125,9 @@ class OeaGamesActivity : Activity(), SessionListener {
     }
 
     @Deprecated("Navigation handled in-page")
-    override fun onBackPressed() {
+    override fun onBackPressed() = handleBack()
+
+    private fun handleBack() {
         if (page == Page.Lobby) {
             val s = NetSession.current
             if (s != null && s.phase != SessionPhase.CLOSED) {
@@ -131,7 +137,7 @@ class OeaGamesActivity : Activity(), SessionListener {
             }
         }
         if (page is Page.JoinOnline && joinReply != null) NetSession.current?.takeIf { it.phase == SessionPhase.CONNECTING }?.close("Cancelled")
-        if (!goBack()) super.onBackPressed()
+        if (!goBack()) finish()
     }
 
     private fun navigate(p: Page) {
@@ -186,7 +192,7 @@ class OeaGamesActivity : Activity(), SessionListener {
     private fun page(title: String, subtitle: String?): OeaKit.Page =
         kit.page(title, subtitle, onBack = if (page == Page.Home) null else ({ onBackPressedCompat() }))
 
-    private fun onBackPressedCompat() { @Suppress("DEPRECATION") onBackPressed() }
+    private fun onBackPressedCompat() = handleBack()
 
     private fun present(p: OeaKit.Page) {
         setContentView(p.root)

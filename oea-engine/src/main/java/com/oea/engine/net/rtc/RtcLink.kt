@@ -157,7 +157,7 @@ class RtcLink internal constructor(
             override fun onCreateSuccess(sdp: SessionDescription) {
                 onExec {
                     connection.setLocalDescription(object : SdpAdapter() {
-                        override fun onSetSuccess() = onExec { awaitGathering { post { onReady(localSdp()) }; setState(State.WAITING, "") } }.let { }
+                        override fun onSetSuccess() = onExec { awaitGathering { val sdp = localSdp(); post { onReady(sdp) }; setState(State.WAITING, "") } }.let { }
                         override fun onSetFailure(error: String) { fail("Couldn't prepare the invite ($error)."); post { onReady(null) } }
                     }, sdp)
                 }
@@ -182,7 +182,8 @@ class RtcLink internal constructor(
                                     override fun onSetSuccess() = onExec {
                                         awaitGathering {
                                             exchangeComplete = true
-                                            post { onReady(localSdp()) }
+                                            val sdp = localSdp()
+                                            post { onReady(sdp) }
                                             setState(State.CONNECTING, "Waiting for the host to enter your reply code")
                                         }
                                     }.let { }

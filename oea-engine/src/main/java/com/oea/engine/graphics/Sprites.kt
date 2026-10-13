@@ -365,6 +365,7 @@ class BitmapFont(typeface: Typeface = Typeface.DEFAULT, val bakeSize: Int = 64, 
     }
 
     companion object {
-        const val DEFAULT_EXTRA = "•·×÷±°…←→↑↓★☆♥✓✗■●○◆▲▼—–€£¥⚡♪"
+        /** Symbols games commonly use in HUDs (taken from fallback fonts when the typeface lacks them). */
+        const val DEFAULT_EXTRA = "•·×÷±°…←→↑↓↶↷⇅★☆♥✓✗✕■●○◆◎◍▲▼▶◀❚☰⊕⏸—–€£¥⚡♪♫♚♛♜♝♞♟⚗"
     }
 }

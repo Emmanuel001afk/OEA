@@ -234,6 +234,9 @@ jobs:
             done
             exit 1
           fi
+          TOTAL=$(cat oea-engine/build/test-results/testDebugUnitTest/*.xml oea-games/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | grep -o '<testsuite [^>]*tests="[0-9]*"' | grep -o 'tests="[0-9]*"' | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          echo "::notice::OEA engine and game unit tests passed: $TOTAL tests"
+          test "$TOTAL" -gt 0
       - name: Verify APK identity
         run: |
           APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"

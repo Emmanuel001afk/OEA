@@ -38,6 +38,8 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
     private var scoreCarry = 0f
     val powers = FloatArray(PowerType.entries.size)
     var invulnerable = 0f
+    /** Brief immunity to side bumps right after a stumble, while sliding back to the old lane. */
+    private var sideGrace = 0f
     private var rollOnLand = false
     /** Animation state. */
     var phase = 0f
@@ -54,7 +56,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
 
     fun reset() {
         z = 0f; x = RunnerWorld.laneX(1); y = 0f; vy = 0f; lane = 1; prevLane = 1; speed = START_SPEED
-        rollTime = 0f; grounded = true; crashed = false; runTime = 0f; lastStumble = -100f
+        rollTime = 0f; grounded = true; crashed = false; runTime = 0f; lastStumble = -100f; sideGrace = 0f
         score = 0L; coins = 0; scoreCarry = 0f; powers.fill(0f); invulnerable = 0f; rollOnLand = false
         phase = 0f; lean = 0f; skyCoins.clear(); stumbleFlash = 0f
     }
@@ -87,6 +89,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
         runTime += dt
         for (i in powers.indices) if (powers[i] > 0f) powers[i] = max(0f, powers[i] - dt)
         if (invulnerable > 0f) invulnerable -= dt
+        if (sideGrace > 0f) sideGrace -= dt
         if (stumbleFlash > 0f) stumbleFlash -= dt
         speed = START_SPEED + (MAX_SPEED - START_SPEED) * (1f - exp(-z / 2200f))
         val prevZ = z
@@ -144,7 +147,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
             if (o.type == ObType.TRAIN && y >= o.top - 0.45f) return@forEachObstacle // standing on the roof
             if (y >= o.top || y + h <= o.bottom) return@forEachObstacle            // above or below it
             val frontal = dx < 0.75f && (prevZ + HALF_D <= o.z0 + 0.05f + o.speed * 0.05f || z + HALF_D - o.z0 < 1.0f)
-            if (frontal) hit(events) else stumble(events)
+            if (frontal) hit(events) else if (sideGrace <= 0f) stumble(events)
         }
     }
 
@@ -167,6 +170,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
         prevLane = lane
         lane = back
         stumbleFlash = 0.5f
+        sideGrace = 0.45f
         if (runTime - lastStumble < 4f) { hit(events); return }
         lastStumble = runTime
         events.onStumble(this)

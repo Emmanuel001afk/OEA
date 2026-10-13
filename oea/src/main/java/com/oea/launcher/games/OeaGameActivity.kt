@@ -58,6 +58,10 @@ class OeaGameActivity : Activity(), HostUi {
         }
         setContentView(h.root)
         if (OeaEngine.settings.islandInGames) addIslands(h.overlay)
+        // Android 16+ (target SDK 36) delivers Back only through this callback.
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
+        }
     }
 
     private fun addIslands(overlay: FrameLayout) {
@@ -98,7 +102,9 @@ class OeaGameActivity : Activity(), HostUi {
     }
 
     @Deprecated("Back is routed to the game first")
-    override fun onBackPressed() {
+    override fun onBackPressed() = handleBack()
+
+    private fun handleBack() {
         val h = host ?: run { finish(); return }
         h.onBackPressed {
             kit.confirm("Leave the game?", "Your progress in this round will be lost.", "Leave", destructive = true) { finish() }
