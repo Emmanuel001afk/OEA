@@ -110,7 +110,6 @@ class OeaDynamicIslandView(context: Context) : FrameLayout(context) {
             setOnClickListener { toggleExpanded() }
         }
         iconFrame.apply {
-            gravity = Gravity.CENTER
             addView(appIcon, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
             addView(fallbackIcon, FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER))
         }
@@ -441,7 +440,7 @@ class OeaDynamicIslandView(context: Context) : FrameLayout(context) {
             }
         } else if (state == Call.STATE_ACTIVE) {
             val canHold = runCatching {
-                ((call.details?.capabilities ?: 0) and Call.Details.CAPABILITY_HOLD) != 0
+                ((call.details?.callCapabilities ?: 0) and Call.Details.CAPABILITY_HOLD) != 0
             }.getOrDefault(false)
             if (canHold) {
                 addTextAction("Hold") {

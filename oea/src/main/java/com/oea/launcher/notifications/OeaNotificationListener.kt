@@ -108,7 +108,7 @@ object OeaNotificationState {
                 Notification.CATEGORY_NAVIGATION,
                 Notification.CATEGORY_SERVICE,
                 Notification.CATEGORY_STOPWATCH,
-                Notification.CATEGORY_TIMER,
+                "timer",
             )
             val priority = when {
                 call -> 5
