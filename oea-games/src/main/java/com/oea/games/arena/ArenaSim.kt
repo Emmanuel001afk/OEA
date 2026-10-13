@@ -100,6 +100,8 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     var shots = 0
     var lastShotTime = 0f
     var spread = 0f
+    /** View kick from recoil not yet applied by the controlling client (radians, upwards). */
+    var recoil = 0f
     var lastDamageFrom = -1
     var lastDamageTime = -10f
     val history = PositionHistory(48)
@@ -371,8 +373,8 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
             }
             @Suppress("UNUSED_VARIABLE") val unused = hitWorld
         }
-        // Recoil kicks the view up a little.
-        p.input.pitch += w.recoil
+        // Recoil kicks the view up a little (the local controller applies it to its camera).
+        if (p.isBot) p.input.pitch += w.recoil * 0.3f else p.recoil += w.recoil
     }
 
     /** How far back to rewind for a human shooter (their latency + interpolation delay). */

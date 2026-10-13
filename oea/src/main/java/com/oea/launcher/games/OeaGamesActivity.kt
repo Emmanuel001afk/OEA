@@ -466,10 +466,14 @@ class OeaGamesActivity : Activity(), SessionListener {
 
     // ================================================================ online invite (host)
 
-    private fun openInviteSheet() {
+    private fun openInviteSheet(forceNew: Boolean = false) {
         val s = NetSession.current ?: return
         if (!s.isHost) return
-        val invite = s.createOnlineInvite()
+        // Reopen an invite that is still waiting for its reply; a new one is for an extra player.
+        val pending = if (forceNew) null else s.onlineInvites.lastOrNull {
+            it.status == OnlineInvite.Status.READY || it.status == OnlineInvite.Status.CREATING || it.status == OnlineInvite.Status.CONNECTING
+        }
+        val invite = pending ?: s.createOnlineInvite()
         kit.sheet("Invite a friend online", "1. Share this invite.  2. Your friend sends back a reply code.  3. Enter it below.") { panel, dialog ->
             val status = kit.text(invite.status.label, 14f, palette.textSecondary).apply { setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(10)) }
             panel.addView(status)
@@ -510,14 +514,14 @@ class OeaGamesActivity : Activity(), SessionListener {
                     shareRow.addView(kit.tonalButton("Share") { shareCode(s.descriptor, code, invite = true) }, LinearLayout.LayoutParams(0, kit.dp(46), 1f))
                 }
                 if (invite.status == OnlineInvite.Status.CONNECTED) main.postDelayed({ if (dialog.isShowing) dialog.dismiss() }, 1200)
-                if (invite.status == OnlineInvite.Status.FAILED && shareRow.childCount < 3) {
-                    shareRow.addView(kit.primaryButton("New invite") { dialog.dismiss(); openInviteSheet() }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { leftMargin = kit.dp(8) })
+                if ((invite.status == OnlineInvite.Status.FAILED || invite.status == OnlineInvite.Status.CONNECTED) && shareRow.childCount < 3) {
+                    shareRow.addView(kit.primaryButton("New invite") { dialog.dismiss(); openInviteSheet(forceNew = true) }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { leftMargin = kit.dp(8) })
                 }
                 if (page == Page.Lobby) render()
             }
             invite.onChange = { refresh() }
             refresh()
-            dialog.setOnDismissListener { invite.onChange = null; if (invite.status == OnlineInvite.Status.READY && invite.code == null) invite.cancel() }
+            dialog.setOnDismissListener { invite.onChange = null }
         }
     }
 
@@ -537,6 +541,9 @@ class OeaGamesActivity : Activity(), SessionListener {
             kit.banner(box, R.drawable.oic_refresh, s.status.ifBlank { "Waiting for the host" }, "Keep this screen open. You'll be connected as soon as the host enters your reply.", OeaKit.Tone.INFO)
             box.addView(kit.quietButton("Cancel") { s.close("Cancelled"); joinReply = null; render() }, LinearLayout.LayoutParams(-1, kit.dp(48)))
             present(p); return
+        }
+        if (s != null && s.role == com.oea.engine.net.session.SessionRole.CLIENT && s.phase == SessionPhase.CONNECTING) {
+            kit.banner(box, R.drawable.oic_refresh, "Preparing your reply code…", "Finding this phone's network routes. This takes a few seconds.", OeaKit.Tone.INFO)
         }
         joinError?.let { kit.banner(box, R.drawable.oic_warning_fill, "Can't use this code", it, OeaKit.Tone.DANGER) }
         val field = codeField("Invite code (OEA-…)").apply { setText(joinInput) }

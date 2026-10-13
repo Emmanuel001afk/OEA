@@ -29,6 +29,7 @@ import com.oea.launcher.workspace.OeaDynamicIslandView
  */
 class OeaGameActivity : Activity(), HostUi {
     private var host: GameHost? = null
+    private var session: com.oea.engine.net.session.NetSession? = null
     private lateinit var kit: OeaKit
     private var cardIsland: OeaDynamicIslandView? = null
     private var cameraIsland: OeaDynamicIslandView? = null
@@ -52,6 +53,7 @@ class OeaGameActivity : Activity(), HostUi {
         }
         val h = GameHost(this, descriptor, launch, this)
         host = h
+        session = launch.session
         h.onFatalError = { error ->
             Toast.makeText(this, "${descriptor.title} stopped because of an error (${error.javaClass.simpleName}).", Toast.LENGTH_LONG).show()
             finish()
@@ -93,6 +95,8 @@ class OeaGameActivity : Activity(), HostUi {
     override fun onDestroy() {
         host?.onDestroy()
         host = null
+        // The host leaving the game screen ends the match: everyone returns to the lobby.
+        if (isFinishing) session?.takeIf { it.isHost && it.phase == com.oea.engine.net.session.SessionPhase.PLAYING }?.endMatch()
         super.onDestroy()
     }
 

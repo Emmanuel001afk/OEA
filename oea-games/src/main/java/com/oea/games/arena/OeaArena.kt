@@ -270,11 +270,35 @@ class OeaArena : OeaGame() {
         jumpLatch = false; reloadLatch = false; slotLatch = -1; pickupLatch = -1
     }
 
+    private val aim = FloatArray(2)
+
+    /**
+     * Third-person aim convergence: the body aims from its eye at whatever the
+     * crosshair (camera centre ray) points at, so shots land on the crosshair
+     * despite the over-the-shoulder camera offset.
+     */
+    private fun aimAngles(me: ArenaPlayer, out: FloatArray) {
+        out[0] = lookYaw; out[1] = lookPitch
+        if (me.skydiving) return
+        val cp = cos(lookPitch)
+        val fx = sin(lookYaw) * cp; val fy = sin(lookPitch); val fz = cos(lookYaw) * cp
+        val dist = if (map.physics.raycast(camPos.x, camPos.y, camPos.z, fx, fy, fz, 260f, hit, Layers.WORLD or Layers.PROPS)) hit.distance else 260f
+        if (dist < 2.5f) return
+        val tx = camPos.x + fx * dist; val ty = camPos.y + fy * dist; val tz = camPos.z + fz * dist
+        val dx = tx - me.pos.x; val dy = ty - (me.pos.y + me.eyeHeight); val dz = tz - me.pos.z
+        val flat = sqrt(dx * dx + dz * dz)
+        if (flat < 0.5f) return
+        out[0] = kotlin.math.atan2(dx, dz)
+        out[1] = MathX.clamp(kotlin.math.atan2(dy, flat), -1.2f, 1.1f)
+    }
+
     private fun buildInput(inp: PlayerInput) {
         inp.moveX = joystick.value.x
         inp.moveY = joystick.value.y
-        inp.yaw = lookYaw
-        inp.pitch = lookPitch
+        val me = local
+        if (me != null) aimAngles(me, aim) else { aim[0] = lookYaw; aim[1] = lookPitch }
+        inp.yaw = aim[0]
+        inp.pitch = aim[1]
         inp.fire = fire.pressed || fire2.pressed
         inp.ads = adsOn
         inp.jump = jumpLatch
@@ -389,6 +413,13 @@ class OeaArena : OeaGame() {
             val heal = r.q8(0f, 1f); val reload = r.q8(0f, 4f)
             val a = actors.getOrPut(id) { Actor(id, "Player $id", EngineColors[id % EngineColors.size]) }
             if (id != localId && a.shots != shots && a.alive) onRemoteShots(a, (shots - a.shots) and 0xFF)
+            if (id == localId && a.shots != shots) local?.let { me ->
+                val n = min(3, (shots - a.shots) and 0xFF)
+                val w = Weapon.entries.getOrElse(if (active == 0) s0 else s1) { Weapon.PAN }
+                me.recoil += w.recoil * n
+                playShot(w, x, y, z, true)
+                addTracer(x, y + (if (flags and 2 != 0) 1.05f else 1.6f) - 0.15f, z, lookYaw, camPos.x + sin(lookYaw) * 60f, camPos.y + sin(lookPitch) * 60f, camPos.z + cos(lookYaw) * 60f)
+            }
             a.flags = flags; a.health = health; a.armor = armor; a.helmet = helmet; a.weapon = (if (active == 0) s0 else s1); a.shots = shots; a.kills = kills
             a.buffer.push(now, floatArrayOf(x, y, z, yaw, pitch))
             if (id == localId) reconcile(x, y, z, flags, health, armor, helmet, s0, s1, active, m0, m1, ammo, meds, kills, ack, heal, reload)
@@ -543,9 +574,10 @@ class OeaArena : OeaGame() {
         if (pickupBtn.justPressed && near != null) pickupLatch = near.id
         if (gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) slotLatch = 1 - (me?.active ?: 0)
         if (me?.weapon == Weapon.PAN) adsOn = false
-        if (me != null && isAuthority && me.alive) {
-            // Keep the view in sync with recoil applied by the simulation.
-            lookPitch = MathX.clamp(me.input.pitch, -1.2f, 1.1f)
+        if (me != null && me.alive && me.recoil != 0f) {
+            // Recoil from the simulation (host) or from our own shots (client) kicks the camera.
+            lookPitch = MathX.clamp(lookPitch + me.recoil, -1.2f, 1.1f)
+            me.recoil = 0f
         }
         // Visual effects.
         sparks.update(dt); puffs.update(dt)
