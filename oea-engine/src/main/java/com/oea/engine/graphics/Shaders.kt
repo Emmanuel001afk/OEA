@@ -84,6 +84,8 @@ void main() {
     vec4 base = u_baseColor * v_color;
     if (u_flags.x > 0.5) {
         vec4 t = texture(u_tex, v_uv);
+        // Android uploads bitmaps premultiplied; lighting wants straight colour.
+        if (t.a > 0.0) t.rgb /= t.a;
         t.rgb = pow(max(t.rgb, vec3(0.0)), vec3(2.2));
         base *= t;
     }
