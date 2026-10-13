@@ -12,6 +12,7 @@ import com.oea.launcher.gameboost.OeaGameBoostStore
 import com.oea.launcher.runtime.OeaHomeController
 import com.oea.launcher.runtime.OeaRuntime
 import com.oea.launcher.ui.OeaInsets
+import com.oea.launcher.ui.OeaScreenFailure
 
 class OeaLauncherActivity : Activity() {
     companion object {
@@ -24,18 +25,22 @@ class OeaLauncherActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Edge-to-edge over the real system wallpaper; the workspace pads
-        // itself with the system-bar insets and picks the bar icon colour.
-        OeaInsets.edgeToEdge(window, lightBars = false)
-        OeaRuntime.initialize(application)
-        home = OeaHomeController(this)
-        setContentView(home.createHomeSurface())
-        if (Build.VERSION.SDK_INT >= 33) {
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
-            ) { home.handleBack() }
+        try {
+            // Edge-to-edge over the real system wallpaper; the workspace pads
+            // itself with the system-bar insets and picks the bar icon colour.
+            OeaInsets.edgeToEdge(window, lightBars = false)
+            OeaRuntime.initialize(application)
+            home = OeaHomeController(this)
+            setContentView(home.createHomeSurface())
+            if (Build.VERSION.SDK_INT >= 33) {
+                onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                ) { home.handleBack() }
+            }
+            consumeHomeAction(intent)
+        } catch (error: Exception) {
+            OeaScreenFailure.show(this, "OEA Home", error)
         }
-        consumeHomeAction(intent)
     }
 
     private fun consumeHomeAction(source: Intent?) {
@@ -65,13 +70,16 @@ class OeaLauncherActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (::home.isInitialized) home.refresh()
+        if (::home.isInitialized) {
+            runCatching { home.refresh() }
+                .onFailure { OeaScreenFailure.show(this, "OEA Home", it) }
+        }
         resumeGameBoostMonitoring()
     }
 
     override fun onPause() {
         resumedAndFocused = false
-        if (::home.isInitialized) home.onPause()
+        if (::home.isInitialized) runCatching { home.onPause() }
         super.onPause()
     }
 
@@ -82,7 +90,10 @@ class OeaLauncherActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (::home.isInitialized) home.onConfigurationChanged(newConfig)
+        if (::home.isInitialized) {
+            runCatching { home.onConfigurationChanged(newConfig) }
+                .onFailure { OeaScreenFailure.show(this, "OEA Home", it) }
+        }
     }
 
     /**
@@ -91,15 +102,16 @@ class OeaLauncherActivity : Activity() {
      * user to toggle Game Boost off and on manually.
      */
     private fun resumeGameBoostMonitoring() {
-        if (!OeaGameBoostStore.enabled(this) || !hasUsageAccess()) return
+        val shouldRun = runCatching { OeaGameBoostStore.enabled(this) && hasUsageAccess() }
+            .onFailure { android.util.Log.w("OeaLauncherActivity", "Could not inspect Game Boost state", it) }
+            .getOrDefault(false)
+        if (!shouldRun) return
+
         val intent = Intent(this, OeaGameBoostService::class.java)
             .setAction(OeaGameBoostService.ACTION_REFRESH)
         runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+            else startService(intent)
         }.onFailure { error ->
             android.util.Log.w("OeaLauncherActivity", "Could not resume Game Boost monitoring", error)
         }

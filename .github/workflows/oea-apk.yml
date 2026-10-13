@@ -162,6 +162,26 @@ jobs:
           grep -Fq 'Compact floating card' $SRC/phone/OeaPhoneActivity.kt
           grep -Fq 'Incoming-call flash alert' $SRC/phone/OeaPhoneActivity.kt
           grep -Fq 'setTorchMode' $SRC/phone/OeaInCallService.kt
+      - name: Verify launcher engine and Home live activities
+        run: |
+          set -euo pipefail
+          SRC=oea/src/main/java/com/oea/launcher
+          ENGINE=$SRC/engine/OeaLauncherEngine.kt
+          NOTIFICATIONS=$SRC/notifications/OeaNotificationListener.kt
+          ISLAND=$SRC/workspace/OeaDynamicIslandView.kt
+          WORKSPACE=$SRC/workspace/OeaWorkspace.kt
+          grep -Fq "Executors.newSingleThreadExecutor" "$ENGINE"
+          grep -Fq "model.query()" "$ENGINE"
+          grep -Fq "OeaWorkspace(ContextThemeWrapper" "$ENGINE"
+          grep -Fq "fun dynamicIslandEnabled()" "$SRC/data/OeaDataStore.kt"
+          grep -Fq "OeaDynamicIslandView(context)" "$WORKSPACE"
+          grep -Fq "MediaController" "$ISLAND"
+          grep -Fq "transport.skipToNext()" "$ISLAND"
+          grep -Fq "Notification.CATEGORY_CALL" "$NOTIFICATIONS"
+          grep -Fq "Notification.Action" "$ISLAND"
+          grep -Fq "OeaCallState" "$ISLAND"
+          ! grep -Fq "TYPE_APPLICATION_OVERLAY" "$NOTIFICATIONS"
+          ! grep -Fq "WindowManager" "$NOTIFICATIONS"
       - name: Build standalone OEA Launcher APK
         run: |
           set -o pipefail

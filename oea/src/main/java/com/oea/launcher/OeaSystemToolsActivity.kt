@@ -13,6 +13,8 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextUtils
@@ -46,10 +48,12 @@ import com.oea.launcher.split.OeaSplitLauncher
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
 import com.oea.launcher.workspace.OeaWorkspaceStore
 import java.io.InputStream
+import java.util.concurrent.Executors
 
 /**
  * OEA Settings: one hub with focused sub-screens for Home, appearance, the
@@ -64,7 +68,18 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private val dataStore by lazy { OeaDataStore.get(this) }
+    private val appQueryWorker = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaSettingsApps").apply { isDaemon = true }
+    }
+    private val main = Handler(Looper.getMainLooper())
     private var appsCache: List<OeaAppInfo>? = null
+    private var appsLoading = false
+    private var appsLoadFailed = false
+    private var appsLoadError: String? = null
+    private var usageStatsCache: Map<String, Long>? = null
+    private var usageStatsLoading = false
+    private var usageStatsLoadFailed = false
+    private var usageStatsLoadError: String? = null
     private lateinit var palette: OeaPalette
     private lateinit var kit: OeaKit
     private val stack = ArrayDeque<String>()
@@ -73,9 +88,128 @@ class OeaSystemToolsActivity : Activity() {
     private val scrollPositions = HashMap<String, Int>()
     private var refreshOverviewOnResume = false
 
-    private fun apps(): List<OeaAppInfo> = appsCache ?: run {
+    /** Returns the current snapshot immediately and never scans packages on the UI thread. */
+    private fun apps(): List<OeaAppInfo> {
+        appsCache?.let { return it }
         val fromHome = runCatching { OeaRuntime.engine(this).model.apps }.getOrDefault(emptyList())
-        (fromHome.ifEmpty { OeaAppModel(this).query() }).also { appsCache = it }
+        if (fromHome.isNotEmpty()) {
+            appsCache = fromHome
+            appsLoadFailed = false
+            appsLoadError = null
+            return fromHome
+        }
+        if (!appsLoading && !appsLoadFailed) loadAppsInBackground()
+        return emptyList()
+    }
+
+    private fun loadAppsInBackground() {
+        appsLoading = true
+        try {
+            appQueryWorker.execute {
+                val result = runCatching { OeaAppModel(applicationContext).query() }
+                main.post {
+                    if (isDestroyed) return@post
+                    appsLoading = false
+                    result.fold(
+                        onSuccess = { value ->
+                            appsCache = value
+                            appsLoadError = null
+                            appsLoadFailed = false
+                        },
+                        onFailure = { error ->
+                            appsLoadError = error.message ?: error.javaClass.simpleName
+                            appsLoadFailed = true
+                            android.util.Log.w("OeaSystemToolsActivity", "Could not load app catalogue", error)
+                        },
+                    )
+                    if (!isFinishing) rerender()
+                }
+            }
+        } catch (error: RuntimeException) {
+            appsLoading = false
+            appsLoadFailed = true
+            appsLoadError = error.message ?: error.javaClass.simpleName
+            android.util.Log.w("OeaSystemToolsActivity", "Could not queue app catalogue load", error)
+        }
+    }
+
+    private fun retryAppLoad() {
+        appsLoadFailed = false
+        appsLoadError = null
+        loadAppsInBackground()
+        rerender()
+    }
+
+    private fun requireApps(): List<OeaAppInfo>? {
+        val value = apps()
+        if (appsCache == null) {
+            if (appsLoadFailed) {
+                toast("App list could not load. Retrying now.")
+                retryAppLoad()
+            } else {
+                toast("App list is loading. Try again in a moment.")
+            }
+            return null
+        }
+        if (value.isEmpty()) {
+            toast("No launchable apps found.")
+            return null
+        }
+        return value
+    }
+
+    private fun recentUsageStats(hasAccess: Boolean, now: Long, windowMillis: Long): Map<String, Long> {
+        if (!hasAccess) return emptyMap()
+        usageStatsCache?.let { return it }
+        if (!usageStatsLoading && !usageStatsLoadFailed) {
+            val manager = getSystemService(android.app.usage.UsageStatsManager::class.java)
+            if (manager == null) {
+                usageStatsLoadFailed = true
+                usageStatsLoadError = "Usage history is not available on this device."
+                return emptyMap()
+            }
+            usageStatsLoading = true
+            val start = now - windowMillis
+            try {
+                appQueryWorker.execute {
+                    val result = runCatching {
+                        manager.queryUsageStats(android.app.usage.UsageStatsManager.INTERVAL_DAILY, start, now)
+                            .orEmpty()
+                            .groupBy { it.packageName }
+                            .mapValues { (_, records) -> records.maxOfOrNull { it.lastTimeUsed } ?: 0L }
+                    }
+                    main.post {
+                        if (isDestroyed) return@post
+                        usageStatsLoading = false
+                        result.fold(
+                            onSuccess = { usage ->
+                                usageStatsCache = usage
+                                usageStatsLoadError = null
+                                usageStatsLoadFailed = false
+                            },
+                            onFailure = { error ->
+                                usageStatsLoadError = error.message ?: error.javaClass.simpleName
+                                usageStatsLoadFailed = true
+                                android.util.Log.w("OeaSystemToolsActivity", "Could not load usage history", error)
+                            },
+                        )
+                        if (!isFinishing && current == "overview") rerender()
+                    }
+                }
+            } catch (error: RuntimeException) {
+                usageStatsLoading = false
+                usageStatsLoadError = error.message ?: error.javaClass.simpleName
+                usageStatsLoadFailed = true
+            }
+        }
+        return emptyMap()
+    }
+
+    private fun retryUsageStats() {
+        usageStatsCache = null
+        usageStatsLoadError = null
+        usageStatsLoadFailed = false
+        rerender()
     }
 
     override fun onCreate(state: Bundle?) {
@@ -101,9 +235,20 @@ class OeaSystemToolsActivity : Activity() {
         super.onResume()
         // Permission screens may have changed what a row says; re-render in place.
         if (current != "overview" || refreshOverviewOnResume) {
+            if (refreshOverviewOnResume) {
+                usageStatsCache = null
+                usageStatsLoadFailed = false
+                usageStatsLoadError = null
+            }
             refreshOverviewOnResume = false
             rerender()
         }
+    }
+
+    override fun onDestroy() {
+        main.removeCallbacksAndMessages(null)
+        appQueryWorker.shutdownNow()
+        super.onDestroy()
     }
 
     @Deprecated("Back is handled with an in-activity navigation stack")
@@ -135,24 +280,28 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun show(screen: String) {
-        palette = OeaTheme.resolve(this)
-        kit = OeaKit(this, palette)
-        OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
-        window.decorView.setBackgroundColor(palette.background)
-        when (screen) {
-            "home" -> showHome()
-            "appearance" -> showAppearance()
-            "drawer" -> showDrawer()
-            "gestures" -> showGestures()
-            "notifications" -> showNotifications()
-            "privacy" -> showPrivacy()
-            "freezer" -> showFreezer()
-            "multitasking" -> showMultitasking()
-            "overview" -> showMultitask()
-            "split" -> showSplit()
-            "access" -> showAccess()
-            "about" -> showAbout()
-            else -> showSettings()
+        try {
+            palette = OeaTheme.resolve(this)
+            kit = OeaKit(this, palette)
+            OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
+            window.decorView.setBackgroundColor(palette.background)
+            when (screen) {
+                "home" -> showHome()
+                "appearance" -> showAppearance()
+                "drawer" -> showDrawer()
+                "gestures" -> showGestures()
+                "notifications" -> showNotifications()
+                "privacy" -> showPrivacy()
+                "freezer" -> showFreezer()
+                "multitasking" -> showMultitasking()
+                "overview" -> showMultitask()
+                "split" -> showSplit()
+                "access" -> showAccess()
+                "about" -> showAbout()
+                else -> showSettings()
+            }
+        } catch (error: Exception) {
+            OeaScreenFailure.show(this, "OEA Settings", error)
         }
     }
 
@@ -427,7 +576,8 @@ class OeaSystemToolsActivity : Activity() {
     private fun hiddenCount() = dataStore.hiddenApps().size
 
     private fun hiddenAppsDialog() {
-        val choices = apps().filterNot { it.packageName == packageName && it.className.endsWith("OeaSettingsAlias") }
+        val choices = (requireApps() ?: return)
+            .filterNot { it.packageName == packageName && it.className.endsWith("OeaSettingsAlias") }
         val selected = choices.filter { dataStore.isHidden(it.packageName, it.className) }.map { it.packageName + "/" + it.className }.toSet()
         kit.pickApps("Hidden apps", "Hidden apps stay installed but don't appear in the drawer or search.", choices, selected, { it.packageName + "/" + it.className }) { chosen ->
             choices.forEach { dataStore.setHidden(it.packageName, it.className, (it.packageName + "/" + it.className) in chosen) }
@@ -474,7 +624,7 @@ class OeaSystemToolsActivity : Activity() {
         val page = page("Notification dots", "See which apps have something new")
         val box = page.content
         if (!notificationAccess()) {
-            kit.banner(box, R.drawable.oic_notifications, "Allow notification access", "OEA needs it to show dots and counts on icons and what's playing in At a Glance.",
+            kit.banner(box, R.drawable.oic_notifications, "Allow notification access", "OEA needs it for app badges, media playback information, and controls from supported notifications.",
                 OeaKit.Tone.WARNING, "Allow") { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) } }
         }
         kit.sectionTitle(box, "Style")
@@ -487,6 +637,16 @@ class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_notifications, "Notification access", notificationStatus()) {
             runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         }
+        kit.sectionTitle(box, "Live activity area")
+        val islandGroup = kit.group(box)
+        kit.switchRow(
+            islandGroup,
+            R.drawable.oic_music_note,
+            "Show Dynamic Island",
+            "Show active calls, charging status, media and compatible ongoing notifications on OEA Home.",
+            dataStore.dynamicIslandEnabled(),
+        ) { dataStore.setDynamicIslandEnabled(it) }
+        kit.note(box, "Tap the capsule on Home to expand it. Media sessions use standard play, pause and skip controls; other apps can provide notification actions. Notification-based details require Notification access. Charging status does not.")
         present(page)
     }
 
@@ -539,7 +699,8 @@ class OeaSystemToolsActivity : Activity() {
             changePin()
             return
         }
-        val choices = apps().filterNot { it.packageName == packageName && it.className.endsWith("OeaSettingsAlias") }
+        val choices = (requireApps() ?: return)
+            .filterNot { it.packageName == packageName && it.className.endsWith("OeaSettingsAlias") }
         val selected = choices.filter { OeaAppLockStore.isLocked(this, it.packageName + "/" + it.className) }.map { it.packageName + "/" + it.className }.toSet()
         kit.pickApps("Locked apps", "These apps ask for your PIN when opened from OEA.", choices, selected, { it.packageName + "/" + it.className }) { chosen ->
             choices.forEach { OeaAppLockStore.setLocked(this, it.packageName + "/" + it.className, (it.packageName + "/" + it.className) in chosen) }
@@ -905,6 +1066,26 @@ class OeaSystemToolsActivity : Activity() {
                 runCatching { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
             }
         }
+        if (appsCache == null) {
+            if (appsLoading) {
+                kit.banner(box, R.drawable.oic_apps, "Loading apps", "The app list is being read in the background.", OeaKit.Tone.INFO)
+            } else if (appsLoadFailed) {
+                kit.banner(box, R.drawable.oic_warning_fill, "Couldn't load apps", appsLoadError ?: "Try again.", OeaKit.Tone.WARNING, "Retry") {
+                    retryAppLoad()
+                }
+            }
+        } else if (choices.isEmpty()) {
+            kit.note(box, "No launchable apps were found.")
+        }
+        if (usageAccess && usageStatsCache == null) {
+            if (usageStatsLoading) {
+                kit.note(box, "Loading recent app history in the background…")
+            } else if (usageStatsLoadFailed) {
+                kit.banner(box, R.drawable.oic_warning_fill, "Couldn't load recent history", usageStatsLoadError ?: "Try again.", OeaKit.Tone.WARNING, "Retry") {
+                    retryUsageStats()
+                }
+            }
+        }
         val search = kit.field("Search apps or package names")
         box.addView(search, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         var showAllApps = false
@@ -923,14 +1104,7 @@ class OeaSystemToolsActivity : Activity() {
 
         val overviewNow = System.currentTimeMillis()
         val sevenDaysMillis = 7L * 24L * 60L * 60L * 1000L
-        val usageManager = getSystemService(android.app.usage.UsageStatsManager::class.java)
-        val lastUsed = if (usageAccess && usageManager != null) {
-            runCatching {
-                usageManager.queryUsageStats(android.app.usage.UsageStatsManager.INTERVAL_DAILY, overviewNow - sevenDaysMillis, overviewNow)
-                    .groupBy { it.packageName }
-                    .mapValues { (_, records) -> records.maxOfOrNull { it.lastTimeUsed } ?: 0L }
-            }.getOrDefault(emptyMap())
-        } else emptyMap()
+        val lastUsed = recentUsageStats(usageAccess, overviewNow, sevenDaysMillis)
         val allChoices = choices.sortedWith(compareByDescending<OeaAppInfo> { lastUsed[it.packageName] ?: 0L }.thenBy { it.label.lowercase() })
         // This is usage history, not Android's private active-task stack. Keep
         // the Recent tab honest by excluding apps with no recorded use this week.
@@ -1115,8 +1289,17 @@ class OeaSystemToolsActivity : Activity() {
         if (pairs.isEmpty()) {
             kit.note(box, "No pairs yet. After choosing two apps, tap Save pair to put a one-tap pair icon on Home.")
         } else {
-            val group = kit.group(box)
             val byKey = apps().associateBy { it.packageName + "/" + it.className }
+            if (appsCache == null) {
+                if (appsLoading) {
+                    kit.note(box, "Loading app details for saved pairs…")
+                } else if (appsLoadFailed) {
+                    kit.banner(box, R.drawable.oic_warning_fill, "Couldn't load pair details", appsLoadError ?: "Try again.", OeaKit.Tone.WARNING, "Retry") {
+                        retryAppLoad()
+                    }
+                }
+            }
+            val group = kit.group(box)
             pairs.forEach { pair ->
                 val members = pair.members.mapNotNull(byKey::get)
                 if (members.size < 2) return@forEach
@@ -1135,7 +1318,9 @@ class OeaSystemToolsActivity : Activity() {
     }
 
     private fun chooseSplitApps() {
-        val choices = apps().filter { it.packageName != packageName }.distinctBy { it.packageName }
+        val choices = (requireApps() ?: return)
+            .filter { it.packageName != packageName }
+            .distinctBy { it.packageName }
         kit.pickApps("OEA Split Screen", "Select exactly two apps. Android controls the final divider and orientation.", choices, emptySet(), { it.packageName }, max = 2, confirmLabel = "Continue") { picked ->
             if (picked.size != 2) {
                 toast("Choose two apps first.")

@@ -7,17 +7,32 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * Process-level service locator for OEA's launcher engine. Registering the
+ * Application is cheap; the engine and Home view tree are created only when a
+ * launcher feature actually requests them, so standalone OEA apps do not pay
+ * Home's cold-start cost or inherit a failed Home initialization.
+ */
 object OeaRuntime {
     data class RuntimeState(val initialized: Boolean = false)
-    private var engine: OeaLauncherEngine? = null
+
+    private val lock = Any()
+    @Volatile private var appContext: Context? = null
+    @Volatile private var engineInstance: OeaLauncherEngine? = null
     private val _state = MutableStateFlow(RuntimeState())
     val state: StateFlow<RuntimeState> = _state.asStateFlow()
-    @Synchronized fun initialize(app: Application) {
-        if (engine != null) return
-        engine = OeaLauncherEngine(app.applicationContext)
-        _state.value = RuntimeState(true)
+
+    fun initialize(app: Application) {
+        if (appContext == null) appContext = app.applicationContext
     }
-    fun engine(context: Context): OeaLauncherEngine = engine ?: synchronized(this) {
-        engine ?: OeaLauncherEngine(context.applicationContext).also { engine = it; _state.value = RuntimeState(true) }
+
+    fun engine(context: Context): OeaLauncherEngine {
+        engineInstance?.let { return it }
+        return synchronized(lock) {
+            engineInstance ?: OeaLauncherEngine((appContext ?: context.applicationContext).applicationContext).also {
+                engineInstance = it
+                _state.value = RuntimeState(initialized = true)
+            }
+        }
     }
 }

@@ -70,6 +70,12 @@ class OeaDataStore private constructor(context: Context) {
     fun badgeStyle() = prefs.getString(KEY_BADGE_STYLE, "dot") ?: "dot"
     fun setBadgeStyle(v: String) { prefs.edit().putString(KEY_BADGE_STYLE, v).apply() }
 
+    /** In-workspace live activity capsule. Notification content needs listener access; charging does not. */
+    fun dynamicIslandEnabled() = prefs.getBoolean(KEY_DYNAMIC_ISLAND_ENABLED, true)
+    fun setDynamicIslandEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DYNAMIC_ISLAND_ENABLED, enabled).apply()
+    }
+
     fun themedIcons() = prefs.getBoolean(KEY_THEMED_ICONS, false)
     fun setThemedIcons(v: Boolean) { prefs.edit().putBoolean(KEY_THEMED_ICONS, v).apply() }
 
@@ -175,6 +181,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_SEARCH_POSITION = "search_bar_position"
         private const val KEY_GLANCE_STYLE = "glance_style"
         private const val KEY_BADGE_STYLE = "badge_style"
+        private const val KEY_DYNAMIC_ISLAND_ENABLED = "dynamic_island_enabled"
         private const val KEY_THEMED_ICONS = "themed_icons"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_SWIPE_DOWN = "gesture_swipe_down"
