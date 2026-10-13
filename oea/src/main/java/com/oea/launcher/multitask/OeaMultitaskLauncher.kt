@@ -111,6 +111,7 @@ object OeaMultitaskLauncher {
         val density = context.resources.displayMetrics.density
         val (preferredWidthDp, preferredHeightDp) = when (OeaDataStore.get(context).floatingWindowSize()) {
             "small" -> 320 to 440
+            "medium" -> 420 to 560
             "large" -> 520 to 700
             else -> 420 to 560
         }
