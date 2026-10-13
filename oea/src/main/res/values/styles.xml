@@ -7,6 +7,50 @@
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!-- OEA Home: the real system wallpaper (static or live) is shown behind a
+         fully transparent, edge-to-edge window, exactly like a native launcher. -->
+    <style name="OeaHomeTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#8AB4F8</item>
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowActivityTransitions">false</item>
+    </style>
+
+    <!-- OEA tool screens (Settings, Game Boost) draw edge-to-edge and pad
+         themselves with the real system-bar insets. -->
+    <style name="OeaPanelTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#8AB4F8</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <style name="OeaGameBoostTheme" parent="OeaPanelTheme">
+        <item name="android:colorAccent">#57C8FF</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
+    <style name="OeaTranslucentTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
     <style name="OeaCaptureTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>

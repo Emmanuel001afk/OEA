@@ -14,6 +14,12 @@ class OeaDataStore private constructor(context: Context) {
     private val _homeSurfaceEnabled = MutableStateFlow(prefs.getBoolean(KEY_HOME_SURFACE, false))
     val homeSurfaceEnabled: StateFlow<Boolean> = _homeSurfaceEnabled.asStateFlow()
 
+    /** Home listens so settings changed anywhere in OEA apply immediately. */
+    fun registerListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener) =
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+    fun unregisterListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener) =
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
+
     fun markModelBound() { _modelBound.value = true }
     fun setApplicationCount(count: Int) { _applicationCount.value = count }
     fun setHomeSurfaceEnabled(enabled: Boolean) {
@@ -41,8 +47,60 @@ class OeaDataStore private constructor(context: Context) {
 
     fun showAppLabels() = prefs.getBoolean(KEY_SHOW_LABELS, true)
     fun setShowAppLabels(v: Boolean) { prefs.edit().putBoolean(KEY_SHOW_LABELS, v).apply() }
-    fun gridColumns() = prefs.getInt(KEY_GRID_COLUMNS, 4).coerceIn(3, 5)
-    fun setGridColumns(v: Int) { prefs.edit().putInt(KEY_GRID_COLUMNS, v.coerceIn(3, 5)).apply() }
+    fun gridColumns() = prefs.getInt(KEY_GRID_COLUMNS, 4).coerceIn(3, 6)
+    fun setGridColumns(v: Int) { prefs.edit().putInt(KEY_GRID_COLUMNS, v.coerceIn(3, 6)).apply() }
+    fun gridRows() = prefs.getInt(KEY_GRID_ROWS, 5).coerceIn(3, 7)
+    fun setGridRows(v: Int) { prefs.edit().putInt(KEY_GRID_ROWS, v.coerceIn(3, 7)).apply() }
+    fun iconSizeDp() = prefs.getInt(KEY_ICON_SIZE, 54).coerceIn(44, 66)
+    fun setIconSizeDp(v: Int) { prefs.edit().putInt(KEY_ICON_SIZE, v.coerceIn(44, 66)).apply() }
+
+    /** Dock surface: "glass" (frosted card), "solid" or "none". */
+    fun dockStyle() = prefs.getString(KEY_DOCK_STYLE, "glass") ?: "glass"
+    fun setDockStyle(v: String) { prefs.edit().putString(KEY_DOCK_STYLE, v).apply() }
+
+    /** Home search pill: "bottom" (below the dock), "top" (under At a Glance) or "hidden". */
+    fun searchBarPosition() = prefs.getString(KEY_SEARCH_POSITION, "bottom") ?: "bottom"
+    fun setSearchBarPosition(v: String) { prefs.edit().putString(KEY_SEARCH_POSITION, v).apply() }
+
+    /** At a Glance: "large", "compact" or "hidden". */
+    fun glanceStyle() = prefs.getString(KEY_GLANCE_STYLE, "large") ?: "large"
+    fun setGlanceStyle(v: String) { prefs.edit().putString(KEY_GLANCE_STYLE, v).apply() }
+
+    /** Notification badges: "dot", "count" or "off". */
+    fun badgeStyle() = prefs.getString(KEY_BADGE_STYLE, "dot") ?: "dot"
+    fun setBadgeStyle(v: String) { prefs.edit().putString(KEY_BADGE_STYLE, v).apply() }
+
+    fun themedIcons() = prefs.getBoolean(KEY_THEMED_ICONS, false)
+    fun setThemedIcons(v: Boolean) { prefs.edit().putBoolean(KEY_THEMED_ICONS, v).apply() }
+
+    /** Accent: "wallpaper" (Material You / wallpaper colour) or a fixed OEA accent. */
+    fun accentMode() = prefs.getString(KEY_ACCENT_MODE, "wallpaper") ?: "wallpaper"
+    fun setAccentMode(v: String) { prefs.edit().putString(KEY_ACCENT_MODE, v).apply() }
+
+    /** Home swipe-down: "notifications", "quick_settings", "search" or "none". */
+    fun swipeDownAction() = prefs.getString(KEY_SWIPE_DOWN, "notifications") ?: "notifications"
+    fun setSwipeDownAction(v: String) { prefs.edit().putString(KEY_SWIPE_DOWN, v).apply() }
+
+    /** Home double-tap: "lock", "drawer" or "none". */
+    fun doubleTapAction() = prefs.getString(KEY_DOUBLE_TAP, "lock") ?: "lock"
+    fun setDoubleTapAction(v: String) { prefs.edit().putString(KEY_DOUBLE_TAP, v).apply() }
+
+    /** Recents button: "system" (Android Recents via OEA Assistant) or "oea" (OEA Overview). */
+    fun recentsMode() = prefs.getString(KEY_RECENTS_MODE, "system") ?: "system"
+    fun setRecentsMode(v: String) { prefs.edit().putString(KEY_RECENTS_MODE, v).apply() }
+
+    fun drawerCategories() = prefs.getBoolean(KEY_DRAWER_CATEGORIES, true)
+    fun setDrawerCategories(v: Boolean) { prefs.edit().putBoolean(KEY_DRAWER_CATEGORIES, v).apply() }
+    fun drawerKeyboard() = prefs.getBoolean(KEY_DRAWER_KEYBOARD, false)
+    fun setDrawerKeyboard(v: Boolean) { prefs.edit().putBoolean(KEY_DRAWER_KEYBOARD, v).apply() }
+    fun homeLayoutLocked() = prefs.getBoolean(KEY_LAYOUT_LOCKED, false)
+    fun setHomeLayoutLocked(v: Boolean) { prefs.edit().putBoolean(KEY_LAYOUT_LOCKED, v).apply() }
+    fun hapticsEnabled() = prefs.getBoolean(KEY_HAPTICS, true)
+    fun setHapticsEnabled(v: Boolean) { prefs.edit().putBoolean(KEY_HAPTICS, v).apply() }
+    fun defaultHomeBannerDismissed() = prefs.getBoolean(KEY_DEFAULT_BANNER, false)
+    fun setDefaultHomeBannerDismissed(v: Boolean) { prefs.edit().putBoolean(KEY_DEFAULT_BANNER, v).apply() }
+    fun onboardingDone() = prefs.getBoolean(KEY_ONBOARDING_DONE, false)
+    fun setOnboardingDone(v: Boolean) { prefs.edit().putBoolean(KEY_ONBOARDING_DONE, v).apply() }
     enum class DrawerMode { GRID, VERTICAL, HORIZONTAL }
     fun drawerMode() = runCatching {
         DrawerMode.valueOf(prefs.getString(KEY_DRAWER_MODE, DrawerMode.GRID.name) ?: DrawerMode.GRID.name)
@@ -56,7 +114,8 @@ class OeaDataStore private constructor(context: Context) {
     fun setThemeMode(v: String) { prefs.edit().putString(KEY_THEME_MODE, v).apply() }
     fun showMostUsed() = prefs.getBoolean(KEY_SHOW_MOST_USED, true)
     fun setShowMostUsed(v: Boolean) { prefs.edit().putBoolean(KEY_SHOW_MOST_USED, v).apply() }
-    fun iconShape() = prefs.getString(KEY_ICON_SHAPE, "rounded") ?: "rounded"
+    /** "system" keeps the device icon mask; circle/squircle/rounded/square/teardrop reshape adaptive icons. */
+    fun iconShape() = prefs.getString(KEY_ICON_SHAPE, "system") ?: "system"
     fun setIconShape(v: String) { prefs.edit().putString(KEY_ICON_SHAPE, v).apply() }
     fun animationSpeed() = prefs.getInt(KEY_ANIMATION_SPEED, 1).coerceIn(0, 2)
     fun setAnimationSpeed(value: Int) { prefs.edit().putInt(KEY_ANIMATION_SPEED, value.coerceIn(0, 2)).apply() }
@@ -110,6 +169,23 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_ICON_PACK_PACKAGE = "icon_pack_package"
         private const val KEY_ANIMATION_SPEED = "animation_speed"
         private const val KEY_WALLPAPER_URI = "wallpaper_uri"
+        private const val KEY_GRID_ROWS = "grid_rows"
+        private const val KEY_ICON_SIZE = "icon_size_dp"
+        private const val KEY_DOCK_STYLE = "dock_style"
+        private const val KEY_SEARCH_POSITION = "search_bar_position"
+        private const val KEY_GLANCE_STYLE = "glance_style"
+        private const val KEY_BADGE_STYLE = "badge_style"
+        private const val KEY_THEMED_ICONS = "themed_icons"
+        private const val KEY_ACCENT_MODE = "accent_mode"
+        private const val KEY_SWIPE_DOWN = "gesture_swipe_down"
+        private const val KEY_DOUBLE_TAP = "gesture_double_tap"
+        private const val KEY_RECENTS_MODE = "recents_mode"
+        private const val KEY_DRAWER_CATEGORIES = "drawer_categories"
+        private const val KEY_DRAWER_KEYBOARD = "drawer_keyboard"
+        private const val KEY_LAYOUT_LOCKED = "home_layout_locked"
+        private const val KEY_HAPTICS = "haptics"
+        private const val KEY_ONBOARDING_DONE = "onboarding_done"
+        private const val KEY_DEFAULT_BANNER = "default_home_banner_dismissed"
         private const val KEY_RECENTS = "recent_launches"
         private const val KEY_LAUNCH_COUNT_PREFIX = "launch_count:"
         private const val SEP = "|"
