@@ -14,21 +14,26 @@ See [Launcher engine and live activities](docs/launcher-engine-and-live-activiti
 
 ## OEA Systems
 
-- App freezer using Android Device Policy package suspension when OEA has the required authority.
+- Freezer, a standalone app (own icon and task): Android package suspension with Device Owner/root, otherwise OEA Freeze (blocked in OEA and force-stopped by OEA Assistant behind a progress screen). A granted OEA Assistant that Android paused is reconnected, never re-requested.
 - Call blocker using Android's call-screening role with exact/prefix/suffix rules and contact exceptions.
-- Split-pair launcher using Android multi-task/adjacent activity flags; Android controls the final split presentation.
-- Game Boost monitoring selected games with usage access, optional DND handling, and an optional session overlay.
+- Phone with full-screen (over the wallpaper), popup and floating-card call screens, Telecom-backed mute/speaker/Bluetooth routing, proximity screen-off and an incoming-call notification with Answer/Decline. Telecom plays the ringtone.
+- Split screen that waits for the first app to be in front before launching the adjacent app, verifies the split with OEA Assistant and recovers once through the system split toggle.
+- Game Boost monitoring selected games with usage access, optional DND handling, and a floating control with RAM gauges, network speed (down/up) and a cycling rainbow colour option.
+- Built-in apps (Game Boost, Phone, Call Blocker, Freezer, OEA Settings) are ordinary launcher entries that can be added to Home like any app.
 - Launcher navigation remains integrated with Android's own Home and Recents/Overview surfaces.
 
 ## Home and app drawer
 
 - Persistent home pages, dock, folders and drag/drop.
+- Widgets own a rectangle of cells: drag them between pages like icons, and resize them with Android-style handles limited to each widget's own min/max size.
 - App search and All Apps search.
 - Grid, vertical-list and horizontal All Apps layouts.
 - Long-press app actions, hiding and app-freezer access.
+- Hidden apps as their own space (drawer ⋮ › Hidden apps): open and use hidden apps there, optionally behind the App Lock PIN.
 - Wallpaper-derived launcher theme colors.
 - Native Android launcher shortcuts.
-- Home-only live-activity capsule for charging, supported calls, media sessions, and compatible notification actions (requires notification access for app notification content).
+- Home-only live activities in two styles — the card under the status bar and an expandable island under the front camera — usable alone or together with per-app routing. Both expand over Home without resizing the grid (requires notification access for app notification content).
+- The full-screen launcher error page appears only when Home genuinely fails to start; later recoverable errors are logged and the running Home is kept.
 
 ## Independence
 

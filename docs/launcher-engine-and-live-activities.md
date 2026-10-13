@@ -67,3 +67,25 @@ The Home capsule is intentionally **Home-only**, not a claim that OEA can draw a
 4. With notification access off, verify charging appears and media/call notification data remains hidden. With access on, test a MediaStyle app that advertises previous/play/pause/next, an app with ordinary notification actions, and a call notification.
 5. In the expanded capsule, test controls without opening the full media app; verify action taps work and RemoteInput is not exposed.
 6. Toggle the live-activity area in OEA Settings, leave/return Home, rotate or resize, and confirm the capsule never creates a separate window.
+
+
+## Follow-up: warning accuracy, live-activity styles and widgets
+
+### When Home shows a warning
+
+- `OeaScreenFailure` (the full-screen "couldn't start" page) is a **startup boundary**. `OeaLauncherActivity` uses it only until the Home surface has been attached once. After that, resume/rotation/action errors are logged and the running workspace is kept.
+- The engine shows its centred retry pill only when there is no usable Home. A bind is judged by its result: if a late stage throws after pages were rebuilt (`OeaWorkspace.hasUsableHome()`), Home is treated as working. Empty or failed refreshes with a bound workspace are logged and retried quietly.
+- `OeaWorkspace.rebuild()` isolates its stages (layout, each page, each widget/icon, dock, drawer, folder, hidden apps), so one broken provider or tile cannot blank Home.
+
+### Two live-activity styles
+
+- `OeaDynamicIslandView(context)` is the card under the status bar; `OeaDynamicIslandView(context, Surface.CAMERA)` is the island under the front camera. Both share the payload, MediaController, call and Notification.Action logic.
+- The camera island hangs just below the status bar, centred on the display cutout: the status-bar strip belongs to System UI's window, which consumes touches, so a pill inside it could not be tapped.
+- Style is "card", "camera" or "both". With both, `OeaIslandRouting` sends assigned apps to their style; unassigned apps, OEA calls and charging use the chosen default.
+- Both styles float in `homeLayer` above the Home column; a spacer reserves only their collapsed height, so expanding never shrinks the grid or resizes widgets.
+
+### Widgets
+
+- Placement is stored per widget (`page`, `x`, `y`, `spanX`, `spanY`). Legacy full-width bands are migrated in order, preserving the old layout.
+- Spans are clamped to the provider's `minResize*`/`maxResize*` limits and `resizeMode` (with a measured cell size), which prevents the squeezed/overlapping content seen with the old row-only stepper. Size changes are reported with the Android 12+ `SizeF` API.
+- Long-press shows the widget menu; moving after the long-press drags the widget (across pages at the screen edges). "Resize" opens an in-place frame with edge handles; icons under a moved or resized widget move to the nearest free cell.
