@@ -64,7 +64,12 @@ class OeaDynamicIslandOverlayService : Service() {
         super.onCreate()
         overlayActive = false
         store = OeaDataStore.get(applicationContext)
-        windowManager = getSystemService(WindowManager::class.java)
+        windowManager = getSystemService(WindowManager::class.java) ?: run {
+            Log.e(TAG, "WindowManager is unavailable; leaving the in-Home island enabled")
+            store.setIslandOnOtherApps(false)
+            stopSelf()
+            return
+        }
         createNotificationChannel()
         // Promote before doing WindowManager work; this is a user-visible,
         // explicit feature and must not silently become a background service.
@@ -327,7 +332,7 @@ class OeaDynamicIslandOverlayService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < 26) return
-        val manager = getSystemService(NotificationManager::class.java)
+        val manager = getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Dynamic Island", NotificationManager.IMPORTANCE_LOW).apply {
             description = "Keeps the optional OEA live-activity island visible across apps."
         })
