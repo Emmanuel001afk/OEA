@@ -7,3 +7,6 @@ dependencyResolutionManagement {
 }
 rootProject.name = "OEA"
 include(":oea")
+// OEA Game Engine (reusable runtime) and the first-party games built on it.
+include(":oea-engine")
+include(":oea-games")
