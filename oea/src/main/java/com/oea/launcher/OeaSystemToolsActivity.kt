@@ -234,6 +234,8 @@ open class OeaSystemToolsActivity : Activity() {
             "multitask" -> current = "overview"
             "split" -> current = "split"
             "home" -> current = "home"
+            "notifications" -> current = "notifications"
+            "games" -> { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java); finish(); return }
             else -> current = "hub"
         }
         show(current)
@@ -361,9 +363,10 @@ open class OeaSystemToolsActivity : Activity() {
         group = kit.group(box)
         kit.row(group, R.drawable.oic_splitscreen, "Multitasking", "Overview, split screen and floating windows") { navigate("multitasking") }
         kit.row(group, R.drawable.oic_sports_esports, "Game Boost", if (OeaGameBoostStore.enabled(this)) "On • ${OeaGameBoostStore.games(this).size} games" else "Off") { openActivity(OeaGameBoostActivity::class.java) }
+        kit.row(group, R.drawable.oic_stadia_controller_fill, "OEA Games", "Runner, Arena, Chess and the OEA Game Engine") { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java) }
         kit.row(group, R.drawable.oic_call, "Phone", "OEA dialer, contacts and in-call screen") { openActivity(OeaPhoneActivity::class.java) }
         kit.row(group, R.drawable.oic_block, "Call Blocker", "Blocked numbers, allow list, rules and history") { openActivity(OeaCallBlockerActivity::class.java) }
-        kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
+        kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "OEA Games, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_accessibility_new, "Permissions & access", accessSummary()) { navigate("access") }
         kit.row(group, R.drawable.oic_info, "About OEA", "Version $version") { navigate("about") }
@@ -698,6 +701,9 @@ open class OeaSystemToolsActivity : Activity() {
                     dataStore.islandDefaultSurface()) {
                     dataStore.setIslandDefaultSurface(it)
                 }
+            }
+            kit.row(islandGroup, R.drawable.oic_stadia_controller_fill, "OEA Games in the island", "Choose card, camera island, both or automatic for each game") {
+                openActivity(com.oea.launcher.games.OeaGamesActivity::class.java)
             }
         }
         kit.note(box, when (dataStore.islandStyle()) {

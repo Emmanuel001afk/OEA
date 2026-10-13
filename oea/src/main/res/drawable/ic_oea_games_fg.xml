@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Isometric engine cube inside the adaptive-icon safe zone, with a play mark on top. -->
+    <path android:fillColor="#F2FFFFFF" android:pathData="M54,29L75,41L54,53L33,41Z" />
+    <path android:fillColor="#B3FFFFFF" android:pathData="M33,41L54,53L54,78L33,66Z" />
+    <path android:fillColor="#73FFFFFF" android:pathData="M75,41L54,53L54,78L75,66Z" />
+    <path android:fillColor="#FFB2307A" android:pathData="M50,37.5L60,41L50,44.5Z" />
+    <!-- Sparkle. -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M80,24l1.6,4.4l4.4,1.6l-4.4,1.6l-1.6,4.4l-1.6,-4.4l-4.4,-1.6l4.4,-1.6z" />
+</vector>

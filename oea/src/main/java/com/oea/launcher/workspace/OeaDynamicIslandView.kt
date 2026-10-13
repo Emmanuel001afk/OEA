@@ -37,6 +37,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.oea.launcher.R
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.games.OeaGameLiveState
 import com.oea.launcher.notifications.OeaNotificationState
 import com.oea.launcher.phone.OeaCallState
 import com.oea.launcher.ui.OeaPalette
@@ -88,10 +89,15 @@ object OeaIslandRouting {
  * other ongoing notifications can expose their ordinary Notification.Action
  * PendingIntents. User-generated RemoteInput actions are intentionally omitted.
  */
-class OeaDynamicIslandView(context: Context, private val surface: Surface = Surface.CARD) : FrameLayout(context) {
+class OeaDynamicIslandView(
+    context: Context,
+    private val surface: Surface = Surface.CARD,
+    /** Inside an OEA game: only calls, game events and (optionally) music are shown. */
+    private val inGame: Boolean = false,
+) : FrameLayout(context) {
     enum class Surface { CARD, CAMERA }
 
-    private enum class Kind { CALL, MEDIA, NOTIFICATION, CHARGING }
+    private enum class Kind { CALL, MEDIA, NOTIFICATION, CHARGING, GAME }
 
     private data class Payload(
         val key: String,
@@ -101,7 +107,12 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
         val notification: StatusBarNotification? = null,
         val icon: Drawable? = null,
         val call: Call? = null,
-    )
+        /** OEA game live activity (running game) or a transient game event. */
+        val game: OeaGameLiveState.Entry? = null,
+        val gameEvent: OeaGameLiveState.Event? = null,
+    ) {
+        val gameGlyph: String get() = game?.activity?.glyph?.ifBlank { null } ?: gameEvent?.event?.glyph?.ifBlank { null } ?: game?.game?.glyph ?: gameEvent?.game?.glyph ?: "🎮"
+    }
 
     private val density = resources.displayMetrics.density
     private val store = OeaDataStore.get(context)
@@ -159,6 +170,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
 
     private val notificationObserver: () -> Unit = { render() }
     private val callObserver: () -> Unit = { render() }
+    private val gameObserver: () -> Unit = { render() }
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             updateBattery(intent)
@@ -271,6 +283,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
         card.addView(details, LinearLayout.LayoutParams(-1, -2))
         card.setOnLongClickListener {
             // Long-press opens the app behind the activity, like the system island.
+            if (current?.kind == Kind.GAME && !inGame) { OeaGameLiveState.resume(context); return@setOnLongClickListener true }
             val intent = current?.notification?.notification?.contentIntent ?: return@setOnLongClickListener false
             OeaPendingIntents.send(context, intent)
             true
@@ -349,13 +362,15 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
         super.onAttachedToWindow()
         OeaNotificationState.addListener(notificationObserver)
         OeaCallState.addListener(callObserver)
-        registerBatteryReceiver()
+        OeaGameLiveState.addListener(gameObserver)
+        if (!inGame) registerBatteryReceiver()
         render()
     }
 
     override fun onDetachedFromWindow() {
         OeaNotificationState.removeListener(notificationObserver)
         OeaCallState.removeListener(callObserver)
+        OeaGameLiveState.removeListener(gameObserver)
         unregisterBatteryReceiver()
         removeCallbacks(callTicker)
         super.onDetachedFromWindow()
@@ -414,6 +429,21 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
         if (!store.dynamicIslandEnabled()) return null
         if (!OeaIslandRouting.surfaceEnabled(store, surface)) return null
         if (accepts(null)) OeaCallState.current?.let(::callPayload)?.let { return it }
+        // OEA games: transient events on the surfaces the game resolved, then the running game's live activity.
+        OeaGameLiveState.eventFor(surface)?.let { e ->
+            return Payload(key = "game-event:${e.until}", kind = Kind.GAME, title = e.event.text, subtitle = e.game.title, gameEvent = e)
+        }
+        if (inGame) {
+            if (!com.oea.engine.OeaEngine.settings.islandMediaInGames) return null
+            val media = OeaNotificationState.dynamicIslandNotification { sbn ->
+                accepts(sbn.packageName) && (sbn.notification.category == Notification.CATEGORY_TRANSPORT ||
+                    sbn.notification.extras?.containsKey(Notification.EXTRA_MEDIA_SESSION) == true)
+            }
+            return media?.let { notificationPayload(it) }
+        }
+        OeaGameLiveState.activityFor(surface)?.let { g ->
+            return Payload(key = "game:${g.game.id}", kind = Kind.GAME, title = g.activity.title, subtitle = g.activity.subtitle, game = g)
+        }
         val notification = OeaNotificationState.dynamicIslandNotification { accepts(it.packageName) }
         if (notification != null) notificationPayload(notification)?.let { return it }
         if (charging && batteryPercent >= 0 && accepts(null)) {
@@ -546,6 +576,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
             Kind.MEDIA -> payload.subtitle.ifBlank { "Media playback controls" }
             Kind.CHARGING -> payload.subtitle
             Kind.NOTIFICATION -> payload.subtitle.ifBlank { labelFor(Kind.NOTIFICATION) }
+            Kind.GAME -> payload.subtitle.ifBlank { payload.game?.game?.title ?: "Game" }
         }
         rebuildActions(payload)
         expandIcon.rotation = if (expanded) 180f else 0f
@@ -560,6 +591,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
         Kind.MEDIA -> "Now playing"
         Kind.NOTIFICATION -> "Live notification"
         Kind.CHARGING -> "Battery"
+        Kind.GAME -> "Game"
     }
 
     private fun setLeadingIcon(payload: Payload) {
@@ -569,6 +601,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
             Kind.MEDIA -> "♫"
             Kind.NOTIFICATION -> "•"
             Kind.CHARGING -> "⚡"
+            Kind.GAME -> payload.gameGlyph
         }
         if (icon != null) {
             appIcon.setImageDrawable(icon.mutate().apply { setTint(palette.accent) })
@@ -595,6 +628,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
                 val number = com.oea.launcher.phone.OeaCallUi.displayNumber(call)
                 com.oea.launcher.phone.OeaCallUi.contactName(context, number) ?: number
             } ?: payload.title
+            Kind.GAME -> payload.game?.activity?.compactText?.ifBlank { null } ?: payload.title
             else -> payload.title
         }
         val playing = payload.kind == Kind.MEDIA && runCatching {
@@ -610,8 +644,13 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
             Kind.CHARGING -> if (batteryPercent >= 0) "$batteryPercent%" else "⚡"
             Kind.MEDIA -> "❚❚"
             Kind.NOTIFICATION -> "●"
+            Kind.GAME -> payload.game?.activity?.trailing?.ifBlank { null } ?: payload.gameGlyph
         }
         if (payload.kind == Kind.NOTIFICATION) trailingText.setTextColor(palette.accent)
+        if (payload.kind == Kind.GAME) {
+            val accent = payload.game?.activity?.accent?.takeIf { it != 0 } ?: payload.game?.game?.accent ?: payload.gameEvent?.game?.accent ?: palette.accent
+            trailingText.setTextColor(if (payload.game?.activity?.urgent == true) Color.rgb(255, 99, 99) else accent)
+        }
     }
 
     private fun callTrailing(call: Call?): String {
@@ -633,6 +672,11 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
         actions.removeAllViews()
         val notification = payload.notification?.notification
         when {
+            payload.kind == Kind.GAME -> {
+                val g = payload.game
+                if (!inGame && (payload.game != null || payload.gameEvent != null)) addTextAction("Resume") { OeaGameLiveState.resume(context) }
+                g?.activity?.actions?.take(3)?.forEach { a -> addTextAction(a.label.take(16)) { g.onAction?.invoke(a.id); postDelayed({ render() }, 300L) } }
+            }
             payload.call != null -> addCallControls(payload.call)
             payload.kind == Kind.MEDIA && notification != null -> {
                 val controller = mediaController(notification)

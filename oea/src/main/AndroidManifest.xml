@@ -118,6 +118,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- OEA Games: the hub for games built on the OEA Game Engine. Its own
+             task (like Game Boost), so a running game resumes from the icon or
+             the Dynamic Island. Not singleTask: that would close a running game. -->
+        <activity
+            android:name="com.oea.launcher.games.OeaGamesActivity"
+            android:exported="true"
+            android:label="OEA Games"
+            android:icon="@drawable/ic_oea_games"
+            android:roundIcon="@drawable/ic_oea_games"
+            android:taskAffinity="com.oea.launcher.games"
+            android:theme="@style/OeaGameBoostTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- A running game (OpenGL ES 3). Handles rotation itself, so switching a
+             game to landscape never restarts it. -->
+        <activity
+            android:name="com.oea.launcher.games.OeaGameActivity"
+            android:exported="false"
+            android:label="OEA Games"
+            android:taskAffinity="com.oea.launcher.games"
+            android:launchMode="singleTop"
+            android:theme="@style/OeaGameTheme"
+            android:screenOrientation="unspecified"
+            android:hardwareAccelerated="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density" />
         <!-- "Add to Home screen" requests (pinned shortcuts and widgets). -->
         <activity
             android:name=".OeaPinRequestActivity"
