@@ -55,18 +55,21 @@ Android does not expose one universal “Dynamic Island” API for launchers. It
 - Ordinary `Notification.Action` PendingIntents for apps that expose actions in their notification ([Notification.Action](https://developer.android.com/reference/android/app/Notification.Action)).
 - Android's battery broadcasts for charging state; this does not require notification-listener or overlay access.
 
-OEA therefore renders the capsule as a child of its existing Home view hierarchy. It cannot cover another app, cannot steal touch outside Home, and does not request `SYSTEM_ALERT_WINDOW` for the feature. It selects one useful current activity (OEA's own call state when OEA is the default dialer; otherwise a call/media/actionable ongoing notification; charging when no higher-priority activity is active). Tapping expands the capsule. Media sessions get previous/play-or-pause/next when the session advertises those actions; compatible notifications get up to three ordinary action buttons plus Open. Text-entry/RemoteInput actions are deliberately omitted because a compact launcher capsule is not an appropriate place to collect a reply. OEA default-dialer calls get answer/decline/end/hold/resume actions; other dialers can supply their own call actions via their notification.
+By default OEA renders the capsule as a child of its existing Home view hierarchy. It cannot cover another app, cannot steal touch outside Home, and does not request `SYSTEM_ALERT_WINDOW` just to show the Home capsule. An optional **Show over other apps** setting starts a separate foreground service only after the user enables it and grants Android's Display over other apps permission. That service owns small, repositionable windows for the selected island styles and suppresses duplicate in-Home/in-game islands while active. Android keeps a foreground-service notice; its notification includes a Turn off action when notification visibility is allowed. Notification activities can be shown for all apps or an explicitly selected app set. This system-wide option is opt-in and is not required for OEA Home to work.
 
-The Home capsule is intentionally **Home-only**, not a claim that OEA can draw a system-wide island over every app. Notification-based details and third-party controls require Notification access; charging status and OEA's own active call state do not. An app that publishes neither a media session nor notification actions cannot be controlled by another app, which is an Android platform boundary rather than an OEA limitation.
+OEA selects one useful current activity (OEA's own call state when OEA is the default dialer; otherwise a call/media/actionable ongoing notification; charging when no higher-priority activity is active). Tapping expands the capsule. Media sessions get previous/play-or-pause/next when the session advertises those actions; compatible notifications get available ordinary action buttons and Open. Clearable notifications can be swiped away or dismissed from the expanded card. Text-entry/RemoteInput actions are deliberately omitted because a compact island is not an appropriate place to collect a reply. OEA default-dialer calls get answer/decline/end/hold/resume actions; other dialers can supply their own call actions via their notification.
+
+Notification-based details and third-party controls require Notification access; charging status and OEA's own active call state do not. An app that publishes neither a media session nor notification actions cannot be controlled by another app, which is an Android platform boundary rather than an OEA limitation.
 
 ## Practical verification checklist
 
 1. Open Phone, Call Blocker, Game Boost and OEA Settings without starting Home first; confirm they do not allocate the Home workspace.
 2. Cold-launch OEA Home with a populated, empty, or temporarily failing app catalogue; confirm there is no synchronous package scan on main, no layout wipe and a retry state on failure.
 3. Add/remove an app while Home is open; confirm the catalogue refreshes in the background and icons invalidate without disturbing saved pages or folders.
-4. With notification access off, verify charging appears and media/call notification data remains hidden. With access on, test a MediaStyle app that advertises previous/play/pause/next, an app with ordinary notification actions, and a call notification.
+4. With notification access off, verify charging appears and media/call notification data remains hidden. With access on, test a MediaStyle app that advertises previous/play/pause/next, successive notifications, ordinary notification actions, a call notification, Open, and swipe/dismiss of a clearable notification.
 5. In the expanded capsule, test controls without opening the full media app; verify action taps work and RemoteInput is not exposed.
-6. Toggle the live-activity area in OEA Settings, leave/return Home, rotate or resize, and confirm the capsule never creates a separate window.
+6. Toggle the live-activity area in OEA Settings, leave/return Home, rotate or resize, and verify the default Home capsule stays in the workspace view hierarchy.
+7. Separately grant Display over other apps and enable Show over other apps. Verify the foreground notice and, when notifications are allowed, its Turn off action; test both island styles and per-app filtering, confirm the Home/game copy is suppressed, and revoke permission to ensure the service stops cleanly.
 
 
 ## Follow-up: warning accuracy, live-activity styles and widgets
@@ -80,7 +83,7 @@ The Home capsule is intentionally **Home-only**, not a claim that OEA can draw a
 ### Two live-activity styles
 
 - `OeaDynamicIslandView(context)` is the card under the status bar; `OeaDynamicIslandView(context, Surface.CAMERA)` is the island under the front camera. Both share the payload, MediaController, call and Notification.Action logic.
-- The camera island hangs just below the status bar, centred on the display cutout: the status-bar strip belongs to System UI's window, which consumes touches, so a pill inside it could not be tapped.
+- The camera island is centred on the detected top display cutout and anchored just below the greater of the cutout's lower edge or the status bar. Stored horizontal/vertical offsets let users reposition it for other camera layouts; the system-owned status-bar strip itself is not touchable by this overlay.
 - Style is "card", "camera" or "both". With both, `OeaIslandRouting` sends assigned apps to their style; unassigned apps, OEA calls and charging use the chosen default.
 - Both styles float in `homeLayer` above the Home column; a spacer reserves only their collapsed height, so expanding never shrinks the grid or resizes widgets.
 

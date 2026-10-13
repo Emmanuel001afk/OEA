@@ -114,8 +114,9 @@ jobs:
           grep -Fq "Intent.FLAG_ACTIVITY_NEW_TASK" $SRC/multitask/OeaMultitaskLauncher.kt
           ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "currentWindowMetrics.bounds" $SRC/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "preferredWidthDp = 420" $SRC/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "preferredHeightDp = 560" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq '"small" -> 320 to 440' $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq '"medium" -> 420 to 560' $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq '"large" -> 520 to 700' $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.software.freeform_window_management" $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.activity.windowingMode" $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT" $SRC/split/OeaSplitLauncher.kt
@@ -209,7 +210,7 @@ jobs:
       - name: Build standalone OEA Launcher APK
         run: |
           set -o pipefail
-          if ! ./gradlew :oea:assembleRelease --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+          if ! ./gradlew :oea:assembleRelease :oea-game-arena:assembleRelease :oea-game-chess:assembleRelease :oea-game-runner:assembleRelease --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
             # Surface compiler/lint errors as annotations so they are visible
             # without downloading the full log.
             {

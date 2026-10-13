@@ -49,9 +49,12 @@ class OeaPhoneActivity : Activity() {
     private var selectedTab = TAB_DIAL
     private var contactRows: List<ContactRow> = emptyList()
     private var pendingCallNumber: String? = null
+    private var pendingDeleteCallId: Long? = null
+    private var pendingContactHistory: ContactRow? = null
     private val phonePrefs by lazy { getSharedPreferences("oea_phone_prefs", Context.MODE_PRIVATE) }
 
-    private data class ContactRow(val name: String, val phone: String)
+    private data class ContactRow(val id: Long, val name: String, val phone: String)
+    private data class CallLogRow(val id: Long, val name: String, val number: String, val type: Int, val date: Long, val durationSeconds: Long)
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -111,6 +114,7 @@ class OeaPhoneActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        headerRow.addView(smallButton("Back") { finish() }, LinearLayout.LayoutParams(dp(58), dp(36)).apply { rightMargin = dp(8) })
         headerRow.addView(TextView(this).apply {
             text = "OEA Phone"
             textSize = 25f
@@ -582,6 +586,32 @@ class OeaPhoneActivity : Activity() {
         }
     }.getOrDefault(false)
 
+    private fun hasCallScreeningAccess(): Boolean = runCatching {
+        if (Build.VERSION.SDK_INT >= 29) {
+            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true || isDefaultDialer()
+        } else {
+            isDefaultDialer()
+        }
+    }.getOrDefault(false)
+
+    private fun hasConfiguredBlockRule(number: String): Boolean {
+        val variants = OeaCallBlockRules.numberVariants(number)
+        if (variants.isEmpty()) return false
+        if (variants.any { it in OeaCallBlockRules.getExact(this) }) return true
+        return OeaCallBlockRules.getPrefix(this).any { rule -> variants.any { it.startsWith(rule) } } ||
+            OeaCallBlockRules.getSuffix(this).any { rule -> variants.any { it.endsWith(rule) } }
+    }
+
+    private fun callBlockStatus(number: String): String? {
+        if (!hasConfiguredBlockRule(number)) return null
+        return when {
+            !OeaCallBlockRules.enabled(this) -> "Block rule • protection off"
+            !hasCallScreeningAccess() -> "Block rule • Android screening access needed"
+            OeaCallBlockRules.shouldBlock(this, number) -> "Blocked"
+            else -> "Rule matches, but an allow-list/contact exception applies"
+        }
+    }
+
     private fun openDefaultAppsSettings() {
         runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
             .onFailure { toast("Open Android Settings and choose OEA as the default phone app.") }
@@ -594,32 +624,37 @@ class OeaPhoneActivity : Activity() {
             }
             return
         }
-        val projection = arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.CACHED_NAME)
+        val projection = arrayOf(
+            CallLog.Calls._ID,
+            CallLog.Calls.NUMBER,
+            CallLog.Calls.TYPE,
+            CallLog.Calls.DATE,
+            CallLog.Calls.DURATION,
+            CallLog.Calls.CACHED_NAME,
+        )
         var count = 0
         runCatching {
             contentResolver.query(CallLog.Calls.CONTENT_URI, projection, null, null, CallLog.Calls.DATE + " DESC")?.use { cursor ->
                 while (cursor.moveToNext() && count < 100) {
-                    val callType = cursor.getInt(1)
+                    val callType = cursor.getInt(2)
                     if (missedOnly && callType != CallLog.Calls.MISSED_TYPE) continue
                     count++
-                    val phone = cursor.getString(0).orEmpty().ifBlank { "Unknown number" }
-                    val type = when (callType) {
-                        CallLog.Calls.INCOMING_TYPE -> "Incoming"
-                        CallLog.Calls.OUTGOING_TYPE -> "Outgoing"
-                        CallLog.Calls.MISSED_TYPE -> "Missed"
-                        CallLog.Calls.REJECTED_TYPE -> "Rejected"
-                        else -> "Call"
-                    }
-                    val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(cursor.getLong(2)))
-                    val name = cursor.getString(3).orEmpty().ifBlank { phone }
-                    val blocked = OeaCallBlockRules.isNumberBlocked(this, phone)
-                    val subtitle = "$phone • $type • $date" + if (blocked) " • Blocked" else ""
+                    val phone = cursor.getString(1).orEmpty().ifBlank { "Unknown number" }
+                    val dateMillis = cursor.getLong(3)
+                    val duration = cursor.getLong(4).coerceAtLeast(0L)
+                    val name = cursor.getString(5).orEmpty().ifBlank { phone }
+                    val entry = CallLogRow(cursor.getLong(0), name, phone, callType, dateMillis, duration)
+                    val callTypeText = callTypeLabel(callType)
+                    val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(dateMillis))
+                    val blockStatus = callBlockStatus(phone)
+                    val subtitle = "$phone • $callTypeText • ${durationLabel(duration)} • $date" +
+                        (blockStatus?.let { " • $it" } ?: "")
                     addEntry(
                         name,
                         subtitle,
                         "Call",
                         action = { placeCall(phone) },
-                        rowClick = { showNumberActions(name, phone) }
+                        rowClick = { showCallDetails(entry) },
                     )
                 }
             }
@@ -632,42 +667,108 @@ class OeaPhoneActivity : Activity() {
         }
     }
 
-    private fun showNumberActions(title: String, phone: String) {
-        val norm = OeaCallBlockRules.normalizeNumber(phone)
-        if (norm.isEmpty()) {
-            fillNumber(phone)
+    private fun callTypeLabel(type: Int): String = when (type) {
+        CallLog.Calls.INCOMING_TYPE -> "Incoming"
+        CallLog.Calls.OUTGOING_TYPE -> "Outgoing"
+        CallLog.Calls.MISSED_TYPE -> "Missed"
+        CallLog.Calls.REJECTED_TYPE -> "Rejected"
+        else -> "Call"
+    }
+
+    private fun durationLabel(seconds: Long): String = when {
+        seconds <= 0L -> "No duration"
+        seconds < 60L -> "${seconds}s"
+        else -> "${seconds / 60L}m ${seconds % 60L}s"
+    }
+
+    private fun showCallDetails(entry: CallLogRow) {
+        val date = DateFormat.getDateTimeInstance(DateFormat.FULL, DateFormat.MEDIUM).format(Date(entry.date))
+        val number = entry.number
+        val defaultDialer = isDefaultDialer()
+        val exactBlocked = OeaCallBlockRules.numberVariants(number)
+            .any { it in OeaCallBlockRules.getExact(this) }
+        val blocked = hasConfiguredBlockRule(number)
+        val blockStatus = callBlockStatus(number)
+        val blockAction = when {
+            exactBlocked -> "Unblock"
+            blocked -> "Edit block rules"
+            else -> "Block"
+        }
+        val message = buildString {
+            append(callTypeLabel(entry.type)).append(" call\n")
+            append(number).append("\n")
+            append(date).append("\n")
+            append("Duration: ").append(durationLabel(entry.durationSeconds)).append("\n\n")
+            append("Call recording is not provided by OEA. Recording availability depends on Android, the dialer and local rules.")
+            blockStatus?.let { append("\n\nCall protection: ").append(it) }
+            if (!defaultDialer) append("\n\nAndroid only allows call-log deletion to the default phone app when it also grants write access.")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(entry.name)
+            .setMessage(message)
+            .setPositiveButton("Call") { _, _ -> placeCall(number) }
+            .setNeutralButton(blockAction) { _, _ -> toggleCallBlock(number) }
+            .setNegativeButton(if (defaultDialer) "Delete entry" else "Close") { _, _ ->
+                if (defaultDialer) deleteCallHistoryEntry(entry.id)
+            }
+            .show()
+    }
+
+    private fun toggleCallBlock(number: String) {
+        val normalized = OeaCallBlockRules.normalizeNumber(number)
+        val variants = OeaCallBlockRules.numberVariants(number)
+        if (normalized.isBlank() || variants.isEmpty()) {
+            toast("This number can't be added to the block list.")
             return
         }
-        val isBlocked = OeaCallBlockRules.isNumberBlocked(this, phone)
-        val options = arrayOf(
-            "Edit in dial pad",
-            "Call $phone",
-            if (isBlocked) "Unblock this number" else "Block this number"
-        )
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> fillNumber(phone)
-                    1 -> placeCall(phone)
-                    2 -> {
-                        val exact = OeaCallBlockRules.getExact(this).toMutableSet()
-                        if (isBlocked) {
-                            val variants = OeaCallBlockRules.numberVariants(phone)
-                            exact.removeAll(variants)
-                            OeaCallBlockRules.setRules(this, exact, OeaCallBlockRules.getPrefix(this), OeaCallBlockRules.getSuffix(this))
-                            toast("Unblocked $phone")
-                        } else {
-                            exact.add(norm)
-                            OeaCallBlockRules.setRules(this, exact, OeaCallBlockRules.getPrefix(this), OeaCallBlockRules.getSuffix(this))
-                            OeaCallBlockRules.setEnabled(this, true)
-                            toast("Blocked $phone")
-                        }
-                        renderList()
-                    }
-                }
+        val exact = OeaCallBlockRules.getExact(this).toMutableSet()
+        val hasExactRule = variants.any(exact::contains)
+        if (hasExactRule) {
+            exact.removeAll(variants.toSet())
+            OeaCallBlockRules.setRules(this, exact, OeaCallBlockRules.getPrefix(this), OeaCallBlockRules.getSuffix(this))
+            val stillMatches = hasConfiguredBlockRule(number)
+            toast(if (stillMatches) "Exact block removed; $number still matches another rule." else "Removed the exact block rule for $number.")
+        } else if (hasConfiguredBlockRule(number)) {
+            runCatching {
+                startActivity(Intent(this, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java))
+            }.onFailure { toast("Could not open Call Blocker rules.") }
+            return
+        } else {
+            exact.add(normalized)
+            OeaCallBlockRules.setRules(this, exact, OeaCallBlockRules.getPrefix(this), OeaCallBlockRules.getSuffix(this))
+            OeaCallBlockRules.setEnabled(this, true)
+            if (hasCallScreeningAccess()) {
+                toast("Call block rule added for $number.")
+            } else {
+                toast("Rule saved. Enable OEA call screening before it can reject calls.")
+                runCatching { startActivity(Intent(this, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java)) }
+                    .onFailure { android.util.Log.w("OeaPhoneActivity", "Could not open Call Blocker rules", it) }
             }
-            .setNegativeButton("Close", null)
+        }
+        renderList()
+    }
+
+    private fun deleteCallHistoryEntry(id: Long) {
+        if (!isDefaultDialer()) {
+            toast("Android requires OEA to be the default phone app before it can request call-history write access.")
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.WRITE_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            pendingDeleteCallId = id
+            requestPermissions(arrayOf(Manifest.permission.WRITE_CALL_LOG), REQUEST_WRITE_CALL_LOG)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Delete call history entry?")
+            .setMessage("This removes this entry from Android's call log. It does not delete the contact or change call-blocking rules.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                val deleted = runCatching {
+                    contentResolver.delete(Uri.withAppendedPath(CallLog.Calls.CONTENT_URI, id.toString()), null, null) > 0
+                }.getOrDefault(false)
+                toast(if (deleted) "Call history entry deleted." else "Android did not allow deleting this entry.")
+                renderList()
+            }
             .show()
     }
 
@@ -683,15 +784,75 @@ class OeaPhoneActivity : Activity() {
         runCatching {
             contentResolver.query(
                 ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
                 null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC",
             )?.use { cursor ->
                 while (cursor.moveToNext() && rows.size < 500) {
-                    rows += ContactRow(cursor.getString(0).orEmpty().ifBlank { "Unknown contact" }, cursor.getString(1).orEmpty())
+                    rows += ContactRow(cursor.getLong(0), cursor.getString(1).orEmpty().ifBlank { "Unknown contact" }, cursor.getString(2).orEmpty())
                 }
             }
         }.onFailure { addEmptyState("Could not read contacts on this device.") }
         contactRows = rows.distinctBy { it.name.lowercase(Locale.ROOT) + "|" + it.phone }
+    }
+
+    private fun showContactDetails(contact: ContactRow) {
+        val canReadCallLog = checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val recentCalls = if (canReadCallLog) {
+            runCatching {
+                val uri = Uri.withAppendedPath(CallLog.Calls.CONTENT_FILTER_URI, Uri.encode(contact.phone))
+                contentResolver.query(
+                    uri,
+                    arrayOf(CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION),
+                    null,
+                    null,
+                    CallLog.Calls.DATE + " DESC",
+                )?.use { cursor ->
+                    buildList {
+                        while (cursor.moveToNext() && size < 5) {
+                            val type = callTypeLabel(cursor.getInt(0))
+                            val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(cursor.getLong(1)))
+                            val duration = durationLabel(cursor.getLong(2))
+                            add("$type • $duration • $date")
+                        }
+                    }
+                }.orEmpty()
+            }.getOrDefault(emptyList())
+        } else emptyList()
+        val details = buildString {
+            append(contact.phone)
+            append("\n\nRecent calls\n")
+            if (!canReadCallLog) {
+                append("Grant call-history access to see calls with this contact.")
+            } else if (recentCalls.isEmpty()) {
+                append("No recent calls found for this number.")
+            } else {
+                append(recentCalls.joinToString("\n"))
+            }
+        }
+        val options = arrayOf("Call", "Edit in dial pad", "Send text message", "Open in Contacts")
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(contact.name)
+            .setMessage(details)
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> placeCall(contact.phone)
+                    1 -> fillNumber(contact.phone)
+                    2 -> runCatching { startActivity(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", contact.phone, null))) }
+                        .onFailure { toast("No messaging app is available.") }
+                    3 -> runCatching {
+                        val contactUri = Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_URI, contact.id.toString())
+                        startActivity(Intent(Intent.ACTION_VIEW, contactUri))
+                    }.onFailure { toast("Could not open this contact in Android Contacts.") }
+                }
+            }
+            .setNegativeButton("Close", null)
+        if (!canReadCallLog) {
+            dialog.setNeutralButton("Allow call history") { _, _ ->
+                pendingContactHistory = contact
+                requestPermissions(arrayOf(Manifest.permission.READ_CALL_LOG), REQUEST_CALL_LOG)
+            }
+        }
+        dialog.show()
     }
 
     private fun renderContacts() {
@@ -712,7 +873,7 @@ class OeaPhoneActivity : Activity() {
         }
         if (filtered.isEmpty()) addEmptyState(if (query.isEmpty()) "No phone contacts found." else "No contacts match “$query”.")
         filtered.forEach { contact ->
-            addEntry(contact.name, contact.phone, "Call", action = { placeCall(contact.phone) }, rowClick = { fillNumber(contact.phone) })
+            addEntry(contact.name, contact.phone, "Call", action = { placeCall(contact.phone) }, rowClick = { showContactDetails(contact) })
         }
         addSectionAction("Open dial pad") {
             selectedTab = TAB_DIAL
@@ -728,6 +889,17 @@ class OeaPhoneActivity : Activity() {
             addEntry(entry.number, "Blocked • $date", "Call", action = { placeCall(entry.number) }, rowClick = { fillNumber(entry.number) })
         }
         if (history.isEmpty()) addEmptyState("No blocked calls recorded by OEA.")
+        if (history.isNotEmpty()) addSectionAction("Clear OEA blocked-call history") {
+            AlertDialog.Builder(this)
+                .setTitle("Clear blocked-call history?")
+                .setMessage("Only OEA's saved history will be removed. Your blocking rules and Android call log stay unchanged.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ ->
+                    OeaCallBlockRules.clearBlockedHistory(this)
+                    renderList()
+                }
+                .show()
+        }
         addSectionAction("Open Call Blocker Rules") {
             runCatching {
                 startActivity(Intent(this@OeaPhoneActivity, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java))
@@ -847,7 +1019,22 @@ class OeaPhoneActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
-            REQUEST_CALL_LOG, REQUEST_CONTACTS -> renderList()
+            REQUEST_CALL_LOG -> {
+                val contact = pendingContactHistory
+                pendingContactHistory = null
+                renderList()
+                if (contact != null) {
+                    if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) showContactDetails(contact)
+                    else toast("Call-history access was not granted.")
+                }
+            }
+            REQUEST_CONTACTS -> renderList()
+            REQUEST_WRITE_CALL_LOG -> {
+                val id = pendingDeleteCallId
+                pendingDeleteCallId = null
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && id != null) deleteCallHistoryEntry(id)
+                else toast("Android did not grant call-history write access.")
+            }
             REQUEST_CALL_PHONE, REQUEST_PHONE_STATE -> {
                 val raw = pendingCallNumber
                 pendingCallNumber = null
@@ -890,6 +1077,7 @@ class OeaPhoneActivity : Activity() {
         private const val REQUEST_DIALER_ROLE = 9002
         private const val REQUEST_CALL_LOG = 9003
         private const val REQUEST_CONTACTS = 9004
+        private const val REQUEST_WRITE_CALL_LOG = 9008
         private const val REQUEST_CALL_PHONE = 9005
         private const val REQUEST_PHONE_STATE = 9006
         private const val REQUEST_CAMERA = 9007

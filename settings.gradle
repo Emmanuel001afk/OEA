@@ -10,3 +10,7 @@ include(":oea")
 // OEA Game Engine (reusable runtime) and the first-party games built on it.
 include(":oea-engine")
 include(":oea-games")
+// Separately installable Android game apps; they share the engine and game library.
+include(":oea-game-arena")
+include(":oea-game-chess")
+include(":oea-game-runner")

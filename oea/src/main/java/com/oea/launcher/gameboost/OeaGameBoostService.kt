@@ -263,7 +263,7 @@ class OeaGameBoostService : Service() {
     private var rainbowHue = 0f
     private var lastPaintedHue = -1f
     private val argb = android.animation.ArgbEvaluator()
-    private val networkMeter = OeaNetworkSpeedMeter()
+    private val networkQualityReader by lazy { OeaNetworkQualityReader(this) }
     private val tick = object : Runnable {
         override fun run() {
             diagnosticHeartbeatTicks++
@@ -582,7 +582,7 @@ class OeaGameBoostService : Service() {
             setPadding(dp(4), 0, dp(4), 0)
             contentDescription = "Live RAM and virtual RAM circular gauges"
         }
-        // Network speed (down/up) and battery in one tidy, labelled strip.
+        // Approximate Slow / Medium / Fast link health stays inside the panel.
         val device = OeaGameStatusStripView(this)
         val controls = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
@@ -653,15 +653,9 @@ class OeaGameBoostService : Service() {
             gravity = Gravity.END
             topMargin = dp(6)
         })
-        // Compact down/up speed directly under the button (optional in Game Boost settings).
-        val networkBadge = OeaNetworkBadgeView(this).apply {
-            visibility = if (networkBadgeEnabled()) View.VISIBLE else View.GONE
-        }
-        root.addView(networkBadge, android.widget.LinearLayout.LayoutParams(handleSize, dp(NETWORK_BADGE_HEIGHT_DP)).apply {
-            gravity = Gravity.END
-            topMargin = dp(4)
-        })
         // Keep the same floating handle above the panel if their bounds overlap.
+        // Network quality is shown only inside the expanded panel so it cannot
+        // shift, cover, or intercept taps on the floating control.
         handle.bringToFront()
         // A single click on the floating handle toggles the same panel instance.
         // Closing always funnels through closePanel(), shared with CLOSE PANEL.
@@ -758,17 +752,13 @@ class OeaGameBoostService : Service() {
                     return false
                 }
             }
-            // The badge is part of the button: it drags and taps exactly like it.
             handle.setOnTouchListener(dragListener)
-            networkBadge.setOnTouchListener(dragListener)
             handle.alpha = 0f
             handle.translationX = dp(10).toFloat()
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
                 .setInterpolator(android.view.animation.PathInterpolator(0.18f, 0.9f, 0.2f, 1f)).start()
             applyHandlePalette(handle)
             applyPanelPalette(panel)
-            networkMeter.reset()
-            networkMeter.sample()
             startRainbowAnimation()
             updateOverlay()
         }.onFailure { error -> diagnostic(android.util.Log.ERROR, "overlay creation failed game=$packageName error=${error.javaClass.name}:${error.message} stack=${android.util.Log.getStackTraceString(error).take(1800)}") }
@@ -1101,16 +1091,11 @@ class OeaGameBoostService : Service() {
         val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
         val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val charging = runCatching { battery.isCharging }.getOrDefault(false)
-        networkMeter.sample()
         device.update(
-            OeaNetworkSpeedMeter.formatRate(networkMeter.downBytesPerSecond),
-            OeaNetworkSpeedMeter.formatRate(networkMeter.upBytesPerSecond),
+            networkQualityReader.read(),
             if (level in 0..100) "$level%" else "—",
             charging,
-        )
-        (root.getChildAt(NETWORK_BADGE_INDEX) as? OeaNetworkBadgeView)?.update(
-            OeaNetworkSpeedMeter.formatCompact(networkMeter.downBytesPerSecond),
-            OeaNetworkSpeedMeter.formatCompact(networkMeter.upBytesPerSecond),
+            OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true),
         )
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
@@ -1132,7 +1117,6 @@ class OeaGameBoostService : Service() {
         val handle = root.getChildAt(0) as? android.widget.FrameLayout
         val handleVisible = OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)
         handle?.visibility = if (handleVisible) View.VISIBLE else View.GONE
-        syncNetworkBadge(root, handleVisible)
         val handleVisibilityNow = handle?.visibility
         if (handleVisibilityNow != lastLoggedHandleVisibility) {
             diagnostic(android.util.Log.INFO, "handle visibility changed old=$lastLoggedHandleVisibility new=$handleVisibilityNow preferenceVisible=$handleVisible activeGame=$activeGame overlayAttached=${root.parent != null} overlayIsShown=${root.isShown} handleIsShown=${handle?.isShown}")
@@ -1180,8 +1164,6 @@ class OeaGameBoostService : Service() {
      */
     private fun applyHandlePalette(handle: View) {
         val palette = handlePalette()
-        ((overlay as? android.widget.LinearLayout)?.getChildAt(NETWORK_BADGE_INDEX) as? OeaNetworkBadgeView)
-            ?.setColors(palette[0], palette[1])
         val bg = handle.background as? android.graphics.drawable.GradientDrawable ?: return
         bg.setColors(intArrayOf(palette[0], palette[1], palette[0]))
         bg.setStroke(dp(1), palette[1].withAlpha(170))
@@ -1360,7 +1342,6 @@ class OeaGameBoostService : Service() {
         }
         applyPanelPalette(panel)
         startPanelColorAnimation(panel)
-        (overlay as? android.widget.LinearLayout)?.let { syncNetworkBadge(it, OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) }
         panel.alpha = 0f
         panel.scaleX = 0.96f
         panel.scaleY = 0.96f
@@ -1442,41 +1423,16 @@ class OeaGameBoostService : Service() {
         }
     }
 
-    /** True for the floating button and its speed badge: both toggle the panel. */
+    /** A tap on the floating control is never treated as an outside dismissal. */
     private fun isPointInsideFloatingHandle(rawX: Float, rawY: Float): Boolean {
-        val root = overlay as? android.widget.LinearLayout ?: return false
-        return listOf(0, NETWORK_BADGE_INDEX).any { index ->
-            val part = root.getChildAt(index) ?: return@any false
-            if (part.visibility != View.VISIBLE || !part.isShown || part.width <= 0 || part.height <= 0) return@any false
-            val location = IntArray(2)
-            part.getLocationOnScreen(location)
-            val x = rawX.toInt()
-            val y = rawY.toInt()
-            x >= location[0] && x < location[0] + part.width && y >= location[1] && y < location[1] + part.height
-        }
-    }
-
-    private fun networkBadgeEnabled() = OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_BADGE, true)
-
-    /**
-     * Keeps the speed badge the same width as the button and hides it while
-     * the panel is open (the panel shows the full readout). INVISIBLE, not
-     * GONE, so opening the panel never moves the button.
-     */
-    private fun syncNetworkBadge(root: android.widget.LinearLayout, handleVisible: Boolean) {
-        val badge = root.getChildAt(NETWORK_BADGE_INDEX) as? OeaNetworkBadgeView ?: return
-        val wanted = when {
-            !handleVisible || !networkBadgeEnabled() -> View.GONE
-            panelView?.visibility == View.VISIBLE -> View.INVISIBLE
-            else -> View.VISIBLE
-        }
-        if (badge.visibility != wanted) badge.visibility = wanted
-        val lp = badge.layoutParams as? android.widget.LinearLayout.LayoutParams ?: return
-        val size = handleSizePx()
-        if (lp.width != size) {
-            lp.width = size
-            badge.layoutParams = lp
-        }
+        val handle = (overlay as? android.widget.LinearLayout)?.getChildAt(0) ?: return false
+        if (handle.visibility != View.VISIBLE || !handle.isShown || handle.width <= 0 || handle.height <= 0) return false
+        val location = IntArray(2)
+        handle.getLocationOnScreen(location)
+        val x = rawX.toInt()
+        val y = rawY.toInt()
+        return x >= location[0] && x < location[0] + handle.width &&
+            y >= location[1] && y < location[1] + handle.height
     }
 
     /**
@@ -1624,9 +1580,6 @@ class OeaGameBoostService : Service() {
             .onFailure { error -> diagnostic(android.util.Log.ERROR, "closePanel hide failed=${error.javaClass.name}:${error.message}") }
         runCatching { panel.alpha = 1f; panel.scaleX = 1f; panel.scaleY = 1f; panel.translationX = 0f }
             .onFailure { error -> diagnostic(android.util.Log.ERROR, "closePanel reset animation properties failed=${error.javaClass.name}:${error.message}") }
-        runCatching {
-            (overlay as? android.widget.LinearLayout)?.let { syncNetworkBadge(it, OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)) }
-        }
         diagnostic(android.util.Log.INFO, "closePanel completed activeGame=$activeGame overlayAttached=${overlay?.parent != null} overlayVisibility=${overlay?.visibility} panelAttached=${panel.parent != null} panelVisibility=${panel.visibility} handleVisibility=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.visibility)} handleAlpha=${((overlay as? android.widget.LinearLayout)?.getChildAt(0)?.alpha)}")
         // Deliberately do not call ensureOverlayForActiveGame() here.
         // That recovery function is allowed to remove and rebuild the entire
@@ -1877,10 +1830,8 @@ class OeaGameBoostService : Service() {
         /** Panel children: title, game name, RAM gauges, status strip, controls. */
         private const val PANEL_STATUS_INDEX = 3
         private const val PANEL_CONTROLS_INDEX = 4
-        /** Overlay root children: the button (0) and its network badge (1). */
-        private const val NETWORK_BADGE_INDEX = 1
-        private const val NETWORK_BADGE_HEIGHT_DP = 28
-        const val PREF_NETWORK_BADGE = "net_badge_visible"
+        /** Compatibility key retained for existing Game Boost settings. */
+        const val PREF_NETWORK_QUALITY = "net_badge_visible"
         /** One full trip around the hue circle. Slow enough to stay readable in-game. */
         private const val RAINBOW_PERIOD_MS = 6_000L
         /** Repaint only when the hue moved this far, so high-refresh screens do not repaint needlessly. */

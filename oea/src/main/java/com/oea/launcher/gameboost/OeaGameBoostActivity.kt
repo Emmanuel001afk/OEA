@@ -127,7 +127,11 @@ class OeaGameBoostActivity : Activity() {
                 .distinctBy { it.packageName }
             OeaGameBoostStore.invalidateDetectedGames()
             val found = runCatching { OeaGameBoostStore.detectedGames(this) }.getOrDefault(emptySet())
-            if (OeaGameBoostStore.enabled(this)) runCatching { OeaGameBoostStore.syncDetectedGames(this) }
+            // Persist Android-recognized games during catalogue refresh even
+            // while Game Boost is off. Enabling the service never requires the
+            // user to add or save each detected game manually.
+            runCatching { OeaGameBoostStore.syncDetectedGames(this) }
+                .onFailure { android.util.Log.w("OeaGameBoostActivity", "Could not save detected games", it) }
             runCatching {
                 OeaIconController.shared(this).preload(apps.filter {
                     it.packageName in found || it.packageName in OeaGameBoostStore.games(this)
@@ -459,9 +463,9 @@ class OeaGameBoostActivity : Activity() {
             p.edit().putBoolean("ram_handle_visible", on).apply()
             refreshService()
         }
-        kit.switchRow(group, R.drawable.oic_wifi, "Network speed on the button", "Download and upload speed in a small readout under the floating button. The panel always shows it.",
-            p.getBoolean(OeaGameBoostService.PREF_NETWORK_BADGE, true)) { on ->
-            p.edit().putBoolean(OeaGameBoostService.PREF_NETWORK_BADGE, on).apply()
+        kit.switchRow(group, R.drawable.oic_wifi, "Network quality in the panel", "Shows an approximate Slow, Medium or Fast link category inside the expanded panel; never covers the floating control.",
+            p.getBoolean(OeaGameBoostService.PREF_NETWORK_QUALITY, true)) { on ->
+            p.edit().putBoolean(OeaGameBoostService.PREF_NETWORK_QUALITY, on).apply()
             refreshService()
         }
         val sizes = listOf("small", "medium", "large")

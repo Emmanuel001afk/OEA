@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.Settings
 import android.view.WindowManager
 import com.oea.launcher.model.OeaAppInfo
+import com.oea.launcher.data.OeaDataStore
 
 /**
  * Requests a real Android freeform task. OEA does not pretend that an overlay or
@@ -64,10 +65,11 @@ object OeaMultitaskLauncher {
             // launch bounds unless the task itself asks for freeform windowing.
             bundle.putInt(KEY_LAUNCH_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
             context.startActivity(launchIntent, bundle)
+            val sizeLabel = OeaDataStore.get(context).floatingWindowSize()
             val message = if (freeformAdvertised) {
-                "Opening ${app.label} in a floating window. Drag its top bar to move it; drag an edge to resize."
+                "Requested a $sizeLabel floating window for ${app.label}. If Android grants freeform, use its system title bar to move and its resize edge/handle to resize; this phone may ignore freeform requests."
             } else {
-                "Floating windows are off on this phone. Turn on Developer options → \"Enable freeform windows\", restart, then try again."
+                "Android may open ${app.label} full screen because freeform is off. Try Developer options → \"Enable freeform windows\", restart, and request it again."
             }
             Result(true, message, freeformAdvertised)
         }.getOrElse { error ->
@@ -104,11 +106,15 @@ object OeaMultitaskLauncher {
 
         if (width <= 0 || height <= 0) return null
 
-        // Use a practical dp-based starting size rather than a percentage preset.
-        // The OS/OEM window manager remains responsible for interactive resizing.
+        // Offer distinct launch bounds as a starting affordance; actual dragging
+        // and resizing stay system-owned and can be disabled by an OEM.
         val density = context.resources.displayMetrics.density
-        val preferredWidthDp = 420
-        val preferredHeightDp = 560
+        val (preferredWidthDp, preferredHeightDp) = when (OeaDataStore.get(context).floatingWindowSize()) {
+            "small" -> 320 to 440
+            "medium" -> 420 to 560
+            "large" -> 520 to 700
+            else -> 420 to 560
+        }
         val horizontalMargin = (24f * density).toInt()
         val verticalMargin = (32f * density).toInt()
         val preferredWidth = (preferredWidthDp * density).toInt()
