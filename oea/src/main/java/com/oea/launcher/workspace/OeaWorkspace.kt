@@ -233,8 +233,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         homeLayer.addView(dynamicIsland, LayoutParams(-1, -1))
         homeLayer.addView(cameraIsland, LayoutParams(-1, -1))
         dynamicIsland.onReservedHeightChanged = { islandSpacer.requestLayout() }
-        dynamicIsland.onExpandedChanged = { updateSystemBars() }
-        cameraIsland.onExpandedChanged = { updateSystemBars() }
+        cameraIsland.onReservedHeightChanged = {
+            // With both styles on, the card sits below the camera island.
+            dynamicIsland.setExtraTop(cameraIsland.reservedHeight())
+            islandSpacer.requestLayout()
+        }
         glance.onOpenOverview = { openSystemTool("multitask") }
         homeColumn.addView(glance, LinearLayout.LayoutParams(-1, -2).apply {
             leftMargin = dp(26)
@@ -553,19 +556,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     internal fun updateSystemBars() {
         val window = hostActivity?.window ?: return
-        val light = when {
-            drawerOpen -> !palette.dark
-            // White status-bar icons over the expanded (black) camera island.
-            cameraIsland.isExpanded -> false
-            else -> palette.wallpaperLight
-        }
+        val light = if (drawerOpen) !palette.dark else palette.wallpaperLight
         OeaInsets.edgeToEdge(window, lightBars = light)
     }
 
-    /** Height of the card island's collapsed slot in the Home column. */
+    /** Space for the collapsed live-activity surfaces at the top of the Home column. */
     private inner class IslandSpacer(context: Context) : View(context) {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dynamicIsland.reservedHeight())
+            setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), cameraIsland.reservedHeight() + dynamicIsland.reservedHeight())
         }
     }
 

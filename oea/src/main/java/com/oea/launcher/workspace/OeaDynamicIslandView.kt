@@ -117,11 +117,11 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
     private val details = LinearLayout(context)
     private val detailText = TextView(context)
     private val actions = LinearLayout(context)
-    // Camera style: compact pill content around the camera hole.
+    // Camera style: compact pill content under the camera.
     private val compactRow = LinearLayout(context)
     private val compactIcon = ImageView(context)
     private val compactFallback = TextView(context)
-    private val compactGap = View(context)
+    private val compactTitle = TextView(context)
     private val trailingText = TextView(context)
     private val equalizer = EqualizerView(context)
 
@@ -137,6 +137,8 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
     private var cutout: Rect? = null
     /** Card style: distance from the top of Home to the capsule (status bar + spacing). */
     private var cardTop = 0
+    /** Card style: extra offset when the camera island sits above it (both styles on). */
+    private var extraTop = 0
     private var lastCollapsedHeight = -1
 
     /** Fired when the user expands/collapses (the camera style tints the status bar). */
@@ -181,7 +183,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
             topMargin = dp(4)
         })
 
-        // Camera style compact pill: [icon] [camera hole] [live indicator].
+        // Camera style compact pill: [icon] [short title] [live indicator].
         compactRow.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -194,8 +196,15 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
                 textSize = 14f
             }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
         }
-        compactRow.addView(leading, LinearLayout.LayoutParams(dp(CAMERA_SIDE_DP), -1))
-        compactRow.addView(compactGap, LinearLayout.LayoutParams(dp(14), 1))
+        compactRow.addView(leading, LinearLayout.LayoutParams(dp(30), -1))
+        compactRow.addView(compactTitle.apply {
+            textSize = 12.5f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            includeFontPadding = false
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER_VERTICAL
+        }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(4); rightMargin = dp(6) })
         val trailing = FrameLayout(context).apply {
             addView(trailingText.apply {
                 gravity = Gravity.CENTER
@@ -208,7 +217,7 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
             addView(equalizer, FrameLayout.LayoutParams(dp(18), dp(14), Gravity.CENTER))
         }
         compactRow.addView(trailing, LinearLayout.LayoutParams(dp(CAMERA_SIDE_DP), -1))
-        card.addView(compactRow, LinearLayout.LayoutParams(-1, -1))
+        card.addView(compactRow, LinearLayout.LayoutParams(-2, -1))
 
         header.apply {
             orientation = LinearLayout.HORIZONTAL
@@ -299,8 +308,22 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
         if (expanded) setExpanded(false, animate = false)
     }
 
-    /** Card style: the height Home keeps free for the collapsed capsule (it expands over Home). */
-    fun reservedHeight(): Int = if (visibility == VISIBLE && !isCamera) lastCollapsedHeight.coerceAtLeast(0) else 0
+    /**
+     * The height Home keeps free for this surface while collapsed; both
+     * styles expand over Home instead of pushing it down.
+     */
+    fun reservedHeight(): Int = when {
+        visibility != VISIBLE -> 0
+        isCamera -> dp(CAMERA_PILL_DP) + dp(8)
+        else -> lastCollapsedHeight.coerceAtLeast(0)
+    }
+
+    /** Card style: sit below the camera island when both styles are showing. */
+    fun setExtraTop(px: Int) {
+        if (px == extraTop) return
+        extraTop = px
+        applyLayout()
+    }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
@@ -567,6 +590,13 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
     /** Camera style trailing indicator: call timer, playing bars, battery level or a live dot. */
     private fun updateTrailing(payload: Payload) {
         if (!isCamera) return
+        compactTitle.text = when (payload.kind) {
+            Kind.CALL -> payload.call?.let { call ->
+                val number = com.oea.launcher.phone.OeaCallUi.displayNumber(call)
+                com.oea.launcher.phone.OeaCallUi.contactName(context, number) ?: number
+            } ?: payload.title
+            else -> payload.title
+        }
         val playing = payload.kind == Kind.MEDIA && runCatching {
             payload.notification?.notification?.let(::mediaController)?.playbackState?.state == PlaybackState.STATE_PLAYING
         }.getOrDefault(false)
@@ -799,17 +829,18 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
             params.height = LayoutParams.WRAP_CONTENT
             params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             params.leftMargin = 0
-            params.topMargin = cardTop + dp(4)
+            params.topMargin = cardTop + extraTop + dp(4)
             card.setPadding(dp(13), dp(9), dp(13), dp(10))
             card.layoutParams = params
             return
         }
+        // The status-bar strip belongs to System UI's window, which takes every
+        // touch there; the island therefore hangs just below it, centred under
+        // the front camera, where it can be tapped.
         val screenWidth = resources.displayMetrics.widthPixels
-        val hole = cutout
-        val pillHeight = if (hole != null) (hole.height() + dp(10)).coerceIn(dp(28), dp(40)) else dp(30)
-        val pillTop = if (hole != null) (hole.top - (pillHeight - hole.height()) / 2).coerceAtLeast(dp(2))
-            else ((statusBarHeight - pillHeight) / 2).coerceAtLeast(dp(2))
-        val centerX = hole?.centerX() ?: (screenWidth / 2)
+        val pillHeight = dp(CAMERA_PILL_DP)
+        val pillTop = statusBarHeight + dp(3)
+        val centerX = cutout?.centerX() ?: (screenWidth / 2)
         if (expanded) {
             compactRow.visibility = GONE
             header.visibility = VISIBLE
@@ -820,27 +851,23 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
             params.gravity = Gravity.TOP or Gravity.START
             params.leftMargin = (centerX - width / 2).coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
             params.topMargin = pillTop
-            // Content starts below the status bar icons that sit over the card's top edge.
-            val contentTop = (statusBarHeight - pillTop).coerceAtLeast(0) + dp(10)
-            card.setPadding(dp(16), contentTop, dp(16), dp(14))
+            card.setPadding(dp(16), dp(14), dp(16), dp(14))
         } else {
             compactRow.visibility = VISIBLE
             header.visibility = GONE
             details.visibility = GONE
-            val gap = (hole?.width() ?: 0) + dp(14)
-            (compactGap.layoutParams as? LinearLayout.LayoutParams)?.let {
-                if (it.width != gap) {
-                    it.width = gap
-                    compactGap.layoutParams = it
-                }
-            }
-            val width = dp(CAMERA_SIDE_DP) * 2 + gap
+            compactTitle.maxWidth = (screenWidth * 0.48f).toInt()
+            card.setPadding(dp(6), 0, dp(4), 0)
+            card.measure(
+                MeasureSpec.makeMeasureSpec(screenWidth - dp(32), MeasureSpec.AT_MOST),
+                MeasureSpec.makeMeasureSpec(pillHeight, MeasureSpec.EXACTLY),
+            )
+            val width = card.measuredWidth.coerceIn(dp(112), (screenWidth - dp(32)).coerceAtLeast(dp(112)))
             params.width = width
             params.height = pillHeight
             params.gravity = Gravity.TOP or Gravity.START
-            params.leftMargin = (centerX - width / 2).coerceIn(0, (screenWidth - width).coerceAtLeast(0))
+            params.leftMargin = (centerX - width / 2).coerceIn(dp(8), (screenWidth - width - dp(8)).coerceAtLeast(dp(8)))
             params.topMargin = pillTop
-            card.setPadding(0, 0, 0, 0)
         }
         card.layoutParams = params
     }
@@ -892,8 +919,10 @@ class OeaDynamicIslandView(context: Context, private val surface: Surface = Surf
 
     private companion object {
         const val TAG = "OeaLiveActivity"
-        /** Width of each side of the camera pill (icon side / indicator side). */
-        const val CAMERA_SIDE_DP = 46
+        /** Width of the camera pill's indicator side. */
+        const val CAMERA_SIDE_DP = 40
+        /** Height of the collapsed camera pill. */
+        const val CAMERA_PILL_DP = 32
     }
 
     /** Three animated bars shown in the camera pill while media is playing. */
