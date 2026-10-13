@@ -127,7 +127,19 @@ open class OeaInCallActivity : Activity() {
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         )
         palette = OeaTheme.resolve(this)
+        consumeAnswer(intent)
         render()
+    }
+
+    /** Answer from the notification: pick up the ringing call as the screen opens. */
+    private fun consumeAnswer(source: Intent?) {
+        val request = source ?: return
+        if (!request.getBooleanExtra(OeaCallUi.EXTRA_ANSWER, false)) return
+        request.removeExtra(OeaCallUi.EXTRA_ANSWER)
+        val call = OeaCallState.current ?: return
+        if (runCatching { call.state }.getOrNull() == Call.STATE_RINGING) {
+            runCatching { call.answer(VideoProfile.STATE_AUDIO_ONLY) }
+        }
     }
 
     /** The full-screen class; the popup class overrides this. */
@@ -136,6 +148,7 @@ open class OeaInCallActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        consumeAnswer(intent)
         val requested = intent.getStringExtra(OeaCallUi.EXTRA_PRESENTATION) ?: return
         if (requested != presentation) {
             presentation = requested

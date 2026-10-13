@@ -169,7 +169,13 @@ class OeaInCallService : InCallService() {
             builder.setPriority(NotificationCompat.PRIORITY_MAX)
             builder.setFullScreenIntent(open, true)
             builder.addAction(R.drawable.oic_call_end, "Decline", actionIntent(OeaCallActionReceiver.ACTION_DECLINE, 2))
-            builder.addAction(R.drawable.oic_call, "Answer", actionIntent(OeaCallActionReceiver.ACTION_ANSWER, 3))
+            // Answer opens the call screen directly (an activity intent): Android 12+
+            // does not let a broadcast from a notification action open an activity.
+            val answer = PendingIntent.getActivity(
+                this, 3, OeaCallUi.intent(this).putExtra(OeaCallUi.EXTRA_ANSWER, true),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(R.drawable.oic_call, "Answer", answer)
         } else {
             builder.setPriority(NotificationCompat.PRIORITY_LOW)
             if (state == Call.STATE_ACTIVE) {
@@ -258,10 +264,7 @@ class OeaCallActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val call = OeaCallState.current ?: return
         when (intent.action) {
-            ACTION_ANSWER -> {
-                runCatching { call.answer(VideoProfile.STATE_AUDIO_ONLY) }
-                runCatching { context.startActivity(OeaCallUi.intent(context)) }
-            }
+            ACTION_ANSWER -> runCatching { call.answer(VideoProfile.STATE_AUDIO_ONLY) }
             ACTION_DECLINE -> runCatching { call.reject(false, null) }
             ACTION_HANG_UP -> runCatching { call.disconnect() }
             ACTION_SPEAKER -> OeaCallState.toggleSpeaker()
@@ -367,6 +370,8 @@ object OeaCallUi {
     const val POPUP = "popup"
     const val COMPACT = "compact"
     const val EXTRA_PRESENTATION = "oea_call_presentation"
+    /** Set by the notification's Answer action: the call screen answers when it opens. */
+    const val EXTRA_ANSWER = "oea_call_answer"
 
     /** True while a call screen is in front; incoming notifications then skip the heads-up. */
     @Volatile
