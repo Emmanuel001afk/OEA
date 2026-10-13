@@ -5,23 +5,47 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Resources
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
+import android.util.LruCache
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.ui.OeaTheme
 import org.xmlpull.v1.XmlPullParser
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sign
+import kotlin.math.sin
 
 /**
- * Resolves icons from installed ADW/Nova-style icon packs. Apps not covered by a
- * selected pack always fall back to their real launcher icon.
+ * OEA icon engine.
+ *
+ * - Resolves icons from installed ADW/Nova-style icon packs, falling back to the
+ *   app's real launcher icon.
+ * - Reshapes adaptive icons with the chosen OEA icon shape (circle, squircle,
+ *   rounded square, square, teardrop) by masking their real layers, the same way
+ *   native launchers do, with anti-aliased edges.
+ * - Android 13+ themed icons: tints the app's monochrome layer with OEA colours.
+ * - Caches rendered bitmaps process-wide so Home, the drawer and OEA Settings
+ *   share one warm cache, and can preload icons off the main thread.
  */
 class OeaIconController(private val context: Context) {
     data class IconPack(val packageName: String, val label: String)
 
     private val packageManager = context.packageManager
     private val store = OeaDataStore.get(context)
-    private val cache = mutableMapOf<String, Drawable.ConstantState?>()
-    private var activePack: String? = null
-    private var componentMapPack: String? = null
-    private var componentMap: Map<String, String> = emptyMap()
 
     fun installedPacks(): List<IconPack> {
         val candidates = linkedMapOf<String, String>()
@@ -58,27 +82,166 @@ class OeaIconController(private val context: Context) {
         return candidates.map { IconPack(it.key, it.value) }.sortedBy { it.label.lowercase() }
     }
 
+    /** Styled icon for a launcher activity (shape, pack and themed treatment applied). */
     fun icon(packageName: String, className: String? = null): Drawable? {
-        val selectedPack = store.iconPackPackage()
-        if (selectedPack != activePack) {
-            activePack = selectedPack
-            cache.clear()
-            componentMapPack = null
-            componentMap = emptyMap()
-        }
-        val key = "$selectedPack|$packageName/$className"
-        if (!cache.containsKey(key)) {
-            cache[key] = loadPackIcon(selectedPack, packageName, className)
-                ?: runCatching {
-                    if (!className.isNullOrBlank()) packageManager.getActivityIcon(ComponentName(packageName, className)).constantState
-                    else packageManager.getApplicationIcon(packageName).constantState
-                }.getOrNull()
-                ?: runCatching { packageManager.getApplicationIcon(packageName).constantState }.getOrNull()
-        }
-        return cache[key]?.newDrawable()?.mutate()
+        val bitmap = iconBitmap(packageName, className) ?: return null
+        return BitmapDrawable(context.resources, bitmap)
     }
 
-    private fun loadPackIcon(packPackage: String?, packageName: String, className: String?): Drawable.ConstantState? {
+    fun iconBitmap(packageName: String, className: String? = null): Bitmap? {
+        val style = currentStyle()
+        val key = style.key + "|" + packageName + "/" + className.orEmpty()
+        rendered.get(key)?.let { return it }
+        val base = rawIcon(packageName, className, style.pack) ?: return null
+        val bitmap = runCatching { render(base.drawable, base.fromPack, style) }.getOrNull() ?: return null
+        rendered.put(key, bitmap)
+        return bitmap
+    }
+
+    /** Warms the cache for [apps]; call from a background thread. */
+    fun preload(apps: List<Pair<String, String>>) {
+        apps.forEach { (pkg, cls) -> runCatching { iconBitmap(pkg, cls) } }
+    }
+
+    /** Drops rendered icons (e.g. after a shape, size, pack or theme change). */
+    fun invalidate() {
+        rendered.evictAll()
+    }
+
+    fun invalidatePackage(packageName: String) {
+        rawStates.keys.filter { it.contains("|$packageName/") }.forEach { rawStates.remove(it) }
+        rendered.snapshot().keys.filter { it.contains("|$packageName/") }.forEach { rendered.remove(it) }
+    }
+
+    // ------------------------------------------------------------------ style
+
+    private data class Style(val key: String, val shape: String, val themed: Boolean, val pack: String?, val sizePx: Int, val themedBg: Int, val themedFg: Int)
+
+    private fun currentStyle(): Style {
+        val shape = store.iconShape()
+        val themed = store.themedIcons() && Build.VERSION.SDK_INT >= 33
+        val pack = store.iconPackPackage()
+        val sizePx = (maxOf(store.iconSizeDp(), 48) * context.resources.displayMetrics.density).toInt().coerceAtLeast(48)
+        var bg = 0
+        var fg = 0
+        if (themed) {
+            val palette = OeaTheme.resolve(context)
+            bg = if (palette.dark) OeaTheme.blend(palette.background, palette.accent, 0.20f) else palette.accentSoft
+            fg = if (palette.dark) OeaTheme.blend(Color.WHITE, palette.accent, 0.35f) else palette.onAccentSoft
+        }
+        return Style("$shape|$themed|$pack|$sizePx|$bg|$fg", shape, themed, pack, sizePx, bg, fg)
+    }
+
+    private class Raw(val drawable: Drawable, val fromPack: Boolean)
+
+    private fun rawIcon(packageName: String, className: String?, pack: String?): Raw? {
+        val key = "${pack.orEmpty()}|$packageName/${className.orEmpty()}"
+        rawStates[key]?.let { state ->
+            val d = state.newDrawable()?.mutate() ?: return@let
+            return Raw(d, rawFromPack[key] == true)
+        }
+        val packDrawable = loadPackIcon(pack, packageName, className)
+        val drawable = packDrawable
+            ?: runCatching {
+                if (!className.isNullOrBlank()) packageManager.getActivityIcon(ComponentName(packageName, className))
+                else packageManager.getApplicationIcon(packageName)
+            }.getOrNull()
+            ?: runCatching { packageManager.getApplicationIcon(packageName) }.getOrNull()
+            ?: return null
+        drawable.constantState?.let {
+            rawStates[key] = it
+            rawFromPack[key] = packDrawable != null
+        }
+        return Raw(drawable.mutate(), packDrawable != null)
+    }
+
+    private fun render(drawable: Drawable, fromPack: Boolean, style: Style): Bitmap {
+        val s = style.sizePx
+        val out = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val adaptive = drawable as? AdaptiveIconDrawable
+        if (fromPack) {
+            drawFitted(canvas, drawable, s)
+            return out
+        }
+        if (adaptive != null) {
+            adaptive.setBounds(0, 0, s, s)
+            val mask = shapePath(style.shape, s) ?: adaptive.iconMask
+            val mono = if (style.themed && Build.VERSION.SDK_INT >= 33) adaptive.monochrome else null
+            val layers = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+            val layerCanvas = Canvas(layers)
+            val extra = s / 4
+            if (mono != null) {
+                layerCanvas.drawColor(style.themedBg)
+                mono.mutate()
+                mono.setBounds(-extra, -extra, s + extra, s + extra)
+                mono.setTint(style.themedFg)
+                mono.draw(layerCanvas)
+            } else {
+                adaptive.background?.let { bg ->
+                    bg.setBounds(-extra, -extra, s + extra, s + extra)
+                    bg.draw(layerCanvas)
+                }
+                adaptive.foreground?.let { fg ->
+                    fg.setBounds(-extra, -extra, s + extra, s + extra)
+                    fg.draw(layerCanvas)
+                }
+            }
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                shader = BitmapShader(layers, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            }
+            canvas.drawPath(mask, paint)
+            layers.recycle()
+            return out
+        }
+        // Legacy (non-adaptive) icon.
+        val shape = shapePath(style.shape, s)
+        if (shape == null) {
+            drawFitted(canvas, drawable, s)
+            return out
+        }
+        val probe = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        drawFitted(Canvas(probe), drawable, s)
+        val inset = (s * 0.06f).toInt().coerceAtLeast(2)
+        val fullBleed = listOf(
+            probe.getPixel(inset, inset), probe.getPixel(s - 1 - inset, inset),
+            probe.getPixel(inset, s - 1 - inset), probe.getPixel(s - 1 - inset, s - 1 - inset),
+        ).all { Color.alpha(it) > 230 }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        if (fullBleed) {
+            paint.shader = BitmapShader(probe, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            canvas.drawPath(shape, paint)
+        } else {
+            // Wrap the legacy icon in the shape so every icon on Home matches.
+            paint.color = if (style.themed) style.themedBg else Color.WHITE
+            canvas.drawPath(shape, paint)
+            val scaled = (s * 0.72f).toInt()
+            val offset = (s - scaled) / 2
+            canvas.save()
+            canvas.translate(offset.toFloat(), offset.toFloat())
+            canvas.scale(scaled / s.toFloat(), scaled / s.toFloat())
+            canvas.drawBitmap(probe, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            canvas.restore()
+        }
+        probe.recycle()
+        return out
+    }
+
+    private fun drawFitted(canvas: Canvas, drawable: Drawable, s: Int) {
+        val w = drawable.intrinsicWidth
+        val h = drawable.intrinsicHeight
+        if (w <= 0 || h <= 0 || w == h) {
+            drawable.setBounds(0, 0, s, s)
+        } else {
+            val scale = s / maxOf(w, h).toFloat()
+            val dw = (w * scale).toInt()
+            val dh = (h * scale).toInt()
+            drawable.setBounds((s - dw) / 2, (s - dh) / 2, (s - dw) / 2 + dw, (s - dh) / 2 + dh)
+        }
+        drawable.draw(canvas)
+    }
+
+    private fun loadPackIcon(packPackage: String?, packageName: String, className: String?): Drawable? {
         if (packPackage.isNullOrBlank()) return null
         val resources = runCatching { packageManager.getResourcesForApplication(packPackage) }.getOrNull() ?: return null
         val mapping = mappings(packPackage, resources)
@@ -90,18 +253,17 @@ class OeaIconController(private val context: Context) {
             .takeIf { it != 0 }
             ?: resources.getIdentifier(drawableName, "mipmap", packPackage)
         if (id == 0) return null
-        return runCatching { resources.getDrawable(id, null).constantState }.getOrNull()
+        return runCatching { resources.getDrawable(id, null) }.getOrNull()
     }
 
     private fun mappings(packPackage: String, resources: Resources): Map<String, String> {
-        if (componentMapPack == packPackage) return componentMap
+        packMappings[packPackage]?.let { return it }
         val xmlId = resources.getIdentifier("appfilter", "xml", packPackage)
             .takeIf { it != 0 }
             ?: resources.getIdentifier("app_filter", "xml", packPackage)
         if (xmlId == 0) {
-            componentMapPack = packPackage
-            componentMap = emptyMap()
-            return componentMap
+            packMappings[packPackage] = emptyMap()
+            return emptyMap()
         }
         val result = linkedMapOf<String, String>()
         runCatching {
@@ -121,8 +283,59 @@ class OeaIconController(private val context: Context) {
                 }
             }
         }
-        componentMapPack = packPackage
-        componentMap = result
+        packMappings[packPackage] = result
         return result
+    }
+
+    companion object {
+        @Volatile private var sharedInstance: OeaIconController? = null
+
+        fun shared(context: Context): OeaIconController = sharedInstance ?: synchronized(this) {
+            sharedInstance ?: OeaIconController(context.applicationContext).also { sharedInstance = it }
+        }
+
+        private val rawStates = ConcurrentHashMap<String, Drawable.ConstantState>()
+        private val rawFromPack = ConcurrentHashMap<String, Boolean>()
+        private val packMappings = ConcurrentHashMap<String, Map<String, String>>()
+        private val rendered = object : LruCache<String, Bitmap>(
+            (Runtime.getRuntime().maxMemory() / 7).coerceAtMost(56L * 1024 * 1024).toInt(),
+        ) {
+            override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+        }
+
+        /** Shape outline used by icons and folder tiles; null means the device's own mask. */
+        fun shapePath(shape: String, size: Int): Path? {
+            val s = size.toFloat()
+            return when (shape) {
+                "circle" -> Path().apply { addCircle(s / 2f, s / 2f, s / 2f, Path.Direction.CW) }
+                "rounded" -> Path().apply { addRoundRect(RectF(0f, 0f, s, s), s * 0.24f, s * 0.24f, Path.Direction.CW) }
+                "square" -> Path().apply { addRoundRect(RectF(0f, 0f, s, s), s * 0.08f, s * 0.08f, Path.Direction.CW) }
+                "teardrop" -> Path().apply {
+                    val r = s / 2f
+                    val small = s * 0.12f
+                    addRoundRect(RectF(0f, 0f, s, s), floatArrayOf(r, r, r, r, small, small, r, r), Path.Direction.CW)
+                }
+                "squircle" -> Path().apply {
+                    val half = s / 2f
+                    val steps = 96
+                    for (i in 0..steps) {
+                        val t = 2.0 * Math.PI * i / steps
+                        val c = cos(t)
+                        val n = sin(t)
+                        val x = half + half * sign(c) * abs(c).pow(0.5)
+                        val y = half + half * sign(n) * abs(n).pow(0.5)
+                        if (i == 0) moveTo(x.toFloat(), y.toFloat()) else lineTo(x.toFloat(), y.toFloat())
+                    }
+                    close()
+                }
+                else -> null
+            }
+        }
+
+        /** The device's own adaptive-icon mask, used when OEA's shape is "system". */
+        fun systemMask(size: Int): Path = AdaptiveIconDrawable(ColorDrawable(Color.WHITE), ColorDrawable(Color.TRANSPARENT)).run {
+            setBounds(0, 0, size, size)
+            Path(iconMask)
+        }
     }
 }

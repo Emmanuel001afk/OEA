@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Point
 import android.graphics.Rect
 import android.os.Build
+import android.provider.Settings
 import android.view.WindowManager
 import com.oea.launcher.model.OeaAppInfo
 
@@ -21,6 +22,22 @@ object OeaMultitaskLauncher {
         val freeformAdvertised: Boolean = false,
     )
 
+    /**
+     * Freeform needs either the system feature or Developer options →
+     * "Enable freeform windows" (then a restart on most phones).
+     */
+    fun freeformEnabled(context: Context): Boolean {
+        val pm = context.packageManager
+        if (pm.hasSystemFeature("android.software.freeform_window_management")) return true
+        val resolver = context.contentResolver
+        return runCatching { Settings.Global.getInt(resolver, "enable_freeform_support", 0) != 0 }.getOrDefault(false)
+    }
+
+    fun openDeveloperOptions(context: Context): Boolean = runCatching {
+        context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    }.getOrDefault(false)
+
     fun launchFloating(context: Context, app: OeaAppInfo): Result {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             return Result(false, "Floating tasks require Android 7.0 or newer.")
@@ -30,7 +47,8 @@ object OeaMultitaskLauncher {
         val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
             ?: return Result(false, "This app has no launchable activity.")
 
-        val freeformAdvertised = pm.hasSystemFeature("android.software.freeform_window_management")
+        val freeformAdvertised = pm.hasSystemFeature("android.software.freeform_window_management") ||
+            freeformEnabled(context)
         val bounds = calculateLaunchBounds(context)
             ?: return Result(false, "OEA could not determine the screen size for a floating window.", freeformAdvertised)
 
@@ -41,11 +59,15 @@ object OeaMultitaskLauncher {
         return runCatching {
             val options = ActivityOptions.makeBasic()
             options.launchBounds = bounds
-            context.startActivity(launchIntent, options.toBundle())
+            val bundle = options.toBundle()
+            // Phones keep their display in full-screen mode, where Android ignores
+            // launch bounds unless the task itself asks for freeform windowing.
+            bundle.putInt(KEY_LAUNCH_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
+            context.startActivity(launchIntent, bundle)
             val message = if (freeformAdvertised) {
-                "Android accepted the floating-window request. Use the system window controls to move or resize it. If it opens full-screen, the device or app declined freeform mode."
+                "Opening ${app.label} in a floating window. Drag its top bar to move it; drag an edge to resize."
             } else {
-                "Launch request sent. This device does not advertise freeform support; floating mode works only if its firmware enables it. If the app opens full-screen, Android did not honor the floating request."
+                "Floating windows are off on this phone. Turn on Developer options → \"Enable freeform windows\", restart, then try again."
             }
             Result(true, message, freeformAdvertised)
         }.getOrElse { error ->
@@ -56,6 +78,9 @@ object OeaMultitaskLauncher {
             )
         }
     }
+
+    private const val KEY_LAUNCH_WINDOWING_MODE = "android.activity.windowingMode"
+    private const val WINDOWING_MODE_FREEFORM = 5
 
     private fun calculateLaunchBounds(context: Context): Rect? {
         val width: Int

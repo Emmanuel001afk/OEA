@@ -13,18 +13,40 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 
+/**
+ * Live notification state shared with OEA Home: per-app badge counts and the
+ * current media session for At a Glance. Observers are called on the main thread.
+ */
 object OeaNotificationState {
  private val active=LinkedHashMap<String,StatusBarNotification>()
- @Synchronized fun update(sbn:StatusBarNotification){active[sbn.key]=sbn}
- @Synchronized fun remove(sbn:StatusBarNotification){active.remove(sbn.key)}
- @Synchronized fun clear(){active.clear()}
- @Synchronized fun countForPackage(packageName:String)=active.values.count{it.packageName==packageName}
+ private val listeners=LinkedHashSet<()->Unit>()
+ private val main=android.os.Handler(android.os.Looper.getMainLooper())
+ private var pending=false
+ @Volatile var connected=false
+  private set
+ @Synchronized fun update(sbn:StatusBarNotification){active[sbn.key]=sbn;changed()}
+ @Synchronized fun remove(sbn:StatusBarNotification){active.remove(sbn.key);changed()}
+ @Synchronized fun clear(){active.clear();changed()}
+ @Synchronized fun replaceAll(values:Array<StatusBarNotification>?){active.clear();values?.forEach{active[it.key]=it};changed()}
+ fun setConnected(value:Boolean){connected=value;changed()}
+ /** Notifications that should produce a badge (ongoing/system noise excluded). */
+ @Synchronized fun countForPackage(packageName:String)=active.values.count{it.packageName==packageName&&it.isClearable&&!it.isOngoing&&(it.notification.flags and Notification.FLAG_GROUP_SUMMARY)==0}
+ @Synchronized fun media():StatusBarNotification?=active.values.lastOrNull{sbn->val n=sbn.notification;n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)||n.category==Notification.CATEGORY_TRANSPORT}
+ fun addListener(l:()->Unit){synchronized(listeners){listeners+=l}}
+ fun removeListener(l:()->Unit){synchronized(listeners){listeners-=l}}
+ private fun changed(){
+  if(pending)return
+  pending=true
+  // Coalesce bursts (e.g. a chat app posting several notifications at once).
+  main.postDelayed({pending=false;val copy=synchronized(listeners){listeners.toList()};copy.forEach{runCatching{it()}}},120)
+ }
 }
 class OeaNotificationListener:NotificationListenerService(){
  private var island:View?=null
  override fun onNotificationPosted(sbn:StatusBarNotification){OeaNotificationState.update(sbn);if(isMediaNotification(sbn))showDynamicIsland(sbn)}
  override fun onNotificationRemoved(sbn:StatusBarNotification){OeaNotificationState.remove(sbn);if(isMediaNotification(sbn))hideDynamicIsland()}
- override fun onListenerDisconnected(){OeaNotificationState.clear();hideDynamicIsland()}
+ override fun onListenerConnected(){OeaNotificationState.setConnected(true);runCatching{OeaNotificationState.replaceAll(activeNotifications)}}
+ override fun onListenerDisconnected(){OeaNotificationState.clear();OeaNotificationState.setConnected(false);hideDynamicIsland()}
  private fun isMediaNotification(sbn:StatusBarNotification):Boolean{
   val n=sbn.notification;val pkg=sbn.packageName.lowercase()
   return n.category==Notification.CATEGORY_TRANSPORT||pkg.contains("spotify")||n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)

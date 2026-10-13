@@ -8,9 +8,18 @@ import java.util.concurrent.TimeUnit
 /**
  * Uses only authority Android actually grants OEA. Ordinary Device Admin is
  * detected separately because it cannot suspend arbitrary packages.
+ *
+ * Two freezing modes exist:
+ *  - System freeze (Device Owner or root): Android suspends the package.
+ *  - OEA Freeze (every other device, no root/ADB/PC): OEA hibernates the app.
+ *    OEA Assistant force-stops it through Android's App info page, which puts
+ *    the app in Android's "stopped" state (no background work, alarms or
+ *    broadcasts until it is opened again), and OEA blocks launching it from
+ *    Home and the drawer until it is unfrozen.
  */
 object OeaAppFreezer {
     enum class Backend { DEVICE_OWNER, ROOT, DEVICE_ADMIN, NONE }
+    enum class Mode { SYSTEM, OEA }
 
     @Volatile private var rootAvailableCache: Boolean? = null
 
@@ -70,6 +79,31 @@ object OeaAppFreezer {
 
     fun frozenPackages(context: Context): Set<String> =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet(KEY_FROZEN, emptySet()).orEmpty()
+
+    /** SYSTEM when Android grants real package suspension, otherwise OEA Freeze. */
+    fun mode(context: Context): Mode = when (backend(context)) {
+        Backend.DEVICE_OWNER, Backend.ROOT -> Mode.SYSTEM
+        Backend.DEVICE_ADMIN, Backend.NONE -> Mode.OEA
+    }
+
+    /** Apps frozen by OEA Freeze (hibernated). */
+    fun hibernatedPackages(context: Context): Set<String> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet(KEY_HIBERNATED, emptySet()).orEmpty()
+
+    fun setHibernated(context: Context, packages: Collection<String>, hibernated: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val current = prefs.getStringSet(KEY_HIBERNATED, emptySet()).orEmpty().toMutableSet()
+        val targets = packages.filter { it.isNotBlank() && it != context.packageName }
+        if (hibernated) current.addAll(targets) else current.removeAll(targets.toSet())
+        prefs.edit().putStringSet(KEY_HIBERNATED, current).apply()
+    }
+
+    /** True when the app is frozen by either mode. */
+    fun isFrozen(context: Context, packageName: String): Boolean =
+        packageName in frozenPackages(context) || packageName in hibernatedPackages(context)
+
+    /** Every frozen package, whichever mode froze it. */
+    fun allFrozen(context: Context): Set<String> = frozenPackages(context) + hibernatedPackages(context)
 
     fun syncActualState(context: Context, candidatePackages: Collection<String> = emptyList()) {
         val active = backend(context)
@@ -134,4 +168,5 @@ object OeaAppFreezer {
 
     private const val PREFS = "oea_app_freezer"
     private const val KEY_FROZEN = "frozen_packages"
+    private const val KEY_HIBERNATED = "hibernated_packages"
 }

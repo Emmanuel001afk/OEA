@@ -33,128 +33,150 @@ jobs:
       - name: Verify App Freezer integration
         run: |
           set -euo pipefail
-          grep -Fq "setPackagesSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
-          grep -Fq "isPackageSuspended" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
-          grep -Fq "rootSuspensionState(packageName)" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
-          grep -Fq "Android did not confirm the requested frozen state" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
-          grep -Fq "android.intent.category.HOME" oea/src/main/AndroidManifest.xml
-          grep -Fq "android.intent.category.DEFAULT" oea/src/main/AndroidManifest.xml
-          grep -Fq "dumpsys package" oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
-          grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "freezerOperationRunning" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          ! grep -Fq "adb shell dpm set-device-owner" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          ! grep -Fq "Copy Device Owner command" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          ! grep -Fq "DEVICE OWNER SETUP" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "loadInstalledFreezerApps" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
-          grep -Fq "originalDndFilter" oea/src/main/java/com/oea/launcher/gameboost/OeaGameBoostService.kt
-          grep -Fq "beginDndSession" oea/src/main/java/com/oea/launcher/gameboost/OeaGameBoostService.kt
-          grep -Fq "calculateLaunchBounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "options.launchBounds = bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "Intent.FLAG_ACTIVITY_NEW_TASK" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT" oea/src/main/java/com/oea/launcher/split/OeaSplitLauncher.kt
-          ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" oea/src/main/java/com/oea/launcher/split/OeaSplitLauncher.kt
-          grep -Fq "Search apps or package names" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "Overview" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "UsageStatsManager" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'overviewTab("Recent use")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "Clear OEA list" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "Restore cards" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "Android tasks were not closed" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'overviewTab("All apps")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "overviewNow - usedAt <= sevenDaysMillis" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq '"Lock this app"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "Open as floating window" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "App info / force stop" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "android:excludeFromRecents=\"true\"" oea/src/main/AndroidManifest.xml
-          grep -Fq "val cardRail = android.widget.HorizontalScrollView(this)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "dp(284)" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq "does not provide OEA a live task snapshot" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'private fun openDrawer()' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'DecelerateInterpolator' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'org.adw.launcher.THEMES' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
-          grep -Fq 'com.novalauncher.THEME' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
-          grep -Fq 'External icon pack' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'private fun applyIconShape' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq '"squircle"' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'outline.setConvexPath(path)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'widgetScroll' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'val count = cols() * 4' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'row(box, "Animation speed"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'store.animationDuration(180)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq '.removePrefix("oea_widget:")?.toIntOrNull()' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'animate().alpha(1f).scaleX(1f).scaleY(1f)' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'ActivityOptions.makeCustomAnimation' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'section(box, "ALLOWED NUMBERS")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'section(box, "BLOCKED CALL HISTORY")' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'class OeaPhoneActivity' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'private fun loadContacts()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'private fun loadBlockedHistory()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'private const val TAB_DIAL' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'private fun renderContacts()' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'rowClick: (() -> Unit)? = null' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'action = { placeCall(contact.phone) }' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'addTextChangedListener' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'placeCall(contact.phone)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'private fun openDialer(uri: Uri)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'private var callBlockerTab = "blocked"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq '"blocked" to "Blocked"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq '"allowed" to "Allowed"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq '"rules" to "Rules"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq '"history" to "History"' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          python3 - <<'PY'
-          from pathlib import Path
-          source = Path("oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt").read_text()
-          render_block = source.split("private fun renderOeaTools()", 1)[1].split("private fun drawerTile", 1)[0]
-          tools_list = render_block.split("val tools = listOf(", 1)[1].split(")", 1)[0]
-          forbidden = ("App Freezer", "Multitask", "Split Screen")
-          found = [name for name in forbidden if name in tools_list]
-          if found:
-              raise SystemExit("System-only tools leaked into All Apps OEA Systems grid: " + ", ".join(found))
-          PY
-          grep -Fq "Open OEA multitasking overview" oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq "currentWindowMetrics.bounds" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "preferredWidthDp = 420" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "preferredHeightDp = 560" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          grep -Fq "android.software.freeform_window_management" oea/src/main/java/com/oea/launcher/multitask/OeaMultitaskLauncher.kt
-          grep -Fq 'org.adw.launcher.THEMES' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
-          grep -Fq 'com.novalauncher.THEME' oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
-          grep -Fq 'External icon pack' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'private fun applyIconShape' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq '"squircle"' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'fun getAllowList' oea/src/main/java/com/oea/launcher/callblocker/OeaCallScreeningService.kt
-          grep -Fq 'fun blockedHistory' oea/src/main/java/com/oea/launcher/callblocker/OeaCallScreeningService.kt
-          grep -Fq 'BLOCKED CALL HISTORY' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'ALLOWED NUMBERS' oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
-          grep -Fq 'Phone number or USSD code' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'TAB_CONTACTS' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'ACTION_CHANGE_DEFAULT_DIALER' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'consumeDialIntent(intent)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'private fun consumeDialIntent(source: Intent?)' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          ! grep -Fq 'startActivity(Intent(Intent.ACTION_CALL' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'Choose SIM for this call' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'callCapablePhoneAccounts' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'Compact floating card' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'Incoming-call flash alert' oea/src/main/java/com/oea/launcher/phone/OeaPhoneActivity.kt
-          grep -Fq 'setTorchMode' oea/src/main/java/com/oea/launcher/phone/OeaInCallService.kt
-          grep -Fq 'tag = widget.appWidgetId' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'val childId = child.tag as? Int' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          grep -Fq 'renderedPages.toList().forEach { refreshPage(it) }' oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
-          python3 - <<'PY'
-          from pathlib import Path
-          source = Path("oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt").read_text()
-          render_block = source.split("private fun renderOeaTools()", 1)[1].split("private fun drawerTile", 1)[0]
-          tools_list = render_block.split("val tools = listOf(", 1)[1].split(")", 1)[0]
-          forbidden = ("App Freezer", "Multitask", "Split Screen")
-          found = [name for name in forbidden if name in tools_list]
-          if found:
-              raise SystemExit("System-only tools leaked into All Apps OEA Systems grid: " + ", ".join(found))
-          PY
+          FREEZER=oea/src/main/java/com/oea/launcher/applock/OeaAppFreezer.kt
+          TOOLS=oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          MANIFEST=oea/src/main/AndroidManifest.xml
+          grep -Fq "setPackagesSuspended" "$FREEZER"
+          grep -Fq "isPackageSuspended" "$FREEZER"
+          grep -Fq "rootSuspensionState(packageName)" "$FREEZER"
+          grep -Fq "Android did not confirm the requested frozen state" "$FREEZER"
+          grep -Fq "dumpsys package" "$FREEZER"
+          grep -Fq "fun hibernatedPackages" "$FREEZER"
+          grep -Fq "android.intent.category.HOME" "$MANIFEST"
+          grep -Fq "android.intent.category.DEFAULT" "$MANIFEST"
+          grep -Fq "QUERY_ALL_PACKAGES" "$MANIFEST"
+          grep -Fq "SELECT VISIBLE" "$TOOLS"
+          grep -Fq "REFRESH STATE" "$TOOLS"
+          grep -Fq "freezerOperationRunning" "$TOOLS"
+          grep -Fq "loadInstalledFreezerApps" "$TOOLS"
+          ! grep -Fq "adb shell dpm set-device-owner" "$TOOLS"
+          ! grep -Fq "Copy Device Owner command" "$TOOLS"
+          ! grep -Fq "DEVICE OWNER SETUP" "$TOOLS"
+      - name: Verify launcher identity and required launcher features
+        run: |
+          set -euo pipefail
+          SRC=oea/src/main/java/com/oea/launcher
+          MANIFEST=oea/src/main/AndroidManifest.xml
+          WS=$SRC/workspace/OeaWorkspace.kt
+          # Home role, wallpaper window and own-app identities.
+          grep -Fq 'android:excludeFromRecents="true"' "$MANIFEST"
+          grep -Fq 'android:theme="@style/OeaHomeTheme"' "$MANIFEST"
+          grep -Fq 'android:windowShowWallpaper' oea/src/main/res/values/styles.xml
+          grep -Fq 'android.content.pm.action.CONFIRM_PIN_SHORTCUT' "$MANIFEST"
+          grep -Fq 'android.content.pm.action.CONFIRM_PIN_APPWIDGET' "$MANIFEST"
+          grep -Fq 'com.oea.launcher.gameboost.OeaGameBoostActivity' "$MANIFEST"
+          grep -Fq 'android:label="Game Boost"' "$MANIFEST"
+          grep -Fq '@drawable/ic_oea_game_boost' "$MANIFEST"
+          grep -Fq 'android:label="OEA Settings"' "$MANIFEST"
+          grep -Fq 'android.permission.BIND_ACCESSIBILITY_SERVICE' "$MANIFEST"
+          grep -Fq 'android.permission.SET_WALLPAPER' "$MANIFEST"
+          grep -Fq 'android.permission.REQUEST_DELETE_PACKAGES' "$MANIFEST"
+          test "$(grep -c 'android.intent.category.LAUNCHER' "$MANIFEST")" -ge 6
+          # OEA Home: launching, gestures, drag and drop, widgets, pairs.
+          grep -Fq 'fun onHomeIntent(alreadyOnHome: Boolean)' "$WS"
+          grep -Fq 'startMainActivity' "$WS"
+          grep -Fq 'makeClipRevealAnimation' "$WS"
+          grep -Fq 'requestDisallowInterceptTouchEvent(false)' "$WS"
+          grep -Fq 'DecelerateInterpolator' "$WS"
+          grep -Fq 'private fun widgetRowsOnPage' "$WS"
+          grep -Fq 'fun addPinnedWidget' "$WS"
+          grep -Fq 'OeaWorkspaceStore.KIND_PAIR' "$WS"
+          grep -Fq 'NotificationListenerService.requestRebind' "$WS"
+          grep -Fq 'class OeaDrawerView' $SRC/workspace/OeaDrawerView.kt
+          grep -Fq 'class AlphabetRail' $SRC/workspace/OeaDrawerView.kt
+          grep -Fq 'startAppWidgetConfigureActivityForResult' $SRC/widgets/OeaWidgetController.kt
+          grep -Fq 'ACTION_APPWIDGET_BIND' $SRC/widgets/OeaWidgetController.kt
+          grep -Fq 'hasShortcutHostPermission' $SRC/shortcuts/OeaShortcutController.kt
+          grep -Fq 'startShortcut' $SRC/shortcuts/OeaShortcutController.kt
+          grep -Fq 'fun calculate' $SRC/search/OeaSearchController.kt
+          ! grep -Fq 'renderOeaTools' "$WS"
+          # Icon packs and shapes.
+          grep -Fq 'org.adw.launcher.THEMES' $SRC/icons/OeaIconController.kt
+          grep -Fq 'com.novalauncher.THEME' $SRC/icons/OeaIconController.kt
+          grep -Fq '"squircle"' $SRC/icons/OeaIconController.kt
+          grep -Fq 'External icon pack' $SRC/OeaSystemToolsActivity.kt
+          grep -Fq '"Animation speed"' $SRC/OeaSystemToolsActivity.kt
+          # OEA Assistant (lock, notifications, Recents, no-root freezer).
+          grep -Fq 'GLOBAL_ACTION_LOCK_SCREEN' $SRC/assistant/OeaAssistant.kt
+          grep -Fq 'ACTION_APPLICATION_DETAILS_SETTINGS' $SRC/assistant/OeaAssistantService.kt
+          grep -Fq 'android:id/button1' $SRC/assistant/OeaAssistantService.kt
+      - name: Verify multitasking, Overview, Game Boost, Phone and Call Blocker
+        run: |
+          set -euo pipefail
+          SRC=oea/src/main/java/com/oea/launcher
+          TOOLS=$SRC/OeaSystemToolsActivity.kt
+          grep -Fq "originalDndFilter" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "beginDndSession" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "class OeaGameBoostActivity" $SRC/gameboost/OeaGameBoostActivity.kt
+          grep -Fq "OeaGameBoostService.ACTION_REFRESH" $SRC/gameboost/OeaGameBoostActivity.kt
+          grep -Fq "calculateLaunchBounds" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "options.launchBounds = bounds" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "Intent.FLAG_ACTIVITY_NEW_TASK" $SRC/multitask/OeaMultitaskLauncher.kt
+          ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "currentWindowMetrics.bounds" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "preferredWidthDp = 420" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "preferredHeightDp = 560" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "android.software.freeform_window_management" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "android.activity.windowingMode" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT" $SRC/split/OeaSplitLauncher.kt
+          ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" $SRC/split/OeaSplitLauncher.kt
+          grep -Fq "toggleSplitScreen" $SRC/split/OeaSplitLauncher.kt
+          grep -Fq "Search apps or package names" "$TOOLS"
+          grep -Fq "Overview" "$TOOLS"
+          grep -Fq "UsageStatsManager" "$TOOLS"
+          grep -Fq 'overviewTab("Recent use")' "$TOOLS"
+          grep -Fq 'overviewTab("All apps")' "$TOOLS"
+          grep -Fq "Clear OEA list" "$TOOLS"
+          grep -Fq "Restore cards" "$TOOLS"
+          grep -Fq "Android tasks were not closed" "$TOOLS"
+          grep -Fq "overviewNow - usedAt <= sevenDaysMillis" "$TOOLS"
+          grep -Fq '"Lock this app"' "$TOOLS"
+          grep -Fq "Open as floating window" "$TOOLS"
+          grep -Fq "App info / force stop" "$TOOLS"
+          grep -Fq "val cardRail = HorizontalScrollView(this)" "$TOOLS"
+          grep -Fq "dp(284)" "$TOOLS"
+          grep -Fq "does not provide OEA a live task snapshot" "$TOOLS"
+          grep -Fq '"call_blocker" -> { openActivity(OeaCallBlockerActivity::class.java)' "$TOOLS"
+          grep -Fq '"blocked" to "Blocked", "allowed" to "Allowed", "rules" to "Rules", "history" to "History"' $SRC/callblocker/OeaCallBlockerActivity.kt
+          grep -Fq 'fun getAllowList' $SRC/callblocker/OeaCallScreeningService.kt
+          grep -Fq 'fun blockedHistory' $SRC/callblocker/OeaCallScreeningService.kt
+          grep -Fq 'class OeaPhoneActivity' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun loadContacts()' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun loadBlockedHistory()' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'private const val TAB_DIAL' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun renderContacts()' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'rowClick: (() -> Unit)? = null' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'action = { placeCall(contact.phone) }' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'addTextChangedListener' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'placeCall(contact.phone)' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun openDialer(uri: Uri)' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'Phone number or USSD code' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'TAB_CONTACTS' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'ACTION_CHANGE_DEFAULT_DIALER' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'consumeDialIntent(intent)' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'private fun consumeDialIntent(source: Intent?)' $SRC/phone/OeaPhoneActivity.kt
+          ! grep -Fq 'startActivity(Intent(Intent.ACTION_CALL' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'Choose SIM for this call' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'callCapablePhoneAccounts' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'Compact floating card' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'Incoming-call flash alert' $SRC/phone/OeaPhoneActivity.kt
+          grep -Fq 'setTorchMode' $SRC/phone/OeaInCallService.kt
       - name: Build standalone OEA Launcher APK
-        run: ./gradlew :oea:assembleRelease --stacktrace
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:assembleRelease --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+            # Surface compiler/lint errors as annotations so they are visible
+            # without downloading the full log.
+            {
+              grep -E '^e: ' "$RUNNER_TEMP/gradle.log" || true
+              grep -E '(^|[^A-Za-z])(error|Error|ERROR):' "$RUNNER_TEMP/gradle.log" | grep -vE '^e: ' || true
+              grep -A4 'What went wrong' "$RUNNER_TEMP/gradle.log" || true
+            } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -10 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
       - name: Verify APK identity
         run: |
           APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"

@@ -14,6 +14,11 @@
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Launcher essentials: apply wallpapers, pull down the notification shade
+         from a Home gesture, and open Android's uninstall confirmation. -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -29,11 +34,22 @@
         android:label="OEA Launcher"
         android:allowBackup="false"
         android:supportsRtl="true">
+        <!-- OEA Home: the default-launcher activity. It stays out of Recents,
+             survives configuration changes without recreation and keeps the
+             wallpaper visible behind a transparent, edge-to-edge window. -->
         <activity
             android:name=".OeaLauncherActivity"
             android:exported="true"
             android:excludeFromRecents="true"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:clearTaskOnLaunch="true"
+            android:stateNotNeeded="true"
+            android:resumeWhilePausing="true"
+            android:resizeableActivity="true"
+            android:screenOrientation="nosensor"
+            android:windowSoftInputMode="adjustNothing|stateAlwaysHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
+            android:theme="@style/OeaHomeTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
@@ -41,14 +57,82 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- OEA Settings: its own task, reachable from Home and as an app. -->
         <activity
             android:name=".OeaSystemToolsActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:label="OEA Settings"
+            android:taskAffinity="com.oea.launcher.settings"
+            android:theme="@style/OeaPanelTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity-alias
+            android:name=".OeaSettingsAlias"
+            android:exported="true"
+            android:label="OEA Settings"
+            android:icon="@drawable/ic_oea_settings"
+            android:roundIcon="@drawable/ic_oea_settings"
+            android:targetActivity=".OeaSystemToolsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+        <!-- Game Boost: a standalone app with its own icon and task, usable even
+             when OEA is not the default launcher. -->
+        <activity
+            android:name="com.oea.launcher.gameboost.OeaGameBoostActivity"
+            android:exported="true"
+            android:label="Game Boost"
+            android:icon="@drawable/ic_oea_game_boost"
+            android:roundIcon="@drawable/ic_oea_game_boost"
+            android:taskAffinity="com.oea.launcher.gameboost"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaGameBoostTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- "Add to Home screen" requests (pinned shortcuts and widgets). -->
+        <activity
+            android:name=".OeaPinRequestActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/OeaTranslucentTheme">
+            <intent-filter>
+                <action android:name="android.content.pm.action.CONFIRM_PIN_SHORTCUT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.content.pm.action.CONFIRM_PIN_APPWIDGET" />
+            </intent-filter>
+        </activity>
+        <!-- OEA Assistant: accessibility service for lock, notifications,
+             Recents, split screen and the no-root App Freezer. -->
+        <service
+            android:name="com.oea.launcher.assistant.OeaAssistantService"
+            android:exported="true"
+            android:label="@string/oea_assistant_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/oea_assistant" />
+        </service>
         <activity
             android:name="com.oea.launcher.phone.OeaPhoneActivity"
             android:exported="true"
             android:label="Phone"
             android:icon="@drawable/ic_oea_phone"
+            android:roundIcon="@drawable/ic_oea_phone"
+            android:taskAffinity="com.oea.launcher.phone"
             android:theme="@style/OeaTheme">
             <!-- The no-data DIAL filter is required for Android's default-dialer
                  role resolver; the tel filter handles links and prefilled numbers. -->
@@ -110,6 +194,8 @@
             android:exported="true"
             android:label="Call Blocker"
             android:icon="@drawable/ic_oea_call_blocker"
+            android:roundIcon="@drawable/ic_oea_call_blocker"
+            android:taskAffinity="com.oea.launcher.callblocker"
             android:theme="@style/OeaTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
