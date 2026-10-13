@@ -120,6 +120,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val homeLayer = FrameLayout(context)
     private val homeColumn = LinearLayout(context)
     internal val glance = OeaGlanceView(context)
+    private val dynamicIsland = OeaDynamicIslandView(context)
+    private val appLoadStatus = TextView(context)
     private val topSearchHost = FrameLayout(context)
     internal val pager = OeaPagedView(context)
     private val indicator = OeaPageIndicator(context)
@@ -194,6 +196,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         homeColumn.clipToPadding = false
         homeLayer.addView(homeColumn, LayoutParams(-1, -1))
 
+        appLoadStatus.apply {
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            visibility = GONE
+            isClickable = false
+            isFocusable = false
+        }
+        homeLayer.addView(appLoadStatus, LayoutParams(-2, -2, Gravity.CENTER))
+
+        homeColumn.addView(dynamicIsland, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
         glance.onOpenOverview = { openSystemTool("multitask") }
         homeColumn.addView(glance, LinearLayout.LayoutParams(-1, -2).apply {
             leftMargin = dp(26)
@@ -279,6 +292,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     /** Re-applies colours to every piece of chrome (not the pages themselves). */
     private fun applyChrome() {
         kit.palette = palette
+        appLoadStatus.setTextColor(palette.text)
+        appLoadStatus.background = kit.rounded(palette.cardHigh, 22, palette.stroke, 1)
+        dynamicIsland.setPalette(palette)
         scrim.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(palette.scrimTop, Color.TRANSPARENT, Color.TRANSPARENT, palette.scrimBottom),
@@ -330,6 +346,22 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     internal fun insetBottom() = max(insetBottom, imeBottom)
 
     // =============================================================== lifecycle
+
+    /** Small, non-blocking status affordance while the engine hydrates app data. */
+    fun setAppLoadStatus(message: String?, retry: (() -> Unit)? = null) {
+        if (message.isNullOrBlank()) {
+            appLoadStatus.animate().cancel()
+            appLoadStatus.visibility = GONE
+            appLoadStatus.setOnClickListener(null)
+            return
+        }
+        appLoadStatus.text = message
+        appLoadStatus.contentDescription = message
+        appLoadStatus.isClickable = retry != null
+        appLoadStatus.isFocusable = retry != null
+        appLoadStatus.setOnClickListener { retry?.invoke() }
+        appLoadStatus.visibility = VISIBLE
+    }
 
     fun attachHost(activity: Activity?) {
         hostActivity = activity
@@ -389,6 +421,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             refreshBadges()
         }
         glance.refresh()
+        dynamicIsland.refresh()
         renderBanner()
         rebindNotificationListener()
         updateSystemBars()

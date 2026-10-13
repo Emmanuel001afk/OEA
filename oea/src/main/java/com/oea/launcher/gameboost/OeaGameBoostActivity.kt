@@ -41,6 +41,7 @@ import com.oea.launcher.model.OeaAppModel
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
 import java.util.concurrent.Executors
@@ -53,7 +54,9 @@ import java.util.concurrent.Executors
  */
 class OeaGameBoostActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
-    private val io = Executors.newSingleThreadExecutor()
+    private val io = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaGameBoostApps").apply { isDaemon = true }
+    }
     private lateinit var palette: OeaPalette
     private lateinit var kit: OeaKit
     private lateinit var scroll: ScrollView
@@ -68,31 +71,36 @@ class OeaGameBoostActivity : Activity() {
     private var batteryCaption: TextView? = null
     private val statsTick = object : Runnable {
         override fun run() {
-            updateStats()
+            runCatching { updateStats() }
+                .onFailure { android.util.Log.w("OeaGameBoostActivity", "Could not refresh system stats", it) }
             handler.postDelayed(this, 2000L)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        OeaInsets.edgeToEdge(window, lightBars = false)
-        val root = FrameLayout(this)
-        scroll = ScrollView(this).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            clipToPadding = false
+        try {
+            OeaInsets.edgeToEdge(window, lightBars = false)
+            val root = FrameLayout(this)
+            scroll = ScrollView(this).apply {
+                isFillViewport = true
+                isVerticalScrollBarEnabled = false
+                clipToPadding = false
+            }
+            content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            scroll.addView(content, FrameLayout.LayoutParams(-1, -2))
+            root.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+            root.setOnApplyWindowInsetsListener { _, insets ->
+                val bars = OeaInsets.bars(insets)
+                scroll.setPadding(bars[0], bars[1], bars[2], bars[3])
+                insets
+            }
+            setContentView(root)
+            render()
+            loadApps()
+        } catch (error: Exception) {
+            OeaScreenFailure.show(this, "Game Boost", error)
         }
-        content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(content, FrameLayout.LayoutParams(-1, -2))
-        root.addView(scroll, FrameLayout.LayoutParams(-1, -1))
-        root.setOnApplyWindowInsetsListener { _, insets ->
-            val bars = OeaInsets.bars(insets)
-            scroll.setPadding(bars[0], bars[1], bars[2], bars[3])
-            insets
-        }
-        setContentView(root)
-        render()
-        loadApps()
     }
 
     override fun onResume() {
@@ -106,6 +114,12 @@ class OeaGameBoostActivity : Activity() {
         super.onPause()
     }
 
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        io.shutdownNow()
+        super.onDestroy()
+    }
+
     private fun loadApps() {
         io.execute {
             val apps = runCatching { OeaAppModel(this).query() }.getOrDefault(emptyList())
@@ -113,9 +127,13 @@ class OeaGameBoostActivity : Activity() {
                 .distinctBy { it.packageName }
             val found = runCatching { OeaGameBoostStore.detectedGames(this) }.getOrDefault(emptySet())
             if (OeaGameBoostStore.enabled(this)) runCatching { OeaGameBoostStore.syncDetectedGames(this) }
-            OeaIconController.shared(this).preload(apps.filter { it.packageName in found || it.packageName in OeaGameBoostStore.games(this) }
-                .map { it.packageName to it.className })
+            runCatching {
+                OeaIconController.shared(this).preload(apps.filter {
+                    it.packageName in found || it.packageName in OeaGameBoostStore.games(this)
+                }.map { it.packageName to it.className })
+            }.onFailure { android.util.Log.w("OeaGameBoostActivity", "Could not preload game icons", it) }
             handler.post {
+                if (isDestroyed) return@post
                 installedApps = apps
                 detected = found
                 loaded = true
@@ -174,6 +192,14 @@ class OeaGameBoostActivity : Activity() {
     // ================================================================ render
 
     private fun render() {
+        try {
+            renderContent()
+        } catch (error: Exception) {
+            OeaScreenFailure.show(this, "Game Boost", error)
+        }
+    }
+
+    private fun renderContent() {
         val y = scroll.scrollY
         palette = gamePalette()
         kit = OeaKit(this, palette)

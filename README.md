@@ -8,7 +8,9 @@ The active launcher path is:
 
 `OeaLauncherActivity → OeaHomeController → OeaRuntime → OeaLauncherEngine → OeaWorkspace`
 
-OEA owns the home surface, app model, workspace persistence, drawer, dock, folders, shortcuts, gestures, themes, and system-feature integrations.
+OEA owns the home surface, app model, workspace persistence, drawer, dock, folders, shortcuts, gestures, themes, and system-feature integrations. The engine is initialized lazily, loads the app catalogue away from the UI thread, retains the last good workspace on failure, and publishes its state for future engine-owned features.
+
+See [Launcher engine and live activities](docs/launcher-engine-and-live-activities.md) for the lifecycle boundaries, stability rules, Dynamic Island-style notification design, platform constraints, and verification checklist.
 
 ## OEA Systems
 
@@ -26,6 +28,7 @@ OEA owns the home surface, app model, workspace persistence, drawer, dock, folde
 - Long-press app actions, hiding and app-freezer access.
 - Wallpaper-derived launcher theme colors.
 - Native Android launcher shortcuts.
+- Home-only live-activity capsule for charging, supported calls, media sessions, and compatible notification actions (requires notification access for app notification content).
 
 ## Independence
 

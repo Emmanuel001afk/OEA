@@ -42,12 +42,17 @@ class OeaInCallService : InCallService() {
 
     private val callback = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) {
+            OeaCallState.notifyChanged()
             if (state == Call.STATE_RINGING) {
                 if (interceptIfBlocked(call)) return
                 startFlash()
             } else {
                 stopFlash()
             }
+        }
+
+        override fun onDetailsChanged(call: Call, details: Call.Details) {
+            OeaCallState.notifyChanged()
         }
     }
 
@@ -117,6 +122,27 @@ class OeaInCallService : InCallService() {
     }
 }
 
+/** Observable state from OEA's default-dialer connection for the Home capsule. */
 object OeaCallState {
-    @Volatile var current: Call? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val listeners = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+
+    @Volatile
+    var current: Call? = null
+        set(value) {
+            field = value
+            notifyChanged()
+        }
+
+    fun addListener(listener: () -> Unit) {
+        listeners += listener
+    }
+
+    fun removeListener(listener: () -> Unit) {
+        listeners -= listener
+    }
+
+    fun notifyChanged() {
+        main.post { listeners.forEach { listener -> runCatching { listener() } } }
+    }
 }
