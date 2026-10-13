@@ -712,7 +712,7 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         OeaAppFreezer.setHibernated(context, listOf(pkg), true)
         w.refreshBadges()
         val start = OeaAssistant.forceStopWhenReady(context, listOf(pkg), homeIntent()) { stopped, _ ->
-            w.toast(if (pkg in stopped) "${app.label} frozen and asleep" else "${app.label} frozen in OEA. Android will stop it the next time OEA Assistant is active.")
+            w.toast(if (pkg in stopped) "${app.label} frozen and asleep" else "${app.label} frozen in OEA. Force stop was skipped; use Freezer › ⋮ › Put frozen apps back to sleep.")
         }
         when (start) {
             OeaAssistant.ForceStopStart.STARTED -> Unit

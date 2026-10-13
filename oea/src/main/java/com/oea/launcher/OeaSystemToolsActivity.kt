@@ -993,7 +993,7 @@ open class OeaSystemToolsActivity : Activity() {
             freezerToast(when {
                 failed.isEmpty() && stopped.size == 1 -> "Frozen and asleep."
                 failed.isEmpty() -> "${stopped.size} apps frozen and asleep."
-                stopped.isEmpty() -> "Frozen in OEA. Android will stop them the next time OEA Assistant is active."
+                stopped.isEmpty() -> "Frozen in OEA. OEA Assistant wasn't running, so Force stop was skipped (⋮ › Put frozen apps back to sleep)."
                 else -> "${stopped.size} asleep • ${failed.size} frozen in OEA (Android didn't confirm Force stop)."
             })
         }
