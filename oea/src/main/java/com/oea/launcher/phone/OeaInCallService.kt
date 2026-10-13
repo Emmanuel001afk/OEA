@@ -314,11 +314,16 @@ object OeaCallState {
         main.post { listeners.forEach { listener -> runCatching { listener() } } }
     }
 
-    fun isMuted(): Boolean = audioState?.isMuted == true
+    /** Telecom's audio state: the last callback value, else asked from the service directly. */
+    @Suppress("DEPRECATION")
+    private fun currentAudio(): CallAudioState? =
+        audioState ?: service?.get()?.let { svc -> runCatching { svc.callAudioState }.getOrNull() }
 
-    fun route(): Int = audioState?.route ?: CallAudioState.ROUTE_EARPIECE
+    fun isMuted(): Boolean = currentAudio()?.isMuted == true
 
-    fun supportedRoutes(): Int = audioState?.supportedRouteMask ?: (CallAudioState.ROUTE_EARPIECE or CallAudioState.ROUTE_SPEAKER)
+    fun route(): Int = currentAudio()?.route ?: CallAudioState.ROUTE_EARPIECE
+
+    fun supportedRoutes(): Int = currentAudio()?.supportedRouteMask ?: (CallAudioState.ROUTE_EARPIECE or CallAudioState.ROUTE_SPEAKER)
 
     fun hasRoute(route: Int): Boolean = (supportedRoutes() and route) != 0
 

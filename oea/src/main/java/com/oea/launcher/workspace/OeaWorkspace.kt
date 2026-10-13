@@ -969,13 +969,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         stage("hidden apps refresh") { hiddenSpaceRef?.refresh() }
     }
 
-    private fun emptyPage(page: Int): OeaCellLayout = OeaCellLayout(context).apply {
-        cols = cols()
-        rows = rows()
-        this.page = page
-        setPadding(dp(6), 0, dp(6), 0)
-        highlightColor = OeaTheme.alpha(palette.homeText, 0x2E)
-        emptyGestures = GestureDetector(context, emptyGestureListener())
+    private fun emptyPage(page: Int): OeaCellLayout {
+        val layout = OeaCellLayout(context)
+        layout.cols = cols()
+        layout.rows = rows()
+        layout.page = page
+        layout.setPadding(dp(6), 0, dp(6), 0)
+        layout.highlightColor = OeaTheme.alpha(palette.homeText, 0x2E)
+        layout.emptyGestures = GestureDetector(context, emptyGestureListener())
+        return layout
     }
 
     private var scheduleRebuildAfterDrag = false

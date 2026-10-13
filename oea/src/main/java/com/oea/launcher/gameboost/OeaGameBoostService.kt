@@ -372,8 +372,11 @@ class OeaGameBoostService : Service() {
                         // A confirmed different foreground app ends the session.
                         // Confirmation means consecutive *fresh* resumed events for
                         // the same non-game package; closing the panel never extends
-                        // game eligibility.
-                        if (nonGameForegroundSamples < LEAVE_CONFIRM_SAMPLES) {
+                        // game eligibility. Home ends it quickly; another app needs a
+                        // little longer, so a brief interruption while the game loads
+                        // (an ad, a sign-in sheet) doesn't remove the button.
+                        val needed = if (isHomePackage(game)) LEAVE_CONFIRM_SAMPLES else LEAVE_CONFIRM_SAMPLES_OTHER_APP
+                        if (nonGameForegroundSamples < needed) {
                             ensureOverlayForActiveGame()
                             updateOverlay()
                         } else {
@@ -478,19 +481,25 @@ class OeaGameBoostService : Service() {
         // Returning to OEA (including its All Apps drawer) must end the game
         // session so the in-game floating control is removed.
         // Only short-lived system surfaces below are ignored.
-        return packageName in setOf(
-            "com.android.systemui",
-            "com.android.settings",
-            "com.android.permissioncontroller",
-            "com.google.android.permissioncontroller",
-            "com.android.packageinstaller",
-            "com.google.android.packageinstaller",
-            "com.google.android.inputmethod.latin",
-            "com.google.android.apps.inputmethod",
-            "com.android.inputmethod.latin",
-            // Do not include Home launcher packages here. Their resumed
-            // activity is positive evidence that the selected app was left.
-        )
+        if (packageName in TRANSIENT_PACKAGES) return true
+        // The active keyboard can resume its own settings/emoji activities.
+        val ime = runCatching {
+            Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                ?.substringBefore('/')
+        }.getOrNull()
+        return ime != null && packageName == ime
+    }
+
+    private var homePackagesCache: Set<String>? = null
+
+    /** Launchers (including OEA): returning to one means the game was left. */
+    private fun isHomePackage(packageName: String): Boolean {
+        val homes = homePackagesCache ?: runCatching {
+            packageManager.queryIntentActivities(
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0,
+            ).mapNotNull { it.activityInfo?.packageName }.toSet()
+        }.getOrDefault(emptySet()).also { homePackagesCache = it }
+        return packageName in homes || packageName == this.packageName
     }
 
     /**
@@ -1880,8 +1889,37 @@ class OeaGameBoostService : Service() {
         /** After a service restart, how far back to look for the app that was in front. */
         private const val COLD_START_LOOKBACK_MS = 6 * 60 * 60 * 1000L
         private const val GAME_SYNC_INTERVAL_MS = 60_000L
-        /** Consecutive fresh resumed events for the same other app before a session ends. */
+        /** Consecutive fresh resumed events for Home before a session ends. */
         private const val LEAVE_CONFIRM_SAMPLES = 2
+        /** Another app must stay in front a little longer (interruptions while a game loads). */
+        private const val LEAVE_CONFIRM_SAMPLES_OTHER_APP = 6
+
+        /**
+         * Short-lived surfaces that appear over a game without the user leaving
+         * it: system UI and dialogs, permission and installer sheets, keyboards,
+         * Google Play sign-in/purchase sheets and OEM game toolbars. Home
+         * launchers are deliberately absent: returning Home ends the session.
+         */
+        private val TRANSIENT_PACKAGES = setOf(
+            "android",
+            "com.android.systemui",
+            "com.android.settings",
+            "com.android.permissioncontroller",
+            "com.google.android.permissioncontroller",
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+            "com.google.android.inputmethod.latin",
+            "com.google.android.apps.inputmethod",
+            "com.android.inputmethod.latin",
+            "com.google.android.gms",
+            "com.google.android.gsf",
+            "com.google.android.play.games",
+            "com.google.android.apps.games",
+            "com.android.vending",
+            "com.samsung.android.game.gametools",
+            "com.samsung.android.game.gamehome",
+            "com.samsung.android.game.gos",
+        )
     }
 }
 object OeaGameBoostStore {
