@@ -262,6 +262,7 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
 
     /** Rebuilds categories and rows from the current app list. */
     fun refresh() {
+        ws.searchController.clearResolveCache()
         buildChips()
         rebuild()
     }
@@ -395,17 +396,38 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
                 out += Row.Label("Apps")
                 if (listMode) matches.forEach { out += Row.ListApp(it) } else matches.chunked(cols).forEach { out += Row.Apps(it) }
             }
-            val actions = runCatching { ws.searchController.actions(query) }.getOrDefault(emptyList())
+            // Non-app results arrive from a worker; app matches above show instantly.
+            val actions = if (actionsQuery == query) lastActions else emptyList()
+            if (actionsQuery != query) requestActions(query)
             if (actions.isNotEmpty()) {
                 out += Row.Label(if (matches.isEmpty()) "Results" else "More results")
                 actions.forEach { out += Row.Action(it) }
             }
-            if (out.isEmpty()) out += Row.Empty("No results for \"$query\"")
+            if (out.isEmpty()) out += Row.Empty(if (actionsQuery == query) "No results for \"$query\"" else "Searching…")
         }
         rows = out
         letterRows = letters
         rail.letters = letters.map { it.first }
         adapter.notifyDataSetChanged()
+    }
+
+    private var actionsQuery: String? = null
+    private var lastActions: List<OeaSearchAction> = emptyList()
+    private var pendingQuery: String? = null
+    private val actionsRequest = Runnable {
+        val query = pendingQuery ?: return@Runnable
+        ws.searchController.actionsAsync(query) { q, list ->
+            if (q != search.text?.toString()?.trim().orEmpty()) return@actionsAsync
+            actionsQuery = q
+            lastActions = list
+            rebuild()
+        }
+    }
+
+    private fun requestActions(query: String) {
+        pendingQuery = query
+        removeCallbacks(actionsRequest)
+        postDelayed(actionsRequest, 90L)
     }
 
     private fun indexLetter(label: String): Char? {
@@ -449,7 +471,10 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
             ws.launchApp(firstApp, null)
             return
         }
-        rows.firstNotNullOfOrNull { (it as? Row.Action)?.action }?.let { ws.runSearchAction(it) }
+        val query = search.text?.toString()?.trim().orEmpty()
+        val action = rows.firstNotNullOfOrNull { (it as? Row.Action)?.action }
+            ?: if (query.isNotEmpty()) runCatching { ws.searchController.actions(query).firstOrNull() }.getOrNull() else null
+        action?.let { ws.runSearchAction(it) }
     }
 
     private fun jumpTo(letter: Char, y: Float) {

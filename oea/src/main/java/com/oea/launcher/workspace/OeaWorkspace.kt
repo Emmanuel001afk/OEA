@@ -423,6 +423,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
         appLoadStatus.text = message
         appLoadStatus.contentDescription = message
+        // First start (nothing cached yet): a branded card instead of a bare label.
+        val logo = if (retry == null) context.getDrawable(R.drawable.oea_logo)?.apply { setBounds(0, 0, dp(56), dp(56)) } else null
+        appLoadStatus.compoundDrawablePadding = dp(12)
+        appLoadStatus.setCompoundDrawablesRelative(null, logo, null, null)
         appLoadStatus.isClickable = retry != null
         appLoadStatus.isFocusable = retry != null
         appLoadStatus.setOnClickListener { retry?.invoke() }

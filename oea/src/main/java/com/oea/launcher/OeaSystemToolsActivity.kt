@@ -347,7 +347,14 @@ open class OeaSystemToolsActivity : Activity() {
 
     private fun page(title: String, subtitle: String?): OeaKit.Page {
         val root = current == rootScreen && stack.isEmpty()
-        return kit.page(title, subtitle, onBack = if (root) null else ({ back() }))
+        // The OEA Settings hub carries the OEA brand mark.
+        val brand = if (root && rootScreen == "hub") ImageView(this).apply {
+            setImageResource(R.drawable.oea_logo)
+            contentDescription = "OEA"
+        } else null
+        val page = kit.page(title, subtitle, onBack = if (root) null else ({ back() }), trailing = brand)
+        brand?.layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+        return page
     }
 
     private fun present(page: OeaKit.Page) {
@@ -772,7 +779,7 @@ open class OeaSystemToolsActivity : Activity() {
 
         kit.sectionTitle(box, "Lock & power")
         group = kit.group(box)
-        kit.row(group, R.drawable.oic_lock, "Lock screen now", if (OeaAssistant.isConnected()) "Like pressing the power key; fingerprint and face unlock keep working" else if (power.deviceAdminActive(this)) "Uses OEA's Device admin (Android may ask for your PIN next time)" else "Needs OEA Assistant or Device admin") {
+        kit.row(group, R.drawable.oic_lock, "Lock screen now", if (OeaAssistant.isConnected()) "Like pressing the power key; fingerprint and face unlock keep working" else if (power.deviceAdminCanLock(this)) "Uses OEA's Device admin (Android may ask for your PIN next time)" else "Needs OEA Assistant or Device admin") {
             if (power.lockScreen(this) == com.oea.launcher.power.OeaPower.LockResult.NEEDS_SETUP) toast("Turn on OEA Assistant below (or Device admin) first.")
         }
         kit.row(group, R.drawable.oic_restart_alt, "Power menu", "Android's own menu to power off or restart. Needs OEA Assistant") {
@@ -782,8 +789,13 @@ open class OeaSystemToolsActivity : Activity() {
             }
         }
         kit.row(group, R.drawable.oic_accessibility_new, "OEA Assistant", if (OeaAssistant.isConnected()) "On" else "Off • needed for lock without PIN and for the power menu") { OeaAssistant.openSetup(this) }
-        kit.row(group, R.drawable.oic_shield, "Device admin lock", if (power.deviceAdminActive(this)) "Active • used when OEA Assistant is off" else "Off • optional fallback for locking") {
-            if (!power.deviceAdminActive(this)) runCatching { startActivity(power.deviceAdminIntent(this)) }
+        val adminLock = power.deviceAdminCanLock(this)
+        kit.row(group, R.drawable.oic_shield, "Device admin lock", when {
+            adminLock -> "Active • used when OEA Assistant is off"
+            power.deviceAdminActive(this) -> "Active for the Freezer only • tap to also allow locking"
+            else -> "Off • optional fallback for locking"
+        }) {
+            if (!adminLock) runCatching { startActivity(power.deviceAdminIntent(this)) }
                 .onFailure { toast("Android didn't open the Device admin screen.") }
             else toast("Device admin is active. Remove it in Android Settings › Security › Device admin apps.")
         }
@@ -2081,7 +2093,7 @@ open class OeaSystemToolsActivity : Activity() {
             setPadding(dp(20), dp(24), dp(20), dp(24))
             background = kit.rounded(palette.card, 28)
         }
-        hero.addView(ImageView(this).apply { setImageDrawable(applicationInfo.loadIcon(packageManager)) }, LinearLayout.LayoutParams(dp(72), dp(72)))
+        hero.addView(ImageView(this).apply { setImageResource(R.drawable.oea_logo); contentDescription = "OEA logo" }, LinearLayout.LayoutParams(dp(84), dp(84)))
         hero.addView(kit.text("OEA Launcher", 22f, palette.text, OeaType.medium).apply { setPadding(0, dp(12), 0, 0) })
         hero.addView(kit.text("Version ${info?.versionName ?: "?"}", 14f, palette.textSecondary))
         box.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
@@ -2091,7 +2103,7 @@ open class OeaSystemToolsActivity : Activity() {
         }
         kit.row(group, R.drawable.oic_new_releases, "What's in OEA", null) {
             kit.sheet("OEA Launcher", null) { panel, _ ->
-                kit.note(panel, "• OEA Home with At a Glance, smart drawer search, app shortcuts, widgets, folders and app pairs\n• Notification dots, icon shapes, themed icons and icon packs\n• Gestures: swipe down, double-tap to lock\n• App Lock, hidden apps and the no-root App Freezer\n• Split screen, floating windows and the OEA Overview\n• Game Boost, Phone and Call Blocker as their own apps")
+                kit.note(panel, "• OEA Home with At a Glance, smart drawer search, app shortcuts, widgets, folders and app pairs\n• The Themes app: ten built-in themes, your own themes and a wallpaper library\n• Liquid glass surfaces and page transitions (Liquid, Cube, Stack, Zoom, Fade)\n• Dynamic Island with calls, media, notifications, games and privacy dots\n• Notification dots, icon shapes, themed icons and icon packs\n• Gestures, wave to wake, lock and power menu for a faulty power key\n• App Lock, hidden apps and the no-root App Freezer\n• Split screen, floating windows and the OEA Overview\n• Game Boost, Phone, Call Blocker, Freezer, Themes and OEA Games as their own apps")
             }
         }
         present(page)

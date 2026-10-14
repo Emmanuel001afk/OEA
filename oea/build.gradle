@@ -19,6 +19,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
     }
+    // Pure-logic unit tests (wave detector, theme catalogue) never call real
+    // Android code; framework stubs return defaults instead of throwing.
+    testOptions { unitTests.returnDefaultValues = true }
 }
 kotlin { jvmToolchain(21) }
 
@@ -27,4 +30,5 @@ dependencies {
     implementation project(":oea-games")
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
+    testImplementation libs.junit
 }

@@ -91,7 +91,7 @@ object OeaPower {
         if (OeaAssistant.lockScreen()) return LockResult.LOCKED
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
         val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
-        if (dpm != null && dpm.isAdminActive(admin)) {
+        if (dpm != null && deviceAdminCanLock(context)) {
             val locked = runCatching {
                 dpm.lockNow()
                 true
@@ -103,6 +103,17 @@ object OeaPower {
 
     fun deviceAdminActive(context: Context): Boolean = runCatching {
         context.getSystemService(DevicePolicyManager::class.java)?.isAdminActive(ComponentName(context, OeaDeviceAdminReceiver::class.java)) == true
+    }.getOrDefault(false)
+
+    /**
+     * Device admin can lock only if its activation included the "force lock"
+     * policy; an admin activated by an older OEA (freezer only) must be
+     * re-activated to grant it.
+     */
+    fun deviceAdminCanLock(context: Context): Boolean = runCatching {
+        val dpm = context.getSystemService(DevicePolicyManager::class.java) ?: return false
+        val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
+        dpm.isAdminActive(admin) && dpm.hasGrantedPolicy(admin, android.app.admin.DeviceAdminInfo.USES_POLICY_FORCE_LOCK)
     }.getOrDefault(false)
 
     fun deviceAdminIntent(context: Context): Intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)

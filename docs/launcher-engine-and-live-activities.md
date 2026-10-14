@@ -92,3 +92,33 @@ Notification-based details and third-party controls require Notification access;
 - Placement is stored per widget (`page`, `x`, `y`, `spanX`, `spanY`). Legacy full-width bands are migrated in order, preserving the old layout.
 - Spans are clamped to the provider's `minResize*`/`maxResize*` limits and `resizeMode` (with a measured cell size), which prevents the squeezed/overlapping content seen with the old row-only stepper. Size changes are reported with the Android 12+ `SizeF` API.
 - Long-press shows the widget menu; moving after the long-press drags the widget (across pages at the screen edges). "Resize" opens an in-place frame with edge handles; icons under a moved or resized widget move to the nearest free cell.
+
+
+## Follow-up: battery, cold starts, themes and power-button alternatives
+
+### Root causes addressed
+
+- **Game Boost drained the battery while no game was open.** Its foreground service started as soon as the switch was on (and again on every Home resume), then polled Usage access every second, re-read installed apps every minute and logged a heartbeat every ten seconds — with a "Game session active" notification even on Home. Sessions now begin only when a game is actually opened (OEA launch, an OEA Assistant window event, or one optional Usage access check right after leaving Home) and end when OEA Home resumes or another app stays in front after a short confirmation. The service is `START_NOT_STICKY`, stops with its session, pauses while the screen is off, and checks a single package's game category instead of scanning every app.
+- **Home "reloaded".** A process restart (common on aggressive OEM memory managers) showed an empty wallpaper and "Loading apps…" while every app label was re-read, and every icon was re-rendered on the main thread. The last catalogue is now persisted and bound at once; icons are cached on disk keyed by style and APK stamp. Separately, *any* settings write rebuilt every Home page and recreated every widget view; settings are now classified so only grid/tile changes rebuild pages.
+- **Repeated stalls.** `OeaTheme.resolve()` made WallpaperManager binder calls on every resume and once per icon with themed icons; the palette is now cached and invalidated by a wallpaper-colours listener. Drawer search ran a contacts query and several PackageManager resolves per keystroke on the UI thread; it now runs on a worker with debounce and a resolve cache. Root detection spawned `su` on the UI thread (up to 700 ms, and a root prompt per process on rooted phones); it now runs once, in the background, only if an `su` binary exists.
+- **Crash paths.** Foreground-service promotions (Game Boost, capture, island overlay, wake gestures) are wrapped: a refused promotion stops the service instead of crashing OEA. The island overlay no longer switches the user's setting off when Android refuses a background restart; Home re-promotes it from the foreground.
+- **Data safety.** A partial PackageManager reply could delete Home items; pruning now verifies with PackageManager that the component is really gone and never prunes from the cached catalogue.
+
+### Themes
+
+Built-in themes live in `OeaThemeCatalog`; custom themes and imported pictures in `OeaThemeStore` (pictures are copied, downscaled, into private storage). `OeaThemeApplier` writes only appearance settings and wallpapers (`WallpaperManager` `FLAG_SYSTEM`/`FLAG_LOCK`); the workspace store, widgets and personal settings are never written. Lock-screen wallpapers are reported honestly when an OEM lock screen keeps its own picture.
+
+### Power-button alternatives
+
+`OeaWakeService` (specialUse foreground service with a minimal notification) exists only while wave or lift to wake is on and registers sensors only while the screen is off; `OeaWaveDetector` (unit tested) applies sensitivity, two-wave mode, pocket guard and cooldown. Waking uses a wake-up wake lock (Android 14+ requires the user-grantable "Turn screen on" access) plus a show-when-locked activity. Lock and power menu use OEA Assistant global actions with Device admin `lockNow()` as a lock fallback. Quick controls and two Quick Settings tiles expose volume, ringer, Do Not Disturb and lock from anywhere.
+
+### Island
+
+The island peeks open for attention (ringing calls stay open), honours a manual close, shows album art and position for media, and draws privacy dots from `CameraManager.AvailabilityCallback` and `AudioManager.AudioRecordingCallback` (no permission, push based, registered only while a surface is attached). The overlay service creates its windows from a TYPE_APPLICATION_OVERLAY WindowContext so rotation updates metrics and geometry.
+
+### Additional verification
+
+1. Turn Game Boost on, stay on Home for a while: no Game Boost notification or service. Open a selected game from Home: the session notification and overlay appear; press Home: both disappear immediately.
+2. Kill OEA from Android Settings, press Home: the previous Home appears at once with icons.
+3. Apply each built-in theme with each target; confirm pages, folders, widgets and grid are unchanged.
+4. Enable wave to wake, turn the screen off, wave twice over the sensor: the screen turns on; put the phone in a pocket: no wakes.

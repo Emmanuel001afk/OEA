@@ -35,8 +35,9 @@ OEA ships its own game engine and games, opened from the **OEA Games** app (own 
 - Call blocker using Android's call-screening role with exact/prefix/suffix rules and contact exceptions.
 - Phone with full-screen (over the wallpaper), popup and floating-card call screens, Telecom-backed mute/speaker/Bluetooth routing, proximity screen-off and an incoming-call notification with Answer/Decline. Telecom plays the ringtone.
 - Split screen that waits for the first app to be in front before launching the adjacent app, verifies the split with OEA Assistant and recovers once through the system split toggle.
-- Game Boost monitors selected games using optional usage access; its draggable floating RAM control toggles one stable panel with a Slow/Medium/Fast network-quality category inside the panel, not under the button.
-- Built-in apps (OEA Games, Game Boost, Phone, Call Blocker, Freezer, OEA Settings) are ordinary launcher entries that can be added to Home like any app.
+- Game Boost runs only while one of your selected games is open. A session starts when the game is opened from OEA (Home, drawer, folders, search, the Game Boost app), when OEA Assistant reports a game window (event driven, no polling), or — optionally — after one Usage access check right after you leave OEA Home. While no game is open there is no Game Boost service, no notification and no Usage access use; during a session it checks every two seconds whether you left the game (or follows OEA Assistant's window events) and pauses while the screen is off. Its draggable floating RAM control toggles one stable panel with a Slow/Medium/Fast network-quality category inside the panel, not under the button.
+- Faulty power button alternatives (OEA Settings › Buttons & screen): wave to wake with the proximity sensor (sensitivity, two-wave mode, pocket guard and a live sensor test) and lift to wake on phones that expose a low-power pick-up sensor — sensors are used only while the screen is off; lock screen and Android's power menu through OEA Assistant (Device admin lock as a fallback); Quick controls (volume sliders, sound/vibrate/silent, Do Not Disturb, notification settings) and Lock screen / Quick controls Quick Settings tiles. Android does not let any app switch on a powered-off phone, and OEA does not pretend to.
+- Built-in apps (OEA Games, Game Boost, Phone, Call Blocker, Freezer, Themes, OEA Settings) are ordinary launcher entries that can be added to Home like any app.
 - Launcher navigation remains integrated with Android's own Home and Recents/Overview surfaces.
 
 ## Home and app drawer
@@ -47,10 +48,13 @@ OEA ships its own game engine and games, opened from the **OEA Games** app (own 
 - Grid, vertical-list and horizontal All Apps layouts.
 - Long-press app actions, hiding and app-freezer access.
 - Hidden apps as their own space (drawer ⋮ › Hidden apps): open and use hidden apps there, optionally behind the App Lock PIN.
-- Wallpaper-derived launcher theme colors, with bundled nature scenes alongside Android's wallpapers and imported photos.
-- All Apps keeps its current opaque/plain look by default; an optional setting can reveal a translucent wallpaper background.
+- **Themes** is its own app (own icon and task): ten original built-in themes with coordinated wallpapers, colours, icon shape, dock and glass style and page motion — five use the same picture on Home and the lock screen, five pair two different pictures. Every theme can be previewed on Home and the lock screen (side by side or full screen) before applying, and applying lets you choose wallpapers, colours and style separately and Home, lock or both. Your own themes can be created from your pictures (the same picture for both screens or one each, colours matched to the picture). A wallpaper library holds the bundled pictures and pictures you add; preview them and apply to Home, lock or both, or turn them into a theme. Themes never touch pages, icons, folders, widgets, the grid or other settings.
+- Wallpaper-derived launcher theme colors when no OEA theme is applied (Settings › Appearance or "Use device colours" in Themes).
+- Liquid glass surfaces (dock, search bar, island card, drawer search) and Home page transitions: Classic, Liquid (pages flow and icons trail like liquid), Cube, Stack, Zoom, Fade or None.
+- All Apps keeps its current opaque/plain look by default; optional settings reveal the wallpaper behind All Apps, or behind search (the search area at the top of All Apps, and the whole screen while searching from Home or All Apps) with a contrast scrim that stays readable on any wallpaper, plus frosted window blur where Android enables it.
 - Native Android launcher shortcuts.
-- Live activities in two styles — the card under the status bar and an expandable island under the front camera — usable alone or together with per-app routing. Home expansions do not resize the grid; an optional, permission-gated overlay can show compatible activities across apps (notification access is required for app notification content).
+- Live activities in two styles — the card under the status bar and an expandable island under the front camera — usable alone or together with per-app routing. The island expands by itself when something needs attention (stays open while a call rings; opens briefly for a new message, a new track, a charger or a game event; never reopens for something you closed), shows album art and playback position for media, and shows green/orange camera and microphone dots while any app uses them (on Android 11 and older, where Android has no indicator, it can show them on their own). Home expansions do not resize the grid; an optional, permission-gated overlay can show compatible activities across apps and follows rotation through an overlay window context (notification access is required for app notification content).
+- Cold starts show Home immediately from the last app catalogue and persisted icons, then refresh in the background; Home entries are only removed for apps that are really uninstalled.
 - The full-screen launcher error page appears only when Home genuinely fails to start; later recoverable errors are logged and the running Home is kept.
 
 ## Independence
@@ -61,6 +65,6 @@ OEA does not build, run, or import Launcher3/Lawnchair source code. The reposito
 
 `./gradlew :oea:assembleRelease`
 
-Engine and game unit tests: `./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest`
+Unit tests: `./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest :oea:testDebugUnitTest`
 
 The resulting application ID is `com.oea.launcher`.

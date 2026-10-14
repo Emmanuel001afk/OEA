@@ -224,8 +224,9 @@ jobs:
           fi
       - name: Run engine and game unit tests
         run: |
-          # Chess rules (perft), connection codes, math and N-D geometry.
-          if ! ./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/tests.log"; then
+          # Chess rules (perft), connection codes, math and N-D geometry, plus
+          # launcher logic (wake gestures, theme catalogue requirements).
+          if ! ./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest :oea:testDebugUnitTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/tests.log"; then
             {
               grep -E '^e: ' "$RUNNER_TEMP/tests.log" || true
               grep -E 'FAILED|AssertionError|Exception:' "$RUNNER_TEMP/tests.log" | grep -vE '^e: ' || true
@@ -235,8 +236,8 @@ jobs:
             done
             exit 1
           fi
-          TOTAL=$(cat oea-engine/build/test-results/testDebugUnitTest/*.xml oea-games/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | grep -o '<testsuite [^>]*tests="[0-9]*"' | grep -o 'tests="[0-9]*"' | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
-          echo "::notice::OEA engine and game unit tests passed: $TOTAL tests"
+          TOTAL=$(cat oea-engine/build/test-results/testDebugUnitTest/*.xml oea-games/build/test-results/testDebugUnitTest/*.xml oea/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | grep -o '<testsuite [^>]*tests="[0-9]*"' | grep -o 'tests="[0-9]*"' | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          echo "::notice::OEA launcher, engine and game unit tests passed: $TOTAL tests"
           test "$TOTAL" -gt 0
       - name: Verify APK identity
         run: |

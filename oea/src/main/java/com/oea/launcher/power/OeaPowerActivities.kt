@@ -234,7 +234,7 @@ class OeaLockTileService : TileService() {
         qsTile?.apply {
             state = Tile.STATE_INACTIVE
             label = "Lock screen"
-            if (Build.VERSION.SDK_INT >= 29) subtitle = if (OeaAssistant.isConnected() || OeaPower.deviceAdminActive(this@OeaLockTileService)) "OEA" else "Set up in OEA"
+            if (Build.VERSION.SDK_INT >= 29) subtitle = if (OeaAssistant.isConnected() || OeaPower.deviceAdminCanLock(this@OeaLockTileService)) "OEA" else "Set up in OEA"
             updateTile()
         }
     }
