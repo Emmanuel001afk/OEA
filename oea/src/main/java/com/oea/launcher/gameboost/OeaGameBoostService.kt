@@ -260,6 +260,9 @@ class OeaGameBoostService : Service() {
 
     /** The app that looked like it replaced the game; confirmed after a short delay. */
     private var leaveCandidate: String? = null
+    /** When the running session began (wall clock for Usage events, uptime for the grace period). */
+    private var sessionStartedWall = 0L
+    private var sessionStartedUptime = 0L
     private var screenInteractive = true
     private var screenReceiverRegistered = false
     private var usageAccessCheckedAt = 0L
@@ -279,7 +282,7 @@ class OeaGameBoostService : Service() {
             if (activeGame == null || !screenInteractive) return
             try {
                 val (front, fresh) = pollForeground()
-                evaluateForeground(front, fresh, foregroundActivityClass)
+                evaluateForeground(front, fresh, foregroundActivityClass, polledEvidenceAt)
                 activeGame?.let {
                     ensureOverlayForActiveGame()
                     updateOverlay()
@@ -390,6 +393,8 @@ class OeaGameBoostService : Service() {
         activeGame = game
         lastKnownForegroundPackage = game
         foregroundActivityClass = null
+        sessionStartedWall = System.currentTimeMillis()
+        sessionStartedUptime = android.os.SystemClock.uptimeMillis()
         diagnostic(android.util.Log.INFO, "session start game=$game previous=$previous")
         activate(game)
         panelView?.let(::closePanel)
@@ -434,16 +439,23 @@ class OeaGameBoostService : Service() {
         if (activeGame == null) return
         lastKnownForegroundPackage = packageName
         foregroundActivityClass = className
-        evaluateForeground(packageName, fresh, className)
+        evaluateForeground(packageName, fresh, className, System.currentTimeMillis())
     }
 
     private fun pollIntervalMs(): Long = if (OeaAssistant.isConnected()) 5_000L else 2_000L
 
+    /** Wall-clock time of the evidence behind the latest [pollForeground] answer. */
+    private var polledEvidenceAt = 0L
+
     /** The package in front and whether that answer is real lifecycle evidence. */
     private fun pollForeground(): Pair<String?, Boolean> {
-        OeaAssistant.foregroundPackage()?.let { return it to true }
+        OeaAssistant.foregroundPackage()?.let {
+            polledEvidenceAt = System.currentTimeMillis()
+            return it to true
+        }
         if (!isUsageAccessGrantedCached()) return null to false
         val front = foregroundPackage()
+        polledEvidenceAt = lastForegroundEventAt
         return front to lastForegroundEvidenceFresh
     }
 
@@ -454,16 +466,24 @@ class OeaGameBoostService : Service() {
      * front after a short confirmation delay (an ad or sign-in sheet while a
      * game loads does not remove the control). OEA Home ends it at once.
      */
-    private fun evaluateForeground(front: String?, fresh: Boolean, className: String?) {
+    private fun evaluateForeground(front: String?, fresh: Boolean, className: String?, evidenceAt: Long) {
         val active = activeGame ?: return
+        // Evidence from before this session began (e.g. OEA Home's resume just
+        // before the game was tapped, while the game is still starting) says
+        // nothing about leaving the game.
+        val stale = evidenceAt in 1 until sessionStartedWall
+        val inGrace = android.os.SystemClock.uptimeMillis() - sessionStartedUptime < SESSION_GRACE_MS
         when {
             front == null -> return
+            front != active && stale -> return
             front == active -> {
                 cancelLeave()
                 applyGameDndPreference()
             }
             front == packageName -> {
-                if (className == com.oea.launcher.OeaLauncherActivity::class.java.name) onHomeShown()
+                // OEA Home's own onResume ends sessions authoritatively; a polled
+                // or reported Home window is trusted only after the launch grace.
+                if (className == com.oea.launcher.OeaLauncherActivity::class.java.name && !inGrace) onHomeShown()
                 // Other OEA screens (capture consent, the Wi-Fi panel) are part of the session.
             }
             OeaGameBoostStore.isGame(this, front) -> beginSession(front)
@@ -485,6 +505,7 @@ class OeaGameBoostService : Service() {
         val (front, fresh) = pollForeground()
         when {
             front == null || front == active -> Unit
+            polledEvidenceAt in 1 until sessionStartedWall -> Unit
             front == candidate || (fresh && !isTransientForegroundPackage(front) && front != packageName &&
                 !OeaGameBoostStore.isGame(this, front)) -> endSession("left for $front")
         }
@@ -1956,6 +1977,8 @@ class OeaGameBoostService : Service() {
         private const val COLD_START_LOOKBACK_MS = 6 * 60 * 60 * 1000L
         /** Another launcher in front: confirm quickly before ending the session. */
         private const val HOME_CONFIRM_MS = 700L
+        /** Right after a launch the launcher can still look "in front" while the game starts. */
+        private const val SESSION_GRACE_MS = 4_000L
         /** Another app must stay in front a little longer (interruptions while a game loads). */
         private const val OTHER_APP_CONFIRM_MS = 3_500L
 
