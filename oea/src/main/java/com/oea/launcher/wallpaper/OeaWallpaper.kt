@@ -32,6 +32,12 @@ enum class OeaWallpaper(
     val accent: Int,
     /** True when the scene is bright enough that Home's icons need dark text. */
     val light: Boolean,
+    /**
+     * Drawn for the lock screen: the middle of the picture stays quiet so the
+     * clock and notifications sit on calm pixels. Lock pictures are their own
+     * artwork and are never offered as a Home wallpaper.
+     */
+    val forLock: Boolean = false,
 ) {
     MOUNTAIN_DAWN(
         "mountain_dawn", "Mountain dawn",
@@ -82,10 +88,99 @@ enum class OeaWallpaper(
         "mesh_amoled", "Deep mesh",
         "Near-black with faint colour clouds; made for OLED.",
         Color.rgb(120, 160, 255), light = false,
+    ),
+
+    // ------------------------------------------------ the second wallpaper set
+    // Eight more pictures, each painted by OeaArtwork from a palette of its own,
+    // so the wallpaper library is not a short list of variations on one idea.
+    CANYON_EMBER(
+        "canyon_ember", "Canyon ember",
+        "Rock columns with a shaft of warm light between them.",
+        Color.rgb(255, 150, 90), light = false,
+    ),
+    GLASS_DUSK(
+        "glass_dusk", "Glass dusk",
+        "Frosted panels and long light streaks in violet.",
+        Color.rgb(186, 160, 255), light = false,
+    ),
+    ORCHID_BLOOM(
+        "orchid_bloom", "Orchid bloom",
+        "Soft petals of magenta light opening from a bright core.",
+        Color.rgb(255, 150, 214), light = false,
+    ),
+    RIBBON_SEA(
+        "ribbon_sea", "Ribbon sea",
+        "Teal ribbons sweeping across a deep current.",
+        Color.rgb(120, 236, 220), light = false,
+    ),
+    STRATA_SAND(
+        "strata_sand", "Strata sand",
+        "Warm stone bands with a bright seam; bright and readable.",
+        Color.rgb(150, 104, 58), light = true,
+    ),
+    MIST_VALLEY(
+        "mist_valley", "Mist valley",
+        "Layers of morning fog over a green horizon glow.",
+        Color.rgb(178, 220, 200), light = false,
+    ),
+    ORBIT_DAWN(
+        "orbit_dawn", "Orbit dawn",
+        "Warm rings around a low sun, drawn as clean lines.",
+        Color.rgb(255, 196, 140), light = false,
+    ),
+    SLATE_LINES(
+        "slate_lines", "Slate lines",
+        "Cool graphite bands; the quietest dark option.",
+        Color.rgb(150, 170, 196), light = false,
+    ),
+
+    // ------------------------------------------------ lock screen wallpapers
+    // Pictures drawn for the lock screen: their middle band is deliberately kept
+    // clear for the clock, and their own artwork means a lock screen never
+    // repeats the picture that is behind the icons on Home.
+    LOCK_MIDNIGHT(
+        "lock_midnight", "Midnight",
+        "Deep blue rings around a single star of light.",
+        Color.rgb(132, 172, 255), light = false, forLock = true,
+    ),
+    LOCK_EMBER(
+        "lock_ember", "Ember",
+        "A low, warm glow between dark rock, made for night reading.",
+        Color.rgb(255, 140, 80), light = false, forLock = true,
+    ),
+    LOCK_FROST(
+        "lock_frost", "Frost",
+        "Pale cold fog with a soft horizon; bright and legible.",
+        Color.rgb(96, 126, 158), light = true, forLock = true,
+    ),
+    LOCK_VIOLET(
+        "lock_violet", "Violet haze",
+        "Violet glass panes and one long streak of light.",
+        Color.rgb(200, 170, 255), light = false, forLock = true,
+    ),
+    LOCK_NOIR(
+        "lock_noir", "Noir",
+        "Near-black graphite with a thin seam of light.",
+        Color.rgb(196, 202, 212), light = false, forLock = true,
+    ),
+    LOCK_HALO(
+        "lock_halo", "Halo",
+        "A cool halo of light above the clock, clear where it matters.",
+        Color.rgb(170, 236, 255), light = false, forLock = true,
     );
 
     companion object {
         fun byId(id: String?): OeaWallpaper? = entries.firstOrNull { it.id == id }
+
+        /**
+         * The Home wallpaper library. Lock-screen pictures are excluded: they are a
+         * set of their own, and offering them as a Home wallpaper would put the
+         * quiet band built for the clock behind the user's icons.
+         */
+        val homeSet: List<OeaWallpaper> = entries.filter { !it.forLock }
+
+        /** The lock screen library: its own artwork, none of it shared with Home. */
+        val lockSet: List<OeaWallpaper> = entries.filter { it.forLock }
     }
 }
 
@@ -118,6 +213,14 @@ object OeaWallpaperRenderer {
             OeaWallpaper.TERRAZZO -> terrazzo(canvas, paint, w, h, random)
             OeaWallpaper.LINEN -> linen(canvas, paint, w, h)
             OeaWallpaper.MESH_AMOLED -> mesh(canvas, paint, w, h, dark = true)
+            // The second set and every lock-screen picture: painted from their own
+            // palette by OeaArtwork, which also draws the generated theme artwork.
+            OeaWallpaper.CANYON_EMBER, OeaWallpaper.GLASS_DUSK, OeaWallpaper.ORCHID_BLOOM,
+            OeaWallpaper.RIBBON_SEA, OeaWallpaper.STRATA_SAND, OeaWallpaper.MIST_VALLEY,
+            OeaWallpaper.ORBIT_DAWN, OeaWallpaper.SLATE_LINES,
+            OeaWallpaper.LOCK_MIDNIGHT, OeaWallpaper.LOCK_EMBER, OeaWallpaper.LOCK_FROST,
+            OeaWallpaper.LOCK_VIOLET, OeaWallpaper.LOCK_NOIR, OeaWallpaper.LOCK_HALO ->
+            OeaArtwork.paint(canvas, paint, scene.id, w.toFloat(), h.toFloat())
         }
         dim(canvas, paint, w, h, scene)
         return bitmap

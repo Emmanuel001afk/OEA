@@ -198,7 +198,7 @@ class OeaThemesActivity : Activity() {
         }
 
         kit.sectionTitle(box, "Built-in themes")
-        kit.note(box, "The first five use one picture for Home and the lock screen; the other five pair two different pictures.")
+        kit.note(box, "Every theme has its own Home picture and its own lock-screen picture — five of the lock screens are drawn by OEA itself — and no theme uses a wallpaper from the library below.")
         addThemeGrid(box, OeaThemeCatalog.builtIns, applied?.id, withCreate = false)
 
         kit.sectionTitle(box, "My themes")
@@ -207,14 +207,26 @@ class OeaThemesActivity : Activity() {
         addThemeGrid(box, mine, applied?.id, withCreate = true)
 
         kit.sectionTitle(box, "OEA scenes")
-        kit.note(box, "OEA's own artwork. Live scenes are drawn by Home itself, so Android's wallpaper — and your lock screen — stay exactly as they are.")
+        kit.note(box, "OEA's own live artwork. A live scene is drawn by Home itself, so Android's wallpaper — and your lock screen — stay exactly as they are.")
         addSceneGrid(box)
 
         kit.sectionTitle(box, "Wallpapers")
-        kit.note(box, "Preview any picture on Home or the lock screen, then apply it on its own or use it in a theme.")
-        addWallpaperGrid(box)
+        kit.note(box, "Pictures drawn for Home: apply one on its own, or freeze a live scene into it. The lock screen has its own set below.")
+        addWallpaperSetGrid(box, com.oea.launcher.wallpaper.OeaWallpaper.homeSet, lockOnly = false)
+
+        kit.sectionTitle(box, "Lock screen wallpapers")
+        kit.note(box, "A set of its own, drawn so the middle of the screen stays calm for the clock and your notifications. These pictures are never used on Home, so locking and unlocking shows something different.")
+        addWallpaperSetGrid(box, com.oea.launcher.wallpaper.OeaWallpaper.lockSet, lockOnly = true)
+
+        kit.sectionTitle(box, "Your pictures")
         val group = kit.group(box)
         kit.row(group, R.drawable.oic_photo_library, "Add a picture", "Copies it into OEA's wallpaper library") { pickImage("library") }
+        val yours = store.libraryImages().filterIsInstance<OeaImageRef.Imported>()
+        if (yours.isEmpty()) {
+            kit.note(box, "Pictures you add appear here and can be used on Home, on the lock screen, or in a theme of your own.")
+        } else {
+            addImageGrid(box, yours)
+        }
         kit.row(group, R.drawable.oic_wallpaper, "Android wallpaper picker", "Live wallpapers and your phone maker's own wallpapers") {
             runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) }
                 .onFailure { toast("No wallpaper picker is available.") }
@@ -229,8 +241,6 @@ class OeaThemesActivity : Activity() {
      */
     private fun addSceneGrid(parent: LinearLayout) {
         val liveInUse = com.oea.launcher.wallpaper.OeaHomeScene.live(this)
-        val drawsForHome = data.wallpaperSource() == com.oea.launcher.data.OeaDataStore.WALLPAPER_OEA
-        val stillInUse = com.oea.launcher.wallpaper.OeaWallpaperStore.scene(this)
         val tiles = mutableListOf<View>()
         com.oea.launcher.wallpaper.OeaLiveScenes.ids.forEach { id ->
             tiles += sceneTile(
@@ -247,16 +257,6 @@ class OeaThemesActivity : Activity() {
                         liveId = id,
                     )
                 },
-            )
-        }
-        com.oea.launcher.wallpaper.OeaWallpaper.entries.forEach { scene ->
-            tiles += sceneTile(
-                title = scene.label,
-                subtitle = "Still",
-                inUse = !drawsForHome && stillInUse == scene,
-                accent = scene.accent,
-                render = { com.oea.launcher.wallpaper.OeaWallpaperRenderer.preview(scene, dp(76), dp(160)) },
-                onClick = { sceneSheet(scene.label, scene.blurb, scene = scene, liveId = null) },
             )
         }
         tiles.chunked(3).forEach { chunk ->
@@ -357,6 +357,33 @@ class OeaThemesActivity : Activity() {
             else
                 "Drawn by Home, the scene sits under your icons and Android's wallpaper is left alone. Applied to Android, it becomes the real wallpaper of the place you choose.")
         }
+    }
+
+    /**
+     * The lock-screen sheet for a picture from the lock set.
+     *
+     * It offers the lock screen and nothing else, on purpose: these pictures are
+     * drawn for that one place (a quiet band where the clock sits), and offering
+     * "Home" here is how the two libraries started sharing pictures in the first
+     * place. A preview of the lock screen is shown above the buttons.
+     */
+    private fun lockSceneSheet(scene: com.oea.launcher.wallpaper.OeaWallpaper) {
+        val host = this
+        val page = page(scene.label, "A lock-screen picture: shown before you unlock, never behind your Home icons")
+        val box = page.content
+        addPreviewPair(box, currentLookSpec(OeaImageRef.Generated(scene.id, scene.label)).copy(lock = OeaImageRef.Generated(scene.id, scene.label)))
+        kit.sectionTitle(box, "Apply this picture")
+        val group = kit.group(box)
+        kit.row(group, R.drawable.oic_lock, "Set as the lock screen", scene.blurb) {
+            host.applyScene(scene, com.oea.launcher.wallpaper.OeaWallpaperStore.Target.LOCK)
+        }
+        kit.row(group, R.drawable.oic_history, "Keep Android's current lock wallpaper", "Nothing is changed") { back() }
+        kit.sectionTitle(box, "Also")
+        val more = kit.group(box)
+        kit.row(more, R.drawable.oic_wallpaper, "Use it on Home too", "Overrides the rule that keeps the two sets apart — your choice, not OEA's") {
+            host.applyScene(scene, com.oea.launcher.wallpaper.OeaWallpaperStore.Target.HOME)
+        }
+        present(page)
     }
 
     private fun applyScene(scene: com.oea.launcher.wallpaper.OeaWallpaper, target: com.oea.launcher.wallpaper.OeaWallpaperStore.Target) {
@@ -467,8 +494,50 @@ class OeaThemesActivity : Activity() {
         }
     }
 
-    private fun addWallpaperGrid(parent: LinearLayout) {
-        val images = store.libraryImages()
+    /**
+     * One row of pictures from a wallpaper set. Tiles show the real artwork (a
+     * rendered frame of the scene), and the one in use carries a marker, so the
+     * user can see at a glance what is on the phone rather than guessing.
+     */
+    private fun addWallpaperSetGrid(parent: LinearLayout, scenes: List<com.oea.launcher.wallpaper.OeaWallpaper>, lockOnly: Boolean) {
+        val liveInUse = com.oea.launcher.wallpaper.OeaHomeScene.live(this)
+        val drawsForHome = data.wallpaperSource() == com.oea.launcher.data.OeaDataStore.WALLPAPER_OEA
+        val applied = com.oea.launcher.wallpaper.OeaWallpaperStore.lastApplied(this)
+        val lastTarget = com.oea.launcher.wallpaper.OeaWallpaperStore.lastTarget(this)
+        val tiles = scenes.map { scene ->
+            val onLock = applied == scene.id && lastTarget == com.oea.launcher.wallpaper.OeaWallpaperStore.Target.LOCK
+            val onHome = applied == scene.id && !onLock && !drawsForHome
+            sceneTile(
+                title = scene.label,
+                subtitle = when {
+                    onLock -> "On lock"
+                    onHome -> "On Home"
+                    lockOnly -> "Lock screen"
+                    else -> "Wallpaper"
+                },
+                inUse = onHome || onLock || (lockOnly && liveInUse == scene.id),
+                accent = scene.accent,
+                render = { com.oea.launcher.wallpaper.OeaWallpaperRenderer.preview(scene, dp(76), dp(160)) },
+                onClick = {
+                    if (lockOnly) lockSceneSheet(scene)
+                    else sceneSheet(scene.label, scene.blurb, scene = scene, liveId = null)
+                },
+            )
+        }
+        tiles.chunked(3).forEach { chunk ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            chunk.forEachIndexed { index, cell ->
+                row.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    leftMargin = if (index == 0) 0 else dp(5)
+                    rightMargin = if (index == chunk.lastIndex) 0 else dp(5)
+                })
+            }
+            repeat(3 - chunk.size) { row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { leftMargin = dp(5) }) }
+            parent.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        }
+    }
+
+    private fun addImageGrid(parent: LinearLayout, images: List<OeaImageRef>) {
         images.chunked(3).forEach { chunk ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             chunk.forEachIndexed { index, ref ->

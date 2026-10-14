@@ -174,5 +174,5 @@ object OeaModes {
     /** What the wallpaper area of Settings offers for the OEA-drawn source. */
     fun drawnSceneOptions(): List<Pair<String, String>> =
         OeaLiveScenes.ids.map { it to OeaLiveScenes.label(it) } +
-            OeaWallpaper.entries.map { it.id to it.label }
+            OeaWallpaper.homeSet.map { it.id to it.label }
 }

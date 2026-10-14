@@ -894,8 +894,9 @@ open class OeaSystemToolsActivity : Activity() {
         }
 
         kit.sectionTitle(box, "Scenes")
+        kit.note(box, "Drawn for Home. The Themes app has a separate lock-screen set with its own artwork.")
         val list = kit.group(box)
-        OeaWallpaper.entries.forEach { scene ->
+        OeaWallpaper.homeSet.forEach { scene ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -1022,7 +1023,7 @@ open class OeaSystemToolsActivity : Activity() {
         val scene = OeaWallpaperStore.scene(this)
         val target = OeaWallpaperStore.lastTarget(this)
         return when {
-            scene == null -> "${OeaWallpaper.entries.size} bundled scenes, drawn to fit this screen"
+            scene == null -> "${OeaWallpaper.homeSet.size} bundled scenes, drawn to fit this screen"
             target == null -> "${scene.label} (in use)"
             else -> "${scene.label} on the ${target.label.lowercase()}"
         }
