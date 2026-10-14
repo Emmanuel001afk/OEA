@@ -89,6 +89,11 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private val dataStore by lazy { OeaDataStore.get(this) }
+    /** Set while the access doctor is on screen, so a fix can re-verify at once. */
+    private var doctorCheck: (() -> Unit)? = null
+    private val doctorWorkers = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaAccessDoctor").apply { isDaemon = true }
+    }
     private val appQueryWorker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "OeaSettingsApps").apply { isDaemon = true }
     }
@@ -343,6 +348,7 @@ open class OeaSystemToolsActivity : Activity() {
                 "overview" -> showMultitask()
                 "split" -> showSplit()
                 "access" -> showAccess()
+                "access_doctor" -> showAccessDoctor()
                 "stability" -> showStability()
                 "wallpaper" -> showWallpaperGallery()
                 "modes" -> showModes()
@@ -416,6 +422,7 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "OEA Games, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_accessibility_new, "Permissions & access", accessSummary()) { navigate("access") }
+        kit.row(group, R.drawable.oic_developer_mode, "Access doctor", "Each permission verified live, with the exact fix — including the ones that look switched on but are not working") { navigate("access_doctor") }
         kit.row(group, R.drawable.oic_battery_charging_full, "LOW mode", OeaLowMode.summary(this)) { navigate("low") }
         kit.row(group, R.drawable.oic_shield_fill, "Stability", stabilitySummary()) { navigate("stability") }
         kit.row(group, R.drawable.oic_info, "About OEA", "Version $version") { navigate("about") }
@@ -2764,6 +2771,97 @@ open class OeaSystemToolsActivity : Activity() {
      * 2. OEA grants by itself whatever Android lets it grant (root or device
      *    owner) and only asks the user for the rest — no helper app, no PC.
      */
+    /**
+     * The access doctor: every permission OEA uses, *verified live* rather than
+     * read off Android's switches, with the exact fix for each one.
+     *
+     * This is the screen for "it says it is on but nothing happens": each row shows
+     * what OEA observed, and a row that is switched on but not working says so and
+     * offers the repair instead of looking healthy.
+     */
+    private fun showAccessDoctor() {
+        val page = page("Access doctor", "Every permission verified, with the fix for each one")
+        val box = page.content
+        val status = kit.text("Checking what OEA can actually do…", 13f, palette.textSecondary).apply {
+            setPadding(dp(6), dp(6), dp(6), dp(10))
+        }
+        box.addView(status)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(list, LinearLayout.LayoutParams(-1, -2))
+
+        fun render(findings: List<com.oea.launcher.privilege.OeaAccessDoctor.Finding>) {
+            list.removeAllViews()
+            val working = findings.count { it.isReady }
+            status.text = "$working of ${findings.size} checks pass. The rest are listed first, with what to do about each."
+            status.setTextColor(if (working == findings.size) palette.success else palette.textSecondary)
+            findings.forEach { finding ->
+                val group = kit.group(list)
+                val tone = when (finding.state) {
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.WORKING -> OeaKit.Tone.SUCCESS
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.STALE -> OeaKit.Tone.DANGER
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.NEEDS_TAP -> OeaKit.Tone.WARNING
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.OEA_CAN_FIX -> OeaKit.Tone.INFO
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.UNAVAILABLE -> OeaKit.Tone.INFO
+                }
+                kit.banner(group, if (finding.isReady) R.drawable.oic_check_circle_fill else R.drawable.oic_warning_fill, finding.privilege.title, finding.evidence, tone = tone)
+                kit.row(group, R.drawable.oic_settings, finding.privilege.summary, finding.advice, chevron = false)
+                if (!finding.isReady) {
+                    val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(4), dp(8), dp(12)) }
+                    actions.addView(kit.tonalButton("Fix this", R.drawable.oic_shield) {
+                        // One route for every state: OeaPrivileges decides whether it
+                        // can grant it itself, opens the right Android page, or says
+                        // plainly that this device cannot.
+                        OeaPrivileges.grant(this, finding.privilege) { outcome ->
+                            toast(outcome.message)
+                            doctorReload()
+                        }
+                    }, LinearLayout.LayoutParams(-2, dp(42)))
+                    if (finding.command != null) {
+                        actions.addView(kit.quietButton("Copy command", R.drawable.oic_text_fields) {
+                            runCatching {
+                                val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("OEA", finding.command))
+                                toast("Command copied. It is what OEA itself would run.")
+                            }
+                        }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(8) })
+                    }
+                    group.addView(actions)
+                }
+            }
+        }
+
+        fun check() {
+            status.text = "Checking what OEA can actually do…"
+            doctorWorkers.execute {
+                val findings = runCatching { com.oea.launcher.privilege.OeaAccessDoctor.examine(this) }.getOrDefault(emptyList())
+                runOnUiThread { if (!isDestroyed) render(findings) }
+            }
+        }
+        doctorCheck = ::check
+
+        val actions = kit.group(box)
+        kit.row(actions, R.drawable.oic_shield_fill, "Repair everything OEA can repair", "Uses OEA's own channel — no PC and no other app") {
+            OeaPrivileges.repairAll(this) { summary ->
+                toast(summary.describe())
+                check()
+            }
+        }
+        kit.row(actions, R.drawable.oic_refresh, "Check again", "Verifies each permission live, including drawing a test window") { check() }
+        kit.row(actions, R.drawable.oic_info, "Why some rows stay manual", "Android only lets the user turn on accessibility and notification access on most phones. OEA shows exactly which screen.") {
+            toast("Accessibility and notification access have no API a normal app can call; OEA opens the exact page instead.")
+        }
+        kit.note(
+            box,
+            "Nothing here is required. A permission that stays off only limits the feature that uses it: every one of them falls back to OEA's own Home surface, so the launcher keeps working.",
+        )
+        present(page)
+        check()
+    }
+
+    private fun doctorReload() {
+        doctorCheck?.invoke()
+    }
+
     private fun showAccess() {
         val page = page("Permissions & access", "What OEA can use, what it unlocks, and what it does without it")
         val box = page.content
