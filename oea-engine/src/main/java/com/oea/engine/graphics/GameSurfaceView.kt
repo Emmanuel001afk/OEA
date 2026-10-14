@@ -56,9 +56,10 @@ object SurfaceProbe {
                 if (egl.eglChooseConfig(display, attribs, null, 0, count) && count[0] > 0) return null
             }
             // Nothing at all: name the real reason, because the two are different
-            // problems with different answers.
+            // problems with different answers. (An explicit return is required here:
+            // a try block that has a finally clause is not the function's value.)
             val es3 = IntArray(2)
-            if (egl.eglGetConfigs(display, null, 0, es3) && es3[0] > 0) {
+            return if (egl.eglGetConfigs(display, null, 0, es3) && es3[0] > 0) {
                 "This phone's graphics driver offers no OpenGL ES 3.0 display, which OEA's games need."
             } else {
                 "This phone reported no graphics configurations at all; a reboot usually restores the driver."
