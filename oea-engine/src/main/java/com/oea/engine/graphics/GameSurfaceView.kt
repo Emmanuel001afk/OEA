@@ -21,7 +21,15 @@ import javax.microedition.khronos.egl.EGLDisplay
  */
 object SurfaceProbe {
     /** null when a surface can be created; otherwise why it cannot. */
-    fun reason(): String? = runCatching {
+    fun reason(): String? = try {
+        probe()
+    } catch (error: Throwable) {
+        // A probe that itself fails must not be read as "everything is fine": the
+        // caller has to know the check could not be made.
+        "The graphics driver could not be checked (${error.javaClass.simpleName})."
+    }
+
+    private fun probe(): String? {
         val egl = javax.microedition.khronos.egl.EGLContext.getEGL() as? javax.microedition.khronos.egl.EGL10
             ?: return null
         val display = egl.eglGetDisplay(javax.microedition.khronos.egl.EGL10.EGL_DEFAULT_DISPLAY)
