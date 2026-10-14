@@ -2,6 +2,7 @@ package com.oea.engine.island
 
 import android.os.SystemClock
 import com.oea.engine.EngineSettings
+import com.oea.engine.core.OeaGuard
 import com.oea.engine.core.GameDescriptor
 
 /**
@@ -110,8 +111,8 @@ class GameIsland internal constructor(
     private var ended = true
 
     /** Styles currently enabled on the device. */
-    val enabledStyles: Set<IslandStyle> get() = runCatching { host().enabledStyles() }.getOrDefault(emptySet())
-    val placement: IslandPlacement get() = runCatching { host().placement(descriptor.id) }.getOrDefault(IslandPlacement.AUTO)
+    val enabledStyles: Set<IslandStyle> get() = OeaGuard.call("island-host", emptySet<IslandStyle>()) { host().enabledStyles() }
+    val placement: IslandPlacement get() = OeaGuard.call("island-host", IslandPlacement.AUTO) { host().placement(descriptor.id) }
     val isAvailable get() = enabledStyles.isNotEmpty()
 
     /** Where [activity] would appear right now. */
@@ -131,13 +132,13 @@ class GameIsland internal constructor(
         if (ended) return
         ended = true
         last = null
-        runCatching { host().publish(descriptor, null, emptySet(), null) }
+        OeaGuard.run("island-host") { host().publish(descriptor, null, emptySet(), null) }
     }
 
     /** Shows a transient notice. */
     fun event(text: String, glyph: String = "", durationMs: Long = 2600, important: Boolean = false) {
         val e = IslandEvent(text, glyph.ifEmpty { descriptor.glyph }, durationMs, descriptor.accent, important)
-        runCatching { host().event(descriptor, e, IslandRouting.resolve(enabledStyles, placement, descriptor.preferredIsland)) }
+        OeaGuard.run("island-host") { host().event(descriptor, e, IslandRouting.resolve(enabledStyles, placement, descriptor.preferredIsland)) }
     }
 
     internal fun tick() = flushIfDue()
@@ -151,7 +152,7 @@ class GameIsland internal constructor(
         ended = false
         lastPublishAt = now
         val withDefaults = p.copy(glyph = p.glyph.ifEmpty { descriptor.glyph }, accent = if (p.accent != 0) p.accent else descriptor.accent)
-        runCatching {
+        OeaGuard.run("island-host") {
             host().publish(descriptor, withDefaults, surfacesFor(p)) { id -> toGameThread { onActionCallback(id) } }
         }
     }

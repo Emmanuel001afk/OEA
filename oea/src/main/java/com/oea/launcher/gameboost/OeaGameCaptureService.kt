@@ -21,6 +21,7 @@ import android.util.DisplayMetrics
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import com.oea.launcher.fault.OeaFaultShield
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -60,7 +61,12 @@ class OeaGameCaptureService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        OeaFaultShield.value("game-capture:command", START_NOT_STICKY) {
+            command(intent, startId)
+        }
+
+    private fun command(intent: Intent?, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopCapture()
             stopSelf()
@@ -103,8 +109,12 @@ class OeaGameCaptureService : Service() {
 
         projectionCallback = object : MediaProjection.Callback() {
             override fun onStop() {
-                stopCapture(stopProjection = false)
-                stopSelf()
+                // Binder callback: a fault here would kill the process, so the
+                // teardown is contained like every other OEA entry point.
+                OeaFaultShield.guard("game-capture:projection-stop") {
+                    stopCapture(stopProjection = false)
+                    stopSelf()
+                }
             }
         }
         projection?.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))

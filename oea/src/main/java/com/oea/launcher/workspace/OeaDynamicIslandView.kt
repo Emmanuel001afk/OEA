@@ -638,7 +638,7 @@ class OeaDynamicIslandView(
     private fun render() {
         try {
             renderContent()
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             Log.w(TAG, "Could not render live activity", error)
             val wasVisible = visibility == VISIBLE
             val wasExpanded = expanded

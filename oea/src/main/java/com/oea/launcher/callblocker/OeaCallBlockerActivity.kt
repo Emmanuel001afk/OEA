@@ -30,9 +30,11 @@ class OeaCallBlockerActivity : Activity() {
     private var selectedTab = "blocked"
 
     override fun onCreate(state: Bundle?) {
-        super.onCreate(state)
-        selectedTab = state?.getString("tab") ?: intent.getStringExtra("tab") ?: "blocked"
-        render()
+        com.oea.launcher.fault.OeaFaultShield.guard("call-blocker:create") {
+            super.onCreate(state)
+            selectedTab = state?.getString("tab") ?: intent.getStringExtra("tab") ?: "blocked"
+            render()
+        }
     }
 
     override fun onResume() {

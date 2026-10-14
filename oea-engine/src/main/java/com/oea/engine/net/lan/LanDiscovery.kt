@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.oea.engine.OeaEngine
+import com.oea.engine.core.OeaGuard
 import com.oea.engine.net.ByteReader
 import com.oea.engine.net.ByteWriter
 import com.oea.engine.net.Codes
@@ -99,8 +100,8 @@ class LanAdvertiser(private val context: Context, private val beacon: LanBeacon)
             ?: runCatching { DatagramSocket().apply { broadcast = true } }.getOrNull()
         socket = s
         if (s != null) {
-            Thread({ sendLoop(s) }, "oea-lan-beacon").apply { isDaemon = true; start() }
-            Thread({ queryLoop(s) }, "oea-lan-query").apply { isDaemon = true; start() }
+            OeaGuard.start("oea-lan-beacon", "lan-discovery") { sendLoop(s) }
+            OeaGuard.start("oea-lan-query", "lan-discovery") { queryLoop(s) }
         }
         registerNsd()
     }
@@ -202,8 +203,8 @@ class LanBrowser(private val context: Context, private val gameId: String?, priv
             ?: runCatching { DatagramSocket().apply { broadcast = true } }.getOrNull()
         socket = s
         if (s != null) {
-            Thread({ receiveLoop(s) }, "oea-lan-browse").apply { isDaemon = true; start() }
-            Thread({ queryLoop(s) }, "oea-lan-ask").apply { isDaemon = true; start() }
+            OeaGuard.start("oea-lan-browse", "lan-discovery") { receiveLoop(s) }
+            OeaGuard.start("oea-lan-ask", "lan-discovery") { queryLoop(s) }
         }
         startNsd()
         main.postDelayed(expiry, 1000)
@@ -257,8 +258,8 @@ class LanBrowser(private val context: Context, private val gameId: String?, priv
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
             override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
-            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                main.post { resolveQueue.addLast(serviceInfo); resolveNext() }
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) = OeaGuard.run("lan-discovery") {
+                OeaGuard.post("lan-discovery", main) { resolveQueue.addLast(serviceInfo); resolveNext() }
             }
         }
         runCatching { nsd.discoverServices(LanAdvertiser.NSD_TYPE, NsdManager.PROTOCOL_DNS_SD, l); nsdListener = l }
@@ -273,10 +274,10 @@ class LanBrowser(private val context: Context, private val gameId: String?, priv
         resolving = true
         runCatching {
             nsd.resolveService(info, object : NsdManager.ResolveListener {
-                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                    main.post { resolving = false; resolveNext() }
+                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = OeaGuard.run("lan-discovery") {
+                    OeaGuard.post("lan-discovery", main) { resolving = false; resolveNext() }
                 }
-                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                override fun onServiceResolved(serviceInfo: NsdServiceInfo) = OeaGuard.run("lan-discovery") {
                     val host = serviceInfo.host
                     val attrs = runCatching { serviceInfo.attributes }.getOrNull().orEmpty()
                     val sid = attrs["s"]?.let { String(it) }?.toLongOrNull()
@@ -287,7 +288,7 @@ class LanBrowser(private val context: Context, private val gameId: String?, priv
                             host.hostAddress.orEmpty(), serviceInfo.port, 0, 0, true, proto, System.currentTimeMillis())
                         publish()
                     }
-                    main.post { resolving = false; resolveNext() }
+                    OeaGuard.post("lan-discovery", main) { resolving = false; resolveNext() }
                 }
             })
         }.onFailure { resolving = false }

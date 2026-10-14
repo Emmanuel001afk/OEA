@@ -233,8 +233,26 @@ class PerformanceManager internal constructor(private val context: Context, priv
         windowFrames = 0; windowMisses = 0; windowWorkNs = 0L
     }
 
+    /** Extra cap applied while Android reports memory pressure (1 = none). */
+    @Volatile private var pressureScale = 1f
+
+    /**
+     * Android is short of memory. Shrinking the render targets is the fastest way
+     * for a game to give some back: the scene, shadow and bloom textures are the
+     * biggest allocations an engine makes, and this beats being killed.
+     */
+    fun applyMemoryPressure(severe: Boolean) {
+        pressureScale = if (severe) 0.62f else 0.8f
+    }
+
+    /** Restores the scale the quality tier asked for. */
+    fun clearMemoryPressure() { pressureScale = 1f }
+
+    /** True while the pressure cap is active, so the HUD can say so. */
+    val underMemoryPressure: Boolean get() = pressureScale < 1f
+
     private fun maxScale(): Float {
-        var cap = min(quality.maxScale, pixelCapScale)
+        var cap = min(min(quality.maxScale, pixelCapScale), quality.maxScale * pressureScale)
         val status = thermalStatus
         if (status >= PowerManager.THERMAL_STATUS_SEVERE) cap = min(cap, quality.minScale + 0.1f)
         else if (status >= PowerManager.THERMAL_STATUS_MODERATE) cap = min(cap, 1f)

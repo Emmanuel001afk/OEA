@@ -69,27 +69,37 @@ class OeaAssistantService : AccessibilityService() {
 
     private var lastWindowKey: String? = null
 
+    /**
+     * Accessibility events arrive continuously from every app, so this is the
+     * service's busiest entry point and the last place a thrown exception should
+     * ever reach Android: a fault here would take OEA Assistant (and Home with
+     * it) down. Events are processed defensively instead.
+     */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString()
-            if (!pkg.isNullOrEmpty()) {
-                val cls = event.className?.toString()
-                val key = "$pkg/$cls"
-                if (key != lastWindowKey) {
-                    lastWindowKey = key
-                    // Game Boost follows sessions from these events instead of polling Usage access.
-                    runCatching { com.oea.launcher.gameboost.OeaGameBoost.onWindowChanged(this, pkg, cls) }
+        com.oea.launcher.fault.OeaFaultShield.guard("assistant:event") {
+            if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                val changed = event.packageName?.toString()
+                if (!changed.isNullOrEmpty()) {
+                    val cls = event.className?.toString()
+                    val key = "$changed/$cls"
+                    if (key != lastWindowKey) {
+                        lastWindowKey = key
+                        // Game Boost follows sessions from these events instead
+                        // of polling Usage access.
+                        runCatching { com.oea.launcher.gameboost.OeaGameBoost.onWindowChanged(this, changed, cls) }
+                            .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:boost-window", it) }
+                    }
                 }
             }
+            val watch = foregroundWatch
+            if (watch != null && event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+                event.packageName?.toString() == watch.packageName) {
+                finishForegroundWatch(true)
+            }
+            val active = job ?: return@guard
+            val pkg = event?.packageName?.toString() ?: return@guard
+            if (pkg in active.settingsPackages) scheduleStep(90L)
         }
-        val watch = foregroundWatch
-        if (watch != null && event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-            event.packageName?.toString() == watch.packageName) {
-            finishForegroundWatch(true)
-        }
-        val active = job ?: return
-        val pkg = event?.packageName?.toString() ?: return
-        if (pkg in active.settingsPackages) scheduleStep(90L)
     }
 
     // ======================================================= foreground watch

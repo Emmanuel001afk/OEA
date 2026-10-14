@@ -224,6 +224,26 @@ class OeaDataStore private constructor(context: Context) {
     fun setHomeLayoutLocked(v: Boolean) { prefs.edit().putBoolean(KEY_LAYOUT_LOCKED, v).apply() }
     fun hapticsEnabled() = prefs.getBoolean(KEY_HAPTICS, true)
     fun setHapticsEnabled(v: Boolean) { prefs.edit().putBoolean(KEY_HAPTICS, v).apply() }
+    /**
+     * Home stability: when set, Home skips the optional subsystems (widget host,
+     * At a Glance, live activities, boost resume) for the session. Turned on
+     * automatically after repeated faults and switchable by the user.
+     */
+    fun homeSafeMode() = prefs.getBoolean(KEY_HOME_SAFE_MODE, false)
+    fun setHomeSafeMode(enabled: Boolean) { prefs.edit().putBoolean(KEY_HOME_SAFE_MODE, enabled).apply() }
+
+    /** The games that keep stopping, so the hub can offer a safer path for them. */
+    fun unstableGames(): Set<String> = prefs.getStringSet(KEY_UNSTABLE_GAMES, emptySet()).orEmpty()
+    fun markUnstable(gameId: String, unstable: Boolean) {
+        val set = unstableGames().toMutableSet()
+        if (unstable) set += gameId else set -= gameId
+        prefs.edit().putStringSet(KEY_UNSTABLE_GAMES, set).apply()
+    }
+
+    /** Optional fault log for the Stability screen; turning it off stops all file writes. */
+    fun faultLogEnabled() = prefs.getBoolean(KEY_FAULT_LOG, true)
+    fun setFaultLogEnabled(enabled: Boolean) { prefs.edit().putBoolean(KEY_FAULT_LOG, enabled).apply() }
+
     fun defaultHomeBannerDismissed() = prefs.getBoolean(KEY_DEFAULT_BANNER, false)
     fun setDefaultHomeBannerDismissed(v: Boolean) { prefs.edit().putBoolean(KEY_DEFAULT_BANNER, v).apply() }
     fun onboardingDone() = prefs.getBoolean(KEY_ONBOARDING_DONE, false)
@@ -342,6 +362,9 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_LAYOUT_LOCKED = "home_layout_locked"
         private const val KEY_HAPTICS = "haptics"
         private const val KEY_ONBOARDING_DONE = "onboarding_done"
+        private const val KEY_HOME_SAFE_MODE = "home_safe_mode"
+        private const val KEY_UNSTABLE_GAMES = "unstable_games"
+        private const val KEY_FAULT_LOG = "fault_log_enabled"
         private const val KEY_DEFAULT_BANNER = "default_home_banner_dismissed"
         private const val KEY_RECENTS = "recent_launches"
         private const val KEY_LAUNCH_COUNT_PREFIX = "launch_count:"

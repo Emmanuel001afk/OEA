@@ -34,6 +34,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.privilege.Privilege
 import com.oea.launcher.R
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.icons.OeaIconController
@@ -540,11 +542,17 @@ class OeaGameBoostActivity : Activity() {
         kit.sectionTitle(content, "Permissions")
         val group = kit.group(content)
         fun status(ok: Boolean, required: Boolean) = if (ok) "Allowed" else if (required) "Required" else "Off"
-        val overlay = Settings.canDrawOverlays(this)
+        val overlay = OeaPrivileges.canOverlay(this)
         val dnd = getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
         kit.row(group, R.drawable.oic_layers, "Display over other apps", "Shows the OEA RAM control above games", value = status(overlay, true),
             iconBg = statusBg(overlay), iconTint = statusTint(overlay)) {
-            runCatching { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
+            // One tap: OEA grants it itself when the phone allows that (root or
+            // device owner) and otherwise opens exactly the right Android page,
+            // then verifies the result.
+            OeaPrivileges.grant(this, Privilege.OVERLAY) { outcome ->
+                toast(outcome.message)
+                handler.postDelayed({ if (loaded) render() }, 700L)
+            }
         }
         kit.row(group, R.drawable.oic_do_not_disturb_on, "Do Not Disturb access", "Lets Game Boost silence notifications", value = status(dnd, false),
             iconBg = statusBg(dnd), iconTint = statusTint(dnd)) {

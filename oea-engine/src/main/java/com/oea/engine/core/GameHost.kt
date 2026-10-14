@@ -79,6 +79,7 @@ class GameHost(
     private var destroyed = false
     @Volatile private var failed = false
     private var lastNanos = 0L
+    @Volatile private var lastFrameAt = 0L
     private var accumulator = 0.0
     private var background: Thread? = null
     @Volatile private var resumed = false
@@ -159,30 +160,68 @@ class GameHost(
         resumed = true
         stopBackground()
         immersive()
-        surface.onResume()
+        OeaGuard.run("game:surface-resume") { surface.onResume() }
         audio.resume()
-        surface.queueEvent { lock.withLock { perf.resetTiming(); lastNanos = 0L; if (created) safely { game.onResume() } } }
+        surface.queueEvent {
+            lock.withLock {
+                perf.resetTiming(); lastNanos = 0L
+                if (created) safely { game.onResume() }
+            }
+        }
+        main.removeCallbacks(watchdog)
+        main.postDelayed(watchdog, WATCHDOG_MS)
     }
 
     fun onPause() {
         resumed = false
-        surface.queueEvent { lock.withLock { input.reset(); if (created) safely { game.onPause() } } }
-        surface.onPause()
+        main.removeCallbacks(watchdog)
+        // A game that is stuck inside its own update must not hang the UI thread:
+        // queue the pause on the game thread, but do not wait for it here.
+        OeaGuard.run("game:surface-pause") { surface.queueEvent { lock.withLock { input.reset(); if (created) safely { game.onPause() } } } }
+        OeaGuard.run("game:surface-pause") { surface.onPause() }
         audio.pause()
-        if (created && !destroyed && game.keepsRunningInBackground()) startBackground()
+        if (created && !destroyed && OeaGuard.call("game:background-check", false) { game.keepsRunningInBackground() }) startBackground()
     }
 
     fun onWindowFocusChanged(hasFocus: Boolean) { if (hasFocus) immersive() }
 
+    /**
+     * Android's memory signal, forwarded from the host activity. The renderer
+     * shrinks immediately; the game is asked on the game thread, under the normal
+     * fault guard, so a cache-dropping bug can never turn pressure into a crash.
+     */
+    fun onTrimMemory(level: Int) {
+        val severe = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        perf.applyMemoryPressure(severe)
+        if (created) runOnGameThread { safely { game.onMemoryPressure(severe) } }
+    }
+
+    fun onLowMemory() = onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+
     fun onDestroy() {
         destroyed = true
         stopBackground()
+        main.removeCallbacks(watchdog)
         island.end()
-        perf.detach(activity)
-        // The GL thread is paused by now; game state is only touched under the lock, so finish here.
-        lock.withLock {
-            if (created) safely { game.onDestroy() }
-            perf.onGlThreadStopped()
+        OeaGuard.run("game:perf-detach") { perf.detach(activity) }
+        // The GL thread is paused by now, so game state is only touched under the lock.
+        // Waiting for that lock forever would ANR the host app if a game thread is stuck,
+        // so the teardown is skipped when the lock cannot be taken quickly.
+        val acquired = try {
+            lock.tryLock(TEARDOWN_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            false
+        }
+        if (acquired) {
+            try {
+                if (created) safely { game.onDestroy() }
+                perf.onGlThreadStopped()
+            } finally {
+                lock.unlock()
+            }
+        } else {
+            failed = true
+            OeaGuard.report("game:${descriptor.id}", IllegalStateException("Game thread did not release its lock; skipped game teardown"), fatal = false)
         }
         audio.release()
         jobs.shutdown()
@@ -196,8 +235,12 @@ class GameHost(
         }
     }
 
-    fun dispatchKeyEvent(e: KeyEvent): Boolean = input.onKeyEvent(e)
-    fun dispatchGenericMotionEvent(e: MotionEvent): Boolean = input.onGenericMotion(e)
+    /**
+     * Input arrives on the UI thread, so a fault inside it is contained here: the
+     * event is dropped instead of ending the process.
+     */
+    fun dispatchKeyEvent(e: KeyEvent): Boolean = OeaGuard.call("game:input", false) { input.onKeyEvent(e) }
+    fun dispatchGenericMotionEvent(e: MotionEvent): Boolean = OeaGuard.call("game:input", false) { input.onGenericMotion(e) }
 
     override fun runOnGameThread(action: () -> Unit) = jobs.post(action)
 
@@ -222,7 +265,11 @@ class GameHost(
                 if (sleep > 0) try { Thread.sleep(sleep / 1_000_000L, (sleep % 1_000_000L).toInt()) } catch (_: InterruptedException) { break }
                 else next = System.nanoTime()
             }
-        }, "oea-game-bg").apply { isDaemon = true; start() }
+        }, "oea-game-bg").apply {
+            isDaemon = true
+            setUncaughtExceptionHandler { t, e -> OeaGuard.report("game:${descriptor.id}:background", e, fatal = true) }
+            start()
+        }
     }
 
     private fun stopBackground() {
@@ -236,16 +283,29 @@ class GameHost(
     private inner class Renderer : GLSurfaceView.Renderer {
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             lock.withLock {
-                perf.onGlThreadStarted()
-                graphics.onContextCreated()
-                if (created) safely { game.onGpuContextRestored() }
+                // An EGL/driver failure here is fatal to the game, but it must never
+                // escape into GLSurfaceView's own thread: an exception there would take
+                // the host process (and therefore the launcher) down with it.
+                val ok = OeaGuard.run("game:context") {
+                    perf.onGlThreadStarted()
+                    graphics.onContextCreated()
+                    if (!OeaEngine.device.supportsEs3) error("This phone's GPU does not provide OpenGL ES 3.0")
+                    if (created) safely { game.onGpuContextRestored() }
+                }
+                if (!ok) fail(IllegalStateException("The 3D display could not start on this phone"), fatal = false)
             }
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
             lock.withLock {
-                graphics.onSurfaceChanged(width, height)
-                perf.onSurfaceSize(width, height)
+                val ok = OeaGuard.run("game:surface") {
+                    graphics.onSurfaceChanged(width, height)
+                    perf.onSurfaceSize(width, height)
+                }
+                if (!ok) {
+                    fail(IllegalStateException("The game surface could not be created"), fatal = false)
+                    return@withLock
+                }
                 if (!created) {
                     created = true
                     time.fixedDelta = 1f / game.fixedStepHz.coerceIn(10, 240)
@@ -258,6 +318,7 @@ class GameHost(
         override fun onDrawFrame(gl: GL10?) {
             val start = System.nanoTime()
             lock.withLock { frame(start) }
+            lastFrameAt = SystemClock.uptimeMillis()
             perf.endFrame(System.nanoTime(), System.nanoTime() - start)
         }
     }
@@ -303,15 +364,48 @@ class GameHost(
         return try {
             block()
         } catch (t: Throwable) {
-            failed = true
-            Log.e(TAG, "Game '${descriptor.id}' stopped", t)
-            main.post {
-                onFatalError?.invoke(t) ?: run {
-                    ui.toast("${descriptor.title} stopped: ${t.javaClass.simpleName}")
-                    activity.finish()
+            fail(t, fatal = true)
+            null
+        }
+    }
+
+    /**
+     * Ends the game: report once, then close the game screen on the UI thread.
+     *
+     * This is the single exit for every fault inside the engine, so a game bug,
+     * an out-of-memory inside a game, or a driver problem stops only the game and
+     * never takes the host app (OEA Home) down.
+     */
+    private fun fail(error: Throwable, source: String = "game:${descriptor.id}", fatal: Boolean = true) {
+        if (failed) return
+        failed = true
+        OeaGuard.report(source, error, fatal = fatal)
+        Log.e(TAG, "Game '${descriptor.id}' stopped", error)
+        main.post {
+            OeaGuard.run("game:close") {
+                val handler = onFatalError
+                if (handler != null) handler(error) else {
+                    ui.toast("${descriptor.title} stopped: ${error.javaClass.simpleName}")
+                    if (!activity.isFinishing) activity.finish()
                 }
             }
-            null
+        }
+    }
+
+    /**
+     * Detects a game that stopped producing frames (a stuck loop or a blocked GL
+     * thread) so the host can close it instead of Android showing a "not
+     * responding" dialog for the whole app.
+     */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (destroyed || !resumed || failed) return
+            val since = SystemClock.uptimeMillis() - lastFrameAt
+            if (created && lastFrameAt != 0L && since > STALL_LIMIT_MS) {
+                fail(IllegalStateException("${descriptor.title} produced no frame for ${(since / 1000L)}s"), fatal = false)
+                return
+            }
+            main.postDelayed(this, WATCHDOG_MS)
         }
     }
 
@@ -331,6 +425,12 @@ class GameHost(
     private companion object {
         const val TAG = "OeaGameHost"
         const val MAX_STEPS = 8
+        /** How often the UI thread checks that the game is still drawing. */
+        const val WATCHDOG_MS = 2_000L
+        /** No frame for this long means the game is stuck, not merely slow. */
+        const val STALL_LIMIT_MS = 15_000L
+        /** Longest the UI thread waits for the game lock while tearing down. */
+        const val TEARDOWN_WAIT_MS = 400L
         @Suppress("unused") val CLOCK = SystemClock::class.java
     }
 }

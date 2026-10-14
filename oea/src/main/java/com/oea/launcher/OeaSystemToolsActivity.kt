@@ -36,6 +36,8 @@ import com.oea.launcher.applock.OeaAppLockStore
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.callblocker.OeaCallBlockerActivity
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.fault.OeaFaultLog
+import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.freezer.OeaFreezerActivity
 import com.oea.launcher.gameboost.OeaGameBoostActivity
 import com.oea.launcher.gameboost.OeaGameBoostStore
@@ -44,6 +46,11 @@ import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.model.OeaAppModel
 import com.oea.launcher.multitask.OeaMultitaskLauncher
 import com.oea.launcher.phone.OeaPhoneActivity
+import com.oea.launcher.privilege.Capability
+import com.oea.launcher.privilege.Grant
+import com.oea.launcher.privilege.OeaShell
+import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.privilege.Privilege
 import com.oea.launcher.runtime.OeaRuntime
 import com.oea.launcher.split.OeaSplitLauncher
 import com.oea.launcher.ui.OeaInsets
@@ -52,6 +59,9 @@ import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
+import com.oea.launcher.wallpaper.OeaWallpaper
+import com.oea.launcher.wallpaper.OeaWallpaperRenderer
+import com.oea.launcher.wallpaper.OeaWallpaperStore
 import com.oea.launcher.workspace.OeaWorkspaceStore
 import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
 import java.util.concurrent.Executors
@@ -239,6 +249,7 @@ open class OeaSystemToolsActivity : Activity() {
             "notifications" -> current = "notifications"
             "power" -> current = "power"
             "games" -> { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java); finish(); return }
+            "stability" -> current = "stability"
             else -> current = "hub"
         }
         show(current)
@@ -253,7 +264,7 @@ open class OeaSystemToolsActivity : Activity() {
         super.onResume()
         if (pendingIslandOverlayEnable) {
             pendingIslandOverlayEnable = false
-            if (Settings.canDrawOverlays(this)) {
+            if (OeaPrivileges.canOverlay(this)) {
                 dataStore.setIslandOnOtherApps(true)
                 OeaDynamicIslandOverlayService.sync(this)
                 toast("Dynamic Island will appear over other apps.")
@@ -263,7 +274,7 @@ open class OeaSystemToolsActivity : Activity() {
         } else if (dataStore.islandOnOtherApps()) {
             // Keep persisted UI state honest if the user revoked overlay access
             // from Android Settings while OEA was in the background.
-            if (Settings.canDrawOverlays(this)) {
+            if (OeaPrivileges.canOverlay(this)) {
                 OeaDynamicIslandOverlayService.sync(this)
             } else {
                 dataStore.setIslandOnOtherApps(false)
@@ -337,10 +348,12 @@ open class OeaSystemToolsActivity : Activity() {
                 "overview" -> showMultitask()
                 "split" -> showSplit()
                 "access" -> showAccess()
+                "stability" -> showStability()
+                "wallpaper" -> showWallpaperGallery()
                 "about" -> showAbout()
                 else -> showSettings()
             }
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             OeaScreenFailure.show(this, "OEA Settings", error)
         }
     }
@@ -403,6 +416,7 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "OEA Games, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_accessibility_new, "Permissions & access", accessSummary()) { navigate("access") }
+        kit.row(group, R.drawable.oic_shield_fill, "Stability", stabilitySummary()) { navigate("stability") }
         kit.row(group, R.drawable.oic_info, "About OEA", "Version $version") { navigate("about") }
         present(page)
     }
@@ -507,11 +521,18 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_palette, "Themes & wallpapers", "Opens the OEA Themes app: themes, your own themes and the wallpaper library") {
             openActivity(com.oea.launcher.themes.OeaThemesActivity::class.java)
         }
+        kit.row(group, R.drawable.oic_wallpaper, "OEA wallpapers", oeaWallpaperSummary()) { navigate("wallpaper") }
+        kit.row(group, R.drawable.oic_palette, "Theme follows wallpaper", wallpaperThemeSummary()) {
+            val next = !OeaWallpaperStore.themeFollowsScene(this)
+            OeaWallpaperStore.setThemeFollowsScene(this, next)
+            toast(if (next) "OEA's colours will follow the wallpaper scene." else "OEA keeps the accent you chose.")
+            rerender()
+        }
         present(page)
     }
 
     private fun accentRow(group: LinearLayout) {
-        val options = listOf("wallpaper", "blue", "teal", "violet", "rose", "amber", "green")
+        val options = listOf("wallpaper", "blue", "teal", "violet", "rose", "amber", "green", "indigo", "coral", "lime", "slate")
         val current = dataStore.accentMode()
         val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         options.forEach { mode ->
@@ -522,6 +543,10 @@ open class OeaSystemToolsActivity : Activity() {
                 "rose" -> Color.rgb(233, 30, 99)
                 "amber" -> Color.rgb(255, 160, 0)
                 "green" -> Color.rgb(67, 160, 71)
+                "indigo" -> Color.rgb(92, 107, 192)
+                "coral" -> Color.rgb(255, 112, 67)
+                "lime" -> Color.rgb(156, 204, 101)
+                "slate" -> Color.rgb(120, 144, 156)
                 else -> palette.accent
             }
             val swatch = FrameLayout(this).apply {
@@ -589,10 +614,108 @@ open class OeaSystemToolsActivity : Activity() {
         }
     }
 
+    /**
+     * OEA's own wallpapers: drawn by OEA at the phone's resolution, applied
+     * through Android's wallpaper service (install-time permission, no prompt),
+     * with a dim control for busy scenes and a preview for each one.
+     */
+    private fun showWallpaperGallery() {
+        val page = page("OEA wallpapers", "Drawn for this screen, applied to Android's wallpaper")
+        val box = page.content
+        val current = OeaWallpaperStore.scene(this)
+        kit.note(box, "These replace the system wallpaper on the target you choose. Your own photos, the stock picker and Android's live wallpapers keep working exactly as before.")
+
+        val group = kit.group(box)
+        kit.stepperRow(group, R.drawable.oic_contrast, "Dim", "Darkens the scene when icons need more contrast", OeaWallpaperStore.dimPercent(this) / 5, 0, 12, { "${it * 5}%" }) {
+            OeaWallpaperStore.setDimPercent(this, it * 5)
+            OeaWallpaperStore.scene(this)?.let { scene -> applyWallpaper(scene, silent = true) }
+        }
+        kit.switchRow(group, R.drawable.oic_palette, "Theme follows the scene", "OEA's accent and Home text colour are picked from the wallpaper", OeaWallpaperStore.themeFollowsScene(this)) {
+            OeaWallpaperStore.setThemeFollowsScene(this, it)
+            rerender()
+        }
+
+        kit.sectionTitle(box, "Scenes")
+        val list = kit.group(box)
+        OeaWallpaper.entries.forEach { scene ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                isClickable = true
+                setOnClickListener { wallpaperTargetSheet(scene) }
+            }
+            val preview = ImageView(this)
+            runCatching { preview.setImageBitmap(OeaWallpaperRenderer.preview(scene, dp(54), dp(96))) }
+            preview.scaleType = ImageView.ScaleType.CENTER_CROP
+            preview.background = kit.rounded(Color.TRANSPARENT, 12, palette.stroke, 1)
+            row.addView(preview, LinearLayout.LayoutParams(dp(54), dp(90)).apply { rightMargin = dp(14) })
+            val text = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            text.addView(kit.text(scene.label, 15.5f, palette.text, OeaType.medium))
+            text.addView(kit.text(scene.blurb, 12.5f, palette.textSecondary).apply { setLineSpacing(dp(2).toFloat(), 1f) })
+            if (current == scene) text.addView(kit.text("In use", 12f, palette.accent, OeaType.medium).apply { setPadding(0, dp(4), 0, 0) })
+            row.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
+            val swatch = View(this).apply { background = kit.oval(scene.accent) }
+            row.addView(swatch, LinearLayout.LayoutParams(dp(22), dp(22)))
+            list.addView(row)
+        }
+
+        val actions = kit.group(box)
+        kit.row(actions, R.drawable.oic_refresh, "Apply the scene in use again", "Useful after changing dim or after another app changed the wallpaper") {
+            OeaWallpaperStore.reapply(this) { result -> toast(result.message); rerender() }
+        }
+        kit.row(actions, R.drawable.oic_wallpaper, "Android's wallpaper picker", "Stock wallpapers and live wallpapers") {
+            runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) }
+        }
+        present(page)
+    }
+
+    private fun wallpaperTargetSheet(scene: OeaWallpaper) {
+        kit.sheet(scene.label, scene.blurb) { panel, dialog ->
+            panel.addView(kit.hscroll(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                OeaWallpaperStore.Target.entries.forEach { target ->
+                    val button = kit.primaryButton("Apply to ${target.label}", R.drawable.oic_wallpaper) {
+                        dialog.dismiss()
+                        applyWallpaper(scene, target)
+                    }
+                    addView(button, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
+                }
+            }))
+            kit.note(panel, "OEA renders the scene for this phone's screen and hands it to Android, so it behaves like any other wallpaper.")
+        }
+    }
+
+    private fun applyWallpaper(scene: OeaWallpaper, target: OeaWallpaperStore.Target = OeaWallpaperStore.Target.HOME, silent: Boolean = false) {
+        if (!silent) toast("Applying ${scene.label}…")
+        OeaWallpaperStore.apply(this, scene, target) { result ->
+            if (!isFinishing) {
+                toast(result.message)
+                if (result is OeaWallpaperStore.Result.Applied) rerender()
+            }
+        }
+    }
+
+    private fun oeaWallpaperSummary(): String {
+        val scene = OeaWallpaperStore.scene(this)
+        val target = OeaWallpaperStore.lastTarget(this)
+        return when {
+            scene == null -> "${OeaWallpaper.entries.size} bundled scenes, drawn to fit this screen"
+            target == null -> "${scene.label} (in use)"
+            else -> "${scene.label} on the ${target.label.lowercase()}"
+        }
+    }
+
+    private fun wallpaperThemeSummary(): String {
+        if (!OeaWallpaperStore.themeFollowsScene(this)) return "Off — using your accent choice"
+        val scene = OeaWallpaperStore.scene(this)
+        return if (scene == null) "On — follows Android's wallpaper colours" else "On — follows ${scene.label}"
+    }
+
     @Deprecated("Activity results are routed manually for this simple flow")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_ISLAND_OVERLAY) {
-            if (Settings.canDrawOverlays(this)) {
+            if (OeaPrivileges.canOverlay(this)) {
                 dataStore.setIslandOnOtherApps(true)
                 OeaDynamicIslandOverlayService.sync(this)
                 toast("Dynamic Island will appear over other apps.")
@@ -933,7 +1056,7 @@ open class OeaSystemToolsActivity : Activity() {
                     dataStore.setIslandOnOtherApps(false)
                     OeaDynamicIslandOverlayService.sync(this)
                     rerender()
-                } else if (Settings.canDrawOverlays(this)) {
+                } else if (OeaPrivileges.canOverlay(this)) {
                     dataStore.setIslandOnOtherApps(true)
                     OeaDynamicIslandOverlayService.sync(this)
                     rerender()
@@ -1341,7 +1464,7 @@ open class OeaSystemToolsActivity : Activity() {
             loadingApps = true
             renderApps()
             val includeSystem = freezerShowSystem
-            Thread {
+            com.oea.engine.core.OeaGuard.start("oea-freezer-query", "settings:freezer") {
                 val loaded = runCatching { loadInstalledFreezerApps(includeSystem) }.getOrElse { emptyList() }
                 OeaAppFreezer.syncActualState(this, loaded.map { it.packageName })
                 runOnUiThread {
@@ -1352,7 +1475,7 @@ open class OeaSystemToolsActivity : Activity() {
                     loadingApps = false
                     renderApps()
                 }
-            }.start()
+            }
         }
 
         fun reportForceStop(stopped: List<String>, failed: List<String>) {
@@ -1377,7 +1500,7 @@ open class OeaSystemToolsActivity : Activity() {
                 freezerOperationRunning = true
                 freezerBusy.addAll(packages)
                 renderApps()
-                Thread {
+                com.oea.engine.core.OeaGuard.start("oea-freezer-apply", "settings:freezer") {
                     var succeeded = 0
                     var failed = 0
                     packages.forEach { pkg -> if (OeaAppFreezer.setFrozen(this, pkg, freeze).success) succeeded++ else failed++ }
@@ -1390,7 +1513,7 @@ open class OeaSystemToolsActivity : Activity() {
                         freezerSelected.clear()
                         renderApps()
                     }
-                }.start()
+                }
                 return
             }
             OeaAppFreezer.setHibernated(this, packages, freeze)
@@ -2020,30 +2143,276 @@ open class OeaSystemToolsActivity : Activity() {
         }
     }
 
+    // ============================================================== stability
+
+    /**
+     * What OEA does when something goes wrong, and what went wrong lately.
+     *
+     * The point of this screen is that the user never has to wonder whether a
+     * game, a widget or a service damaged their launcher: every contained fault
+     * is listed with what OEA did about it, safe mode can be switched on or off,
+     * and the saved workspace can be rebuilt without losing the layout.
+     */
+    private fun showStability() {
+        val page = page("Stability", "OEA keeps Home running when a part of the system fails")
+        val box = page.content
+        val faults = OeaFaultLog.history()
+        val engineFaults = runCatching { com.oea.engine.core.OeaGuard.faultCounts() }.getOrDefault(emptyMap())
+        val session = OeaFaultShield.sessionCounts()
+
+        val healthy = faults.isEmpty() && engineFaults.values.sum() == 0
+        kit.banner(
+            box,
+            if (healthy) R.drawable.oic_check_circle_fill else R.drawable.oic_warning_fill,
+            if (healthy) "Nothing has gone wrong this session" else "${faults.size + engineFaults.values.sum()} contained problem${if (faults.size + engineFaults.values.sum() == 1) "" else "s"}",
+            if (healthy) "OEA has not had to recover from anything. Games, widgets and services are all behaving."
+            else "Each one below was handled without losing your Home screen, apps or layout.",
+            if (healthy) OeaKit.Tone.SUCCESS else OeaKit.Tone.WARNING,
+        )
+
+        kit.sectionTitle(box, "Home protection")
+        var group = kit.group(box)
+        kit.switchRow(
+            group,
+            R.drawable.oic_shield,
+            "Safe mode",
+            "Start Home without widgets, At a Glance and live activities. Use it to find out which optional part is causing trouble.",
+            OeaFaultShield.safeMode,
+        ) { enabled ->
+            OeaFaultShield.setSafeMode(enabled, this)
+            toast(if (enabled) "Safe mode is on: Home keeps your icons, dock and folders only." else "Safe mode is off. Rebuilding Home…")
+            homeAction("rebuild")
+        }
+        kit.row(group, R.drawable.oic_refresh, "Rebuild Home now", "Re-reads your layout and icons; nothing is deleted") {
+            homeAction("rebuild")
+            toast("Home is rebuilding with your saved layout.")
+        }
+        kit.row(group, R.drawable.oic_cleaning_services, "Restart OEA Home", "Closes and reopens Home; open apps stay as they are") {
+            homeAction("restart")
+        }
+        group = kit.group(box)
+        kit.row(group, R.drawable.oic_insights, "Memory handling", "Icons and caches are released when Android is short of memory", value = if (OeaFaultShield.safeMode) "Reduced" else "Automatic") {
+            toast("OEA trims its icon and preview caches when Android reports memory pressure.")
+        }
+
+        if (engineFaults.isNotEmpty() || session.isNotEmpty()) {
+            kit.sectionTitle(box, "Subsystems this session")
+            val subsystems = kit.group(box)
+            val merged = LinkedHashMap<String, Int>()
+            engineFaults.forEach { (key, value) -> merged[key] = value }
+            session.forEach { (key, value) -> merged[key] = (merged[key] ?: 0) + value }
+            merged.entries.sortedByDescending { it.value }.take(8).forEach { (name, count) ->
+                kit.row(subsystems, R.drawable.oic_layers, name.replace('_', ' ').replace('-', ' ').replaceFirstChar { it.uppercase() },
+                    "Contained by OEA; the rest of the system kept running", value = "$count")
+            }
+        }
+
+        kit.sectionTitle(box, "Recent problems")
+        if (faults.isEmpty()) {
+            kit.note(box, "No problems have been recorded. OEA only writes here when something had to be contained.")
+        } else {
+            val list = kit.group(box)
+            faults.take(12).forEach { fault ->
+                val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(fault.at))
+                kit.row(list, R.drawable.oic_history, fault.title(), "$stamp • ${fault.reason}", value = fault.action.name.lowercase().replace('_', ' ')) {
+                    kit.sheet(fault.title(), "$stamp • ${fault.thread}") { panel, _ ->
+                        kit.note(panel, fault.body())
+                        panel.addView(kit.buttonRow(
+                            kit.quietButton("Copy") { copyToClipboard(fault.body(), "Fault copied") },
+                            kit.primaryButton("Share") {
+                                runCatching {
+                                    startActivity(Intent.createChooser(
+                                        Intent(Intent.ACTION_SEND).setType("text/plain")
+                                            .putExtra(Intent.EXTRA_TEXT, fault.body()), "Share diagnosis",
+                                    ))
+                                }.onFailure { toast("Nothing can share text on this phone.") }
+                            },
+                        ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                    }
+                }
+            }
+            group = kit.group(box)
+            kit.row(group, R.drawable.oic_delete, "Clear the log", "Removes the recorded entries; OEA's settings stay as they are") {
+                kit.confirm("Clear the stability log?", "Only the recorded problems are removed. This does not change any setting.", "Clear", destructive = true) {
+                    OeaFaultLog.clear(this)
+                    rerender()
+                }
+            }
+            kit.switchRow(group, R.drawable.oic_edit, "Keep a problem log", "Writes contained problems to OEA's private storage so a crash can be understood later", dataStore.faultLogEnabled()) {
+                dataStore.setFaultLogEnabled(it)
+                OeaFaultLog.persistence = it
+            }
+        }
+        kit.note(box, "OEA never sends this anywhere. The log lives in OEA's own private storage and is only read by this screen.")
+        present(page)
+    }
+
+    private fun stabilitySummary(): String {
+        val count = OeaFaultLog.count()
+        return when {
+            OeaFaultShield.safeMode -> "Safe mode is on"
+            count == 0 -> "No problems recorded"
+            else -> "$count contained problem${if (count == 1) "" else "s"}"
+        }
+    }
+
+    private fun copyToClipboard(text: String, message: String) {
+        runCatching {
+            val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("OEA", text))
+            toast(message)
+        }
+    }
+
     // ================================================================ access
 
+    /**
+     * Permissions, as capabilities rather than a checklist.
+     *
+     * Two ideas drive this screen:
+     * 1. every privilege shows what it *unlocks* and what OEA does without it, so
+     *    nothing reads as "broken on this device";
+     * 2. OEA grants by itself whatever Android lets it grant (root or device
+     *    owner) and only asks the user for the rest — no helper app, no PC.
+     */
     private fun showAccess() {
-        val page = page("Permissions & access", "Everything OEA can use, and why")
+        val page = page("Permissions & access", "What OEA can use, what it unlocks, and what it does without it")
         val box = page.content
+        val rows = OeaPrivileges.privilegeRows(this)
+        val ready = rows.count { it.second == Grant.GRANTED }
+
+        val shell = OeaShell.available()
+        val owner = OeaPrivileges.isDeviceOwner(this)
+        kit.banner(
+            box,
+            R.drawable.oic_shield_fill,
+            "$ready of ${rows.size} permissions are on",
+            when {
+                shell -> "This phone has root, so OEA can switch the rest on by itself."
+                owner -> "OEA is the device owner, so it can grant runtime permissions itself."
+                else -> "Everything here is switched on inside Android itself. No separate app (Shizuku and similar) is needed, and always just one tap away."
+            },
+            if (ready == rows.size) OeaKit.Tone.SUCCESS else OeaKit.Tone.INFO,
+            actionLabel = if (shell || owner) "Fix all" else null,
+            onAction = if (shell || owner) {
+                {
+                    toast("Working…")
+                    OeaPrivileges.repairAll(this) { summary -> toast(summary.describe()); rerender() }
+                }
+            } else null,
+        )
+
+        kit.sectionTitle(box, "What each one unlocks")
+        val features = kit.group(box)
+        OeaPrivileges.capabilities(this).forEach { capability ->
+            val icon = when {
+                capability.granted == Grant.GRANTED -> R.drawable.oic_check_circle_fill
+                capability.isPending -> R.drawable.oic_refresh
+                else -> R.drawable.oic_warning_fill
+            }
+            val value = when {
+                capability.granted == Grant.GRANTED -> "On"
+                capability.isPending -> "Restarting"
+                else -> capability.surface.label
+            }
+            kit.row(features, icon, capability.feature, if (capability.isReady) capability.requires.summary else capability.effect, value = value) {
+                explainCapability(capability)
+            }
+        }
+
+        kit.sectionTitle(box, "Permissions")
         val group = kit.group(box)
-        fun state(ok: Boolean) = if (ok) "On" else "Off"
-        kit.row(group, R.drawable.oic_home, "Default Home app", homeRoleStatus(), value = state(isDefaultHome())) { requestDefaultHome() }
-        kit.row(group, R.drawable.oic_notifications, "Notification access", "Dots on icons and Now Playing", value = state(notificationAccess())) {
-            runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-        }
-        kit.row(group, R.drawable.oic_accessibility_new, "OEA Assistant", "Lock, notifications, Recents, split screen, App Freezer", value = state(OeaAssistant.isEnabled(this))) { OeaAssistant.openSetup(this) }
-        kit.row(group, R.drawable.oic_insights, "Usage access", "Screen time, Overview order and Game Boost", value = state(usageAccess())) {
-            runCatching { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
-        }
-        kit.row(group, R.drawable.oic_layers, "Display over other apps", "Game Boost overlay and Now Playing island", value = state(Settings.canDrawOverlays(this))) {
-            runCatching { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
-        }
-        val contacts = checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
-        kit.row(group, R.drawable.oic_person, "Contacts", "Find people from drawer search", value = state(contacts)) {
-            if (!contacts) requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS)
+        rows.forEach { (privilege, grant) ->
+            val state = when (grant) {
+                Grant.GRANTED -> "On"
+                Grant.PENDING -> "Switched on, waiting for Android"
+                Grant.UNSUPPORTED -> "Not available here"
+                Grant.DENIED -> if (OeaPrivileges.selfGrantable(this, privilege)) "OEA can switch this on" else "Off"
+            }
+            kit.row(group, iconFor(privilege), privilege.title, privilege.summary, value = state) {
+                requestPrivilege(privilege, grant)
+            }
         }
         if (OeaAssistant.needsRestrictedSettingsHint() && !OeaAssistant.isEnabled(this)) kit.note(box, OeaAssistant.RESTRICTED_SETTINGS_HINT)
+        if (!shell && !owner) {
+            kit.note(box, "Two permissions can only be given by Android itself: \"Display over other apps\" and \"Usage access\". The pages above open exactly there, and OEA verifies the result when you come back. A helper app such as Shizuku would not change that — Android reserves these to the user, though root or device owner lets OEA do it alone.")
+        }
+        kit.note(box, "OEA asks for nothing else. Every optional permission changes how a feature is presented, never whether Home works.")
         present(page)
+    }
+
+    private fun iconFor(privilege: Privilege): Int = when (privilege) {
+        Privilege.HOME_ROLE -> R.drawable.oic_home
+        Privilege.ACCESSIBILITY -> R.drawable.oic_accessibility_new
+        Privilege.OVERLAY -> R.drawable.oic_layers
+        Privilege.NOTIFICATION_ACCESS -> R.drawable.oic_notifications
+        Privilege.USAGE_ACCESS -> R.drawable.oic_insights
+        Privilege.DEVICE_ADMIN -> R.drawable.oic_shield
+        Privilege.DEVICE_OWNER -> R.drawable.oic_shield_fill
+        Privilege.ROOT -> R.drawable.oic_developer_mode
+        Privilege.DND_ACCESS -> R.drawable.oic_do_not_disturb_on
+        Privilege.BATTERY_UNRESTRICTED -> R.drawable.oic_battery_full
+        Privilege.DIALER_ROLE -> R.drawable.oic_call
+        Privilege.CALL_SCREENING_ROLE -> R.drawable.oic_block
+        Privilege.NOTIFICATIONS -> R.drawable.oic_notifications
+        Privilege.CONTACTS -> R.drawable.oic_person
+        Privilege.CAMERA -> R.drawable.oic_photo_library
+    }
+
+    private fun explainCapability(capability: Capability) {
+        kit.sheet(capability.feature, capability.requires.title) { panel, _ ->
+            kit.note(panel, "Needs: ${capability.requires.summary}")
+            kit.note(panel, "Shown as: ${capability.surface.label} — ${capability.surface.detail}")
+            kit.note(panel, if (capability.isReady) "Fully available on this phone." else "Without it: ${capability.effect}.")
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Close") { },
+                kit.primaryButton(if (capability.isReady) "Settings" else "Open the page", R.drawable.oic_settings) {
+                    if (capability.isReady) navigate("access") else requestPrivilege(capability.requires, capability.granted)
+                },
+            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        }
+    }
+
+    /** One tap: OEA grants it, or opens exactly the page that can. */
+    private fun requestPrivilege(privilege: Privilege, state: Grant) {
+        when (privilege) {
+            Privilege.CONTACTS, Privilege.CAMERA, Privilege.NOTIFICATIONS -> {
+                val permission = when (privilege) {
+                    Privilege.CONTACTS -> Manifest.permission.READ_CONTACTS
+                    Privilege.CAMERA -> Manifest.permission.CAMERA
+                    else -> if (Build.VERSION.SDK_INT >= 33) "android.permission.POST_NOTIFICATIONS" else null
+                }
+                if (permission != null) {
+                    if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                        toast("${privilege.title} is already on.")
+                    } else {
+                        requestPermissions(arrayOf(permission), REQUEST_CONTACTS)
+                    }
+                } else {
+                    toast("Android ${Build.VERSION.RELEASE} grants notifications without asking.")
+                }
+            }
+
+            Privilege.ACCESSIBILITY -> OeaAssistant.openSetup(this)
+            Privilege.HOME_ROLE -> requestDefaultHome()
+            else -> {
+                if (state == Grant.GRANTED) {
+                    toast("${privilege.title} is already on.")
+                    return
+                }
+                toast("Checking what this phone allows…")
+                OeaPrivileges.grant(this, privilege) { outcome ->
+                    toast(outcome.message)
+                    if (privilege == Privilege.OVERLAY && outcome.granted) {
+                        dataStore.setIslandOnOtherApps(true)
+                        OeaDynamicIslandOverlayService.sync(this)
+                    }
+                    pendingIslandOverlayEnable = privilege == Privilege.OVERLAY && !outcome.granted
+                    rerender()
+                    main.postDelayed({ rerender() }, 900L)
+                }
+            }
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -2051,12 +2420,11 @@ open class OeaSystemToolsActivity : Activity() {
         rerender()
     }
 
-    private fun usageAccess(): Boolean = runCatching {
-        getSystemService(AppOpsManager::class.java)?.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName) == AppOpsManager.MODE_ALLOWED
-    }.getOrDefault(false)
+    /** Read through the capability layer, so a root-granted appop counts too. */
+    private fun usageAccess(): Boolean = OeaPrivileges.canReadUsage(this)
 
     private fun accessSummary(): String {
-        val granted = listOf(isDefaultHome(), notificationAccess(), OeaAssistant.isEnabled(this), usageAccess(), Settings.canDrawOverlays(this)).count { it }
+        val granted = listOf(isDefaultHome(), notificationAccess(), OeaAssistant.isEnabled(this), usageAccess(), OeaPrivileges.canOverlay(this)).count { it }
         return "$granted of 5 enabled"
     }
 

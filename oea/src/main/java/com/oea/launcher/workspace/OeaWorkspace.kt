@@ -451,6 +451,62 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     /**
+     * Home's window is going away for good. The workspace itself is
+     * process-scoped and survives, so only the transient host is released:
+     * keeping a destroyed Activity would leak it and crash the next widget or
+     * dialog callback that reaches for it.
+     */
+    fun detachHost() {
+        hostActivity = null
+        widgets.setHostActivity(null)
+    }
+
+    /**
+     * Rebuilds Home in place after a contained fault. Transient surfaces are
+     * closed first so a half-open drawer, resize frame or popup cannot survive
+     * into the new render, then the saved workspace is bound again.
+     *
+     * @return true when a usable Home came back, so the fault shield can stop
+     *   there instead of escalating to an activity recreate.
+     */
+    fun recoverSurface(): Boolean {
+        // Success means "the whole re-render ran without faulting". An empty app
+        // list is not a broken surface: the engine shows its own retry pill for
+        // that, and judging recovery by the rebuild's own result keeps the two
+        // problems apart.
+        val recovered = com.oea.launcher.fault.OeaFaultShield.value("home:recover", false) {
+            onHostPaused()
+            rebuild()
+            true
+        }
+        if (recovered) com.oea.launcher.fault.OeaFaultShield.noteHomeRendered()
+        toastRecovering(!recovered)
+        return recovered
+    }
+
+    private fun toastRecovering(failed: Boolean) {
+        val activity = hostActivity ?: return
+        runCatching {
+            android.widget.Toast.makeText(
+                activity,
+                if (failed) "Home had a problem and could not be refreshed; your layout is saved."
+                else "Home recovered from a problem. Nothing was lost.",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    /** Memory pressure: hand back caches that are cheap to rebuild. */
+    fun onHostTrimMemory(level: Int) {
+        val aggressive = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        runCatching { com.oea.launcher.icons.OeaIconController.shared(context).trimMemory(aggressive) }
+        if (aggressive) {
+            closeWidgetResize()
+            collapseIslands()
+        }
+    }
+
+    /**
      * Earlier OEA builds drew their own wallpaper image. Home now shows the real
      * system wallpaper, so a previously chosen image is applied to the system
      * Home screen once (best effort; the image may no longer be readable).
@@ -458,19 +514,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun migrateLegacyWallpaper() {
         val uri = store.wallpaperUri() ?: return
         store.setWallpaperUri(null)
-        Thread {
+        com.oea.engine.core.OeaGuard.start("oea-wallpaper-migrate", "home:wallpaper") {
             runCatching {
                 context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
                     WallpaperManager.getInstance(context).setStream(stream, null, true, WallpaperManager.FLAG_SYSTEM)
                 }
             }
-        }.start()
+        }
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         migrateLegacyWallpaper()
-        widgets.start()
+        if (!com.oea.launcher.fault.OeaFaultShield.safeMode) widgets.start()
         store.registerListener(prefsListener)
         OeaNotificationState.addListener(notificationListener)
         registerWallpaperListener()
@@ -479,7 +535,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     override fun onDetachedFromWindow() {
-        widgets.stop()
+        runCatching { widgets.stop() }
         store.unregisterListener(prefsListener)
         OeaNotificationState.removeListener(notificationListener)
         unregisterWallpaperListener()
@@ -498,12 +554,27 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         } else {
             refreshBadges()
         }
+        applySafeModeVisibility()
         glance.refresh()
         dynamicIsland.refresh()
         cameraIsland.refresh()
         renderBanner()
         rebindNotificationListener()
         updateSystemBars()
+    }
+
+    /**
+     * Safe mode is OEA's own "start without the optional parts" switch, entered
+     * automatically after repeated faults and available in OEA Settings. Only the
+     * surfaces that can legitimately be missing are hidden; the grid, dock,
+     * folders and drawer (the launcher's actual job) always stay.
+     */
+    private fun applySafeModeVisibility() {
+        val safe = com.oea.launcher.fault.OeaFaultShield.safeMode
+        val optional = if (safe) GONE else VISIBLE
+        if (glance.visibility != optional) glance.visibility = optional
+        if (dynamicIsland.visibility != optional) dynamicIsland.visibility = optional
+        if (cameraIsland.visibility != optional) cameraIsland.visibility = optional
     }
 
     fun onHostPaused() {
@@ -611,6 +682,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (Build.VERSION.SDK_INT < 27 || wallpaperListener != null) return
         val listener = WallpaperManager.OnColorsChangedListener { _, which ->
             if ((which and WallpaperManager.FLAG_SYSTEM) != 0) {
+                // The system wallpaper changed, so OEA's own scene may no longer be
+                // the one on screen: re-check before the theme follows it.
+                runCatching { com.oea.launcher.wallpaper.OeaWallpaperStore.syncWithSystem(context) }
                 main.removeCallbacks(themeRefresh)
                 main.postDelayed(themeRefresh, 150L)
             }
@@ -682,7 +756,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private inline fun stage(name: String, block: () -> Unit) {
         try {
             block()
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             Log.e(TAG, "Home $name failed; continuing with the rest of Home", error)
         }
     }
@@ -1071,7 +1145,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         for (page in 0 until ws.pages()) {
             val built = try {
                 buildPage(page)
-            } catch (error: Exception) {
+            } catch (error: Throwable) {
                 // One broken page must not empty the whole pager.
                 Log.e(TAG, "Home page $page failed to build; showing it empty", error)
                 emptyPage(page)
@@ -1275,6 +1349,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun renderBanner() {
         bannerHost.removeAllViews()
+        if (com.oea.launcher.fault.OeaFaultShield.safeMode) {
+            bannerHost.visibility = VISIBLE
+            bannerHost.addView(safeModeCard(), LayoutParams(-1, -2).apply { leftMargin = dp(14); rightMargin = dp(14); topMargin = dp(2); bottomMargin = dp(6) })
+            return
+        }
         if (store.defaultHomeBannerDismissed() || isDefaultHome()) {
             bannerHost.visibility = GONE
             return
@@ -1304,6 +1383,38 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setOnClickListener { store.setDefaultHomeBannerDismissed(true); renderBanner() }
         }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { leftMargin = dp(4) })
         bannerHost.addView(card, LayoutParams(-1, -2).apply { leftMargin = dp(14); rightMargin = dp(14); topMargin = dp(2); bottomMargin = dp(6) })
+    }
+
+    /** Shown while safe mode is on, with the way out of it. */
+    private fun safeModeCard(): View {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(8), dp(10))
+            background = kit.rounded(palette.glassStrong, 22, palette.glassStroke, 1)
+        }
+        card.addView(ImageView(context).apply { setImageDrawable(kit.icon(R.drawable.oic_shield, palette.warning)) },
+            LinearLayout.LayoutParams(dp(22), dp(22)).apply { rightMargin = dp(12) })
+        card.addView(TextView(context).apply {
+            text = "Home is in safe mode"
+            textSize = 14f
+            typeface = OeaType.medium
+            setTextColor(palette.homeText)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        card.addView(kit.button("Fix", palette.accent, palette.onAccent) {
+            com.oea.launcher.fault.OeaFaultShield.setSafeMode(false, context)
+            widgets.start()
+            applySafeModeVisibility()
+            scheduleRebuild()
+        }.apply { setPadding(dp(14), dp(8), dp(14), dp(8)) }, LinearLayout.LayoutParams(-2, -2))
+        card.setOnClickListener {
+            runCatching {
+                context.startActivity(Intent(context, com.oea.launcher.OeaSystemToolsActivity::class.java)
+                    .putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "stability")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
+        return card
     }
 
     internal fun isDefaultHome(): Boolean {
@@ -2429,6 +2540,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             action == "drawer" -> openDrawer()
             action == "search" -> openDrawer(searchFocus = true)
             action == "hidden" -> openHiddenApps()
+            // Stability screen: rebuild in place, or restart Home's window.
+            action == "rebuild" -> {
+                val rebuilt = recoverSurface()
+                toast(if (rebuilt) "Home rebuilt from your saved layout" else "Home could not be rebuilt; try Restart OEA Home")
+            }
+
+            action == "restart" -> hostActivity?.recreate()
             action.startsWith(HOME_ACTION_ADD_APPS) -> addAppsFromSettings(action.removePrefix(HOME_ACTION_ADD_APPS))
         }
     }

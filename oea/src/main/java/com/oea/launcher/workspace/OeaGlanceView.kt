@@ -45,7 +45,8 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
     private val store = OeaDataStore.get(context)
     private val density = resources.displayMetrics.density
     private val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newSingleThreadExecutor()
+    /** Usage-stats reads are slow and can fail; the pool guards and names its thread. */
+    private val io = com.oea.engine.core.OeaGuard.pool("glance", 1, "oea-glance")
     private val clock = TextView(context)
     private val date = TextView(context)
     private val chipsScroll = HorizontalScrollView(context)
@@ -292,11 +293,8 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
         }
     }
 
-    private fun hasUsageAccess(): Boolean = runCatching {
-        context.getSystemService(AppOpsManager::class.java).checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName,
-        ) == AppOpsManager.MODE_ALLOWED
-    }.getOrDefault(false)
+    // Screen time is a capability: one check, shared with Settings › access.
+    private fun hasUsageAccess(): Boolean = com.oea.launcher.privilege.OeaPrivileges.canReadUsage(context)
 
     private fun formatDuration(ms: Long): String {
         val minutes = ms / 60_000L

@@ -74,81 +74,90 @@ class OeaDynamicIslandOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        overlayActive = false
-        store = OeaDataStore.get(applicationContext)
-        windowContext = overlayWindowContext()
-        windowManager = windowContext.getSystemService(WindowManager::class.java) ?: run {
-            Log.e(TAG, "WindowManager is unavailable; leaving the in-Home island enabled")
-            stopSelf()
-            return
-        }
-        createNotificationChannel()
-        // Promote before doing WindowManager work; this is a user-visible,
-        // explicit feature and must not silently become a background service.
-        val notification = buildNotification()
-        val promoted = runCatching {
-            if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
+        // The island is an optional extra that lives in the launcher's own
+        // process, so everything after the framework's setup runs inside the
+        // fault shield: a fault here can never be seen as a launcher crash.
+        com.oea.launcher.fault.OeaFaultShield.guard("island-overlay:create") {
+            overlayActive = false
+            store = OeaDataStore.get(applicationContext)
+            windowContext = overlayWindowContext()
+            val manager = windowContext.getSystemService(WindowManager::class.java)
+            if (manager == null) {
+                Log.e(TAG, "WindowManager is unavailable; leaving the in-Home island enabled")
+                stopSelf()
+                return@guard
             }
-        }.onFailure { error ->
-            // Typically Android refusing a background (re)start. Keep the
-            // user's choice: OEA Home re-promotes the island when it is next
-            // in the foreground, which Android always allows.
-            Log.w(TAG, "Android did not allow the Dynamic Island service to enter the foreground now", error)
-            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
-        }.isSuccess
-        if (!promoted) {
-            stopSelf()
-            return
-        }
-        if (!canRun()) {
-            disableOverlayIfPermissionRevoked()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return
-        }
-        store.registerListener(preferenceListener)
-        watchOverlayPermission()
-        createIsland(OeaDynamicIslandView.Surface.CARD).also { cardIsland = it }
-        createIsland(OeaDynamicIslandView.Surface.CAMERA).also { cameraIsland = it }
-        cameraIsland?.onReservedHeightChanged = {
+            windowManager = manager
+            createNotificationChannel()
+            // Promote before doing WindowManager work; this is a user-visible,
+            // explicit feature and must not silently become a background service.
+            val notification = buildNotification()
+            val promoted = runCatching {
+                if (Build.VERSION.SDK_INT >= 34) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            }.onFailure { error ->
+                // Typically Android refusing a background (re)start. Keep the
+                // user's choice: OEA Home re-promotes the island when it is next
+                // in the foreground, which Android always allows.
+                Log.w(TAG, "Android did not allow the Dynamic Island service to enter the foreground now", error)
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            }.isSuccess
+            if (!promoted) {
+                stopSelf()
+                return@guard
+            }
+            if (!canRun()) {
+                disableOverlayIfPermissionRevoked()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return@guard
+            }
+            store.registerListener(preferenceListener)
+            watchOverlayPermission()
+            createIsland(OeaDynamicIslandView.Surface.CARD).also { cardIsland = it }
+            createIsland(OeaDynamicIslandView.Surface.CAMERA).also { cameraIsland = it }
+            cameraIsland?.onReservedHeightChanged = {
+                cardIsland?.setExtraTop(cameraIsland?.reservedHeight() ?: 0)
+            }
             cardIsland?.setExtraTop(cameraIsland?.reservedHeight() ?: 0)
+            val cardAttached = attachIsland(cardIsland)
+            val cameraAttached = attachIsland(cameraIsland)
+            if (!cardAttached || !cameraAttached) {
+                Log.w(TAG, "Could not attach both system-wide island windows; stopping the optional service")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return@guard
+            }
+            overlayActive = true
+            registerConfigurationReceiver()
+            watchWindowConfiguration()
+            refreshDisplayGeometry()
+            refreshIslands()
         }
-        cardIsland?.setExtraTop(cameraIsland?.reservedHeight() ?: 0)
-        val cardAttached = attachIsland(cardIsland)
-        val cameraAttached = attachIsland(cameraIsland)
-        if (!cardAttached || !cameraAttached) {
-            Log.w(TAG, "Could not attach both system-wide island windows; stopping the optional service")
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return
-        }
-        overlayActive = true
-        registerConfigurationReceiver()
-        watchWindowConfiguration()
-        refreshDisplayGeometry()
-        refreshIslands()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            overlayActive = false
-            store.setIslandOnOtherApps(false)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
+        com.oea.launcher.fault.OeaFaultShield.guard("island-overlay:command") {
+            if (intent?.action == ACTION_STOP) {
+                overlayActive = false
+                store.setIslandOnOtherApps(false)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            if (!canRun()) {
+                overlayActive = false
+                disableOverlayIfPermissionRevoked()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            if (intent?.action == ACTION_REFRESH) refreshIslands()
+            return START_STICKY
         }
-        if (!canRun()) {
-            overlayActive = false
-            disableOverlayIfPermissionRevoked()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (intent?.action == ACTION_REFRESH) refreshIslands()
-        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -171,10 +180,10 @@ class OeaDynamicIslandOverlayService : Service() {
     }
 
     private fun canRun(): Boolean =
-        store.islandOnOtherApps() && store.dynamicIslandEnabled() && Settings.canDrawOverlays(this)
+        store.islandOnOtherApps() && store.dynamicIslandEnabled() && com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)
 
     private fun disableOverlayIfPermissionRevoked() {
-        if (!Settings.canDrawOverlays(this) && store.islandOnOtherApps()) {
+        if (!com.oea.launcher.privilege.OeaPrivileges.canOverlay(this) && store.islandOnOtherApps()) {
             store.setIslandOnOtherApps(false)
         }
     }
@@ -267,7 +276,7 @@ class OeaDynamicIslandOverlayService : Service() {
         y: Int,
         visible: Boolean,
     ) {
-        if (!Settings.canDrawOverlays(this)) {
+        if (!com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)) {
             overlayActive = false
             disableOverlayIfPermissionRevoked()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -414,7 +423,7 @@ class OeaDynamicIslandOverlayService : Service() {
             if (overlayActive) return
             val app = context.applicationContext
             val store = OeaDataStore.get(app)
-            if (!store.dynamicIslandEnabled() || !store.islandOnOtherApps() || !Settings.canDrawOverlays(app)) return
+            if (!store.dynamicIslandEnabled() || !store.islandOnOtherApps() || !com.oea.launcher.privilege.OeaPrivileges.canOverlay(app)) return
             sync(app)
         }
 
@@ -422,7 +431,7 @@ class OeaDynamicIslandOverlayService : Service() {
         fun sync(context: Context) {
             val app = context.applicationContext
             val store = OeaDataStore.get(app)
-            val shouldRun = store.dynamicIslandEnabled() && store.islandOnOtherApps() && Settings.canDrawOverlays(app)
+            val shouldRun = store.dynamicIslandEnabled() && store.islandOnOtherApps() && com.oea.launcher.privilege.OeaPrivileges.canOverlay(app)
             if (!shouldRun) {
                 app.stopService(Intent(app, OeaDynamicIslandOverlayService::class.java))
                 return

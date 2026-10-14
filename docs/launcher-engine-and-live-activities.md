@@ -13,6 +13,10 @@ There is no device Logcat or crash report in this checkout, so the exact histori
 
 The new screen error boundary writes a stack trace to Logcat under `OeaScreenFailure`. If the original failure is reproduced, that stack trace can confirm the exact exception rather than relying on symptoms. The code changes below address the source-level risks whether or not they were the specific device-side trigger.
 
+> Fault containment, the capability/permission system and the wallpaper engine are documented in
+> [Stability, permissions and wallpapers](stability-and-privileges.md). This document keeps the
+> original scope: the route into Home and the live-activity design.
+
 ## Runtime boundaries
 
 ```text
@@ -33,6 +37,16 @@ OeaLauncherActivity
 ```
 
 The engine now owns Home's catalogue lifecycle; the workspace continues to own layout and user interaction. Its initial and changed-package queries run on one serialized worker. Results are bound on the main thread, empty/error snapshots never erase the last good workspace, and a small retry affordance is shown instead of leaving Home as an unexplained blank surface. Standalone Settings app-catalogue and UsageStats lookups also run in the background. The launcher, Settings and Game Boost screens have a last-resort error surface, while normal rendering and all existing controls remain unchanged.
+
+### Fault containment around Home
+
+Every lifecycle callback of `OeaLauncherActivity` now runs inside
+`OeaFaultShield.guard`, and the activity installs a `OeaFaultShield.Recovery` so a
+fault anywhere in the process can rebuild the running surface
+(`OeaWorkspace.recoverSurface`) or start safe mode instead of ending the process.
+`OeaScreenFailure` is still a startup-only boundary: it is never allowed to
+replace a Home that already rendered. Games funnel their engine faults into
+`OeaGameActivity`'s own failure screen with diagnosis-specific rescue options.
 
 ### Rules for future additions
 

@@ -57,10 +57,12 @@ class OeaPhoneActivity : Activity() {
     private data class CallLogRow(val id: Long, val name: String, val number: String, val type: Int, val date: Long, val durationSeconds: Long)
 
     override fun onCreate(state: Bundle?) {
-        super.onCreate(state)
-        selectedTab = state?.getString("phone_tab") ?: TAB_DIAL
-        build()
-        consumeDialIntent(intent)
+        com.oea.launcher.fault.OeaFaultShield.guard("phone:create") {
+            super.onCreate(state)
+            selectedTab = state?.getString("phone_tab") ?: TAB_DIAL
+            build()
+            consumeDialIntent(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -5,20 +5,35 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.gameboost.OeaGameBoost
+import com.oea.launcher.privilege.OeaPrivileges
 import com.oea.launcher.runtime.OeaHomeController
 import com.oea.launcher.runtime.OeaRuntime
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
 
+/**
+ * OEA Home's window. Its only real jobs are to hand the workspace to Android,
+ * to keep every platform callback from hurting the launcher, and to recover in
+ * place when something inside Home fails.
+ *
+ * Stability contract for this activity:
+ * - every lifecycle callback runs inside [OeaFaultShield.guard], so a thrown
+ *   fault is recorded and Home is rebuilt or kept — never a force-close;
+ * - [OeaScreenFailure] is only allowed while Home has never rendered;
+ * - Home installs a [OeaFaultShield.Recovery] so a fault anywhere in the process
+ *   (game, widget provider, island, service) can rebuild or protect the running
+ *   surface instead of ending the launcher.
+ */
 class OeaLauncherActivity : Activity() {
     companion object {
         /** Lets OEA Settings ask Home to open one of its own panels (e.g. "widgets"). */
         const val EXTRA_HOME_ACTION = "oea_home_action"
     }
 
-    private lateinit var home: OeaHomeController
+    private var home: OeaHomeController? = null
     private var resumedAndFocused = false
 
     /**
@@ -32,23 +47,43 @@ class OeaLauncherActivity : Activity() {
      */
     private var surfaceReady = false
 
+    /** Re-entrant guard: a fault during recovery must not start another recovery. */
+    private var recovering = false
+
+    private val recovery = object : OeaFaultShield.Recovery {
+        override fun rebuildHome(): Boolean = recover("rebuild")
+
+        override fun closeFrontScreen(): Boolean {
+            // The fault belonged to another OEA screen; Home stays exactly as it is.
+            return false
+        }
+
+        override fun enterSafeMode(): Boolean = recover("safe-mode")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        OeaFaultShield.guard("home:create") { buildHome() }
+    }
+
+    private fun buildHome() {
         try {
             // Edge-to-edge over the real system wallpaper; the workspace pads
             // itself with the system-bar insets and picks the bar icon colour.
             OeaInsets.edgeToEdge(window, lightBars = false)
             OeaRuntime.initialize(application)
-            home = OeaHomeController(this)
-            setContentView(home.createHomeSurface())
+            val controller = OeaHomeController(this)
+            home = controller
+            setContentView(controller.createHomeSurface())
             surfaceReady = true
+            OeaFaultShield.noteHomeRendered()
             if (Build.VERSION.SDK_INT >= 33) {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
-                ) { home.handleBack() }
+                ) { home?.handleBack() }
             }
             consumeHomeAction(intent)
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             reportFailure("OEA Home", error)
         }
     }
@@ -68,79 +103,130 @@ class OeaLauncherActivity : Activity() {
         OeaScreenFailure.show(this, screen, error)
     }
 
+    /** Rebuilds Home from the saved workspace; true when the surface is usable again. */
+    private fun recover(cause: String): Boolean {
+        if (recovering) return true
+        recovering = true
+        val ok = try {
+            val controller = home ?: return false
+            OeaFaultShield.value("home:recover:$cause", false) {
+                controller.recoverSurface()
+                true
+            }
+        } finally {
+            recovering = false
+        }
+        if (ok) OeaFaultShield.noteHomeRendered()
+        else OeaFaultShield.noteHomeUnhealthy()
+        return ok
+    }
+
     private fun consumeHomeAction(source: Intent?) {
         val action = source?.getStringExtra(EXTRA_HOME_ACTION) ?: return
         source.removeExtra(EXTRA_HOME_ACTION)
         window.decorView.post {
-            if (!::home.isInitialized) return@post
-            runCatching { home.performAction(action) }
-                .onFailure { reportFailure("OEA Home", it) }
+            val controller = home ?: return@post
+            OeaFaultShield.guard("home:action") { controller.performAction(action) }
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        val controller = home ?: return
         // Home pressed: close the drawer/folders; when Home was already in
         // front, also glide back to the first page like native launchers.
-        if (::home.isInitialized && intent.hasExtra(EXTRA_HOME_ACTION)) {
-            consumeHomeAction(intent)
+        if (intent.hasExtra(EXTRA_HOME_ACTION)) {
+            OeaFaultShield.guard("home:action") { consumeHomeAction(intent) }
             return
         }
-        if (::home.isInitialized && Intent.ACTION_MAIN == intent.action) {
-            runCatching { home.onHomeIntent(alreadyOnHome = resumedAndFocused) }
-                .onFailure { reportFailure("OEA Home", it) }
+        if (Intent.ACTION_MAIN == intent.action) {
+            OeaFaultShield.guard("home:home-intent") { controller.onHomeIntent(alreadyOnHome = resumedAndFocused) }
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        val handled = ::home.isInitialized && runCatching { home.handleActivityResult(requestCode, resultCode, data) }
-            .onFailure { reportFailure("OEA Home", it) }
-            .getOrDefault(false)
+        val handled = home != null && OeaFaultShield.value(
+            "home:activity-result",
+            false,
+        ) { home?.handleActivityResult(requestCode, resultCode, data) == true }
         if (handled) return
         super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onResume() {
         super.onResume()
-        if (::home.isInitialized) {
-            runCatching { home.refresh() }
-                .onFailure { reportFailure("OEA Home", it) }
+        OeaFaultShield.setRecovery(recovery)
+        OeaPrivileges.startObserving(this)
+        val controller = home
+        if (controller != null) {
+            OeaFaultShield.guard("home:resume") { controller.refresh() }
+        } else {
+            // Android recreated the activity while Home was gone: build it again.
+            buildHome()
         }
         // Returning to Home ends a running game session at once. Home never
         // starts Game Boost itself: sessions begin only when a game opens.
-        runCatching { OeaGameBoost.onHomeResumed() }
+        OeaFaultShield.guard("home:boost-resume") { OeaGameBoost.onHomeResumed() }
         // Home is in the foreground, so Android allows re-promoting the
         // optional system-wide island if the system stopped it meanwhile.
-        runCatching { OeaDynamicIslandOverlayService.ensureRunning(this) }
+        OeaFaultShield.guard("home:island-resume") { OeaDynamicIslandOverlayService.ensureRunning(this) }
         // Wake gestures (faulty power key) resume after a reboot or process death.
-        runCatching { com.oea.launcher.power.OeaPower.syncWakeService(this) }
+        OeaFaultShield.guard("home:wake-resume") { com.oea.launcher.power.OeaPower.syncWakeService(this) }
     }
 
     override fun onStop() {
         super.onStop()
-        runCatching { OeaGameBoost.onHomeStopped(this) }
+        OeaFaultShield.guard("home:boost-stop") { OeaGameBoost.onHomeStopped(this) }
     }
 
     override fun onPause() {
         resumedAndFocused = false
-        if (::home.isInitialized) runCatching { home.onPause() }
+        OeaFaultShield.guard("home:pause") { home?.onPause() }
         super.onPause()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         resumedAndFocused = hasFocus
+        if (hasFocus && !surfaceReady) buildHome()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (::home.isInitialized) {
-            runCatching { home.onConfigurationChanged(newConfig) }
-                .onFailure { reportFailure("OEA Home", it) }
-        }
+        val controller = home ?: return
+        OeaFaultShield.guard("home:configuration") { controller.onConfigurationChanged(newConfig) }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Memory pressure is the one signal that a launcher-wide problem is
+        // coming; dropping caches early avoids the OutOfMemoryError instead of
+        // reacting to it.
+        val controller = home ?: return
+        OeaFaultShield.guard("home:trim") { controller.onTrimMemory(level) }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        OeaFaultShield.guard("home:low-memory") { home?.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE) }
+    }
+
+    override fun onDestroy() {
+        OeaPrivileges.stopObserving(this)
+        OeaFaultShield.setRecovery(null)
+        OeaFaultShield.guard("home:destroy") { home?.onDestroy() }
+        home = null
+        super.onDestroy()
     }
 
     @Deprecated("Launcher HOME should not be closed by an accidental Back press.")
-    override fun onBackPressed() { if (::home.isInitialized) home.handleBack() else super.onBackPressed() }
+    override fun onBackPressed() {
+        val controller = home ?: run {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
+            return
+        }
+        OeaFaultShield.guard("home:back") { controller.handleBack() }
+    }
 }

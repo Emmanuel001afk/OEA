@@ -39,12 +39,7 @@ class Jobs internal constructor() {
     private val counter = AtomicInteger()
     private val pool: ExecutorService = Executors.newFixedThreadPool(
         maxOf(2, Runtime.getRuntime().availableProcessors() - 2),
-        ThreadFactory { r ->
-            Thread({
-                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND + Process.THREAD_PRIORITY_MORE_FAVORABLE)
-                r.run()
-            }, "oea-job-${counter.incrementAndGet()}").apply { isDaemon = true }
-        },
+        OeaGuard.factory("oea-job", "jobs", Process.THREAD_PRIORITY_BACKGROUND + Process.THREAD_PRIORITY_MORE_FAVORABLE),
     )
     private val completions = ConcurrentLinkedQueue<() -> Unit>()
 

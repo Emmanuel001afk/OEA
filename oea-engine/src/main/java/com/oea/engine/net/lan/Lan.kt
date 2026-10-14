@@ -1,6 +1,7 @@
 package com.oea.engine.net.lan
 
 import android.util.Log
+import com.oea.engine.core.OeaGuard
 import com.oea.engine.net.Channel
 import com.oea.engine.net.Link
 import com.oea.engine.net.LinkListener
@@ -98,8 +99,8 @@ class LanServer(private val listener: LinkListener) {
         port = ss.localPort
         udp = runCatching { DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(port)) } }.getOrNull()
         running = true
-        Thread({ acceptLoop(ss) }, "oea-lan-accept").apply { isDaemon = true; start() }
-        udp?.let { u -> Thread({ udpLoop(u) }, "oea-lan-udp").apply { isDaemon = true; start() } }
+        OeaGuard.start("oea-lan-accept", "lan-server") { acceptLoop(ss) }
+        udp?.let { u -> OeaGuard.start("oea-lan-udp", "lan-server") { udpLoop(u) } }
         return port
     }
 
@@ -135,7 +136,7 @@ class LanServer(private val listener: LinkListener) {
                 link.lastHeardMs = System.currentTimeMillis()
                 when (type) {
                     LanFrames.UDP_HELLO -> link.sendUdp(LanFrames.UDP_ACK, ByteArray(0), 0, 0)
-                    LanFrames.UDP_DATA -> if (link.isUp) listener.onLinkMessage(link, Channel.UNRELIABLE, buf.copyOfRange(7, packet.length))
+                    LanFrames.UDP_DATA -> if (link.isUp) OeaGuard.run("lan-server") { listener.onLinkMessage(link, Channel.UNRELIABLE, buf.copyOfRange(7, packet.length)) }
                 }
             } catch (e: IOException) {
                 if (running) Log.w(TAG, "udp receive failed", e)
@@ -160,7 +161,7 @@ class LanServer(private val listener: LinkListener) {
         override val description get() = "Wi-Fi • $remote${if (udpAddress != null) "" else " (TCP)"}"
 
         fun start() {
-            Thread({ writeLoop() }, "oea-lan-w$id").apply { isDaemon = true; start() }
+            OeaGuard.start("oea-lan-w$id", "lan-server") { writeLoop() }
             // First frame tells the client its UDP token and the UDP port.
             val hello = ByteArray(7)
             hello[0] = LanFrames.TOKEN.toByte()
@@ -168,8 +169,8 @@ class LanServer(private val listener: LinkListener) {
             hello[5] = (port shr 8).toByte(); hello[6] = port.toByte()
             out.offer(hello)
             isUp = true
-            listener.onLinkUp(this)
-            Thread({ readLoop() }, "oea-lan-r$id").apply { isDaemon = true; start() }
+            OeaGuard.run("lan-server") { listener.onLinkUp(this) }
+            OeaGuard.start("oea-lan-r$id", "lan-server") { readLoop() }
         }
 
         private fun readLoop() {
@@ -182,8 +183,8 @@ class LanServer(private val listener: LinkListener) {
                     input.readFully(frame)
                     lastHeardMs = System.currentTimeMillis()
                     when (frame[0].toInt()) {
-                        LanFrames.DATA -> listener.onLinkMessage(this, Channel.RELIABLE, frame.copyOfRange(1, len))
-                        LanFrames.FALLBACK_UNRELIABLE -> listener.onLinkMessage(this, Channel.UNRELIABLE, frame.copyOfRange(1, len))
+                        LanFrames.DATA -> OeaGuard.run("lan-server") { listener.onLinkMessage(this, Channel.RELIABLE, frame.copyOfRange(1, len)) }
+                        LanFrames.FALLBACK_UNRELIABLE -> OeaGuard.run("lan-server") { listener.onLinkMessage(this, Channel.UNRELIABLE, frame.copyOfRange(1, len)) }
                     }
                 }
             } catch (e: IOException) {
@@ -238,7 +239,7 @@ class LanServer(private val listener: LinkListener) {
             isUp = false
             byToken.remove(token)
             runCatching { socket.close() }
-            listener.onLinkDown(this, reason)
+            OeaGuard.run("lan") { listener.onLinkDown(this, reason) }
         }
     }
 
@@ -259,8 +260,8 @@ class LanClientLink private constructor(private val socket: Socket, private val 
     override val description get() = "Wi-Fi • ${host.hostAddress}${if (udpWorks) "" else " (TCP)"}"
 
     private fun start() {
-        Thread({ writeLoop() }, "oea-lanc-w").apply { isDaemon = true; start() }
-        Thread({ readLoop() }, "oea-lanc-r").apply { isDaemon = true; start() }
+        OeaGuard.start("oea-lanc-w", "lan-client") { writeLoop() }
+        OeaGuard.start("oea-lanc-r", "lan-client") { readLoop() }
     }
 
     private fun readLoop() {
@@ -278,10 +279,10 @@ class LanClientLink private constructor(private val socket: Socket, private val 
                         udpPort = ((frame[5].toInt() and 0xFF) shl 8) or (frame[6].toInt() and 0xFF)
                         startUdp()
                         isUp = true
-                        listener.onLinkUp(this)
+                        OeaGuard.run("lan-server") { listener.onLinkUp(this) }
                     }
-                    LanFrames.DATA -> listener.onLinkMessage(this, Channel.RELIABLE, frame.copyOfRange(1, len))
-                    LanFrames.FALLBACK_UNRELIABLE -> listener.onLinkMessage(this, Channel.UNRELIABLE, frame.copyOfRange(1, len))
+                    LanFrames.DATA -> OeaGuard.run("lan-client") { listener.onLinkMessage(this, Channel.RELIABLE, frame.copyOfRange(1, len)) }
+                    LanFrames.FALLBACK_UNRELIABLE -> OeaGuard.run("lan-client") { listener.onLinkMessage(this, Channel.UNRELIABLE, frame.copyOfRange(1, len)) }
                 }
             }
         } catch (e: IOException) {
@@ -308,17 +309,21 @@ class LanClientLink private constructor(private val socket: Socket, private val 
     private fun startUdp() {
         val u = runCatching { DatagramSocket() }.getOrNull() ?: return
         udp = u
-        Thread({
+        OeaGuard.start("oea-lanc-u", "lan-client") {
             val buf = ByteArray(LanFrames.MAX_FRAME)
             val packet = DatagramPacket(buf, buf.size)
             // Say hello a few times; UDP is used once the host acknowledges.
-            Thread({
-                repeat(6) {
-                    if (closed || udpWorks) return@Thread
+            OeaGuard.start("oea-lanc-hello", "lan-client") {
+                for (attempt in 0 until 6) {
+                    if (closed || udpWorks) break
                     sendUdp(LanFrames.UDP_HELLO, ByteArray(0), 0, 0)
-                    try { Thread.sleep(250) } catch (_: InterruptedException) { return@Thread }
+                    try {
+                        Thread.sleep(250)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
                 }
-            }, "oea-lanc-hello").apply { isDaemon = true; start() }
+            }
             while (!closed) {
                 try {
                     packet.setData(buf, 0, buf.size)
@@ -327,13 +332,13 @@ class LanClientLink private constructor(private val socket: Socket, private val 
                     lastHeardMs = System.currentTimeMillis()
                     when (buf[6].toInt()) {
                         LanFrames.UDP_ACK -> udpWorks = true
-                        LanFrames.UDP_DATA -> { udpWorks = true; listener.onLinkMessage(this, Channel.UNRELIABLE, buf.copyOfRange(7, packet.length)) }
+                        LanFrames.UDP_DATA -> { udpWorks = true; OeaGuard.run("lan-client") { listener.onLinkMessage(this, Channel.UNRELIABLE, buf.copyOfRange(7, packet.length)) } }
                     }
                 } catch (e: IOException) {
                     if (u.isClosed) break
                 }
             }
-        }, "oea-lanc-udp").apply { isDaemon = true; start() }
+        }
     }
 
     private fun sendUdp(type: Int, data: ByteArray, offset: Int, length: Int): Boolean {
@@ -362,7 +367,7 @@ class LanClientLink private constructor(private val socket: Socket, private val 
         isUp = false
         runCatching { socket.close() }
         runCatching { udp?.close() }
-        listener.onLinkDown(this, reason)
+        OeaGuard.run("lan") { listener.onLinkDown(this, reason) }
     }
 
     companion object {

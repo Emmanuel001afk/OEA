@@ -51,6 +51,7 @@ import com.oea.games.lab.EngineLab
 import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.perf.OeaGameRescue
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
@@ -107,7 +108,7 @@ class OeaGamesActivity : Activity(), SessionListener {
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             OeaScreenFailure.show(this, "OEA Games", e)
         }
     }
@@ -185,7 +186,7 @@ class OeaGamesActivity : Activity(), SessionListener {
                 Page.Island -> renderIsland()
                 Page.Profile -> renderProfile()
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             OeaScreenFailure.show(this, "OEA Games", e)
         }
     }
@@ -357,6 +358,7 @@ class OeaGamesActivity : Activity(), SessionListener {
         val box = p.content
         val cover = View(this).apply { background = GameCoverDrawable(d, kit.dpf(26f)) }
         box.addView(cover, 1, LinearLayout.LayoutParams(-1, kit.dp(140)).apply { bottomMargin = kit.dp(12) })
+        if (OeaGameRescue.isUnstable(this, id)) repairCard(box, d)
         if (d.maxPlayers <= 1) {
             kit.note(box, "${d.title} is single-player.")
             present(p); return
@@ -382,6 +384,46 @@ class OeaGamesActivity : Activity(), SessionListener {
         if (lan) s.startLan { _, warning -> if (warning != null) toast(warning); if (page == Page.Lobby) render() }
         navigate(Page.Lobby)
         if (!lan) main.post { openInviteSheet() }
+    }
+
+    /**
+     * Shown when this game stopped more than once in a row. OEA knows the
+     * difference between a save that went bad, a phone that cannot hold the
+     * scene and an unpatched driver, so the card offers the fixes that match
+     * instead of asking the player to try again and hope.
+     */
+    private fun repairCard(box: LinearLayout, d: GameDescriptor) {
+        kit.banner(
+            box,
+            R.drawable.oic_warning_fill,
+            "${d.title} stopped more than once",
+            "OEA kept everything else intact. These are the fixes that usually work, from the least to the most drastic.",
+            OeaKit.Tone.WARNING,
+        )
+        val group = kit.group(box)
+        kit.row(group, R.drawable.oic_tune, "Lower the graphics quality", "Renders smaller so the phone's memory and GPU keep up") {
+            val tier = OeaGameRescue.lowerQuality()
+            OeaGameRescue.noteRunOk(this, d.id)
+            toast("Quality is now $tier. Start the game again.")
+            render()
+        }
+        kit.row(group, R.drawable.oic_delete, "Reset this game's saved data", "Clears only ${d.title}'s records (progress, options, replays)") {
+            kit.confirm("Reset ${d.title}'s data?", "Only this game's saved records are removed. OEA's own settings, your Home layout and other games stay as they are.", "Reset", destructive = true) {
+                val cleared = OeaGameRescue.clearSaveData(this, d.id)
+                toast(if (cleared) "${d.title}'s data was reset." else "There was nothing saved to reset.")
+                render()
+            }
+        }
+        val standalone = OeaGameRescue.standaloneFor(d.id)
+        if (standalone != null && OeaGameRescue.launchable(this, standalone)) {
+            kit.row(group, R.drawable.oic_open_in_new, "Play in its own app", "${d.title} also ships as a separate app, which runs outside OEA entirely") {
+                runCatching { packageManager.getLaunchIntentForPackage(standalone) }
+                    .getOrNull()
+                    ?.let { startActivity(it) }
+                    ?: toast("That app is not installed any more.")
+            }
+        }
+        kit.note(box, "Nothing is lost by trying these: OEA keeps your workspace, apps and settings, and the game's own save data is only cleared if you ask for it.")
     }
 
     // ================================================================ lobby
@@ -927,7 +969,7 @@ class OeaGamesActivity : Activity(), SessionListener {
         val cb = pendingImage ?: return
         pendingImage = null
         val uri = data?.data ?: return
-        Thread {
+        com.oea.engine.core.OeaGuard.start("oea-qr-decode", "oea-games:qr") {
             val text = runCatching {
                 val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
@@ -937,7 +979,7 @@ class OeaGamesActivity : Activity(), SessionListener {
                 bmp?.let { QrCodes.decode(it) }
             }.getOrNull()
             main.post { cb(text) }
-        }.start()
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

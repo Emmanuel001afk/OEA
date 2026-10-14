@@ -7,6 +7,8 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.wallpaper.OeaWallpaper
+import com.oea.launcher.wallpaper.OeaWallpaperStore
 
 /**
  * One OEA colour system for Home, the app drawer, OEA Settings and Game Boost.
@@ -104,7 +106,16 @@ object OeaTheme {
             "light" -> false
             else -> isSystemNight(context)
         }
-        val wallpaperLight = wallpaperLightOverride ?: wallpaperIsLight(context) ?: false
+        // An applied OEA theme (the Themes app) owns the accent. When no theme
+        // is applied, one of OEA's own wallpapers is the wallpaper: its own
+        // brightness decides Home's text colour and, if the user allows it, the
+        // accent. Android's wallpaper colours would describe a different image.
+        val scene = if (OeaWallpaperStore.themeFollowsScene(context) && OeaWallpaperStore.coversHome(context)) {
+            OeaWallpaperStore.scene(context)
+        } else {
+            null
+        }
+        val wallpaperLight = wallpaperLightOverride ?: scene?.light ?: wallpaperIsLight(context) ?: false
         val themed = store.accentMode() == "theme"
         val themeAccent = if (themed) (if (dark) store.themeAccentDark() else store.themeAccentLight()).takeIf { it != 0 } else null
         val accent = if (themeAccent != null) themeAccent else when (store.accentMode()) {
@@ -114,7 +125,11 @@ object OeaTheme {
             "rose" -> if (dark) Color.rgb(255, 178, 190) else Color.rgb(176, 46, 84)
             "amber" -> if (dark) Color.rgb(255, 198, 108) else Color.rgb(140, 90, 0)
             "green" -> if (dark) Color.rgb(140, 214, 150) else Color.rgb(35, 120, 55)
-            else -> dynamicAccent(context, dark) ?: wallpaperAccent(context, dark)
+            "indigo" -> if (dark) Color.rgb(159, 168, 255) else Color.rgb(57, 73, 171)
+            "coral" -> if (dark) Color.rgb(255, 171, 145) else Color.rgb(191, 54, 12)
+            "lime" -> if (dark) Color.rgb(197, 225, 165) else Color.rgb(51, 105, 30)
+            "slate" -> if (dark) Color.rgb(176, 190, 197) else Color.rgb(55, 71, 79)
+            else -> scene?.let { sceneAccent(it, dark) } ?: dynamicAccent(context, dark) ?: wallpaperAccent(context, dark)
                 ?: if (dark) FALLBACK_ACCENT_DARK else FALLBACK_ACCENT_LIGHT
         }
         val dyn = Build.VERSION.SDK_INT >= 31 && store.accentMode() == "wallpaper"
@@ -219,6 +234,17 @@ object OeaTheme {
             }.isSuccess
             if (registered) colorsListener = listener
         }
+    }
+
+    /**
+     * A bundled scene's own colour, tuned to read as an accent on the current
+     * theme: lighter on dark panels, deeper on light ones, and never washed out.
+     */
+    private fun sceneAccent(scene: OeaWallpaper, dark: Boolean): Int {
+        val hsl = hsl(scene.accent)
+        val saturation = hsl[1].coerceIn(0.42f, 0.9f)
+        val lightness = if (dark) 0.74f else 0.42f
+        return hslToColor(hsl[0], saturation, lightness)
     }
 
     private fun dynamicAccent(context: Context, dark: Boolean): Int? {

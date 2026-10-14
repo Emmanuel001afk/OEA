@@ -25,20 +25,22 @@ class OeaPinRequestActivity : Activity() {
     private var finishing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        OeaRuntime.initialize(application)
-        val launcherApps = getSystemService(LauncherApps::class.java)
-        val req = runCatching { launcherApps?.getPinItemRequest(intent) }.getOrNull()
-        if (req == null || !req.isValid) {
-            finish()
-            return
-        }
-        request = req
-        val kit = OeaKit(this, OeaTheme.resolve(this))
-        when (req.requestType) {
-            LauncherApps.PinItemRequest.REQUEST_TYPE_SHORTCUT -> confirmShortcut(kit, req, launcherApps)
-            LauncherApps.PinItemRequest.REQUEST_TYPE_APPWIDGET -> confirmWidget(kit, req)
-            else -> finish()
+        com.oea.launcher.fault.OeaFaultShield.guard("pin-request:create") {
+            super.onCreate(savedInstanceState)
+            OeaRuntime.initialize(application)
+            val launcherApps = getSystemService(LauncherApps::class.java)
+            val req = runCatching { launcherApps?.getPinItemRequest(intent) }.getOrNull()
+            if (req == null || !req.isValid) {
+                finish()
+                return
+            }
+            request = req
+            val kit = OeaKit(this, OeaTheme.resolve(this))
+            when (req.requestType) {
+                LauncherApps.PinItemRequest.REQUEST_TYPE_SHORTCUT -> confirmShortcut(kit, req, launcherApps)
+                LauncherApps.PinItemRequest.REQUEST_TYPE_APPWIDGET -> confirmWidget(kit, req)
+                else -> finish()
+            }
         }
     }
 

@@ -698,13 +698,13 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         }
         val frozen = w.isFrozen(pkg)
         if (OeaAppFreezer.mode(context) == OeaAppFreezer.Mode.SYSTEM && !w.isHibernated(pkg)) {
-            Thread {
+            com.oea.engine.core.OeaGuard.start("oea-freezer-toggle", "home:freezer") {
                 val result = OeaAppFreezer.setFrozen(context, pkg, !frozen)
                 w.post {
                     w.toast(result.message)
                     w.refreshBadges()
                 }
-            }.start()
+            }
             return
         }
         if (frozen) {

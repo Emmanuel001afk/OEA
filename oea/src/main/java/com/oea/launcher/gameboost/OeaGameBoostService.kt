@@ -23,6 +23,8 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
 import com.oea.launcher.assistant.OeaAssistant
+import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.fault.OeaFaultShield
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
@@ -288,6 +290,10 @@ class OeaGameBoostService : Service() {
                     updateOverlay()
                 }
             } catch (error: Throwable) {
+                // Recorded with the rest of OEA's faults: the monitor is the
+                // busiest loop in the service and repeated failures here feed
+                // the rescue options offered for the game.
+                OeaFaultShield.note("game-boost:monitor", error)
                 diagnostic(android.util.Log.ERROR, "session monitor error=${error.javaClass.name}:${error.message}")
             } finally {
                 if (activeGame != null && screenInteractive) handler.postDelayed(this, pollIntervalMs())
@@ -297,6 +303,14 @@ class OeaGameBoostService : Service() {
 
     private val screenReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            // Broadcast entry point: contained like every other OEA callback so
+            // a bad intent can never take the launcher process down.
+            OeaFaultShield.guard("game-boost:screen") {
+                handleScreenIntent(intent)
+            }
+        }
+
+        private fun handleScreenIntent(intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     // Nothing to watch while the screen is off; the session (and
@@ -317,55 +331,67 @@ class OeaGameBoostService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        OeaGameBoost.attach(this)
-        screenInteractive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive }.getOrNull() ?: true
-        createChannel()
-        // startForegroundService() requires this promptly. A refused promotion
-        // (Android's background-start limits) must never crash OEA: the
-        // service stops and the next game launch from OEA starts it again.
-        val promoted = runCatching {
-            val notification = sessionNotification(null)
-            if (Build.VERSION.SDK_INT >= 29) {
-                startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
+        // The launcher must survive its own services: everything after the
+        // framework's own setup runs inside the fault shield.
+        OeaFaultShield.guard("game-boost:create") {
+            OeaGameBoost.attach(this)
+            screenInteractive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive }.getOrNull() ?: true
+            createChannel()
+            // startForegroundService() requires this promptly. A refused promotion
+            // (Android's background-start limits) must never crash OEA: the
+            // service stops and the next game launch from OEA starts it again.
+            val promoted = runCatching {
+                val notification = sessionNotification(null)
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            }.onFailure { diagnostic(android.util.Log.WARN, "Game Boost could not enter the foreground: ${it.javaClass.simpleName}:${it.message}") }
+                .isSuccess
+            if (!promoted) {
+                stopSelf()
+                return@guard
             }
-        }.onFailure { diagnostic(android.util.Log.WARN, "Game Boost could not enter the foreground: ${it.javaClass.simpleName}:${it.message}") }
-            .isSuccess
-        if (!promoted) {
-            stopSelf()
-            return
+            registerScreenReceiver()
+            diagnostic(
+                android.util.Log.INFO,
+                "service ready overlay=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} enabled=${OeaGameBoostStore.enabled(this)}",
+            )
         }
-        registerScreenReceiver()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            OeaGameBoost.ACTION_START_SESSION -> {
-                val game = intent.getStringExtra(OeaGameBoost.EXTRA_PACKAGE)
-                if (!game.isNullOrBlank() && OeaGameBoostStore.enabled(this)) beginSession(game)
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        OeaFaultShield.value("game-boost:command", START_NOT_STICKY) {
+            when (intent?.action) {
+                OeaGameBoost.ACTION_START_SESSION -> {
+                    val game = intent.getStringExtra(OeaGameBoost.EXTRA_PACKAGE)
+                    if (!game.isNullOrBlank() && OeaGameBoostStore.enabled(this)) beginSession(game)
+                }
+                OeaGameBoost.ACTION_END_SESSION -> endSession("ended from the notification")
+                ACTION_REFRESH -> refreshSession()
             }
-            OeaGameBoost.ACTION_END_SESSION -> endSession("ended from the notification")
-            ACTION_REFRESH -> refreshSession()
+            // Never idle in the foreground: without a game there is nothing to do.
+            if (activeGame == null) {
+                stopForegroundCompat()
+                stopSelf()
+            }
+            START_NOT_STICKY
         }
-        // Never idle in the foreground: without a game there is nothing to do.
-        if (activeGame == null) {
-            stopForegroundCompat()
-            stopSelf()
-        }
-        return START_NOT_STICKY
-    }
 
     override fun onDestroy() {
-        diagnostic(android.util.Log.INFO, "service onDestroy activeGame=$activeGame")
-        handler.removeCallbacksAndMessages(null)
-        activeGame?.let(::deactivate)
-        activeGame = null
-        removeWakeOverlay()
-        removeOverlay()
-        if (screenReceiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
-        screenReceiverRegistered = false
-        OeaGameBoost.detach(this)
+        OeaFaultShield.guard("game-boost:destroy") {
+            diagnostic(android.util.Log.INFO, "service onDestroy activeGame=$activeGame")
+            handler.removeCallbacksAndMessages(null)
+            activeGame?.let(::deactivate)
+            activeGame = null
+            removeWakeOverlay()
+            removeOverlay()
+            if (screenReceiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
+            screenReceiverRegistered = false
+            OeaGameBoost.detach(this)
+        }
+        @Suppress("DEPRECATION")
         super.onDestroy()
     }
 
@@ -582,9 +608,9 @@ class OeaGameBoostService : Service() {
     }
 
     private fun activate(packageName: String) {
-        diagnostic(android.util.Log.INFO, "activate requested game=$packageName overlayPermission=${Settings.canDrawOverlays(this)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)} existingOverlayAttached=${overlay?.parent != null}")
+        diagnostic(android.util.Log.INFO, "activate requested game=$packageName overlayPermission=${OeaPrivileges.canOverlay(this)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)} existingOverlayAttached=${overlay?.parent != null}")
         applyGameDndPreference()
-        if (Settings.canDrawOverlays(this)) {
+        if (OeaPrivileges.canOverlay(this)) {
             // The RAM control is a persistent part of the in-game overlay.
             // A previous game/session may have removed the WindowManager view
             // while leaving a stale reference behind. Rebuild that detached
@@ -645,7 +671,7 @@ class OeaGameBoostService : Service() {
      */
     private fun ensureOverlayForActiveGame() {
         val game = activeGame ?: return
-        if (!Settings.canDrawOverlays(this)) return
+        if (!OeaPrivileges.canOverlay(this)) return
         val current = overlay
         val root = current as? android.widget.LinearLayout
         val handle = root?.getChildAt(0) as? android.widget.FrameLayout
@@ -655,7 +681,7 @@ class OeaGameBoostService : Service() {
         val structureHealthy = root != null && handle != null && handleLabel != null
         if (current != null && current.parent != null && structureHealthy) return
 
-        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} rootVisibility=${current?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} structureHealthy=$structureHealthy panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} overlayPermission=${Settings.canDrawOverlays(this)}")
+        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} rootVisibility=${current?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} structureHealthy=$structureHealthy panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} overlayPermission=${OeaPrivileges.canOverlay(this)}")
         if (current != null) {
             panelView?.let { panel ->
                 panel.animate().cancel()
