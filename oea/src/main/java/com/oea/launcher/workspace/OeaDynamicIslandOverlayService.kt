@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.content.pm.ServiceInfo
 import android.graphics.Rect
 import android.os.Build
@@ -233,6 +234,12 @@ class OeaDynamicIslandOverlayService : Service() {
             stopSelf()
             return
         }
+        // Camera-hole mode is a portrait-only surface. Do not leave a
+        // floating capsule across landscape games/videos; Home's own island
+        // remains governed by its normal workspace layout.
+        val portraitOnlyHidden = island === cameraIsland &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val shouldShow = visible && !portraitOnlyHidden
         val existing = island.layoutParams as? WindowManager.LayoutParams
         val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -245,12 +252,12 @@ class OeaDynamicIslandOverlayService : Service() {
             baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             android.graphics.PixelFormat.TRANSLUCENT,
         )).apply {
-            this.width = if (visible) width.coerceAtLeast(1) else 1
-            this.height = if (visible) height.coerceAtLeast(1) else 1
+            this.width = if (shouldShow) width.coerceAtLeast(1) else 1
+            this.height = if (shouldShow) height.coerceAtLeast(1) else 1
             gravity = Gravity.TOP or Gravity.START
-            this.x = if (visible) x.coerceAtLeast(0) else 0
-            this.y = if (visible) y.coerceAtLeast(0) else 0
-            flags = if (visible) baseFlags else baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            this.x = if (shouldShow) x.coerceAtLeast(0) else 0
+            this.y = if (shouldShow) y.coerceAtLeast(0) else 0
+            flags = if (shouldShow) baseFlags else baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
         runCatching {
             if (island.parent == null) windowManager.addView(island, params)
