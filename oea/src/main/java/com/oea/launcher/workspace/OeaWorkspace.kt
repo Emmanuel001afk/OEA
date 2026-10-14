@@ -158,6 +158,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private var rebuildPosted = false
     private var resumed = false
     private var closeDrawerOnPause = false
+    // Declared before init: the drawer reports its backdrop while Home is constructed.
+    private var drawerWallpaperVisible = false
+    private var blurApplied = false
     private val shortcutIconCache = HashMap<String, android.graphics.drawable.Drawable?>()
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
@@ -297,7 +300,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(18), 0, dp(8), 0)
-            background = kit.ripple(kit.rounded(palette.glassStrong, 28, palette.glassStroke, 1), 28)
+            background = kit.ripple(
+                if (store.glassStyle() == OeaDataStore.GLASS_LIQUID) com.oea.launcher.ui.OeaGlassDrawable(palette.glassStrong, dp(28).toFloat(), density, palette.accent)
+                else kit.rounded(palette.glassStrong, 28, palette.glassStroke, 1),
+                28,
+            )
             isClickable = true
             contentDescription = "Search"
             setOnClickListener { openDrawer(searchFocus = true) }
@@ -335,10 +342,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             intArrayOf(palette.scrimTop, Color.TRANSPARENT, Color.TRANSPARENT, palette.scrimBottom),
         )
         indicator.color = palette.homeText
+        val liquid = store.glassStyle() == OeaDataStore.GLASS_LIQUID
         dockFrame.background = when (store.dockStyle()) {
             "none" -> null
             "solid" -> kit.rounded(palette.glassStrong, 30)
-            else -> kit.rounded(palette.glass, 30, palette.glassStroke, 1)
+            else -> if (liquid) com.oea.launcher.ui.OeaGlassDrawable(palette.glass, dp(30).toFloat(), density, palette.accent)
+                else kit.rounded(palette.glass, 30, palette.glassStroke, 1)
         }
         (dockFrame.layoutParams as? LinearLayout.LayoutParams)?.let {
             it.height = dockHeight()
@@ -1472,7 +1481,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun onHomeDoubleTap() {
         if (drawerOpen || drag != null) return
         when (store.doubleTapAction()) {
-            "lock" -> if (!OeaAssistant.lockScreen()) menus.showAssistantNeeded("Double-tap to lock")
+            "lock" -> if (com.oea.launcher.power.OeaPower.lockScreen(context) != com.oea.launcher.power.OeaPower.LockResult.LOCKED) {
+                menus.showAssistantNeeded("Double-tap to lock")
+            }
+            "power_menu" -> if (!com.oea.launcher.power.OeaPower.openPowerMenu()) menus.showAssistantNeeded("Double-tap for the power menu")
+            "quick_controls" -> openQuickControls()
             "drawer" -> openDrawer()
             else -> Unit
         }
@@ -1483,8 +1496,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             "notifications" -> if (!OeaSystemActions.expandNotifications(context)) menus.showAssistantNeeded("Swipe down for notifications")
             "quick_settings" -> if (!OeaSystemActions.expandQuickSettings(context)) menus.showAssistantNeeded("Swipe down for Quick Settings")
             "search" -> openDrawer(searchFocus = true)
+            "quick_controls" -> openQuickControls()
             else -> Unit
         }
+    }
+
+    private fun openQuickControls() {
+        if (!startSafely(Intent(context, com.oea.launcher.power.OeaQuickControlsActivity::class.java))) toast("Quick controls could not be opened")
     }
 
     // ================================================================= drawer
@@ -1519,6 +1537,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             drawer.resetState()
             drawerOpen = false
             updateSystemBars()
+            updateBackdropBlur()
             return
         }
         animateDrawer(open = false)
@@ -1533,6 +1552,39 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     internal fun showDrawerMenu(anchor: View) = menus.showDrawerMenu(anchor)
+
+    /** Called by the drawer when its background starts or stops showing the wallpaper. */
+    internal fun onDrawerBackdropChanged(wallpaperVisible: Boolean) {
+        drawerWallpaperVisible = wallpaperVisible
+        updateBackdropBlur()
+    }
+
+    /**
+     * Frosts the wallpaper behind All Apps and search with Android's window
+     * blur (Android 12+, only where the device enables cross-window blur;
+     * many low-power phones and Battery Saver turn it off). Applied once
+     * when the drawer opens and removed when it closes, never per frame.
+     */
+    private fun updateBackdropBlur() {
+        val window = hostActivity?.window ?: return
+        if (Build.VERSION.SDK_INT < 31) return
+        val wm = context.getSystemService(android.view.WindowManager::class.java) ?: return
+        val want = drawerOpen && drawerWallpaperVisible && store.wallpaperBlur() &&
+            runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false)
+        if (want == blurApplied) return
+        blurApplied = want
+        runCatching {
+            val attrs = window.attributes
+            if (want) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                attrs.blurBehindRadius = dp(28)
+            } else {
+                attrs.blurBehindRadius = 0
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            }
+            window.attributes = attrs
+        }.onFailure { Log.w(TAG, "Window blur unavailable", it) }
+    }
 
     internal fun openHiddenApps() {
         menus.dismissPopups()
@@ -1561,6 +1613,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         drawer.resetState()
                     }
                     updateSystemBars()
+                    updateBackdropBlur()
                     end?.invoke()
                 }
             })

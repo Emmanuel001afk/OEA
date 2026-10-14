@@ -237,6 +237,7 @@ open class OeaSystemToolsActivity : Activity() {
             "split" -> current = "split"
             "home" -> current = "home"
             "notifications" -> current = "notifications"
+            "power" -> current = "power"
             "games" -> { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java); finish(); return }
             else -> current = "hub"
         }
@@ -322,7 +323,9 @@ open class OeaSystemToolsActivity : Activity() {
             kit = OeaKit(this, palette)
             OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
             window.decorView.setBackgroundColor(palette.background)
+            if (screen != "power") stopWaveTest()
             when (screen) {
+                "power" -> showPower()
                 "home" -> showHome()
                 "appearance" -> showAppearance()
                 "drawer" -> showDrawer()
@@ -378,7 +381,8 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_palette, "Appearance", "${themeLabel()} • ${iconShapeLabel()} icons") { navigate("appearance") }
         kit.row(group, R.drawable.oic_wallpaper, "Themes & wallpapers", "Opens the OEA Themes app") { openActivity(com.oea.launcher.themes.OeaThemesActivity::class.java) }
         kit.row(group, R.drawable.oic_apps, "App drawer", if (dataStore.drawerMode() == OeaDataStore.DrawerMode.VERTICAL) "List • ${hiddenCount()} hidden" else "Grid • ${hiddenCount()} hidden") { navigate("drawer") }
-        kit.row(group, R.drawable.oic_gesture, "Gestures", "Double-tap: ${labelFor(dataStore.doubleTapAction(), mapOf("lock" to "lock screen", "drawer" to "app drawer", "none" to "off"))}") { navigate("gestures") }
+        kit.row(group, R.drawable.oic_gesture, "Gestures", "Double-tap: ${labelFor(dataStore.doubleTapAction(), mapOf("lock" to "lock screen", "drawer" to "app drawer", "power_menu" to "power menu", "quick_controls" to "quick controls", "none" to "off"))}") { navigate("gestures") }
+        kit.row(group, R.drawable.oic_power, "Buttons & screen", powerSummary()) { navigate("power") }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_notifications, "Notification dots", if (notificationAccess()) labelFor(dataStore.badgeStyle(), mapOf("dot" to "Dots", "count" to "Counts", "off" to "Off")) else "Needs notification access") { navigate("notifications") }
         kit.row(group, R.drawable.oic_shield, "Privacy & App Lock", "${OeaAppLockStore.lockedApps(this).size} locked • ${hiddenCount()} hidden") { navigate("privacy") }
@@ -619,6 +623,18 @@ open class OeaSystemToolsActivity : Activity() {
             dataStore.setDrawerWallpaperBackground(it)
             rerender()
         }
+        kit.switchRow(group, R.drawable.oic_search, "Show wallpaper behind search",
+            "The search bar area at the top of All Apps shows your wallpaper, and the whole screen does while you search (from Home or All Apps). A contrast scrim keeps results readable.",
+            dataStore.searchWallpaperVisible()) {
+            dataStore.setSearchWallpaperVisible(it)
+            rerender()
+        }
+        if (Build.VERSION.SDK_INT >= 31 && (dataStore.drawerWallpaperBackground() || dataStore.searchWallpaperVisible())) {
+            val blurSupported = runCatching { getSystemService(android.view.WindowManager::class.java)?.isCrossWindowBlurEnabled == true }.getOrDefault(false)
+            kit.switchRow(group, R.drawable.oic_contrast, "Frosted wallpaper",
+                if (blurSupported) "Blurs the wallpaper behind All Apps and search" else "Android has window blur turned off on this phone right now (it's off on many low-power phones and in Battery Saver), so OEA uses the plain scrim",
+                dataStore.wallpaperBlur()) { dataStore.setWallpaperBlur(it) }
+        }
         kit.row(group, R.drawable.oic_visibility_off, "Hidden apps", "${hiddenCount()} hidden") { hiddenAppsDialog() }
         kit.note(box, "Drawer search also finds contacts, Android settings, calculations (try 18% of 2500 as 2500*18%) and web results.")
         present(page)
@@ -644,8 +660,8 @@ open class OeaSystemToolsActivity : Activity() {
         assistantBanner(box)
         val group = kit.group(box)
         kit.row(group, R.drawable.oic_swipe_up, "Swipe up", null, value = "App drawer", chevron = false)
-        choiceRow(group, R.drawable.oic_swipe_down, "Swipe down", listOf("notifications" to "Notifications", "quick_settings" to "Quick Settings", "search" to "Search", "none" to "Nothing"), dataStore.swipeDownAction()) { dataStore.setSwipeDownAction(it) }
-        choiceRow(group, R.drawable.oic_touch_app, "Double-tap", listOf("lock" to "Lock screen", "drawer" to "Open app drawer", "none" to "Nothing"), dataStore.doubleTapAction()) { dataStore.setDoubleTapAction(it) }
+        choiceRow(group, R.drawable.oic_swipe_down, "Swipe down", listOf("notifications" to "Notifications", "quick_settings" to "Quick Settings", "quick_controls" to "OEA Quick controls", "search" to "Search", "none" to "Nothing"), dataStore.swipeDownAction()) { dataStore.setSwipeDownAction(it) }
+        choiceRow(group, R.drawable.oic_touch_app, "Double-tap", listOf("lock" to "Lock screen", "power_menu" to "Power menu", "quick_controls" to "OEA Quick controls", "drawer" to "Open app drawer", "none" to "Nothing"), dataStore.doubleTapAction()) { dataStore.setDoubleTapAction(it) }
         choiceRow(group, R.drawable.oic_layers, "Recent apps (Home menu)", listOf("system" to "Android Recents", "oea" to "OEA Overview"), dataStore.recentsMode()) { dataStore.setRecentsMode(it) }
         kit.note(box, "Long-press an empty spot for the Home menu. Long-press an icon for its shortcuts and actions, then drag to move it.")
         present(page)
@@ -654,11 +670,11 @@ open class OeaSystemToolsActivity : Activity() {
     private fun assistantBanner(box: LinearLayout) {
         when {
             OeaAssistant.isConnected() -> kit.banner(box, R.drawable.oic_check_circle_fill, "OEA Assistant is on",
-                "Lock screen, notifications, Recents, split screen and App Freezer actions are available.", OeaKit.Tone.SUCCESS)
+                "Lock screen, power menu, notifications, Recents, split screen and App Freezer actions are available.", OeaKit.Tone.SUCCESS)
             OeaAssistant.isEnabled(this) -> kit.banner(box, R.drawable.oic_warning_fill, "OEA Assistant was stopped by Android",
                 "Switch it off and on again to restore lock, Recents and freezer actions.", OeaKit.Tone.WARNING, "Open settings") { OeaAssistant.openSetup(this) }
             else -> {
-                val body = "OEA Assistant (an accessibility service) performs only the actions you trigger: double-tap lock, swipe-down notifications, Recents, split screen on older Android and the no-root App Freezer. It never reads or sends your screen content." +
+                val body = "OEA Assistant (an accessibility service) performs only the actions you trigger: double-tap lock, the power menu, swipe-down notifications, Recents, split screen on older Android and the no-root App Freezer. With Game Boost on it also notices which app is in front (package name only) so game sessions need no background Usage access checks. It never reads or sends your screen content." +
                     if (OeaAssistant.needsRestrictedSettingsHint()) "\n\n" + OeaAssistant.RESTRICTED_SETTINGS_HINT else ""
                 val card = kit.banner(box, R.drawable.oic_accessibility_new, "Turn on OEA Assistant", body, OeaKit.Tone.INFO, "Turn on") { OeaAssistant.openSetup(this) }
                 if (OeaAssistant.needsRestrictedSettingsHint()) {
@@ -667,6 +683,184 @@ open class OeaSystemToolsActivity : Activity() {
                 }
             }
         }
+    }
+
+    // ======================================================= buttons & screen
+
+    private fun powerSummary(): String {
+        val parts = mutableListOf<String>()
+        if (com.oea.launcher.power.OeaPower.waveToWake(this)) parts += "wave to wake"
+        if (com.oea.launcher.power.OeaPower.liftToWake(this) && com.oea.launcher.power.OeaPower.liftSensor(this) != null) parts += "lift to wake"
+        if (OeaAssistant.isConnected()) parts += "lock & power menu ready"
+        return if (parts.isEmpty()) "Alternatives for a faulty power or volume button" else parts.joinToString(" • ").replaceFirstChar { it.uppercase() }
+    }
+
+    private var waveTestListener: android.hardware.SensorEventListener? = null
+
+    private fun stopWaveTest() {
+        val listener = waveTestListener ?: return
+        waveTestListener = null
+        runCatching { getSystemService(android.hardware.SensorManager::class.java)?.unregisterListener(listener) }
+    }
+
+    /**
+     * Faulty power button alternatives. Everything here uses supported
+     * Android APIs, and each row says plainly what it needs and what it
+     * can't do (no app can switch on a powered-off phone).
+     */
+    private fun showPower() {
+        val power = com.oea.launcher.power.OeaPower
+        val page = page("Buttons & screen", "Alternatives when the power or volume button is faulty")
+        val box = page.content
+
+        kit.sectionTitle(box, "Wake the screen")
+        val proximity = power.proximitySensor(this)
+        val lift = power.liftSensor(this)
+        var group = kit.group(box)
+        if (proximity == null) {
+            kit.row(group, R.drawable.oic_touch_app, "Wave to wake", "This phone has no proximity sensor OEA can use.", chevron = false)
+        } else {
+            kit.switchRow(group, R.drawable.oic_touch_app, "Wave to wake",
+                "Wave a hand over the top of the screen (near the front camera) while the screen is off." +
+                    if (proximity.isWakeUpSensor) "" else " On this phone the sensor can't wake the processor, so it works best shortly after the screen turns off.",
+                power.waveToWake(this)) { on ->
+                power.set(this, power.KEY_WAVE, on)
+                rerender()
+            }
+            if (power.waveToWake(this)) {
+                val sens = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(12)) }
+                sens.addView(kit.text("Sensitivity", 13f, palette.textSecondary, OeaType.medium).apply { setPadding(dp(2), 0, 0, dp(8)) })
+                sens.addView(kit.segmented(listOf("Low", "Medium", "High"), power.sensitivity(this)) {
+                    power.setSensitivity(this, it)
+                    rerender()
+                })
+                sens.addView(kit.text("Low needs a quick, deliberate wave; High also accepts slower waves.", 12f, palette.textTertiary).apply { setPadding(dp(2), dp(8), 0, 0) })
+                group.addView(sens)
+                kit.switchRow(group, R.drawable.oic_gesture, "Require two waves", "Fewer accidental wakes: wave twice within about a second and a half", power.requireTwoWaves(this)) {
+                    power.set(this, power.KEY_TWO_WAVES, it)
+                    rerender()
+                }
+            }
+        }
+        if (lift != null) {
+            kit.switchRow(group, R.drawable.oic_phone_android, "Lift to wake", "Uses this phone's low-power pick-up sensor (${lift.name}).", power.liftToWake(this)) {
+                power.set(this, power.KEY_LIFT, it)
+                rerender()
+            }
+        } else {
+            kit.row(group, R.drawable.oic_phone_android, "Lift to wake", "Not available: this phone doesn't expose a low-power pick-up sensor, and keeping the motion sensors awake would drain the battery.", chevron = false)
+        }
+        if (power.waveToWake(this) || (power.liftToWake(this) && lift != null)) {
+            kit.switchRow(group, R.drawable.oic_shield, "Pocket guard", "Ignores the sensor while it stays covered, in a pocket or bag", power.pocketGuard(this)) {
+                power.set(this, power.KEY_POCKET, it)
+                rerender()
+            }
+        }
+        if (power.waveToWake(this) && proximity != null) {
+            val status = kit.text("Test it: cover and uncover the sensor near the front camera.", 13f, palette.textSecondary).apply {
+                setPadding(dp(18), dp(10), dp(18), dp(14))
+                setLineSpacing(dp(2).toFloat(), 1f)
+            }
+            group.addView(status)
+            startWaveTest(proximity, status)
+        }
+        kit.note(box, "OEA listens only while the screen is off and stops the moment it turns on; a quiet notification shows while wake gestures are on. On Android 14+ allow \"Turn screen on\" for OEA if waking doesn't work, and keep OEA unrestricted in battery settings. Double-tap to wake, where your phone has it, is a phone-maker feature in Android Settings.")
+        group = kit.group(box)
+        kit.row(group, R.drawable.oic_settings, "Allow OEA to turn the screen on", "Android 14+ special app access; also keep battery use unrestricted") {
+            runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+        }
+
+        kit.sectionTitle(box, "Lock & power")
+        group = kit.group(box)
+        kit.row(group, R.drawable.oic_lock, "Lock screen now", if (OeaAssistant.isConnected()) "Like pressing the power key; fingerprint and face unlock keep working" else if (power.deviceAdminActive(this)) "Uses OEA's Device admin (Android may ask for your PIN next time)" else "Needs OEA Assistant or Device admin") {
+            if (power.lockScreen(this) == com.oea.launcher.power.OeaPower.LockResult.NEEDS_SETUP) toast("Turn on OEA Assistant below (or Device admin) first.")
+        }
+        kit.row(group, R.drawable.oic_restart_alt, "Power menu", "Android's own menu to power off or restart. Needs OEA Assistant") {
+            if (!power.openPowerMenu()) {
+                toast("Turn on OEA Assistant to open the power menu.")
+                OeaAssistant.openSetup(this)
+            }
+        }
+        kit.row(group, R.drawable.oic_accessibility_new, "OEA Assistant", if (OeaAssistant.isConnected()) "On" else "Off • needed for lock without PIN and for the power menu") { OeaAssistant.openSetup(this) }
+        kit.row(group, R.drawable.oic_shield, "Device admin lock", if (power.deviceAdminActive(this)) "Active • used when OEA Assistant is off" else "Off • optional fallback for locking") {
+            if (!power.deviceAdminActive(this)) runCatching { startActivity(power.deviceAdminIntent(this)) }
+                .onFailure { toast("Android didn't open the Device admin screen.") }
+            else toast("Device admin is active. Remove it in Android Settings › Security › Device admin apps.")
+        }
+        kit.row(group, R.drawable.oic_touch_app, "Double-tap Home", labelFor(dataStore.doubleTapAction(), mapOf("lock" to "Locks the screen", "power_menu" to "Opens the power menu", "quick_controls" to "Opens Quick controls", "drawer" to "Opens the app drawer", "none" to "Off"))) { navigate("gestures") }
+
+        kit.sectionTitle(box, "Anywhere: Quick Settings tiles")
+        group = kit.group(box)
+        kit.row(group, R.drawable.oic_lock, "Add the Lock screen tile", "Lock from the notification shade in any app") {
+            addTile(com.oea.launcher.power.OeaLockTileService::class.java, "Lock screen", R.drawable.oic_lock)
+        }
+        kit.row(group, R.drawable.oic_tune, "Add the Quick controls tile", "Power menu, volume, sound mode and Do Not Disturb in one sheet") {
+            addTile(com.oea.launcher.power.OeaQuickControlsTileService::class.java, "Quick controls", R.drawable.oic_tune)
+        }
+
+        kit.sectionTitle(box, "Volume & sound")
+        group = kit.group(box)
+        kit.row(group, R.drawable.oic_volume_up, "Open Quick controls", "Volume sliders, sound/vibrate/silent and Do Not Disturb") {
+            openActivity(com.oea.launcher.power.OeaQuickControlsActivity::class.java)
+        }
+        kit.row(group, R.drawable.oic_volume_up, "Android volume panel", null) { power.showVolumePanel(this) }
+        kit.row(group, R.drawable.oic_do_not_disturb_on, "Do Not Disturb settings", if (power.policyAccess(this)) "Access allowed" else "Allow access to switch DND from OEA") {
+            runCatching { startActivity(if (power.policyAccess(this)) power.dndSettingsIntent() else power.policyAccessIntent()) }
+                .onFailure { toast("Android doesn't offer that screen on this phone.") }
+        }
+        kit.row(group, R.drawable.oic_notifications, "Notification settings", null) {
+            runCatching { startActivity(power.notificationSettingsIntent()) }.onFailure { runCatching { startActivity(power.soundSettingsIntent()) } }
+        }
+        kit.note(box, "Android doesn't let any app switch on a phone that is powered off, or restart it without the system's own power menu. To turn the phone on with a broken power key, connect a charger (many phones start then) or ask a repair shop.")
+        present(page)
+    }
+
+    private fun startWaveTest(sensor: android.hardware.Sensor, status: TextView) {
+        stopWaveTest()
+        val sm = getSystemService(android.hardware.SensorManager::class.java) ?: return
+        val power = com.oea.launcher.power.OeaPower
+        val detector = com.oea.launcher.power.OeaWaveDetector(power.sensitivity(this), power.requireTwoWaves(this), power.pocketGuard(this))
+        detector.reset(android.os.SystemClock.elapsedRealtime(), false)
+        var waves = 0
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(event: android.hardware.SensorEvent) {
+                val distance = event.values.firstOrNull() ?: return
+                val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
+                if (detector.onReading(covered, android.os.SystemClock.elapsedRealtime())) waves++
+                status.text = (if (covered) "Sensor covered" else "Sensor clear") +
+                    (if (waves > 0) " • detected $waves wake gesture" + (if (waves == 1) "" else "s") + " ✓" else " • no wake gesture yet")
+                status.setTextColor(if (waves > 0) palette.success else palette.textSecondary)
+            }
+            override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
+        }
+        if (runCatching { sm.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_UI) }.getOrDefault(false)) waveTestListener = listener
+    }
+
+    /** Android 13+ can add a tile directly; older versions explain where to add it. */
+    private fun addTile(cls: Class<*>, label: String, icon: Int) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            val sbm = getSystemService(android.app.StatusBarManager::class.java)
+            if (sbm != null) {
+                runCatching {
+                    sbm.requestAddTileService(
+                        android.content.ComponentName(this, cls), label,
+                        android.graphics.drawable.Icon.createWithResource(this, icon), mainExecutor,
+                    ) { result ->
+                        toast(when (result) {
+                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "$label tile added to Quick Settings."
+                            android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "The $label tile is already in Quick Settings."
+                            else -> "Tile not added. You can add it by editing Quick Settings."
+                        })
+                    }
+                }.onSuccess { return }
+            }
+        }
+        toast("Open Quick Settings, tap the pencil (Edit) and drag \"$label\" into your tiles.")
+    }
+
+    override fun onPause() {
+        stopWaveTest()
+        super.onPause()
     }
 
     // ========================================================== notifications
@@ -770,6 +964,12 @@ open class OeaSystemToolsActivity : Activity() {
                     dataStore.setIslandDefaultSurface(it)
                 }
             }
+            kit.switchRow(islandGroup, R.drawable.oic_open_in_full, "Expand for new activity",
+                "Opens briefly for a new message, a new song, a charger or a game event, and stays open while a call is ringing. Tap to close; it won't reopen for the same thing.",
+                dataStore.islandPeek()) { dataStore.setIslandPeek(it) }
+            kit.switchRow(islandGroup, R.drawable.oic_mic, "Camera & microphone dots",
+                "Green and orange dots inside the island while any app uses the camera or microphone. Android 12+ shows its own indicator, so the island only shows dots on top of an activity it already shows; on older Android it can show them on their own.",
+                dataStore.islandPrivacyDots()) { dataStore.setIslandPrivacyDots(it) }
             kit.row(islandGroup, R.drawable.oic_stadia_controller_fill, "OEA Games in the island", "Choose card, camera island, both or automatic for each game") {
                 openActivity(com.oea.launcher.games.OeaGamesActivity::class.java)
             }

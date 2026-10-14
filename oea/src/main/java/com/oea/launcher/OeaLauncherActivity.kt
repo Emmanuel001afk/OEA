@@ -113,6 +113,8 @@ class OeaLauncherActivity : Activity() {
         // Home is in the foreground, so Android allows re-promoting the
         // optional system-wide island if the system stopped it meanwhile.
         runCatching { OeaDynamicIslandOverlayService.ensureRunning(this) }
+        // Wake gestures (faulty power key) resume after a reboot or process death.
+        runCatching { com.oea.launcher.power.OeaPower.syncWakeService(this) }
     }
 
     override fun onStop() {

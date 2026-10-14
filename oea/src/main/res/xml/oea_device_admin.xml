@@ -2,5 +2,7 @@
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-policies>
         <limit-password />
+        <!-- Lets OEA lock the screen when the power key fails and OEA Assistant is off. -->
+        <force-lock />
     </uses-policies>
 </device-admin>

@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -18,6 +19,7 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.BatteryManager
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.StatusBarNotification
 import android.text.TextUtils
@@ -30,6 +32,7 @@ import android.transition.TransitionSet
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.view.animation.OvershootInterpolator
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -99,7 +102,7 @@ class OeaDynamicIslandView(
 ) : FrameLayout(context) {
     enum class Surface { CARD, CAMERA }
 
-    private enum class Kind { CALL, MEDIA, NOTIFICATION, CHARGING, GAME }
+    private enum class Kind { CALL, MEDIA, NOTIFICATION, CHARGING, GAME, PRIVACY }
 
     private data class Payload(
         val key: String,
@@ -112,6 +115,10 @@ class OeaDynamicIslandView(
         /** OEA game live activity (running game) or a transient game event. */
         val game: OeaGameLiveState.Entry? = null,
         val gameEvent: OeaGameLiveState.Event? = null,
+        /** Album art for media sessions. */
+        val art: Bitmap? = null,
+        /** An incoming call that is still ringing: stays expanded until answered or declined. */
+        val ringing: Boolean = false,
     ) {
         val gameGlyph: String get() = game?.activity?.glyph?.ifBlank { null } ?: gameEvent?.event?.glyph?.ifBlank { null } ?: game?.game?.glyph ?: gameEvent?.game?.glyph ?: "🎮"
     }
@@ -137,6 +144,30 @@ class OeaDynamicIslandView(
     private val compactTitle = TextView(context)
     private val trailingText = TextView(context)
     private val equalizer = EqualizerView(context)
+    // Camera and microphone in-use dots (compact and expanded) and the media progress row.
+    private val compactPrivacy = PrivacyDotsView(context)
+    private val headerPrivacy = PrivacyDotsView(context)
+    private val privacyText = TextView(context)
+    private val progressRow = LinearLayout(context)
+    private val elapsedText = TextView(context)
+    private val progressBar = MediaProgressView(context)
+    private val durationText = TextView(context)
+    private val labelCache = HashMap<String, String>()
+
+    /** Auto-expanded "peek" state: when it ends, and which activity the user closed by hand. */
+    private var peekUntil = 0L
+    private var peekKey: String? = null
+    private var userClosedSignature: String? = null
+    private val peekCollapse = Runnable {
+        if (expanded && current?.ringing != true && SystemClock.uptimeMillis() >= peekUntil - 50L) setExpanded(false, animate = true)
+    }
+    private val progressTicker = object : Runnable {
+        override fun run() {
+            if (!isAttachedToWindow || !expanded || current?.kind != Kind.MEDIA) return
+            updateProgress()
+            postDelayed(this, 1_000L)
+        }
+    }
 
     private var palette: OeaPalette = OeaTheme.resolve(context)
     private var current: Payload? = null
@@ -178,6 +209,7 @@ class OeaDynamicIslandView(
         }
     }
 
+    private val privacyObserver: () -> Unit = { render() }
     private val notificationObserver: () -> Unit = { render() }
     private val callObserver: () -> Unit = { render() }
     private val gameObserver: () -> Unit = { render() }
@@ -239,6 +271,7 @@ class OeaDynamicIslandView(
             addView(equalizer, FrameLayout.LayoutParams(dp(18), dp(14), Gravity.CENTER))
         }
         compactRow.addView(trailing, LinearLayout.LayoutParams(dp(CAMERA_SIDE_DP), -1))
+        compactRow.addView(compactPrivacy, LinearLayout.LayoutParams(dp(18), -1).apply { rightMargin = dp(4) })
         card.addView(compactRow, LinearLayout.LayoutParams(-2, -1))
 
         header.apply {
@@ -270,6 +303,7 @@ class OeaDynamicIslandView(
         labels.addView(titleView, LinearLayout.LayoutParams(-1, -2))
         labels.addView(subtitleView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
         header.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(headerPrivacy, LinearLayout.LayoutParams(dp(18), dp(22)).apply { leftMargin = dp(6) })
         header.addView(expandIcon, LinearLayout.LayoutParams(dp(22), dp(22)).apply { leftMargin = dp(6) })
         card.addView(header, LinearLayout.LayoutParams(-1, -2))
 
@@ -289,6 +323,26 @@ class OeaDynamicIslandView(
             clipChildren = false
         }
         details.addView(detailText, LinearLayout.LayoutParams(-1, -2))
+        privacyText.apply {
+            textSize = 11.5f
+            visibility = GONE
+            compoundDrawablePadding = dp(6)
+        }
+        details.addView(privacyText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
+        progressRow.apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = GONE
+        }
+        listOf(elapsedText, durationText).forEach {
+            it.textSize = 10.5f
+            it.fontFeatureSettings = "tnum"
+            it.setTextColor(0xFFC5CAD5.toInt())
+        }
+        progressRow.addView(elapsedText, LinearLayout.LayoutParams(-2, -2))
+        progressRow.addView(progressBar, LinearLayout.LayoutParams(0, dp(4), 1f).apply { leftMargin = dp(8); rightMargin = dp(8) })
+        progressRow.addView(durationText, LinearLayout.LayoutParams(-2, -2))
+        details.addView(progressRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         details.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
         card.addView(details, LinearLayout.LayoutParams(-1, -2))
         card.setOnLongClickListener {
@@ -376,6 +430,7 @@ class OeaDynamicIslandView(
         OeaNotificationState.addListener(notificationObserver)
         OeaCallState.addListener(callObserver)
         OeaGameLiveState.addListener(gameObserver)
+        OeaPrivacyMonitor.addListener(context, privacyObserver)
         if (!inGame) registerBatteryReceiver()
         render()
         notifyOverlayGeometry()
@@ -385,8 +440,11 @@ class OeaDynamicIslandView(
         OeaNotificationState.removeListener(notificationObserver)
         OeaCallState.removeListener(callObserver)
         OeaGameLiveState.removeListener(gameObserver)
+        OeaPrivacyMonitor.removeListener(privacyObserver)
         unregisterBatteryReceiver()
         removeCallbacks(callTicker)
+        removeCallbacks(peekCollapse)
+        removeCallbacks(progressTicker)
         super.onDetachedFromWindow()
     }
 
@@ -475,6 +533,24 @@ class OeaDynamicIslandView(
                 subtitle = "$batteryPercent% battery",
             )
         }
+        // Android 12+ already shows its own camera/microphone indicator, so the
+        // island only adds dots to an activity it is showing anyway. Older
+        // Android versions have no indicator; there the island shows one.
+        if (Build.VERSION.SDK_INT < 31 && store.islandPrivacyDots() && accepts(null) &&
+            (OeaPrivacyMonitor.cameraInUse || OeaPrivacyMonitor.micInUse)
+        ) {
+            val both = OeaPrivacyMonitor.cameraInUse && OeaPrivacyMonitor.micInUse
+            return Payload(
+                key = "privacy",
+                kind = Kind.PRIVACY,
+                title = when {
+                    both -> "Camera and microphone in use"
+                    OeaPrivacyMonitor.cameraInUse -> "Camera in use"
+                    else -> "Microphone in use"
+                },
+                subtitle = "An app is using it right now",
+            )
+        }
         return null
     }
 
@@ -496,6 +572,7 @@ class OeaDynamicIslandView(
             title = if (incoming) "Incoming call" else "Phone call",
             subtitle = subtitle,
             call = call,
+            ringing = incoming,
         )
     }
 
@@ -505,9 +582,11 @@ class OeaDynamicIslandView(
         val media = notification.category == Notification.CATEGORY_TRANSPORT ||
             extras?.containsKey(Notification.EXTRA_MEDIA_SESSION) == true
         val call = notification.category == Notification.CATEGORY_CALL
-        val appName = runCatching {
-            context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(sbn.packageName, 0)).toString()
-        }.getOrDefault(sbn.packageName.substringAfterLast('.'))
+        val appName = labelCache.getOrPut(sbn.packageName) {
+            runCatching {
+                context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(sbn.packageName, 0)).toString()
+            }.getOrDefault(sbn.packageName.substringAfterLast('.'))
+        }
         val controller = if (media) mediaController(notification) else null
         val metadataTitle = runCatching {
             controller?.metadata?.description?.title?.toString()
@@ -530,6 +609,15 @@ class OeaDynamicIslandView(
             extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString(),
         ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty().takeIf { it != title }.orEmpty()
         val icon = runCatching { notification.smallIcon?.loadDrawable(context)?.mutate() }.getOrNull()
+        val art = if (media) runCatching {
+            controller?.metadata?.let { meta ->
+                meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                    ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                    ?: meta.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            }
+        }.getOrNull() else null
+        // A ringing call notification (another dialer) carries a full-screen intent.
+        val ringing = call && notification.fullScreenIntent != null
         Payload(
             key = sbn.key,
             kind = when {
@@ -541,6 +629,8 @@ class OeaDynamicIslandView(
             subtitle = subtitle,
             notification = sbn,
             icon = icon,
+            art = art,
+            ringing = ringing,
         )
     }.getOrNull()
 
@@ -575,7 +665,8 @@ class OeaDynamicIslandView(
             notifyOverlayGeometry()
             return
         }
-        if (current?.key != payload.key) {
+        val previous = current
+        if (previous?.key != payload.key) {
             notificationSwipeTarget = null
             notificationSwipeIntercepted = false
             card.animate().cancel()
@@ -587,6 +678,7 @@ class OeaDynamicIslandView(
             }
         }
         val becameVisible = visibility != VISIBLE
+        val peekFor = peekDuration(previous, payload, becameVisible)
         current = payload
         visibility = VISIBLE
         if (becameVisible) onReservedHeightChanged?.invoke()
@@ -611,13 +703,108 @@ class OeaDynamicIslandView(
             Kind.CHARGING -> payload.subtitle
             Kind.NOTIFICATION -> payload.subtitle.ifBlank { labelFor(Kind.NOTIFICATION) }
             Kind.GAME -> payload.subtitle.ifBlank { payload.game?.game?.title ?: "Game" }
+            Kind.PRIVACY -> "Android 11 and older have no camera or microphone indicator, so OEA shows one here."
         }
         rebuildActions(payload)
+        updatePrivacy(payload)
+        updateProgress()
         expandIcon.rotation = if (expanded) 180f else 0f
         card.contentDescription = contentDescription
         card.setOnClickListener { toggleExpanded() }
         applyLayout()
         applyPalette()
+        if (peekFor != 0L) peek(payload, peekFor)
+        else if (expanded && previous?.ringing == true && !payload.ringing && peekKey == payload.key) setExpanded(false, animate = true)
+    }
+
+    /**
+     * How long the island should expand by itself to get attention: a
+     * ringing call stays open (-1) until answered or declined; a new message,
+     * a new track, plugging in a charger or a game event open it briefly.
+     * Nothing peeks while the surface is hidden, in a game (except calls), or
+     * for an activity the user has already closed by hand.
+     */
+    private fun peekDuration(previous: Payload?, payload: Payload, becameVisible: Boolean): Long {
+        // Only a surface the user can actually see peeks (Home stopped = window hidden).
+        if (!store.islandPeek() || !isAttachedToWindow || windowVisibility != VISIBLE) return 0L
+        if (signature(payload) == userClosedSignature) return 0L
+        if (payload.ringing) return if (expanded && peekKey == payload.key) 0L else -1L
+        if (inGame) return 0L
+        val newActivity = previous?.key != payload.key
+        return when (payload.kind) {
+            Kind.NOTIFICATION -> {
+                val fresh = (payload.notification?.postTime ?: 0L) > System.currentTimeMillis() - FRESH_NOTIFICATION_MS
+                if (fresh && (newActivity || previous?.title != payload.title || previous.subtitle != payload.subtitle)) PEEK_NOTIFICATION_MS else 0L
+            }
+            Kind.MEDIA -> if (!newActivity && previous?.title != payload.title) PEEK_MEDIA_MS else 0L
+            Kind.CHARGING -> if (newActivity) PEEK_CHARGING_MS else 0L
+            Kind.GAME -> if (newActivity && payload.gameEvent != null) (payload.gameEvent.until - SystemClock.uptimeMillis()).coerceIn(1_200L, 6_000L) else 0L
+            Kind.CALL, Kind.PRIVACY -> 0L
+        }
+    }
+
+    private fun signature(payload: Payload) = payload.key + "|" + payload.title + "|" + payload.subtitle + "|" + payload.ringing
+
+    private fun peek(payload: Payload, duration: Long) {
+        peekKey = payload.key
+        removeCallbacks(peekCollapse)
+        if (!expanded) setExpanded(true, animate = true, fromUser = false)
+        if (duration > 0L) {
+            peekUntil = SystemClock.uptimeMillis() + duration
+            postDelayed(peekCollapse, duration)
+        }
+    }
+
+    /** Camera/microphone dots inside a visible island; text in the expanded view. */
+    private fun updatePrivacy(payload: Payload) {
+        val show = store.islandPrivacyDots() && payload.kind != Kind.PRIVACY
+        val camera = show && OeaPrivacyMonitor.cameraInUse
+        val mic = show && OeaPrivacyMonitor.micInUse
+        compactPrivacy.set(camera, mic)
+        headerPrivacy.set(camera, mic)
+        compactPrivacy.visibility = if (camera || mic) VISIBLE else GONE
+        headerPrivacy.visibility = if (camera || mic) VISIBLE else GONE
+        privacyText.visibility = if (camera || mic) VISIBLE else GONE
+        privacyText.text = when {
+            camera && mic -> "● Camera and microphone are in use"
+            camera -> "● Camera is in use"
+            mic -> "● Microphone is in use"
+            else -> ""
+        }
+        privacyText.setTextColor(if (camera) PrivacyDotsView.CAMERA else PrivacyDotsView.MIC)
+    }
+
+    /** Media position, updated once a second only while the island is expanded and playing. */
+    private fun updateProgress() {
+        val payload = current
+        val notification = payload?.notification?.notification
+        val controller = if (payload?.kind == Kind.MEDIA && notification != null) mediaController(notification) else null
+        val duration = runCatching { controller?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L }.getOrDefault(0L)
+        val state = runCatching { controller?.playbackState }.getOrNull()
+        if (controller == null || duration <= 0L || state == null) {
+            progressRow.visibility = GONE
+            removeCallbacks(progressTicker)
+            return
+        }
+        val playing = state.state == PlaybackState.STATE_PLAYING
+        var position = state.position
+        if (playing && state.lastPositionUpdateTime > 0L) {
+            position += ((SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
+        }
+        position = position.coerceIn(0L, duration)
+        progressRow.visibility = VISIBLE
+        progressBar.fraction = position / duration.toFloat()
+        progressBar.color = palette.accent
+        elapsedText.text = formatTime(position)
+        durationText.text = formatTime(duration)
+        removeCallbacks(progressTicker)
+        if (playing && expanded && isAttachedToWindow) postDelayed(progressTicker, 1_000L)
+    }
+
+    private fun formatTime(ms: Long): String {
+        val total = ms / 1000L
+        return if (total >= 3600L) String.format(java.util.Locale.US, "%d:%02d:%02d", total / 3600L, (total % 3600L) / 60L, total % 60L)
+        else String.format(java.util.Locale.US, "%d:%02d", total / 60L, total % 60L)
     }
 
     override fun onInterceptTouchEvent(event: android.view.MotionEvent): Boolean {
@@ -698,6 +885,7 @@ class OeaDynamicIslandView(
         Kind.NOTIFICATION -> "Live notification"
         Kind.CHARGING -> "Battery"
         Kind.GAME -> "Game"
+        Kind.PRIVACY -> "Privacy"
     }
 
     private fun setLeadingIcon(payload: Payload) {
@@ -708,6 +896,26 @@ class OeaDynamicIslandView(
             Kind.NOTIFICATION -> "•"
             Kind.CHARGING -> "⚡"
             Kind.GAME -> payload.gameGlyph
+            Kind.PRIVACY -> "●"
+        }
+        val art = payload.art?.takeIf { !it.isRecycled }
+        if (art != null) {
+            // Album art fills the leading circle instead of a tinted glyph.
+            listOf(appIcon, compactIcon).forEach { view ->
+                view.setImageBitmap(art)
+                view.scaleType = ImageView.ScaleType.CENTER_CROP
+                view.background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Color.BLACK) }
+                view.clipToOutline = true
+                view.visibility = VISIBLE
+            }
+            fallbackIcon.visibility = GONE
+            compactFallback.visibility = GONE
+            return
+        }
+        listOf(appIcon, compactIcon).forEach { view ->
+            view.scaleType = ImageView.ScaleType.FIT_CENTER
+            view.background = null
+            view.clipToOutline = false
         }
         if (icon != null) {
             appIcon.setImageDrawable(icon.mutate().apply { setTint(palette.accent) })
@@ -751,7 +959,9 @@ class OeaDynamicIslandView(
             Kind.MEDIA -> "❚❚"
             Kind.NOTIFICATION -> "●"
             Kind.GAME -> payload.game?.activity?.trailing?.ifBlank { null } ?: payload.gameGlyph
+            Kind.PRIVACY -> if (OeaPrivacyMonitor.cameraInUse) "Cam" else "Mic"
         }
+        if (payload.kind == Kind.PRIVACY) trailingText.setTextColor(if (OeaPrivacyMonitor.cameraInUse) PrivacyDotsView.CAMERA else PrivacyDotsView.MIC)
         if (payload.kind == Kind.NOTIFICATION) trailingText.setTextColor(palette.accent)
         if (payload.kind == Kind.GAME) {
             val accent = payload.game?.activity?.accent?.takeIf { it != 0 } ?: payload.game?.game?.accent ?: payload.gameEvent?.game?.accent ?: palette.accent
@@ -937,23 +1147,29 @@ class OeaDynamicIslandView(
     }.getOrNull()
 
     private fun toggleExpanded() {
-        if (current == null) return
+        val payload = current ?: return
+        removeCallbacks(peekCollapse)
+        // Closing an activity by hand stops it from peeking open again until its content changes.
+        if (expanded) userClosedSignature = signature(payload)
         setExpanded(!expanded, animate = true)
     }
 
-    private fun setExpanded(value: Boolean, animate: Boolean) {
+    private fun setExpanded(value: Boolean, animate: Boolean, fromUser: Boolean = true) {
         if (current == null && value) return
         if (expanded == value) return
+        if (fromUser) removeCallbacks(peekCollapse)
         if (animate && isAttachedToWindow && isLaidOut) {
+            // Expanding morphs out with a slight spring; collapsing settles quickly.
             TransitionManager.beginDelayedTransition(this, TransitionSet().apply {
                 ordering = TransitionSet.ORDERING_TOGETHER
                 addTransition(ChangeBounds())
                 addTransition(Fade())
-                duration = if (isCamera) 340L else 260L
-                interpolator = PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
+                duration = if (value) (if (isCamera) 420L else 320L) else 240L
+                interpolator = if (value) OvershootInterpolator(0.85f) else PathInterpolator(0.3f, 0f, 0.1f, 1f)
             })
         }
         expanded = value
+        if (!value) removeCallbacks(progressTicker)
         expandIcon.rotation = if (expanded) 180f else 0f
         contentDescription = buildString {
             append(current?.let { labelFor(it.kind) }.orEmpty())
@@ -965,6 +1181,7 @@ class OeaDynamicIslandView(
         current?.let(::updateTrailing)
         applyLayout()
         applyPalette()
+        if (value) updateProgress()
         onExpandedChanged?.invoke(expanded)
     }
 
@@ -1088,6 +1305,14 @@ class OeaDynamicIslandView(
                 if (expanded) setStroke(maxOf(1, dp(1) / 2), 0x26FFFFFF)
             }
             card.elevation = if (expanded) dp(12).toFloat() else 0f
+        } else if (store.glassStyle() == OeaDataStore.GLASS_LIQUID) {
+            // Liquid glass: deep translucent body with a bright top edge.
+            card.background = com.oea.launcher.ui.OeaGlassDrawable(
+                fill = OeaTheme.alpha(OeaTheme.blend(Color.rgb(12, 14, 20), palette.accent, 0.06f), 0xE6),
+                radius = dp(28).toFloat(),
+                density = density,
+                tint = palette.accent,
+            )
         } else {
             val base = if (palette.dark) Color.rgb(10, 12, 17) else Color.rgb(20, 22, 28)
             card.background = GradientDrawable().apply {
@@ -1129,6 +1354,69 @@ class OeaDynamicIslandView(
         const val CAMERA_SIDE_DP = 40
         /** Height of the collapsed camera pill. */
         const val CAMERA_PILL_DP = 32
+        const val PEEK_NOTIFICATION_MS = 4_000L
+        const val PEEK_MEDIA_MS = 3_000L
+        const val PEEK_CHARGING_MS = 2_500L
+        const val FRESH_NOTIFICATION_MS = 8_000L
+    }
+
+    /** One or two small dots: green for the camera, orange for the microphone. */
+    private class PrivacyDotsView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var camera = false
+        private var mic = false
+
+        fun set(camera: Boolean, mic: Boolean) {
+            if (this.camera == camera && this.mic == mic) return
+            this.camera = camera
+            this.mic = mic
+            contentDescription = when {
+                camera && mic -> "Camera and microphone in use"
+                camera -> "Camera in use"
+                mic -> "Microphone in use"
+                else -> null
+            }
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val r = minOf(width, height) * 0.16f
+            val cy = height / 2f
+            val dots = listOfNotNull(if (camera) CAMERA else null, if (mic) MIC else null)
+            if (dots.isEmpty()) return
+            val gap = r * 2.6f
+            var cx = width / 2f - (dots.size - 1) * gap / 2f
+            dots.forEach { color ->
+                paint.color = color
+                canvas.drawCircle(cx, cy, r, paint)
+                cx += gap
+            }
+        }
+
+        companion object {
+            val CAMERA = Color.rgb(52, 199, 89)
+            val MIC = Color.rgb(255, 159, 10)
+        }
+    }
+
+    /** Thin rounded playback position bar. */
+    private class MediaProgressView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val rect = RectF()
+        var fraction = 0f
+            set(value) { field = value.coerceIn(0f, 1f); invalidate() }
+        var color = Color.WHITE
+            set(value) { field = value; invalidate() }
+
+        override fun onDraw(canvas: Canvas) {
+            val r = height / 2f
+            paint.color = 0x33FFFFFF
+            rect.set(0f, 0f, width.toFloat(), height.toFloat())
+            canvas.drawRoundRect(rect, r, r, paint)
+            paint.color = color
+            rect.set(0f, 0f, width * fraction, height.toFloat())
+            canvas.drawRoundRect(rect, r, r, paint)
+        }
     }
 
     /** Three animated bars shown in the camera pill while media is playing. */

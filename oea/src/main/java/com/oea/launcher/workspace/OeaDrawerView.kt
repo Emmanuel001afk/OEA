@@ -73,6 +73,8 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
     private var topInset = 0
     private var bottomInset = 0
     private val adapter = DrawerAdapter()
+    /** Last applied backdrop; declared before init because init applies the palette. */
+    private var backdropKey: String? = null
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downY = 0f
@@ -168,9 +170,11 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 clearButton.visibility = if (s.isNullOrEmpty()) GONE else VISIBLE
                 rebuild()
+                applyBackdrop()
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
+        search.setOnFocusChangeListener { _, _ -> applyBackdrop() }
         search.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_GO || event?.keyCode == KeyEvent.KEYCODE_ENTER) {
                 launchFirstResult()
@@ -182,10 +186,11 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
 
     fun applyPalette() {
         val p = ws.palette
-        val drawerColor = if (ws.store.drawerWallpaperBackground()) OeaTheme.alpha(p.drawer, 0xD8) else p.drawer
-        background = ws.kit.roundedTop(drawerColor, 28)
+        applyBackdrop()
         handle.background = ws.kit.rounded(OeaTheme.alpha(p.textSecondary, 0x55), 3)
-        searchBox.background = ws.kit.rounded(p.cardHigh, 26)
+        searchBox.background = if (ws.store.glassStyle() == OeaDataStore.GLASS_LIQUID) {
+            com.oea.launcher.ui.OeaGlassDrawable(p.cardHigh, dp(26).toFloat(), density, p.accent, rimAlpha = if (p.dark) 0x70 else 0x40)
+        } else ws.kit.rounded(p.cardHigh, 26)
         (searchBox.findViewWithTag<ImageView>("searchIcon"))?.setImageDrawable(ws.kit.icon(R.drawable.oic_search, p.textSecondary))
         search.setTextColor(p.text)
         search.setHintTextColor(p.textTertiary)
@@ -198,6 +203,50 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
         rail.color = p.textSecondary
         rail.activeColor = p.accent
         rail.invalidate()
+    }
+
+    /** True while the user is searching (field focused or a query typed). */
+    private val searchActive: Boolean get() = search.hasFocus() || !search.text.isNullOrEmpty()
+
+    /**
+     * What sits behind All Apps and search:
+     *  - "Show wallpaper in All Apps": the whole drawer is translucent;
+     *  - "Show wallpaper behind search": the search area at the top always
+     *    shows the wallpaper, and the whole drawer does while searching;
+     *  - neither: the opaque panel.
+     * The scrim keeps text readable: it is lighter where the wallpaper's own
+     * brightness already contrasts with the panel text, and strong (above
+     * 80% opacity, enough for WCAG AA text) where it would fight it.
+     */
+    fun applyBackdrop() {
+        val p = ws.palette
+        val all = ws.store.drawerWallpaperBackground()
+        val searchWallpaper = ws.store.searchWallpaperVisible()
+        val searching = searchActive
+        val agrees = p.dark != p.wallpaperLight
+        val scrim = OeaTheme.alpha(p.drawer, if (agrees) 0xA0 else 0xD6)
+        val key = "$all|$searchWallpaper|$searching|${p.drawer}|$agrees"
+        if (key == backdropKey) return
+        backdropKey = key
+        when {
+            searchWallpaper && searching -> {
+                background = ws.kit.roundedTop(scrim, 28)
+                listArea.background = null
+            }
+            searchWallpaper -> {
+                background = ws.kit.roundedTop(scrim, 28)
+                listArea.background = if (all) null else ws.kit.roundedTop(p.drawer, 24)
+            }
+            all -> {
+                background = ws.kit.roundedTop(OeaTheme.alpha(p.drawer, 0xD8), 28)
+                listArea.background = null
+            }
+            else -> {
+                background = ws.kit.roundedTop(p.drawer, 28)
+                listArea.background = null
+            }
+        }
+        ws.onDrawerBackdropChanged(wallpaperVisible = all || searchWallpaper)
     }
 
     fun applyInsets(top: Int, bottom: Int) {
