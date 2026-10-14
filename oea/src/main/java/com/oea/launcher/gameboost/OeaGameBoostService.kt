@@ -462,7 +462,6 @@ class OeaGameBoostService : Service() {
         diagnostic(android.util.Log.WARN, "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
         handler.removeCallbacksAndMessages(null)
         activeGame?.let(::deactivate)
-        publishMonitoringNotification(active = false)
         removeWakeOverlay()
         removeOverlay()
         super.onDestroy()
