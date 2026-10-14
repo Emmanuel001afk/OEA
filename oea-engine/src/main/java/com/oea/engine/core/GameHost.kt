@@ -1,6 +1,7 @@
 package com.oea.engine.core
 
 import android.app.Activity
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.opengl.GLSurfaceView
@@ -191,12 +192,12 @@ class GameHost(
      * fault guard, so a cache-dropping bug can never turn pressure into a crash.
      */
     fun onTrimMemory(level: Int) {
-        val severe = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        val severe = level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE
         perf.applyMemoryPressure(severe)
         if (created) runOnGameThread { safely { game.onMemoryPressure(severe) } }
     }
 
-    fun onLowMemory() = onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+    fun onLowMemory() = onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
 
     fun onDestroy() {
         destroyed = true

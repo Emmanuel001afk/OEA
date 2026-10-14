@@ -258,8 +258,10 @@ class LanBrowser(private val context: Context, private val gameId: String?, priv
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
             override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
-            override fun onServiceFound(serviceInfo: NsdServiceInfo) = OeaGuard.run("lan-discovery") {
-                OeaGuard.post("lan-discovery", main) { resolveQueue.addLast(serviceInfo); resolveNext() }
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                OeaGuard.run("lan-discovery") {
+                    OeaGuard.post("lan-discovery", main) { resolveQueue.addLast(serviceInfo); resolveNext() }
+                }
             }
         }
         runCatching { nsd.discoverServices(LanAdvertiser.NSD_TYPE, NsdManager.PROTOCOL_DNS_SD, l); nsdListener = l }
@@ -274,21 +276,26 @@ class LanBrowser(private val context: Context, private val gameId: String?, priv
         resolving = true
         runCatching {
             nsd.resolveService(info, object : NsdManager.ResolveListener {
-                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = OeaGuard.run("lan-discovery") {
-                    OeaGuard.post("lan-discovery", main) { resolving = false; resolveNext() }
-                }
-                override fun onServiceResolved(serviceInfo: NsdServiceInfo) = OeaGuard.run("lan-discovery") {
-                    val host = serviceInfo.host
-                    val attrs = runCatching { serviceInfo.attributes }.getOrNull().orEmpty()
-                    val sid = attrs["s"]?.let { String(it) }?.toLongOrNull()
-                    val gid = attrs["g"]?.let { String(it) }.orEmpty()
-                    val proto = attrs["v"]?.let { String(it) }?.toIntOrNull() ?: 0
-                    if (host is Inet4Address && sid != null && (gameId == null || gid == gameId) && !games.containsKey(sid)) {
-                        games[sid] = LanGame(sid, gid, serviceInfo.serviceName.removePrefix("OEA "), attrs["h"]?.let { String(it) } ?: "Host",
-                            host.hostAddress.orEmpty(), serviceInfo.port, 0, 0, true, proto, System.currentTimeMillis())
-                        publish()
+                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    OeaGuard.run("lan-discovery") {
+                        OeaGuard.post("lan-discovery", main) { resolving = false; resolveNext() }
                     }
-                    OeaGuard.post("lan-discovery", main) { resolving = false; resolveNext() }
+                }
+
+                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                    OeaGuard.run("lan-discovery") {
+                        val host = serviceInfo.host
+                        val attrs = runCatching { serviceInfo.attributes }.getOrNull().orEmpty()
+                        val sid = attrs["s"]?.let { String(it) }?.toLongOrNull()
+                        val gid = attrs["g"]?.let { String(it) }.orEmpty()
+                        val proto = attrs["v"]?.let { String(it) }?.toIntOrNull() ?: 0
+                        if (host is Inet4Address && sid != null && (gameId == null || gid == gameId) && !games.containsKey(sid)) {
+                            games[sid] = LanGame(sid, gid, serviceInfo.serviceName.removePrefix("OEA "), attrs["h"]?.let { String(it) } ?: "Host",
+                                host.hostAddress.orEmpty(), serviceInfo.port, 0, 0, true, proto, System.currentTimeMillis())
+                            publish()
+                        }
+                        OeaGuard.post("lan-discovery", main) { resolving = false; resolveNext() }
+                    }
                 }
             })
         }.onFailure { resolving = false }
