@@ -120,6 +120,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- OEA Themes: a standalone app (own icon, label and task) for themes,
+             custom themes and the wallpaper library. Applying a theme changes
+             appearance only; the Home layout and settings are never touched. -->
+        <activity
+            android:name="com.oea.launcher.themes.OeaThemesActivity"
+            android:exported="true"
+            android:label="Themes"
+            android:icon="@drawable/ic_oea_themes"
+            android:roundIcon="@drawable/ic_oea_themes"
+            android:taskAffinity="com.oea.launcher.themes"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <!-- OEA Games: the hub for games built on the OEA Game Engine. Its own
              task (like Game Boost), so a running game resumes from the icon or
              the Dynamic Island. Not singleTask: that would close a running game. -->

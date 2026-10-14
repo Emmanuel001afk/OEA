@@ -54,7 +54,6 @@ import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
 import com.oea.launcher.workspace.OeaWorkspaceStore
 import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
-import java.io.InputStream
 import java.util.concurrent.Executors
 
 /**
@@ -72,7 +71,6 @@ open class OeaSystemToolsActivity : Activity() {
 
     companion object {
         const val EXTRA_SCREEN = "oea_screen"
-        private const val REQUEST_WALLPAPER = 0x4F58
         private const val REQUEST_CONTACTS = 0x4F59
         private const val REQUEST_ISLAND_OVERLAY = 0x4F5A
         private const val FREEZER_LIST_FRESH_MS = 30_000L
@@ -378,6 +376,7 @@ open class OeaSystemToolsActivity : Activity() {
         var group = kit.group(box)
         kit.row(group, R.drawable.oic_home, "Home screen", "${dataStore.gridColumns()} × ${dataStore.gridRows()} grid • ${labelFor(dataStore.searchBarPosition(), mapOf("bottom" to "search at bottom", "top" to "search at top", "hidden" to "no search bar"))}") { navigate("home") }
         kit.row(group, R.drawable.oic_palette, "Appearance", "${themeLabel()} • ${iconShapeLabel()} icons") { navigate("appearance") }
+        kit.row(group, R.drawable.oic_wallpaper, "Themes & wallpapers", "Opens the OEA Themes app") { openActivity(com.oea.launcher.themes.OeaThemesActivity::class.java) }
         kit.row(group, R.drawable.oic_apps, "App drawer", if (dataStore.drawerMode() == OeaDataStore.DrawerMode.VERTICAL) "List • ${hiddenCount()} hidden" else "Grid • ${hiddenCount()} hidden") { navigate("drawer") }
         kit.row(group, R.drawable.oic_gesture, "Gestures", "Double-tap: ${labelFor(dataStore.doubleTapAction(), mapOf("lock" to "lock screen", "drawer" to "app drawer", "none" to "off"))}") { navigate("gestures") }
         group = kit.group(box)
@@ -481,16 +480,22 @@ open class OeaSystemToolsActivity : Activity() {
             }
         }
         kit.row(group, R.drawable.oic_auto_awesome, "External icon pack", iconPackLabel()) { iconPackDialog() }
-        kit.sectionTitle(box, "Motion & wallpaper")
+        kit.sectionTitle(box, "Surfaces & motion")
         group = kit.group(box)
+        choiceRow(group, R.drawable.oic_layers, "Glass style", listOf(OeaDataStore.GLASS_CLASSIC to "Classic", OeaDataStore.GLASS_LIQUID to "Liquid glass"), dataStore.glassStyle()) {
+            dataStore.setGlassStyle(it)
+        }
+        choiceRow(group, R.drawable.oic_view_carousel, "Page transition", listOf(
+            "classic" to "Classic", "liquid" to "Liquid", "cube" to "Cube", "stack" to "Stack", "zoom" to "Zoom", "fade" to "Fade", "none" to "None",
+        ), dataStore.pageEffect()) { dataStore.setPageEffect(it) }
         choiceRow(group, R.drawable.oic_animation, "Animation speed", listOf("0" to "Relaxed", "1" to "Standard", "2" to "Fast"), dataStore.animationSpeed().toString()) {
             dataStore.setAnimationSpeed(it.toInt())
         }
-        kit.row(group, R.drawable.oic_wallpaper, "Wallpaper & style", "Open Android's wallpaper picker") {
-            runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) }
+        kit.sectionTitle(box, "Themes & wallpaper")
+        group = kit.group(box)
+        kit.row(group, R.drawable.oic_palette, "Themes & wallpapers", "Opens the OEA Themes app: themes, your own themes and the wallpaper library") {
+            openActivity(com.oea.launcher.themes.OeaThemesActivity::class.java)
         }
-        kit.row(group, R.drawable.oic_wallpaper, "OEA nature wallpapers", "Choose from the bundled mountain, forest and coast scenes") { chooseBundledWallpaper() }
-        kit.row(group, R.drawable.oic_photo_library, "Use a photo as wallpaper", "Pick an image and apply it to Home") { pickWallpaper() }
         present(page)
     }
 
@@ -573,47 +578,6 @@ open class OeaSystemToolsActivity : Activity() {
         }
     }
 
-    private fun chooseBundledWallpaper() {
-        val choices = listOf(
-            "Mountain dawn" to R.drawable.oea_wallpaper_mountain_dawn,
-            "Forest river" to R.drawable.oea_wallpaper_forest_river,
-            "Desert coast" to R.drawable.oea_wallpaper_desert_coast,
-        )
-        kit.choose(
-            "OEA nature wallpapers",
-            "These bundled images are applied as the Android Home wallpaper. Device wallpapers and your own imported photos remain available too.",
-            choices.map { it.first },
-            0,
-        ) { selected ->
-            val resourceId = choices[selected].second
-            val app = applicationContext
-            toast("Applying wallpaper…")
-            Thread {
-                val applied = runCatching {
-                    app.resources.openRawResource(resourceId).use { stream ->
-                        android.app.WallpaperManager.getInstance(app)
-                            .setStream(stream, null, true, android.app.WallpaperManager.FLAG_SYSTEM)
-                    }
-                }.isSuccess
-                runOnUiThread {
-                    if (!isFinishing && !isDestroyed) toast(if (applied) "Wallpaper applied." else "Android could not apply that wallpaper.")
-                }
-            }.start()
-        }
-    }
-
-    private fun pickWallpaper() {
-        runCatching {
-            startActivityForResult(
-                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    type = "image/*"
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                },
-                REQUEST_WALLPAPER,
-            )
-        }.onFailure { toast("No image picker is available.") }
-    }
-
     @Deprecated("Activity results are routed manually for this simple flow")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_ISLAND_OVERLAY) {
@@ -627,21 +591,6 @@ open class OeaSystemToolsActivity : Activity() {
             }
             pendingIslandOverlayEnable = false
             if (current == "notifications") rerender()
-            return
-        }
-        if (requestCode == REQUEST_WALLPAPER) {
-            val uri = data?.data
-            if (resultCode == RESULT_OK && uri != null) {
-                toast("Applying wallpaper…")
-                Thread {
-                    val ok = runCatching {
-                        contentResolver.openInputStream(uri)?.use { stream: InputStream ->
-                            android.app.WallpaperManager.getInstance(this).setStream(stream)
-                        } ?: error("unreadable")
-                    }.isSuccess
-                    runOnUiThread { toast(if (ok) "Wallpaper applied." else "Android could not apply that image.") }
-                }.start()
-            }
             return
         }
         @Suppress("DEPRECATION")
