@@ -22,7 +22,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
-import androidx.core.app.NotificationCompat
+import com.oea.launcher.assistant.OeaAssistant
+import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.fault.OeaFaultShield
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
@@ -231,8 +233,8 @@ class OeaGameBoostService : Service() {
      */
     private var bootstrapPackage: String? = null
 
-    // Keep diagnostics in Logcat only; temporary Downloads file generation has
-    // been removed now that the overlay failure has been isolated.
+    // Diagnostics stay in Logcat and are written only on state changes, never
+    // on a timer: the old per-tick heartbeat cost binder calls every second.
     private fun diagnostic(priority: Int, message: String) {
         android.util.Log.println(priority, "OeaGameBoost", message)
     }
@@ -250,209 +252,365 @@ class OeaGameBoostService : Service() {
     // Keep the last resumed package so a long-running game does not look like
     // "no foreground app" merely because its last resume was over 30 seconds ago.
     private var lastKnownForegroundPackage: String? = null
-    private var nonGameForegroundSamples = 0
-    private var lastNonGamePackage: String? = null
-    private var diagnosticHeartbeatTicks = 0L
-    private var lastMonitorErrorSignature: String? = null
-    private var lastLoggedForegroundPackage: String? = null
-    private var lastForegroundDecisionLogAt = 0L
     private var lastLoggedHandleVisibility: Int? = null
     // Continuous spectrum for the "rgb" colour mode (the last Game Boost swatch).
-    private var lastGameSyncAt = 0L
     private var rainbowAnimator: android.animation.ValueAnimator? = null
     private var rainbowHue = 0f
     private var lastPaintedHue = -1f
     private val argb = android.animation.ArgbEvaluator()
     private val networkQualityReader by lazy { OeaNetworkQualityReader(this) }
+
+    /** The app that looked like it replaced the game; confirmed after a short delay. */
+    private var leaveCandidate: String? = null
+    /** When the running session began (wall clock for Usage events, uptime for the grace period). */
+    private var sessionStartedWall = 0L
+    private var sessionStartedUptime = 0L
+    private var screenInteractive = true
+    private var screenReceiverRegistered = false
+    private var usageAccessCheckedAt = 0L
+    private var usageAccessCached = false
+
+    private val confirmLeave = Runnable { confirmLeaving() }
+
+    /**
+     * Session monitor. It runs only while a game session is active and the
+     * screen is on. With OEA Assistant it asks the accessibility service which
+     * window is in front (no Usage access at all); otherwise it reads Usage
+     * access events every two seconds. Window events from OEA Assistant and
+     * OEA Home resuming end a session immediately, without waiting for a poll.
+     */
     private val tick = object : Runnable {
         override fun run() {
-            diagnosticHeartbeatTicks++
-            if (diagnosticHeartbeatTicks % 10L == 0L) {
-                val root = overlay
-                val handle = ((root as? android.widget.LinearLayout)?.getChildAt(0) as? android.view.ViewGroup)
-                diagnostic(android.util.Log.INFO, "heartbeat tick=$diagnosticHeartbeatTicks enabled=${OeaGameBoostStore.enabled(this@OeaGameBoostService)} usageAccess=${isUsageAccessGranted()} overlayExists=${root != null} overlayAttached=${root?.parent != null} overlayVisibility=${root?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} handleAttached=${handle?.parent != null} panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} wakeOverlayAttached=${wakeOverlay?.parent != null} overlayPermission=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this@OeaGameBoostService)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this@OeaGameBoostService).getBoolean("ram_handle_visible", true)} activeGame=$activeGame lastForeground=$lastKnownForegroundPackage")
-            }
-            if (!OeaGameBoostStore.enabled(this@OeaGameBoostService)) {
-                diagnostic(android.util.Log.WARN, "monitor stopping because enabled=false activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
-                stopSelf()
-                return
-            }
-
-            // Usage access can temporarily report unavailable after Settings or
-            // permission-controller transitions. Do not destroy a live game
-            // overlay merely because one permission check failed.
-            if (!isUsageAccessGranted()) {
-                nonGameForegroundSamples = 0
-                lastNonGamePackage = null
-                activeGame?.let { ensureOverlayForActiveGame() }
-                handler.postDelayed(this, 1500L)
-                return
-            }
-
+            if (activeGame == null || !screenInteractive) return
             try {
-                // Category detection scans every installed app; doing it every
-                // second added real CPU load while a game was running.
-                val now = android.os.SystemClock.elapsedRealtime()
-                if (now - lastGameSyncAt >= GAME_SYNC_INTERVAL_MS) {
-                    lastGameSyncAt = now
-                    runCatching { OeaGameBoostStore.syncDetectedGames(this@OeaGameBoostService) }
-                }
-                val game = foregroundPackage()
-                if (game != lastLoggedForegroundPackage) {
-                    diagnostic(android.util.Log.INFO, "foreground package changed from=$lastLoggedForegroundPackage to=$game activeGame=$activeGame samples=$nonGameForegroundSamples source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass queryError=$lastForegroundQueryError")
-                    lastLoggedForegroundPackage = game
-                }
-                if (activeGame != null && game != activeGame &&
-                    System.currentTimeMillis() - lastForegroundDecisionLogAt >= 5000L) {
-                    lastForegroundDecisionLogAt = System.currentTimeMillis()
-                    diagnostic(android.util.Log.WARN, "foreground decision candidate activeGame=$activeGame candidate=$game source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass transient=${game?.let(::isTransientForegroundPackage)} samples=$nonGameForegroundSamples")
-                }
-                val captureActive = OeaGameBoostStore.prefs(this@OeaGameBoostService)
-                    .getBoolean("capture_active", false)
-
-                // Once a game session is active, its package remains authoritative
-                // for that session. Do not re-run automatic category detection
-                // against the same package every poll: OEM/app metadata can make
-                // isGame() fluctuate and falsely trigger deactivate(), which
-                // removes the floating handle when the panel is dismissed.
-                val isActiveSessionForeground = game != null && game == activeGame
-                if (isActiveSessionForeground ||
-                    (game != null && OeaGameBoostStore.isGame(this@OeaGameBoostService, game))) {
-                    nonGameForegroundSamples = 0
-                    lastNonGamePackage = null
-                    if (activeGame != game) {
-                        if (activeGame == null) beginDndSession()
-                        setKeepScreenOn(false)
-                        activeGame = game
-                        activate(game)
-                        panelView?.let(::closePanel)
-                    } else {
-                        applyGameDndPreference()
-                        ensureOverlayForActiveGame()
-                    }
-                    updateOverlay()
-                } else if (activeGame != null) {
-                    // Keep the overlay briefly during genuine Android transition
-                    // surfaces, but do not treat the Home launcher as a transient:
-                    // returning Home means the selected game/app has been left.
-                    if (captureActive) {
-                        applyGameDndPreference()
-                        nonGameForegroundSamples = 0
-                        lastNonGamePackage = null
-                        ensureOverlayForActiveGame()
-                        updateOverlay()
-                    } else if (game == null || isTransientForegroundPackage(game)) {
-                        applyGameDndPreference()
-                        // Missing UsageStats data and temporary system/OEA UI are
-                        // not proof that the user left the game. Keep the session
-                        // and its independent handle until Android reports a real,
-                        // non-transient foreground app (Home or another app).
-                        nonGameForegroundSamples = 0
-                        lastNonGamePackage = null
-                        ensureOverlayForActiveGame()
-                        updateOverlay()
-                    } else if (!lastForegroundEvidenceFresh) {
-                        // The only answer available this poll came from UsageStats
-                        // history, not from a real lifecycle transition. Under heavy
-                        // load that history lags by seconds and routinely points at
-                        // a system or launcher package even while the game is still
-                        // in front. Never end a live session on that guess: keep the
-                        // floating control and wait for a resumed event.
-                        lastNonGamePackage = null
-                        nonGameForegroundSamples = 0
-                        ensureOverlayForActiveGame()
-                        updateOverlay()
-                    } else {
-                        if (lastNonGamePackage == game) {
-                            nonGameForegroundSamples++
-                        } else {
-                            lastNonGamePackage = game
-                            nonGameForegroundSamples = 1
-                        }
-                        // A confirmed different foreground app ends the session.
-                        // Confirmation means consecutive *fresh* resumed events for
-                        // the same non-game package; closing the panel never extends
-                        // game eligibility. Home ends it quickly; another app needs a
-                        // little longer, so a brief interruption while the game loads
-                        // (an ad, a sign-in sheet) doesn't remove the button.
-                        val needed = if (isHomePackage(game)) LEAVE_CONFIRM_SAMPLES else LEAVE_CONFIRM_SAMPLES_OTHER_APP
-                        if (nonGameForegroundSamples < needed) {
-                            ensureOverlayForActiveGame()
-                            updateOverlay()
-                        } else {
-                            val endingGame = activeGame
-                            diagnostic(android.util.Log.WARN, "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass")
-                            activeGame = null
-                            nonGameForegroundSamples = 0
-                            lastNonGamePackage = null
-                            endingGame?.let(::deactivate)
-                        }
-                    }
-                }
-            } catch (error: Throwable) {
-                // Record errors that were previously swallowed; avoid repeating the same
-                // exception to the Downloads file every second.
-                val signature = "${error.javaClass.name}:${error.message}"
-                if (signature != lastMonitorErrorSignature) {
-                    lastMonitorErrorSignature = signature
-                    diagnostic(android.util.Log.ERROR, "foreground-monitor exception=$signature stack=${android.util.Log.getStackTraceString(error).take(1800)}")
-                }
-                activeGame?.let {
-                    runCatching { ensureOverlayForActiveGame() }.onFailure { recoveryError ->
-                        diagnostic(android.util.Log.ERROR, "overlay recovery exception=${recoveryError.javaClass.name}:${recoveryError.message}")
-                    }
-                    runCatching { updateOverlay() }.onFailure { updateError ->
-                        diagnostic(android.util.Log.ERROR, "updateOverlay exception=${updateError.javaClass.name}:${updateError.message}")
-                    }
-                }
-            } finally {
-                if (OeaGameBoostStore.enabled(this@OeaGameBoostService)) {
-                    handler.postDelayed(this, 1000L)
-                }
-            }
-        }
-    }
-    override fun onCreate() {
-        com.oea.launcher.fault.OeaFaultShield.guard("game-boost:create") {
-            super.onCreate()
-            diagnostic(android.util.Log.WARN, "service onCreate sdk=${Build.VERSION.SDK_INT} process=${android.os.Process.myPid()} overlayPermission=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} usageAccess=${isUsageAccessGranted()} enabled=${OeaGameBoostStore.enabled(this)}")
-            createChannel()
-            val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.sym_def_app_icon)
-                .setContentTitle("OEA RAM").setContentText("Game session active").setOngoing(true).build()
-            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
-            else startForeground(NOTIFICATION_ID, notification)
-            handler.post(tick)
-        }
-    }
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        com.oea.launcher.fault.OeaFaultShield.guard("game-boost:command") {
-            diagnostic(android.util.Log.INFO, "service onStartCommand action=${intent?.action} flags=$flags startId=$startId activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
-            if (intent?.action == ACTION_REFRESH) {
-                // Settings edits should refresh the existing session, not tear down
-                // the WindowManager handle by stopping and recreating this service.
-                restartPaletteAnimation()
+                val (front, fresh) = pollForeground()
+                evaluateForeground(front, fresh, foregroundActivityClass, polledEvidenceAt)
                 activeGame?.let {
                     ensureOverlayForActiveGame()
                     updateOverlay()
                 }
+            } catch (error: Throwable) {
+                // Recorded with the rest of OEA's faults: the monitor is the
+                // busiest loop in the service and repeated failures here feed
+                // the rescue options offered for the game.
+                OeaFaultShield.note("game-boost:monitor", error)
+                diagnostic(android.util.Log.ERROR, "session monitor error=${error.javaClass.name}:${error.message}")
+            } finally {
+                if (activeGame != null && screenInteractive) handler.postDelayed(this, pollIntervalMs())
             }
-            return START_STICKY
         }
     }
 
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            // Broadcast entry point: contained like every other OEA callback so
+            // a bad intent can never take the launcher process down.
+            OeaFaultShield.guard("game-boost:screen") {
+                handleScreenIntent(intent)
+            }
+        }
+
+        private fun handleScreenIntent(intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    // Nothing to watch while the screen is off; the session (and
+                    // its overlay) simply waits for the user to come back.
+                    screenInteractive = false
+                    handler.removeCallbacks(tick)
+                    handler.removeCallbacks(confirmLeave)
+                    leaveCandidate = null
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    screenInteractive = true
+                    handler.removeCallbacks(tick)
+                    if (activeGame != null) handler.postDelayed(tick, 800L)
+                }
+            }
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        // The launcher must survive its own services: everything after the
+        // framework's own setup runs inside the fault shield.
+        OeaFaultShield.guard("game-boost:create") {
+            OeaGameBoost.attach(this)
+            screenInteractive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive }.getOrNull() ?: true
+            createChannel()
+            // startForegroundService() requires this promptly. A refused promotion
+            // (Android's background-start limits) must never crash OEA: the
+            // service stops and the next game launch from OEA starts it again.
+            val promoted = runCatching {
+                val notification = sessionNotification(null)
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            }.onFailure { diagnostic(android.util.Log.WARN, "Game Boost could not enter the foreground: ${it.javaClass.simpleName}:${it.message}") }
+                .isSuccess
+            if (!promoted) {
+                stopSelf()
+                return@guard
+            }
+            registerScreenReceiver()
+            diagnostic(
+                android.util.Log.INFO,
+                "service ready overlay=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} enabled=${OeaGameBoostStore.enabled(this)}",
+            )
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        OeaFaultShield.value("game-boost:command", START_NOT_STICKY) {
+            when (intent?.action) {
+                OeaGameBoost.ACTION_START_SESSION -> {
+                    val game = intent.getStringExtra(OeaGameBoost.EXTRA_PACKAGE)
+                    if (!game.isNullOrBlank() && OeaGameBoostStore.enabled(this)) beginSession(game)
+                }
+                OeaGameBoost.ACTION_END_SESSION -> endSession("ended from the notification")
+                ACTION_REFRESH -> refreshSession()
+            }
+            // Never idle in the foreground: without a game there is nothing to do.
+            if (activeGame == null) {
+                stopForegroundCompat()
+                stopSelf()
+            }
+            START_NOT_STICKY
+        }
+
     override fun onDestroy() {
-        diagnostic(android.util.Log.WARN, "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
-        handler.removeCallbacksAndMessages(null)
-        activeGame?.let(::deactivate)
-        removeWakeOverlay()
-        removeOverlay()
+        OeaFaultShield.guard("game-boost:destroy") {
+            diagnostic(android.util.Log.INFO, "service onDestroy activeGame=$activeGame")
+            handler.removeCallbacksAndMessages(null)
+            activeGame?.let(::deactivate)
+            activeGame = null
+            removeWakeOverlay()
+            removeOverlay()
+            if (screenReceiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
+            screenReceiverRegistered = false
+            OeaGameBoost.detach(this)
+        }
+        @Suppress("DEPRECATION")
         super.onDestroy()
     }
+
     override fun onBind(intent: Intent?): IBinder? = null
+
+    internal fun currentGame(): String? = activeGame
+
+    /** Starts (or switches) the session for [game]; called from OeaGameBoost on the main thread. */
+    internal fun beginSession(game: String) {
+        if (!OeaGameBoostStore.enabled(this)) return
+        val previous = activeGame
+        cancelLeave()
+        if (previous == game) {
+            ensureOverlayForActiveGame()
+            updateOverlay()
+            return
+        }
+        if (previous == null) beginDndSession() else {
+            // Switching straight from one game to another keeps the DND session
+            // but rebuilds the overlay for the new game.
+            setKeepScreenOn(false)
+            removeWakeOverlay()
+            removeOverlay()
+        }
+        activeGame = game
+        lastKnownForegroundPackage = game
+        foregroundActivityClass = null
+        sessionStartedWall = System.currentTimeMillis()
+        sessionStartedUptime = android.os.SystemClock.uptimeMillis()
+        diagnostic(android.util.Log.INFO, "session start game=$game previous=$previous")
+        activate(game)
+        panelView?.let(::closePanel)
+        updateOverlay()
+        updateSessionNotification()
+        handler.removeCallbacks(tick)
+        if (screenInteractive) handler.postDelayed(tick, pollIntervalMs())
+    }
+
+    /** Ends the session, removes every overlay, restores DND and stops the service. */
+    internal fun endSession(reason: String) {
+        val ending = activeGame
+        diagnostic(android.util.Log.INFO, "session end game=$ending reason=$reason")
+        handler.removeCallbacks(tick)
+        cancelLeave()
+        activeGame = null
+        ending?.let(::deactivate)
+        removeWakeOverlay()
+        removeOverlay()
+        stopForegroundCompat()
+        stopSelf()
+    }
+
+    /** OEA Home is in front: the game was left. */
+    internal fun onHomeShown() {
+        if (activeGame == null) return
+        if (OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)) return
+        endSession("OEA Home resumed")
+    }
+
+    /** Settings changed in Game Boost: refresh the running overlay (never starts a session). */
+    internal fun refreshSession() {
+        restartPaletteAnimation()
+        activeGame?.let {
+            ensureOverlayForActiveGame()
+            updateOverlay()
+        }
+    }
+
+    /** A foreground report from OEA Assistant (event driven). */
+    internal fun onForegroundReported(packageName: String, className: String?, fresh: Boolean) {
+        if (activeGame == null) return
+        lastKnownForegroundPackage = packageName
+        foregroundActivityClass = className
+        evaluateForeground(packageName, fresh, className, System.currentTimeMillis())
+    }
+
+    private fun pollIntervalMs(): Long = if (OeaAssistant.isConnected()) 5_000L else 2_000L
+
+    /** Wall-clock time of the evidence behind the latest [pollForeground] answer. */
+    private var polledEvidenceAt = 0L
+
+    /** The package in front and whether that answer is real lifecycle evidence. */
+    private fun pollForeground(): Pair<String?, Boolean> {
+        OeaAssistant.foregroundPackage()?.let {
+            polledEvidenceAt = System.currentTimeMillis()
+            return it to true
+        }
+        if (!isUsageAccessGrantedCached()) return null to false
+        val front = foregroundPackage()
+        polledEvidenceAt = lastForegroundEventAt
+        return front to lastForegroundEvidenceFresh
+    }
+
+    /**
+     * Decides what a foreground report means for the running session. Short
+     * system surfaces, OEA's own capture/consent screens and stale UsageStats
+     * guesses never end a session; another app ends it only if it is still in
+     * front after a short confirmation delay (an ad or sign-in sheet while a
+     * game loads does not remove the control). OEA Home ends it at once.
+     */
+    private fun evaluateForeground(front: String?, fresh: Boolean, className: String?, evidenceAt: Long) {
+        val active = activeGame ?: return
+        // Evidence from before this session began (e.g. OEA Home's resume just
+        // before the game was tapped, while the game is still starting) says
+        // nothing about leaving the game.
+        val stale = evidenceAt in 1 until sessionStartedWall
+        val inGrace = android.os.SystemClock.uptimeMillis() - sessionStartedUptime < SESSION_GRACE_MS
+        when {
+            front == null -> return
+            front != active && stale -> return
+            front == active -> {
+                cancelLeave()
+                applyGameDndPreference()
+            }
+            front == packageName -> {
+                // OEA Home's own onResume ends sessions authoritatively; a polled
+                // or reported Home window is trusted only after the launch grace.
+                if (className == com.oea.launcher.OeaLauncherActivity::class.java.name && !inGrace) onHomeShown()
+                // Other OEA screens (capture consent, the Wi-Fi panel) are part of the session.
+            }
+            OeaGameBoostStore.isGame(this, front) -> beginSession(front)
+            OeaGameBoostStore.prefs(this).getBoolean("capture_active", false) -> cancelLeave()
+            isTransientForegroundPackage(front) || !fresh -> Unit
+            leaveCandidate == front -> Unit
+            else -> {
+                leaveCandidate = front
+                handler.removeCallbacks(confirmLeave)
+                handler.postDelayed(confirmLeave, if (isHomePackage(front)) HOME_CONFIRM_MS else OTHER_APP_CONFIRM_MS)
+            }
+        }
+    }
+
+    private fun confirmLeaving() {
+        val candidate = leaveCandidate ?: return
+        leaveCandidate = null
+        val active = activeGame ?: return
+        val (front, fresh) = pollForeground()
+        when {
+            front == null || front == active -> Unit
+            polledEvidenceAt in 1 until sessionStartedWall -> Unit
+            front == candidate || (fresh && !isTransientForegroundPackage(front) && front != packageName &&
+                !OeaGameBoostStore.isGame(this, front)) -> endSession("left for $front")
+        }
+    }
+
+    private fun cancelLeave() {
+        leaveCandidate = null
+        handler.removeCallbacks(confirmLeave)
+    }
+
+    private fun isUsageAccessGrantedCached(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - usageAccessCheckedAt > 30_000L) {
+            usageAccessCached = isUsageAccessGranted()
+            usageAccessCheckedAt = now
+        }
+        return usageAccessCached
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiverRegistered) return
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        screenReceiverRegistered = runCatching {
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else registerReceiver(screenReceiver, filter)
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun stopForegroundCompat() {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
+            else @Suppress("DEPRECATION") stopForeground(true)
+        }
+    }
+
+    private fun gameLabel(game: String?): String {
+        if (game == null) return "your game"
+        return runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(game, 0)).toString() }
+            .getOrDefault(game.substringAfterLast('.'))
+    }
+
+    /** Shown only while a session runs; it disappears with the session. */
+    private fun sessionNotification(game: String?): android.app.Notification {
+        val open = android.app.PendingIntent.getActivity(
+            this, 0, Intent(this, OeaGameBoostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        val end = android.app.PendingIntent.getService(
+            this, 1, Intent(this, OeaGameBoostService::class.java).setAction(OeaGameBoost.ACTION_END_SESSION),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL) else {
+            @Suppress("DEPRECATION") android.app.Notification.Builder(this)
+        }
+        return builder
+            .setSmallIcon(com.oea.launcher.R.drawable.ic_oea_launcher_monochrome)
+            .setContentTitle("Game Boost")
+            .setContentText(if (game == null) "Starting game session" else "Session active for ${gameLabel(game)}")
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setContentIntent(open)
+            .addAction(android.app.Notification.Action.Builder(null, "End session", end).build())
+            .build()
+    }
+
+    private fun updateSessionNotification() {
+        runCatching {
+            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, sessionNotification(activeGame))
+        }
+    }
+
     private fun activate(packageName: String) {
-        diagnostic(android.util.Log.INFO, "activate requested game=$packageName overlayPermission=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)} existingOverlayAttached=${overlay?.parent != null}")
+        diagnostic(android.util.Log.INFO, "activate requested game=$packageName overlayPermission=${OeaPrivileges.canOverlay(this)} handlePreferenceVisible=${OeaGameBoostStore.prefs(this).getBoolean("ram_handle_visible", true)} existingOverlayAttached=${overlay?.parent != null}")
         applyGameDndPreference()
-        if (com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)) {
+        if (OeaPrivileges.canOverlay(this)) {
             // The RAM control is a persistent part of the in-game overlay.
             // A previous game/session may have removed the WindowManager view
             // while leaving a stale reference behind. Rebuild that detached
@@ -513,7 +671,7 @@ class OeaGameBoostService : Service() {
      */
     private fun ensureOverlayForActiveGame() {
         val game = activeGame ?: return
-        if (!com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)) return
+        if (!OeaPrivileges.canOverlay(this)) return
         val current = overlay
         val root = current as? android.widget.LinearLayout
         val handle = root?.getChildAt(0) as? android.widget.FrameLayout
@@ -523,7 +681,7 @@ class OeaGameBoostService : Service() {
         val structureHealthy = root != null && handle != null && handleLabel != null
         if (current != null && current.parent != null && structureHealthy) return
 
-        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} rootVisibility=${current?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} structureHealthy=$structureHealthy panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} overlayPermission=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)}")
+        diagnostic(android.util.Log.WARN, "overlay recovery required game=$game rootExists=${current != null} rootAttached=${current?.parent != null} rootVisibility=${current?.visibility} handleVisibility=${handle?.visibility} handleAlpha=${handle?.alpha} structureHealthy=$structureHealthy panelExists=${panelView != null} panelAttached=${panelView?.parent != null} panelVisibility=${panelView?.visibility} overlayPermission=${OeaPrivileges.canOverlay(this)}")
         if (current != null) {
             panelView?.let { panel ->
                 panel.animate().cancel()
@@ -1843,11 +2001,12 @@ class OeaGameBoostService : Service() {
         private const val FOREGROUND_WINDOW_MS = 30_000L
         /** After a service restart, how far back to look for the app that was in front. */
         private const val COLD_START_LOOKBACK_MS = 6 * 60 * 60 * 1000L
-        private const val GAME_SYNC_INTERVAL_MS = 60_000L
-        /** Consecutive fresh resumed events for Home before a session ends. */
-        private const val LEAVE_CONFIRM_SAMPLES = 2
+        /** Another launcher in front: confirm quickly before ending the session. */
+        private const val HOME_CONFIRM_MS = 700L
+        /** Right after a launch the launcher can still look "in front" while the game starts. */
+        private const val SESSION_GRACE_MS = 4_000L
         /** Another app must stay in front a little longer (interruptions while a game loads). */
-        private const val LEAVE_CONFIRM_SAMPLES_OTHER_APP = 6
+        private const val OTHER_APP_CONFIRM_MS = 3_500L
 
         /**
          * Short-lived surfaces that appear over a game without the user leaving
@@ -1889,9 +2048,35 @@ object OeaGameBoostStore {
         prefs(context).edit().putString("game_selection_mode", if (mode == "manual_automatic") mode else "automatic").apply()
     }
     fun dismissedGames(context: Context) = prefs(context).getStringSet("dismissed_games", emptySet()).orEmpty()
+    /**
+     * True when [packageName] should get a Game Boost session. This runs on
+     * every foreground report, so it checks one package (cached) instead of
+     * scanning every installed app as before. A newly installed game that
+     * Android categorises as a game joins the list automatically unless the
+     * user removed it earlier.
+     */
     fun isGame(context: Context, packageName: String): Boolean {
-        if (!games(context).contains(packageName)) return false
-        return mode(context) == "manual_automatic" || detectedGames(context).contains(packageName)
+        val selected = games(context)
+        val manual = mode(context) == "manual_automatic"
+        if (packageName in selected) return manual || isCategoryGame(context, packageName)
+        if (packageName in dismissedGames(context) || !isCategoryGame(context, packageName)) return false
+        setGames(context, selected + packageName)
+        return true
+    }
+
+    private val categoryCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /** Android's declared game category for one package (cached until packages change). */
+    fun isCategoryGame(context: Context, packageName: String): Boolean = categoryCache.getOrPut(packageName) {
+        if (packageName == context.packageName) return@getOrPut false
+        runCatching {
+            val info = context.packageManager.getApplicationInfo(packageName, 0)
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                info.category == android.content.pm.ApplicationInfo.CATEGORY_GAME
+            } else {
+                context.packageManager.getApplicationLabel(info).toString().lowercase().let { it.contains("game") || it.contains("arcade") }
+            }
+        }.getOrDefault(false)
     }
 
     @Volatile private var detectedCache: Set<String>? = null
@@ -1913,9 +2098,10 @@ object OeaGameBoostStore {
 
     private const val DETECTED_CACHE_MS = 60_000L
 
-    /** Forces the next lookup to rescan installed apps (e.g. when Game Boost is opened). */
+    /** Forces the next lookup to rescan installed apps (e.g. when Game Boost is opened or apps change). */
     fun invalidateDetectedGames() {
         detectedCache = null
+        categoryCache.clear()
     }
 
     private fun scanGames(context: Context): Set<String> {

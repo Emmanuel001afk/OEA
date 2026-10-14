@@ -1,20 +1,18 @@
 package com.oea.launcher
 
 import android.app.Activity
-import android.app.AppOpsManager
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
-import android.os.Process
 import com.oea.launcher.fault.OeaFaultShield
-import com.oea.launcher.gameboost.OeaGameBoostService
-import com.oea.launcher.gameboost.OeaGameBoostStore
+import com.oea.launcher.gameboost.OeaGameBoost
 import com.oea.launcher.privilege.OeaPrivileges
 import com.oea.launcher.runtime.OeaHomeController
 import com.oea.launcher.runtime.OeaRuntime
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaScreenFailure
+import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
 
 /**
  * OEA Home's window. Its only real jobs are to hand the workspace to Android,
@@ -167,7 +165,19 @@ class OeaLauncherActivity : Activity() {
             // Android recreated the activity while Home was gone: build it again.
             buildHome()
         }
-        resumeGameBoostMonitoring()
+        // Returning to Home ends a running game session at once. Home never
+        // starts Game Boost itself: sessions begin only when a game opens.
+        OeaFaultShield.guard("home:boost-resume") { OeaGameBoost.onHomeResumed() }
+        // Home is in the foreground, so Android allows re-promoting the
+        // optional system-wide island if the system stopped it meanwhile.
+        OeaFaultShield.guard("home:island-resume") { OeaDynamicIslandOverlayService.ensureRunning(this) }
+        // Wake gestures (faulty power key) resume after a reboot or process death.
+        OeaFaultShield.guard("home:wake-resume") { com.oea.launcher.power.OeaPower.syncWakeService(this) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        OeaFaultShield.guard("home:boost-stop") { OeaGameBoost.onHomeStopped(this) }
     }
 
     override fun onPause() {
@@ -209,36 +219,6 @@ class OeaLauncherActivity : Activity() {
         home = null
         super.onDestroy()
     }
-
-    /**
-     * If Android/OEM process management stopped the monitor while its setting
-     * remained enabled, resuming OEA Home starts it again without requiring the
-     * user to toggle Game Boost off and on manually.
-     */
-    private fun resumeGameBoostMonitoring() {
-        if (OeaFaultShield.safeMode) return
-        val shouldRun = OeaFaultShield.value("home:boost-check", false) {
-            OeaGameBoostStore.enabled(this) && hasUsageAccess()
-        }
-        if (!shouldRun) return
-
-        val intent = Intent(this, OeaGameBoostService::class.java)
-            .setAction(OeaGameBoostService.ACTION_REFRESH)
-        OeaFaultShield.guard("home:boost-resume") {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-            else startService(intent)
-        }
-    }
-
-    private fun hasUsageAccess(): Boolean =
-        OeaPrivileges.canReadUsage(this) || runCatching {
-            val appOps = getSystemService(AppOpsManager::class.java)
-            appOps.checkOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                packageName,
-            ) == AppOpsManager.MODE_ALLOWED
-        }.getOrDefault(false)
 
     @Deprecated("Launcher HOME should not be closed by an accidental Back press.")
     override fun onBackPressed() {

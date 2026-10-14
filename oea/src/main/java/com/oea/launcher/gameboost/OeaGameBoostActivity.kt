@@ -34,15 +34,16 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.privilege.Privilege
 import com.oea.launcher.R
+import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.model.OeaAppModel
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
-import com.oea.launcher.privilege.OeaPrivileges
-import com.oea.launcher.privilege.Privilege
 import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
@@ -100,7 +101,7 @@ class OeaGameBoostActivity : Activity() {
             setContentView(root)
             render()
             loadApps()
-        } catch (error: Throwable) {
+        } catch (error: Exception) {
             OeaScreenFailure.show(this, "Game Boost", error)
         }
     }
@@ -201,7 +202,7 @@ class OeaGameBoostActivity : Activity() {
     private fun render() {
         try {
             renderContent()
-        } catch (error: Throwable) {
+        } catch (error: Exception) {
             OeaScreenFailure.show(this, "Game Boost", error)
         }
     }
@@ -216,10 +217,11 @@ class OeaGameBoostActivity : Activity() {
         hero()
         statsRow()
         gamesSection()
+        detectionSection()
         overlaySection()
         sessionSection()
         permissionsSection()
-        kit.note(content, "Game Boost runs a lightweight game-session layer: it detects your games, can silence notifications, shows live RAM and an in-game control. Android does not let any app raise another app's CPU or GPU priority, so OEA never claims to.")
+        kit.note(content, "Game Boost runs only while one of your games is open: it can silence notifications, keep the screen awake and show live RAM with an in-game control. When no game is open it does not run in the background, uses no Usage access and shows no notification. Android does not let any app raise another app's CPU or GPU priority, so OEA never claims to.")
         scroll.post { scroll.scrollTo(0, y) }
         updateStats()
     }
@@ -239,7 +241,6 @@ class OeaGameBoostActivity : Activity() {
 
     private fun hero() {
         val enabled = OeaGameBoostStore.enabled(this)
-        val usage = usageGranted()
         val count = selectedGames().size
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -261,13 +262,16 @@ class OeaGameBoostActivity : Activity() {
             LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(12) })
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         titles.addView(kit.text("Game Boost", 26f, palette.text, OeaType.medium))
+        val canFollow = OeaGameBoost.canFollowSessions(this)
+        val running = OeaGameBoost.activeGame
         val status = when {
-            !enabled -> "Off • tap the power button to start"
-            !usage -> "Needs Usage access to detect games"
+            !enabled -> "Off • tap the power button to turn on"
+            !canFollow -> "Needs OEA Assistant or Usage access"
+            running != null -> "Boosting ${installedApps.firstOrNull { it.packageName == running }?.label ?: "your game"} now"
             count == 0 -> "On • add games to boost"
-            else -> "Active • watching $count game" + if (count == 1) "" else "s"
+            else -> "On • starts with your $count game" + (if (count == 1) "" else "s") + ", idle otherwise"
         }
-        titles.addView(kit.text(status, 13.5f, if (enabled && usage) palette.accent else palette.textSecondary, OeaType.medium))
+        titles.addView(kit.text(status, 13.5f, if (enabled && canFollow) palette.accent else palette.textSecondary, OeaType.medium))
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
         card.addView(top, LinearLayout.LayoutParams(-1, -2))
         val ring = PowerRing(this, enabled, palette.accent, palette.textTertiary, palette.card).apply {
@@ -278,8 +282,8 @@ class OeaGameBoostActivity : Activity() {
         card.addView(kit.text(if (enabled) "BOOST ON" else "BOOST OFF", 13f, if (enabled) palette.accent else palette.textSecondary, OeaType.condensed).apply {
             letterSpacing = 0.18f
         })
-        if (enabled && !usage) {
-            card.addView(kit.button("Grant Usage access", palette.accent, palette.onAccent, R.drawable.oic_insights) { openUsageAccess() },
+        if (enabled && !canFollow) {
+            card.addView(kit.button("Set up game detection", palette.accent, palette.onAccent, R.drawable.oic_insights) { chooseDetection() },
                 LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(14) })
         }
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
@@ -452,8 +456,10 @@ class OeaGameBoostActivity : Activity() {
             return
         }
         if (!OeaGameBoostStore.enabled(this)) toast("Game Boost is off. Turn it on to boost this session.")
-        runCatching { startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            .onFailure { toast("Android could not open ${app.label}") }
+        runCatching {
+            startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            OeaGameBoost.onAppLaunched(this, app.packageName)
+        }.onFailure { toast("Android could not open ${app.label}") }
     }
 
     private fun overlaySection() {
@@ -536,15 +542,13 @@ class OeaGameBoostActivity : Activity() {
         kit.sectionTitle(content, "Permissions")
         val group = kit.group(content)
         fun status(ok: Boolean, required: Boolean) = if (ok) "Allowed" else if (required) "Required" else "Off"
-        val usage = usageGranted()
         val overlay = OeaPrivileges.canOverlay(this)
         val dnd = getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
-        kit.row(group, R.drawable.oic_insights, "Usage access", "Detects when one of your games is in front", value = status(usage, true),
-            iconBg = statusBg(usage), iconTint = statusTint(usage)) { openUsageAccess() }
         kit.row(group, R.drawable.oic_layers, "Display over other apps", "Shows the OEA RAM control above games", value = status(overlay, true),
             iconBg = statusBg(overlay), iconTint = statusTint(overlay)) {
             // One tap: OEA grants it itself when the phone allows that (root or
-            // device owner) and otherwise opens exactly the right Android page.
+            // device owner) and otherwise opens exactly the right Android page,
+            // then verifies the result.
             OeaPrivileges.grant(this, Privilege.OVERLAY) { outcome ->
                 toast(outcome.message)
                 handler.postDelayed({ if (loaded) render() }, 700L)
@@ -557,7 +561,7 @@ class OeaGameBoostActivity : Activity() {
         }
         if (Build.VERSION.SDK_INT >= 33) {
             val notify = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            kit.row(group, R.drawable.oic_notifications, "Notifications", "Shows the Game Boost status notification", value = status(notify, false),
+            kit.row(group, R.drawable.oic_notifications, "Notifications", "Shows a notification only while a game session runs", value = status(notify, false),
                 iconBg = statusBg(notify), iconTint = statusTint(notify)) {
                 if (!notify) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 41)
             }
@@ -574,40 +578,66 @@ class OeaGameBoostActivity : Activity() {
 
     // ============================================================== engine
 
+    /**
+     * Turning Game Boost on starts nothing by itself: a session begins when
+     * one of the selected games opens and ends when the user leaves it.
+     */
     private fun toggleEnabled() {
         if (OeaGameBoostStore.enabled(this)) {
             OeaGameBoostStore.setEnabled(this, false)
-            stopService(Intent(this, OeaGameBoostService::class.java))
+            OeaGameBoost.endSession(this)
+            OeaAssistant.refreshEventMask()
             render()
             return
         }
-        if (!usageGranted()) {
-            toast("Grant Usage access first so OEA can detect the active game.")
-            openUsageAccess()
+        if (!OeaGameBoost.canFollowSessions(this)) {
+            chooseDetection()
             return
         }
         OeaGameBoostStore.setEnabled(this, true)
-        startBoostService()
+        OeaAssistant.refreshEventMask()
+        toast("Game Boost is on. It starts by itself when you open one of your games.")
         render()
     }
 
-    private fun startBoostService() {
-        runCatching {
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(Intent(this, OeaGameBoostService::class.java))
-            else startService(Intent(this, OeaGameBoostService::class.java))
-        }.onFailure {
-            OeaGameBoostStore.setEnabled(this, false)
-            toast("Game Boost service could not start.")
+    /** OEA Assistant (event driven, preferred) or Usage access lets a session notice when you leave the game. */
+    private fun chooseDetection() {
+        kit.choose(
+            "How should Game Boost notice your games?",
+            "A session needs to know when you leave the game, so its overlay and Do Not Disturb never linger over other apps.",
+            listOf("OEA Assistant (recommended)", "Usage access"),
+            0,
+            listOf(
+                "Follows game windows as they open and close. No polling and no Usage access.",
+                "Checked every two seconds only while a game session runs, plus once when you leave Home.",
+            ),
+        ) { pick ->
+            if (pick == 0) OeaAssistant.openSetup(this) else openUsageAccess()
         }
     }
 
-    /** Applies setting changes to a running session without restarting detection. */
+    private fun detectionSection() {
+        kit.sectionTitle(content, "Game detection")
+        val group = kit.group(content)
+        val assistantOn = OeaAssistant.isEnabled(this)
+        val usage = usageGranted()
+        kit.row(group, R.drawable.oic_sports_esports, "Games opened from OEA", "Home, the drawer, folders, search and this app start a session directly",
+            value = "Always", chevron = false)
+        kit.row(group, R.drawable.oic_accessibility_new, "OEA Assistant", "Recommended. Follows which app's window is in front (package names only), with no polling",
+            value = if (assistantOn) "On" else "Off", iconBg = statusBg(assistantOn), iconTint = statusTint(assistantOn)) { OeaAssistant.openSetup(this) }
+        kit.row(group, R.drawable.oic_insights, "Usage access", "Used only while a game session runs to notice when you leave it" +
+            if (OeaGameBoost.leaveHomeCheck(this)) ", and once when you leave Home" else "",
+            value = if (usage) "Allowed" else "Off", iconBg = statusBg(usage || assistantOn), iconTint = statusTint(usage || assistantOn)) { openUsageAccess() }
+        kit.switchRow(group, R.drawable.oic_home, "Check once when leaving Home", "Catches games opened from Recents or a notification with a single Usage access check. Not needed with OEA Assistant.",
+            OeaGameBoost.leaveHomeCheck(this)) { on -> OeaGameBoost.setLeaveHomeCheck(this, on) }
+    }
+
+    /** Applies setting changes to a running session; never starts one. */
     private fun refreshService() {
-        if (!OeaGameBoostStore.enabled(this)) return
+        if (!OeaGameBoostStore.enabled(this) || OeaGameBoost.activeGame == null) return
         runCatching {
-            val intent = Intent(this, OeaGameBoostService::class.java).setAction(OeaGameBoostService.ACTION_REFRESH)
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
-        }
+            startService(Intent(this, OeaGameBoostService::class.java).setAction(OeaGameBoostService.ACTION_REFRESH))
+        }.onFailure { OeaGameBoost.refresh() }
     }
 
     private fun openUsageAccess() {

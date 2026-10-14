@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Resources
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
@@ -20,9 +21,14 @@ import android.graphics.drawable.Drawable
 import android.os.Build
 import android.util.LruCache
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.ui.OeaTheme
 import org.xmlpull.v1.XmlPullParser
+import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
@@ -92,15 +98,32 @@ class OeaIconController(private val context: Context) {
         val style = currentStyle()
         val key = style.key + "|" + packageName + "/" + className.orEmpty()
         rendered.get(key)?.let { return it }
+        // Rendered icons persist across process restarts: after Android kills
+        // OEA in the background, Home comes back with its icons immediately
+        // instead of re-rendering every icon on the main thread.
+        val disk = diskName(key, packageName, style.pack)
+        if (disk != null) readDisk(disk)?.let { cached ->
+            rendered.put(key, cached)
+            return cached
+        }
         val base = rawIcon(packageName, className, style.pack) ?: return null
         val bitmap = runCatching { render(base.drawable, base.fromPack, style) }.getOrNull() ?: return null
         rendered.put(key, bitmap)
+        if (disk != null) writeDisk(disk, bitmap)
         return bitmap
     }
 
     /** Warms the cache for [apps]; call from a background thread. */
     fun preload(apps: List<Pair<String, String>>) {
         apps.forEach { (pkg, cls) -> runCatching { iconBitmap(pkg, cls) } }
+    }
+
+    /**
+     * Records each app's install stamp. Only stamped apps use the persistent
+     * icon cache, so an icon is never reused after its app was updated.
+     */
+    fun updateStamps(apps: List<OeaAppInfo>) {
+        apps.forEach { if (it.stamp != 0L) stamps[it.packageName] = it.stamp }
     }
 
     /** Drops rendered icons (e.g. after a shape, size, pack or theme change). */
@@ -128,6 +151,57 @@ class OeaIconController(private val context: Context) {
     fun invalidatePackage(packageName: String) {
         rawStates.keys.filter { it.contains("|$packageName/") }.forEach { rawStates.remove(it) }
         rendered.snapshot().keys.filter { it.contains("|$packageName/") }.forEach { rendered.remove(it) }
+        stamps.remove(packageName)
+        // An updated icon pack changes every icon it themes.
+        if (packageName == store.iconPackPackage()) {
+            packMappings.remove(packageName)
+            rawStates.clear()
+            rendered.evictAll()
+        }
+        val dir = diskDir()
+        diskExecutor.execute {
+            runCatching { dir.listFiles { file -> file.name.startsWith(packageName + "_") }?.forEach { it.delete() } }
+        }
+    }
+
+    // ------------------------------------------------------------ disk cache
+
+    private fun diskDir(): File = File(context.cacheDir, DISK_DIR)
+
+    private fun diskName(key: String, packageName: String, pack: String?): String? {
+        val stamp = stamps[packageName] ?: return null
+        val packStamp = pack?.let { stamps[it] } ?: 0L
+        return runCatching {
+            val digest = MessageDigest.getInstance("SHA-1").digest("$key|$stamp|$packStamp".toByteArray())
+            packageName + "_" + digest.joinToString("") { "%02x".format(it) }.take(24) + ".png"
+        }.getOrNull()
+    }
+
+    private fun readDisk(name: String): Bitmap? = runCatching {
+        val file = File(diskDir(), name)
+        if (!file.isFile) null else BitmapFactory.decodeFile(file.path)
+    }.getOrNull()
+
+    private fun writeDisk(name: String, bitmap: Bitmap) {
+        val dir = diskDir()
+        diskExecutor.execute {
+            runCatching {
+                if (!dir.isDirectory) dir.mkdirs()
+                val target = File(dir, name)
+                if (target.isFile) return@runCatching
+                val temp = File(dir, "$name.tmp")
+                FileOutputStream(temp).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                if (!temp.renameTo(target)) temp.delete()
+                if (++diskWrites % 64 == 0) pruneDisk(dir)
+            }
+        }
+    }
+
+    /** Keeps the persistent cache bounded (old styles and removed apps age out). */
+    private fun pruneDisk(dir: File) {
+        val files = dir.listFiles()?.filter { it.isFile } ?: return
+        if (files.size <= DISK_MAX_FILES) return
+        files.sortedBy { it.lastModified() }.take(files.size - DISK_KEEP_FILES).forEach { it.delete() }
     }
 
     // ------------------------------------------------------------------ style
@@ -311,6 +385,17 @@ class OeaIconController(private val context: Context) {
             sharedInstance ?: OeaIconController(context.applicationContext).also { sharedInstance = it }
         }
 
+        private const val DISK_DIR = "oea_icons"
+        private const val DISK_MAX_FILES = 2400
+        private const val DISK_KEEP_FILES = 1600
+        private val stamps = ConcurrentHashMap<String, Long>()
+        @Volatile private var diskWrites = 0
+        private val diskExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "OeaIconDisk").apply {
+                isDaemon = true
+                priority = Thread.MIN_PRIORITY
+            }
+        }
         private val rawStates = ConcurrentHashMap<String, Drawable.ConstantState>()
         private val rawFromPack = ConcurrentHashMap<String, Boolean>()
         private val packMappings = ConcurrentHashMap<String, Map<String, String>>()

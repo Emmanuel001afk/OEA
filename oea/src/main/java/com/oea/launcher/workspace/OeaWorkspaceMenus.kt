@@ -326,8 +326,12 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         val anchor = Rect(rawX.toInt(), rawY.toInt(), rawX.toInt() + 1, rawY.toInt() + 1)
         val locked = w.store.homeLayoutLocked()
         showPopup(anchor, 250) { card ->
-            popupRow(card, kit.icon(R.drawable.oic_wallpaper, palette.text), "Wallpaper & style") {
-                if (!w.startSafely(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper"))) w.toast("No wallpaper picker found")
+            popupRow(card, kit.icon(R.drawable.oic_palette, palette.text), "Themes & wallpapers") {
+                // The OEA Themes app: themes, your own themes and the wallpaper library.
+                val themes = Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (!w.startSafely(themes) && !w.startSafely(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper"))) {
+                    w.toast("No wallpaper picker found")
+                }
             }
             popupRow(card, kit.icon(R.drawable.oic_widgets, palette.text), "Widgets") { showWidgetPicker(w.currentPage()) }
             popupRow(card, kit.icon(R.drawable.oic_settings, palette.text), "Home settings") { w.openSystemTool("home") }

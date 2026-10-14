@@ -157,10 +157,9 @@ object OeaSplitLauncher {
             seen
         }.getOrDefault(false)
 
-        private fun hasUsageAccess(): Boolean = runCatching {
-            val appOps = app.getSystemService(AppOpsManager::class.java)
-            appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), app.packageName) == AppOpsManager.MODE_ALLOWED
-        }.getOrDefault(false)
+        // One capability layer decides what OEA can read; this keeps split screen
+        // in step with the Permissions & access screen instead of its own check.
+        private fun hasUsageAccess(): Boolean = com.oea.launcher.privilege.OeaPrivileges.canReadUsage(app)
 
         private fun toast(message: String) {
             main.post { Toast.makeText(app, message, Toast.LENGTH_LONG).show() }

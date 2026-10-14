@@ -145,6 +145,58 @@ class OeaDataStore private constructor(context: Context) {
     fun islandOnOtherApps() = prefs.getBoolean(KEY_ISLAND_ON_OTHER_APPS, false)
     fun setIslandOnOtherApps(enabled: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_ON_OTHER_APPS, enabled).apply() }
 
+    // ------------------------------------------------------------- OEA themes
+
+    /** The applied OEA theme ("" when the user never applied one). */
+    fun activeThemeId() = prefs.getString(KEY_ACTIVE_THEME, "") ?: ""
+    fun themeAccentDark() = prefs.getInt(KEY_THEME_ACCENT_DARK, 0)
+    fun themeAccentLight() = prefs.getInt(KEY_THEME_ACCENT_LIGHT, 0)
+    fun themeSurfaceTint() = prefs.getInt(KEY_THEME_SURFACE, 0)
+
+    /**
+     * Stores the colours of an applied theme in one write. [accentMode] "theme"
+     * makes OEA's palette use them; personal settings are untouched.
+     */
+    fun applyThemeColors(themeId: String, accentDark: Int, accentLight: Int, surfaceTint: Int) {
+        prefs.edit()
+            .putString(KEY_ACTIVE_THEME, themeId)
+            .putInt(KEY_THEME_ACCENT_DARK, accentDark)
+            .putInt(KEY_THEME_ACCENT_LIGHT, accentLight)
+            .putInt(KEY_THEME_SURFACE, surfaceTint)
+            .putString(KEY_ACCENT_MODE, "theme")
+            .apply()
+    }
+
+    /** Surface style for docks, search bars, folders and cards: "classic" or "liquid" glass. */
+    fun glassStyle() = prefs.getString(KEY_GLASS_STYLE, GLASS_CLASSIC)?.takeIf { it == GLASS_CLASSIC || it == GLASS_LIQUID } ?: GLASS_CLASSIC
+    fun setGlassStyle(v: String) { prefs.edit().putString(KEY_GLASS_STYLE, if (v == GLASS_LIQUID) GLASS_LIQUID else GLASS_CLASSIC).apply() }
+
+    /** Home page transition: classic, liquid, cube, stack, zoom, fade or none. */
+    fun pageEffect() = prefs.getString(KEY_PAGE_EFFECT, "classic")?.takeIf { it in PAGE_EFFECTS } ?: "classic"
+    fun setPageEffect(v: String) { prefs.edit().putString(KEY_PAGE_EFFECT, if (v in PAGE_EFFECTS) v else "classic").apply() }
+
+    /**
+     * Show the wallpaper (behind a contrast scrim) under OEA search: the search
+     * screen opened from Home and the All Apps search area. Off keeps the
+     * current opaque search surface.
+     */
+    fun searchWallpaperVisible() = prefs.getBoolean(KEY_SEARCH_WALLPAPER, false)
+    fun setSearchWallpaperVisible(v: Boolean) { prefs.edit().putBoolean(KEY_SEARCH_WALLPAPER, v).apply() }
+
+    /** Frost the wallpaper behind All Apps and search where Android supports window blur. */
+    fun wallpaperBlur() = prefs.getBoolean(KEY_WALLPAPER_BLUR, true)
+    fun setWallpaperBlur(v: Boolean) { prefs.edit().putBoolean(KEY_WALLPAPER_BLUR, v).apply() }
+
+    // ------------------------------------------------------- island behaviour
+
+    /** Briefly expand the island for calls, new messages, charging and track changes. */
+    fun islandPeek() = prefs.getBoolean(KEY_ISLAND_PEEK, true)
+    fun setIslandPeek(v: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_PEEK, v).apply() }
+
+    /** Camera and microphone in-use dots inside the island. */
+    fun islandPrivacyDots() = prefs.getBoolean(KEY_ISLAND_PRIVACY, true)
+    fun setIslandPrivacyDots(v: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_PRIVACY, v).apply() }
+
     fun themedIcons() = prefs.getBoolean(KEY_THEMED_ICONS, false)
     fun setThemedIcons(v: Boolean) { prefs.edit().putBoolean(KEY_THEMED_ICONS, v).apply() }
 
@@ -287,6 +339,19 @@ class OeaDataStore private constructor(context: Context) {
         const val ISLAND_CARD = "card"
         const val ISLAND_CAMERA = "camera"
         const val ISLAND_BOTH = "both"
+        private const val KEY_ACTIVE_THEME = "theme_active_id"
+        private const val KEY_THEME_ACCENT_DARK = "theme_accent_dark"
+        private const val KEY_THEME_ACCENT_LIGHT = "theme_accent_light"
+        private const val KEY_THEME_SURFACE = "theme_surface_tint"
+        private const val KEY_GLASS_STYLE = "glass_style"
+        private const val KEY_PAGE_EFFECT = "page_effect"
+        private const val KEY_SEARCH_WALLPAPER = "search_wallpaper_visible"
+        private const val KEY_WALLPAPER_BLUR = "wallpaper_blur"
+        private const val KEY_ISLAND_PEEK = "island_peek"
+        private const val KEY_ISLAND_PRIVACY = "island_privacy_dots"
+        const val GLASS_CLASSIC = "classic"
+        const val GLASS_LIQUID = "liquid"
+        val PAGE_EFFECTS = listOf("classic", "liquid", "cube", "stack", "zoom", "fade", "none")
         private const val KEY_THEMED_ICONS = "themed_icons"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_SWIPE_DOWN = "gesture_swipe_down"

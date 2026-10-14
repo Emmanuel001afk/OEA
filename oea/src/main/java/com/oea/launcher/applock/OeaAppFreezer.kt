@@ -146,11 +146,25 @@ object OeaAppFreezer {
         prefs.edit().putStringSet(KEY_FROZEN, packages).apply()
     }
 
+    /**
+     * Root is checked at most once per process, never on the UI thread, and
+     * only when an `su` binary exists at all. Spawning `su` used to block the
+     * UI for up to 700 ms whenever OEA Settings or the Freezer opened, and on
+     * rooted phones it could raise a root prompt each time the process started.
+     */
     private fun hasRoot(): Boolean {
         rootAvailableCache?.let { return it }
+        if (!suBinaryPresent()) {
+            rootAvailableCache = false
+            return false
+        }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            primeRootCheck()
+            return false
+        }
         val detected = runCatching {
             val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
-            if (!process.waitFor(700, TimeUnit.MILLISECONDS)) {
+            if (!process.waitFor(1500, TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly()
                 false
             } else process.exitValue() == 0
@@ -158,6 +172,32 @@ object OeaAppFreezer {
         rootAvailableCache = detected
         return detected
     }
+
+    @Volatile private var rootCheckRunning = false
+
+    /** Starts the one-time root check in the background (used when the Freezer opens). */
+    fun primeRootCheck(onDone: (() -> Unit)? = null) {
+        if (rootAvailableCache != null) {
+            onDone?.let { android.os.Handler(android.os.Looper.getMainLooper()).post(it) }
+            return
+        }
+        if (rootCheckRunning) return
+        rootCheckRunning = true
+        Thread({
+            runCatching { hasRoot() }
+            rootCheckRunning = false
+            onDone?.let { android.os.Handler(android.os.Looper.getMainLooper()).post(it) }
+        }, "OeaRootCheck").apply { isDaemon = true }.start()
+    }
+
+    private fun suBinaryPresent(): Boolean = runCatching {
+        val known = listOf(
+            "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su", "/system/sbin/su",
+            "/vendor/bin/su", "/data/local/xbin/su", "/data/local/bin/su", "/debug_ramdisk/su",
+        )
+        known.any { java.io.File(it).exists() } ||
+            System.getenv("PATH").orEmpty().split(':').any { it.isNotBlank() && java.io.File(it, "su").exists() }
+    }.getOrDefault(false)
 
     private fun runShell(command: String): Pair<Boolean, String> = runCatching {
         val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()

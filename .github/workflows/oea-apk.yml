@@ -30,6 +30,24 @@ jobs:
           cache: gradle
       - name: Make Gradle executable
         run: chmod +x ./gradlew
+      - name: Use the stable OEA signing key (optional)
+        # Without this, every runner creates a new random debug key, so each
+        # APK has a different signature and cannot update the previous one
+        # (Android refuses the update; uninstalling wipes OEA's layout and
+        # settings). Add the repository secret OEA_DEBUG_KEYSTORE_BASE64 (a
+        # base64 keystore using the standard debug credentials: alias
+        # androiddebugkey, passwords "android") and every build is signed with
+        # it. Without the secret this step does nothing.
+        env:
+          OEA_DEBUG_KEYSTORE_BASE64: ${{ secrets.OEA_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "${OEA_DEBUG_KEYSTORE_BASE64:-}" ]; then
+            mkdir -p "$HOME/.android"
+            printf '%s' "$OEA_DEBUG_KEYSTORE_BASE64" | base64 -d > "$HOME/.android/debug.keystore"
+            echo "::notice::Signing with the stable OEA key from OEA_DEBUG_KEYSTORE_BASE64."
+          else
+            echo "::warning::OEA_DEBUG_KEYSTORE_BASE64 is not set: this APK is signed with a new random key and cannot update a previously installed OEA in place."
+          fi
       - name: Verify App Freezer integration
         run: |
           set -euo pipefail
@@ -224,8 +242,9 @@ jobs:
           fi
       - name: Run engine and game unit tests
         run: |
-          # Chess rules (perft), connection codes, math and N-D geometry.
-          if ! ./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/tests.log"; then
+          # Chess rules (perft), connection codes, math and N-D geometry, plus
+          # launcher logic (wake gestures, theme catalogue requirements).
+          if ! ./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest :oea:testDebugUnitTest --stacktrace 2>&1 | tee "$RUNNER_TEMP/tests.log"; then
             {
               grep -E '^e: ' "$RUNNER_TEMP/tests.log" || true
               grep -E 'FAILED|AssertionError|Exception:' "$RUNNER_TEMP/tests.log" | grep -vE '^e: ' || true
@@ -235,8 +254,8 @@ jobs:
             done
             exit 1
           fi
-          TOTAL=$(cat oea-engine/build/test-results/testDebugUnitTest/*.xml oea-games/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | grep -o '<testsuite [^>]*tests="[0-9]*"' | grep -o 'tests="[0-9]*"' | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
-          echo "::notice::OEA engine and game unit tests passed: $TOTAL tests"
+          TOTAL=$(cat oea-engine/build/test-results/testDebugUnitTest/*.xml oea-games/build/test-results/testDebugUnitTest/*.xml oea/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | grep -o '<testsuite [^>]*tests="[0-9]*"' | grep -o 'tests="[0-9]*"' | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          echo "::notice::OEA launcher, engine and game unit tests passed: $TOTAL tests"
           test "$TOTAL" -gt 0
       - name: Verify APK identity
         run: |

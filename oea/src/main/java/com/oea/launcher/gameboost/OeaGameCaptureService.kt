@@ -21,6 +21,7 @@ import android.util.DisplayMetrics
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import com.oea.launcher.fault.OeaFaultShield
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -52,68 +53,82 @@ class OeaGameCaptureService : Service() {
     private var projectionCallback: MediaProjection.Callback? = null
 
     override fun onCreate() {
-        com.oea.launcher.fault.OeaFaultShield.guard("game-capture:create") {
-            super.onCreate()
-            if (Build.VERSION.SDK_INT >= 26) {
-                getSystemService(NotificationManager::class.java).createNotificationChannel(
-                    NotificationChannel(CHANNEL, "OEA Game Capture", NotificationManager.IMPORTANCE_LOW)
-                )
-            }
+        super.onCreate()
+        if (Build.VERSION.SDK_INT >= 26) {
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL, "OEA Game Capture", NotificationManager.IMPORTANCE_LOW)
+            )
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        com.oea.launcher.fault.OeaFaultShield.guard("game-capture:command") {
-            if (intent?.action == ACTION_STOP) {
-                stopCapture()
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            if (intent?.action != ACTION_START) return START_NOT_STICKY
-            val mode = intent.getStringExtra(EXTRA_MODE) ?: OeaGameCaptureActivity.MODE_SCREENSHOT
-            val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-            val data: Intent = if (Build.VERSION.SDK_INT >= 33) {
-                intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(EXTRA_RESULT_DATA)
-            } ?: run {
-                clearCaptureState()
-                stopSelf(startId)
-                return START_NOT_STICKY
-            }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        OeaFaultShield.value("game-capture:command", START_NOT_STICKY) {
+            command(intent, startId)
+        }
+
+    private fun command(intent: Intent?, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopCapture()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action != ACTION_START) return START_NOT_STICKY
+        val mode = intent.getStringExtra(EXTRA_MODE) ?: OeaGameCaptureActivity.MODE_SCREENSHOT
+        val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
+        val data: Intent = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(EXTRA_RESULT_DATA)
+        } ?: run {
+            clearCaptureState()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        // A refused media-projection promotion must not crash OEA; the capture
+        // simply doesn't start and Game Boost's controls return to normal.
+        val promoted = runCatching {
             if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
             } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
-            val manager = getSystemService(MediaProjectionManager::class.java)
-            projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
-            if (projection == null) {
-                // Never leave the Game Boost UI stuck in a capture/recording state
-                // when Android rejects or ends the projection before a session starts.
-                clearCaptureState()
-                stopSelf(startId)
-                return START_NOT_STICKY
-            }
+        }.onFailure { android.util.Log.w("OeaGameCapture", "Capture could not enter the foreground", it) }.isSuccess
+        if (!promoted) {
+            clearCaptureState()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
+        if (projection == null) {
+            // Never leave the Game Boost UI stuck in a capture/recording state
+            // when Android rejects or ends the projection before a session starts.
+            clearCaptureState()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
-            projectionCallback = object : MediaProjection.Callback() {
-                override fun onStop() {
+        projectionCallback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                // Binder callback: a fault here would kill the process, so the
+                // teardown is contained like every other OEA entry point.
+                OeaFaultShield.guard("game-capture:projection-stop") {
                     stopCapture(stopProjection = false)
                     stopSelf()
                 }
             }
-            projection?.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))
-
-            runCatching {
-                if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
-            }.onFailure {
-                stopCapture()
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(this, "OEA capture failed to start. Try again.", Toast.LENGTH_LONG).show()
-                }
-                stopSelf()
-            }
-            return START_NOT_STICKY
         }
+        projection?.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))
+
+        runCatching {
+            if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
+        }.onFailure {
+            stopCapture()
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(this, "OEA capture failed to start. Try again.", Toast.LENGTH_LONG).show()
+            }
+            stopSelf()
+        }
+        return START_NOT_STICKY
     }
 
     private fun size(): Pair<Int, Int> {

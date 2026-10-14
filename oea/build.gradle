@@ -10,7 +10,7 @@ android {
         minSdk 26
         targetSdk 36
         versionCode 6
-        versionName "0.3.0-alpha6"
+        versionName "0.4.0-alpha6"
         // WebRTC ships native code; every current phone is covered by these two ABIs.
         ndk { abiFilters.addAll(["arm64-v8a", "armeabi-v7a"]) }
     }
@@ -19,6 +19,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
     }
+    // Pure-logic unit tests (wave detector, theme catalogue) never call real
+    // Android code; framework stubs return defaults instead of throwing.
+    testOptions { unitTests.returnDefaultValues = true }
 }
 kotlin { jvmToolchain(21) }
 
@@ -28,7 +31,8 @@ dependencies {
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
 
-    // The stability rules (fault policy) and the bundled-wallpaper model are
-    // pure Kotlin, so they are covered by fast JVM tests rather than a device.
+    // The stability rules (fault policy), the theme catalogue, the wave detector
+    // and the bundled-wallpaper model are pure Kotlin, so they are covered by
+    // fast JVM tests rather than a device.
     testImplementation libs.junit
 }

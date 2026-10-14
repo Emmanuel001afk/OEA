@@ -36,6 +36,9 @@
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 
+    <!-- OEA Themes app: OEA's panel look; on Android 12+ its splash carries the OEA brand. -->
+    <style name="OeaBrandedPanelTheme" parent="OeaPanelTheme" />
+
     <style name="OeaGameBoostTheme" parent="OeaPanelTheme">
         <item name="android:colorAccent">#57C8FF</item>
         <item name="android:windowBackground">@android:color/black</item>

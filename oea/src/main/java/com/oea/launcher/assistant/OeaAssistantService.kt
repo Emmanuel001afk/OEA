@@ -67,6 +67,8 @@ class OeaAssistantService : AccessibilityService() {
         OeaAssistant.onServiceConnected()
     }
 
+    private var lastWindowKey: String? = null
+
     /**
      * Accessibility events arrive continuously from every app, so this is the
      * service's busiest entry point and the last place a thrown exception should
@@ -75,6 +77,20 @@ class OeaAssistantService : AccessibilityService() {
      */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         com.oea.launcher.fault.OeaFaultShield.guard("assistant:event") {
+            if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                val changed = event.packageName?.toString()
+                if (!changed.isNullOrEmpty()) {
+                    val cls = event.className?.toString()
+                    val key = "$changed/$cls"
+                    if (key != lastWindowKey) {
+                        lastWindowKey = key
+                        // Game Boost follows sessions from these events instead
+                        // of polling Usage access.
+                        runCatching { com.oea.launcher.gameboost.OeaGameBoost.onWindowChanged(this, changed, cls) }
+                            .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:boost-window", it) }
+                    }
+                }
+            }
             val watch = foregroundWatch
             if (watch != null && event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
                 event.packageName?.toString() == watch.packageName) {
@@ -141,6 +157,22 @@ class OeaAssistantService : AccessibilityService() {
     }
 
     override fun onInterrupt() = Unit
+
+    /** Package of the window in front (no screen content is read). */
+    fun currentForegroundPackage(): String? = runCatching {
+        val node = rootInActiveWindow ?: return null
+        val pkg = node.packageName?.toString()
+        if (Build.VERSION.SDK_INT < 33) {
+            @Suppress("DEPRECATION")
+            node.recycle()
+        }
+        pkg
+    }.getOrNull()
+
+    /** Re-applies which apps' window events are delivered (Game Boost on/off). */
+    fun refreshEventMask() {
+        applyEventMask(active = job != null)
+    }
 
     override fun onUnbind(intent: Intent?): Boolean {
         finishForegroundWatch(false)
@@ -631,10 +663,12 @@ class OeaAssistantService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         }
         // Idle: only OEA's own windows. Active: only the Settings app being driven.
-        // Watching for split screen: every package, window-state changes only.
+        // Watching for split screen, or Game Boost switched on: window-state
+        // changes (package and screen name only) from every app.
         info.packageNames = when {
             active -> job?.settingsPackages?.toTypedArray()
             foregroundWatch != null -> null
+            com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this) -> null
             else -> arrayOf(packageName)
         }
         info.notificationTimeout = if (active) 60L else 250L

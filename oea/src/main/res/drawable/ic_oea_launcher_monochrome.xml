@@ -3,25 +3,30 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M33,41 C26,41 21,46 21,54 C21,62 26,67 33,67 C40,67 45,62 45,54 C45,46 40,41 33,41" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M53,42 L53,66 M53,42 L65,42 M53,54 L63,54 M53,66 L65,66" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="5.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M72,68 L80,42 L88,68 M75,58 L85,58" />
+    <!-- Single-colour OEA monogram for themed icons and notifications. -->
+    <group android:pivotX="54" android:pivotY="54.25" android:scaleX="0.78" android:scaleY="0.78">
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="6.2"
+            android:strokeLineCap="round"
+            android:pathData="M33,42 A12,12 0,1 1,33 66 A12,12 0,1 1,33 42 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M41.5,41.8 A3.7,3.7 0,1 1,41.5 49.2 A3.7,3.7 0,1 1,41.5 41.8 Z" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="6.2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M52.5,42 L52.5,66 M52.5,42 L65,42 M52.5,54 L62.5,54 M52.5,66 L65,66" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="6.2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M70.5,66.5 L79,41.5 L87.5,66.5 M74,57.8 L84,57.8" />
+    </group>
 </vector>
