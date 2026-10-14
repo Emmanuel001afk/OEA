@@ -29,6 +29,33 @@ data class OeaSearchAction(
 }
 
 class OeaSearchController(private val context: Context) {
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaSearch").apply { isDaemon = true }
+    }
+    private val resolveCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    @Volatile private var generation = 0
+
+    /**
+     * Contacts, settings, calculator and web results for [query], computed on
+     * a worker thread (contacts queries and package resolves used to run on
+     * the UI thread for every keystroke). Only the newest request delivers;
+     * [callback] runs on the main thread.
+     */
+    fun actionsAsync(query: String, callback: (String, List<OeaSearchAction>) -> Unit) {
+        val gen = ++generation
+        runCatching {
+            worker.execute {
+                if (gen != generation) return@execute
+                val result = runCatching { actions(query) }.getOrDefault(emptyList())
+                main.post { if (gen == generation) callback(query, result) }
+            }
+        }
+    }
+
+    /** Apps can be installed between searches; forget which intents resolve. */
+    fun clearResolveCache() = resolveCache.clear()
+
     private data class SettingEntry(val title: String, val action: String, val keywords: List<String>, val icon: Int)
 
     private val settings = listOf(
@@ -122,8 +149,13 @@ class OeaSearchController(private val context: Context) {
         return resolvable
     }
 
-    private fun canResolve(intent: Intent): Boolean =
-        runCatching { context.packageManager.resolveActivity(intent, 0) != null }.getOrDefault(false)
+    private fun canResolve(intent: Intent): Boolean {
+        // Resolution depends on the action, scheme and host, not on the search text.
+        val key = "${intent.action}|${intent.data?.scheme}|${intent.data?.host}|${intent.component}"
+        return resolveCache.getOrPut(key) {
+            runCatching { context.packageManager.resolveActivity(intent, 0) != null }.getOrDefault(false)
+        }
+    }
 
     /** Evaluates + − × ÷ % ^ and parentheses; null when [input] is not arithmetic. */
     fun calculate(input: String): String? {

@@ -70,7 +70,33 @@ class OeaLauncherEngine(context: Context) {
     /** Called on Home creation/resume; normally a no-op after the first load. */
     fun start() {
         started = true
+        if (!hasSuccessfulLoad && lastBoundApps.isEmpty()) bindCachedCatalogue()
         if (!loading && (!hasSuccessfulLoad || dirty)) reloadAsync()
+    }
+
+    private var cacheTried = false
+    @Volatile private var savedCatalogue: List<OeaAppInfo> = emptyList()
+
+    /**
+     * Cold start after Android stopped OEA in the background: show the last
+     * known catalogue immediately (with persisted icons) rather than an empty
+     * Home. It is *not* authoritative, so nothing is ever removed from the
+     * user's layout based on it; the live refresh right after replaces it.
+     */
+    private fun bindCachedCatalogue() {
+        if (cacheTried) return
+        cacheTried = true
+        val cached = model.loadCached()
+        if (cached.isEmpty()) return
+        savedCatalogue = cached
+        runCatching { OeaIconController.shared(appContext).updateStamps(cached) }
+        model.setApps(cached)
+        val bound = runCatching {
+            workspace.bind(cached, authoritative = false)
+            true
+        }.onFailure { Log.w(TAG, "Cached catalogue could not be bound; waiting for the live refresh", it) }
+            .getOrDefault(false)
+        if (bound) lastBoundApps = cached
     }
 
     /** Safe from any thread; results and workspace updates are marshalled to main. */
@@ -120,7 +146,10 @@ class OeaLauncherEngine(context: Context) {
                 dirty = false
                 if (apps.isNotEmpty()) {
                     model.setApps(apps)
-                    val bound = apps == lastBoundApps || bind(apps)
+                    runCatching { OeaIconController.shared(appContext).updateStamps(apps) }
+                    val unchanged = apps == lastBoundApps
+                    if (unchanged) runCatching { workspace.markCatalogueAuthoritative() }
+                    val bound = unchanged || bind(apps)
                     if (!bound) {
                         dirty = true
                         val error = IllegalStateException("Workspace rejected the refreshed app catalogue")
@@ -140,6 +169,7 @@ class OeaLauncherEngine(context: Context) {
                     )
                     workspace.setAppLoadStatus(null)
                     preloadIcons(apps)
+                    persistCatalogue(apps)
                 } else {
                     _state.value = EngineState(
                         loadingApps = false,
@@ -179,8 +209,16 @@ class OeaLauncherEngine(context: Context) {
         }
     }
 
+    private fun persistCatalogue(apps: List<OeaAppInfo>) {
+        if (apps == savedCatalogue) return
+        savedCatalogue = apps
+        val snapshot = apps.toList()
+        runCatching { executor.execute { model.saveCache(snapshot) } }
+            .onFailure { Log.w(TAG, "Could not queue catalogue persistence", it) }
+    }
+
     private fun bind(apps: List<OeaAppInfo>): Boolean = runCatching {
-        workspace.bind(apps)
+        workspace.bind(apps, authoritative = true)
         lastBoundApps = apps.toList()
         true
     }.onFailure { Log.e(TAG, "Workspace bind failed for ${apps.size} apps", it) }
@@ -191,6 +229,8 @@ class OeaLauncherEngine(context: Context) {
             val icons = OeaIconController.shared(appContext)
             packages.forEach { icons.invalidatePackage(it) }
         }.onFailure { Log.w(TAG, "Could not invalidate changed app icons", it) }
+        // A newly installed game is recognised by Game Boost on its first launch.
+        runCatching { com.oea.launcher.gameboost.OeaGameBoostStore.invalidateDetectedGames() }
         dirty = true
         if (started) reloadAsync()
     }
@@ -208,6 +248,7 @@ class OeaLauncherEngine(context: Context) {
                 setClassName(packageName, className)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
+            com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(appContext, packageName)
         }.onFailure { Log.w(TAG, "Could not launch $packageName/$className", it) }
     }
 

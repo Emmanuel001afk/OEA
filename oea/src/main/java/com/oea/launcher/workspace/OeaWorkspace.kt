@@ -118,7 +118,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     internal val hiddenSpace: OeaHiddenAppsSpace
         get() = hiddenSpaceRef ?: OeaHiddenAppsSpace(this).also { hiddenSpaceRef = it }
     private val main = Handler(Looper.getMainLooper())
-    private val density = resources.displayMetrics.density
+    /** Read live: a display-size change updates it without restarting the process. */
+    private val density: Float get() = resources.displayMetrics.density
+    private var builtForDensity = 0f
     private val launcherApps: LauncherApps? = context.getSystemService(LauncherApps::class.java)
 
     private val scrim = View(context)
@@ -156,6 +158,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private var rebuildPosted = false
     private var resumed = false
     private var closeDrawerOnPause = false
+    // Declared before init: the drawer reports its backdrop while Home is constructed.
+    private var drawerWallpaperVisible = false
+    private var blurApplied = false
     private val shortcutIconCache = HashMap<String, android.graphics.drawable.Drawable?>()
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
@@ -247,6 +252,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         homeColumn.addView(topSearchHost, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
         pager.onScroll = { position -> indicator.position = position }
         pager.onPageChanged = { page -> ws.setCurrentPage(page) }
+        pager.effect = store.pageEffect()
         homeColumn.addView(pager, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(6) })
         homeColumn.addView(indicator, LinearLayout.LayoutParams(-1, dp(20)))
         homeColumn.addView(bannerHost, LinearLayout.LayoutParams(-1, -2))
@@ -294,7 +300,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(18), 0, dp(8), 0)
-            background = kit.ripple(kit.rounded(palette.glassStrong, 28, palette.glassStroke, 1), 28)
+            background = kit.ripple(
+                if (store.glassStyle() == OeaDataStore.GLASS_LIQUID) com.oea.launcher.ui.OeaGlassDrawable(palette.glassStrong, dp(28).toFloat(), density, palette.accent)
+                else kit.rounded(palette.glassStrong, 28, palette.glassStroke, 1),
+                28,
+            )
             isClickable = true
             contentDescription = "Search"
             setOnClickListener { openDrawer(searchFocus = true) }
@@ -332,10 +342,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             intArrayOf(palette.scrimTop, Color.TRANSPARENT, Color.TRANSPARENT, palette.scrimBottom),
         )
         indicator.color = palette.homeText
+        val liquid = store.glassStyle() == OeaDataStore.GLASS_LIQUID
         dockFrame.background = when (store.dockStyle()) {
             "none" -> null
             "solid" -> kit.rounded(palette.glassStrong, 30)
-            else -> kit.rounded(palette.glass, 30, palette.glassStroke, 1)
+            else -> if (liquid) com.oea.launcher.ui.OeaGlassDrawable(palette.glass, dp(30).toFloat(), density, palette.accent)
+                else kit.rounded(palette.glass, 30, palette.glassStroke, 1)
         }
         (dockFrame.layoutParams as? LinearLayout.LayoutParams)?.let {
             it.height = dockHeight()
@@ -411,6 +423,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
         appLoadStatus.text = message
         appLoadStatus.contentDescription = message
+        // First start (nothing cached yet): a branded card instead of a bare label.
+        val logo = if (retry == null) context.getDrawable(R.drawable.oea_logo)?.apply { setBounds(0, 0, dp(56), dp(56)) } else null
+        appLoadStatus.compoundDrawablePadding = dp(12)
+        appLoadStatus.setCompoundDrawablesRelative(null, logo, null, null)
         appLoadStatus.isClickable = retry != null
         appLoadStatus.isFocusable = retry != null
         appLoadStatus.setOnClickListener { retry?.invoke() }
@@ -421,6 +437,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         hostActivity = activity
         widgets.setHostActivity(activity)
         updateSystemBars()
+        // Display size (density) changes recreate the Home activity but not
+        // this process-wide view tree; rebuild so sizes match the new density.
+        if (builtForDensity != 0f && builtForDensity != density) {
+            builtForDensity = density
+            applyChrome()
+            scheduleRebuild()
+        }
+        if (builtForDensity == 0f) builtForDensity = density
         if (activity != null && !store.onboardingDone()) {
             main.postDelayed({ if (hostActivity != null && !store.onboardingDone()) menus.showOnboarding() }, 700L)
         }
@@ -512,12 +536,66 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         scheduleRebuild()
     }
 
+    /**
+     * Applies a settings change with the smallest update that reflects it.
+     *
+     * Every change used to rebuild all Home pages and recreate every widget
+     * host view, so unrelated writes (island options, gestures, the layout
+     * lock, OEA theme bookkeeping) made Home visibly reload. Only settings that
+     * change the grid or the tiles themselves rebuild the pages now.
+     */
     private fun onPreferenceChanged(key: String?) {
         if (key == null) return
-        if (key.startsWith("launch_count:") || key == "recent_launches" || key == "last_command" || key == "last_result") return
-        if (key == "onboarding_done" || key == "default_home_banner_dismissed") return
-        main.removeCallbacks(themeRefresh)
-        main.postDelayed(themeRefresh, 120L)
+        when (preferenceImpact(key)) {
+            PrefImpact.NONE -> Unit
+            PrefImpact.ISLAND -> {
+                main.removeCallbacks(islandRefresh)
+                main.postDelayed(islandRefresh, 80L)
+            }
+            PrefImpact.DRAWER -> {
+                main.removeCallbacks(drawerRefresh)
+                main.postDelayed(drawerRefresh, 80L)
+            }
+            PrefImpact.CHROME -> {
+                main.removeCallbacks(chromeRefresh)
+                main.postDelayed(chromeRefresh, 100L)
+            }
+            PrefImpact.FULL -> {
+                main.removeCallbacks(themeRefresh)
+                main.postDelayed(themeRefresh, 120L)
+            }
+        }
+    }
+
+    private enum class PrefImpact { NONE, ISLAND, DRAWER, CHROME, FULL }
+
+    private fun preferenceImpact(key: String): PrefImpact = when {
+        key.startsWith("launch_count:") -> PrefImpact.NONE
+        key in QUIET_KEYS -> PrefImpact.NONE
+        key == "dynamic_island_enabled" || key.startsWith("island_") -> PrefImpact.ISLAND
+        key in DRAWER_KEYS -> PrefImpact.DRAWER
+        key in CHROME_KEYS -> PrefImpact.CHROME
+        else -> PrefImpact.FULL
+    }
+
+    private val islandRefresh = Runnable {
+        dynamicIsland.refresh()
+        cameraIsland.refresh()
+        islandSpacer.requestLayout()
+    }
+
+    private val drawerRefresh = Runnable {
+        drawer.applyPalette()
+        if (drawer.visibility == VISIBLE) drawer.refresh()
+        hiddenSpaceRef?.refresh()
+    }
+
+    private val chromeRefresh = Runnable {
+        palette = OeaTheme.resolve(context)
+        applyChrome()
+        glance.applyStyle()
+        glance.refresh()
+        pager.effect = store.pageEffect()
     }
 
     private val themeRefresh = Runnable {
@@ -525,6 +603,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         applyChrome()
         glance.applyStyle()
         glance.refresh()
+        pager.effect = store.pageEffect()
         rebuild()
     }
 
@@ -569,14 +648,28 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     // ==================================================================== data
 
-    fun bind(value: List<OeaAppInfo>) {
+    /**
+     * Binds an app catalogue. Only an [authoritative] catalogue (a live
+     * PackageManager query) may seed the first layout or prune Home items of
+     * apps that are gone; the persisted catalogue used for instant cold starts
+     * only draws what it knows.
+     */
+    fun bind(value: List<OeaAppInfo>, authoritative: Boolean = true) {
         apps = value
         appsByKey = value.associateBy { appKey(it) }
-        if (!ws.isSeeded() && value.isNotEmpty()) {
+        catalogueAuthoritative = authoritative
+        if (authoritative && !ws.isSeeded() && value.isNotEmpty()) {
             runCatching { seedLayout() }.onFailure { Log.e(TAG, "First-run Home layout could not be seeded", it) }
         }
         rebuild()
     }
+
+    /** The live catalogue matched the cached one exactly; it can now be trusted for pruning. */
+    fun markCatalogueAuthoritative() {
+        catalogueAuthoritative = true
+    }
+
+    private var catalogueAuthoritative = false
 
     /**
      * True when Home has a catalogue and at least one built page, i.e. the
@@ -844,10 +937,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun normalizeLayout() {
         val cols = cols()
         val rows = rows()
-        if (apps.isNotEmpty()) {
-            val installed = apps.map { it.packageName }.toSet()
-            ws.clearMissing(appsByKey.keys, installed)
-        }
+        if (apps.isNotEmpty() && catalogueAuthoritative) pruneUninstalled()
         var items = ws.items()
         var folders = ws.folders()
         // Legacy data: folder members were also stored as items carrying folderId.
@@ -928,6 +1018,36 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (placedFolders != ws.folders()) ws.replaceFolders(placedFolders)
         ws.setPages(pages)
         ws.setLayoutGrid(cols, rows)
+    }
+
+    /**
+     * Removes Home, dock and folder entries only for apps that are really
+     * gone. A launcher query can transiently omit apps (profile switch, an
+     * app briefly disabling its launcher activity, a partial OEM reply); those
+     * entries are kept and simply reappear, instead of being deleted from the
+     * user's layout as before.
+     */
+    private fun pruneUninstalled() {
+        val known = appsByKey.keys
+        val referenced = LinkedHashSet<String>()
+        ws.items().filterNot { it.isShortcut }.forEach { referenced += it.id }
+        referenced += ws.dock()
+        ws.folders().forEach { referenced += it.members }
+        val unknown = referenced.filter { it !in known }
+        val pm = context.packageManager
+        val stillThere = unknown.filter { key ->
+            val pkg = key.substringBefore('/')
+            val cls = key.substringAfter('/', "")
+            cls.isNotBlank() && runCatching { pm.getActivityInfo(ComponentName(pkg, cls), 0); true }.getOrDefault(false)
+        }.toSet()
+        val installedPackages = HashSet<String>()
+        apps.forEach { installedPackages += it.packageName }
+        ws.items().filter { it.isShortcut && it.packageName !in installedPackages }.forEach { item ->
+            if (runCatching { pm.getApplicationInfo(item.packageName, 0); true }.getOrDefault(false)) installedPackages += item.packageName
+        }
+        if (unknown.isEmpty() && ws.items().none { it.isShortcut && it.packageName !in installedPackages }) return
+        if (stillThere.isNotEmpty()) Log.i(TAG, "Keeping ${stillThere.size} Home entries whose apps are installed but not listed right now")
+        ws.clearMissing(known + stillThere, installedPackages)
     }
 
     // ================================================================= render
@@ -1265,6 +1385,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (launched) {
             store.recordLaunch(app.packageName, app.className)
             if (drawerOpen) closeDrawerOnPause = true
+            // A selected game opened from OEA starts its Game Boost session
+            // directly; nothing watches the foreground while no game runs.
+            runCatching { com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(context, app.packageName) }
         } else {
             toast("Unable to open ${app.label}")
         }
@@ -1362,7 +1485,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private fun onHomeDoubleTap() {
         if (drawerOpen || drag != null) return
         when (store.doubleTapAction()) {
-            "lock" -> if (!OeaAssistant.lockScreen()) menus.showAssistantNeeded("Double-tap to lock")
+            "lock" -> if (com.oea.launcher.power.OeaPower.lockScreen(context) != com.oea.launcher.power.OeaPower.LockResult.LOCKED) {
+                menus.showAssistantNeeded("Double-tap to lock")
+            }
+            "power_menu" -> if (!com.oea.launcher.power.OeaPower.openPowerMenu()) menus.showAssistantNeeded("Double-tap for the power menu")
+            "quick_controls" -> openQuickControls()
             "drawer" -> openDrawer()
             else -> Unit
         }
@@ -1373,8 +1500,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             "notifications" -> if (!OeaSystemActions.expandNotifications(context)) menus.showAssistantNeeded("Swipe down for notifications")
             "quick_settings" -> if (!OeaSystemActions.expandQuickSettings(context)) menus.showAssistantNeeded("Swipe down for Quick Settings")
             "search" -> openDrawer(searchFocus = true)
+            "quick_controls" -> openQuickControls()
             else -> Unit
         }
+    }
+
+    private fun openQuickControls() {
+        if (!startSafely(Intent(context, com.oea.launcher.power.OeaQuickControlsActivity::class.java))) toast("Quick controls could not be opened")
     }
 
     // ================================================================= drawer
@@ -1409,6 +1541,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             drawer.resetState()
             drawerOpen = false
             updateSystemBars()
+            updateBackdropBlur()
             return
         }
         animateDrawer(open = false)
@@ -1423,6 +1556,39 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     internal fun showDrawerMenu(anchor: View) = menus.showDrawerMenu(anchor)
+
+    /** Called by the drawer when its background starts or stops showing the wallpaper. */
+    internal fun onDrawerBackdropChanged(wallpaperVisible: Boolean) {
+        drawerWallpaperVisible = wallpaperVisible
+        updateBackdropBlur()
+    }
+
+    /**
+     * Frosts the wallpaper behind All Apps and search with Android's window
+     * blur (Android 12+, only where the device enables cross-window blur;
+     * many low-power phones and Battery Saver turn it off). Applied once
+     * when the drawer opens and removed when it closes, never per frame.
+     */
+    private fun updateBackdropBlur() {
+        val window = hostActivity?.window ?: return
+        if (Build.VERSION.SDK_INT < 31) return
+        val wm = context.getSystemService(android.view.WindowManager::class.java) ?: return
+        val want = drawerOpen && drawerWallpaperVisible && store.wallpaperBlur() &&
+            runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false)
+        if (want == blurApplied) return
+        blurApplied = want
+        runCatching {
+            val attrs = window.attributes
+            if (want) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                attrs.blurBehindRadius = dp(28)
+            } else {
+                attrs.blurBehindRadius = 0
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            }
+            window.attributes = attrs
+        }.onFailure { Log.w(TAG, "Window blur unavailable", it) }
+    }
 
     internal fun openHiddenApps() {
         menus.dismissPopups()
@@ -1451,6 +1617,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         drawer.resetState()
                     }
                     updateSystemBars()
+                    updateBackdropBlur()
                     end?.invoke()
                 }
             })
@@ -2676,6 +2843,20 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         /** Home action prefix: "add_apps:pkg/cls,pkg/cls". */
         const val HOME_ACTION_ADD_APPS = "add_apps:"
         private const val TAG = "OeaWorkspace"
+        /** Settings writes that never change what Home shows. */
+        private val QUIET_KEYS = setOf(
+            "recent_launches", "last_command", "last_result", "onboarding_done", "default_home_banner_dismissed",
+            "home_layout_locked", "haptics", "gesture_swipe_down", "gesture_double_tap", "recents_mode",
+            "drawer_keyboard", "floating_window_size", "hidden_space_locked", "favorite_apps", "home_surface_enabled",
+            "wallpaper_uri", "theme_active_id", "wallpaper_blur",
+        )
+        /** Settings that only change the app drawer and search. */
+        private val DRAWER_KEYS = setOf(
+            "drawer_mode", "sort_mode", "drawer_categories", "show_most_used", "drawer_wallpaper_background",
+            "search_wallpaper_visible", "hidden_apps",
+        )
+        /** Settings that restyle Home's chrome (dock, search bar, glance, glass, page motion) without new pages. */
+        private val CHROME_KEYS = setOf("dock_style", "search_bar_position", "glance_style", "glass_style", "page_effect")
         /** Breathing room between a widget and its cell edges. */
         private const val WIDGET_INSET_DP = 6
         private const val HANDLE_NONE = 0

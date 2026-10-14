@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="oea_assistant_label">OEA Assistant</string>
-    <string name="oea_assistant_description">OEA Assistant lets OEA Launcher perform actions you ask for: double-tap to lock the screen, swipe down for notifications, open the real Recents screen, create split-screen pairs on older Android versions, and run the OEA App Freezer. When you freeze apps without root, OEA opens each app\'s Android App info page and presses Force stop for you. OEA Assistant only acts when you trigger one of these OEA actions. It does not read, store or send your screen content or typed text.</string>
-    <string name="oea_assistant_summary">Lock, notifications, Recents, split screen and App Freezer for OEA Launcher</string>
+    <string name="oea_assistant_description">OEA Assistant lets OEA Launcher perform actions you ask for: double-tap to lock the screen, open the power menu and lock the screen when your power button is faulty, swipe down for notifications, open the real Recents screen, create split-screen pairs on older Android versions, and run the OEA App Freezer. When you freeze apps without root, OEA opens each app\'s Android App info page and presses Force stop for you. When Game Boost is on, OEA Assistant also notices which app\'s window comes to the front (the app\'s package name only), so a game session starts and ends without OEA checking Usage access in the background. It does not read, store or send your screen content or typed text.</string>
+    <string name="oea_assistant_summary">Lock, power menu, notifications, Recents, split screen, App Freezer and Game Boost for OEA Launcher</string>
 </resources>

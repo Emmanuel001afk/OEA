@@ -25,6 +25,9 @@
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Wave/lift to wake for a faulty power key: Android 14+ lets an app turn
+         the screen on only with the user-grantable "Turn screen on" access. -->
+    <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -114,6 +117,24 @@
             android:taskAffinity="com.oea.launcher.freezer"
             android:launchMode="singleTask"
             android:theme="@style/OeaPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- OEA Themes: a standalone app (own icon, label and task) for themes,
+             custom themes and the wallpaper library. Applying a theme changes
+             appearance only; the Home layout and settings are never touched. -->
+        <activity
+            android:name="com.oea.launcher.themes.OeaThemesActivity"
+            android:exported="true"
+            android:label="Themes"
+            android:icon="@drawable/ic_oea_themes"
+            android:roundIcon="@drawable/ic_oea_themes"
+            android:taskAffinity="com.oea.launcher.themes"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -312,6 +333,57 @@
             android:name="com.oea.launcher.gameboost.OeaGameCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <!-- Faulty power button alternatives: wake gestures (sensors only while
+             the screen is off), Quick controls and Quick Settings tiles. -->
+        <service
+            android:name="com.oea.launcher.power.OeaWakeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Wakes the screen with the user's enabled proximity or pick-up gesture when the power key is faulty; sensors are used only while the screen is off." />
+        </service>
+        <activity
+            android:name="com.oea.launcher.power.OeaWakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/OeaTranslucentTheme" />
+        <activity
+            android:name="com.oea.launcher.power.OeaQuickControlsActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="Quick controls"
+            android:taskAffinity="com.oea.launcher.quickcontrols"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaTranslucentTheme">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name="com.oea.launcher.power.OeaLockTileService"
+            android:exported="true"
+            android:icon="@drawable/oic_lock"
+            android:label="Lock screen"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name="com.oea.launcher.power.OeaQuickControlsTileService"
+            android:exported="true"
+            android:icon="@drawable/oic_tune"
+            android:label="Quick controls"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
         <service
             android:name="com.oea.launcher.gameboost.OeaGameBoostService"
             android:exported="false"

@@ -543,17 +543,137 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
         }
     }
 
+    /**
+     * Page transition: "classic" (fade and slight shrink), "liquid" (pages
+     * squash and stretch while their icons trail behind like liquid), "cube",
+     * "stack", "zoom", "fade" or "none". Every effect returns to an identity
+     * transform when a page is settled, so drag and drop and widget hit
+     * testing are never affected.
+     */
+    var effect: String = "classic"
+        set(value) {
+            if (field == value) return
+            field = value
+            resetTransforms()
+            applyEffect(scrollX)
+        }
+
+    private var scrollDirection = 1
+
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
         super.onScrollChanged(l, t, oldl, oldt)
         val w = width.coerceAtLeast(1)
+        if (l != oldl) scrollDirection = if (l > oldl) 1 else -1
         onScroll?.invoke(l / w.toFloat())
+        applyEffect(l)
+    }
+
+    override fun onViewAdded(child: View?) {
+        super.onViewAdded(child)
+        child?.let { applyEffect(scrollX) }
+    }
+
+    private fun applyEffect(scroll: Int) {
+        val w = width
+        if (w <= 0) return
+        val h = height.toFloat()
+        val density = resources.displayMetrics.density
         for (i in 0 until childCount) {
             val child = getChildAt(i)
-            val offset = ((i * w - l) / w.toFloat()).coerceIn(-1f, 1f)
+            val offset = ((i * w - scroll) / w.toFloat()).coerceIn(-1f, 1f)
             val a = abs(offset)
-            child.alpha = 1f - 0.45f * a
-            child.scaleX = 1f - 0.05f * a
-            child.scaleY = 1f - 0.05f * a
+            when (effect) {
+                "none" -> identity(child)
+                "fade" -> { identity(child); child.alpha = 1f - a }
+                "zoom" -> {
+                    identity(child)
+                    child.pivotX = w / 2f
+                    child.pivotY = h / 2f
+                    child.scaleX = 1f - 0.2f * a
+                    child.scaleY = 1f - 0.2f * a
+                    child.alpha = 1f - 0.7f * a
+                }
+                "stack" -> {
+                    identity(child)
+                    if (offset < 0f) {
+                        // The page being left stays put and sinks while the next one slides over it.
+                        child.translationX = -offset * w
+                        child.pivotX = w / 2f
+                        child.pivotY = h / 2f
+                        child.scaleX = 1f - 0.14f * a
+                        child.scaleY = 1f - 0.14f * a
+                        child.alpha = 1f - a
+                    }
+                }
+                "cube" -> {
+                    identity(child)
+                    child.cameraDistance = 7000f * density
+                    child.pivotX = if (offset < 0f) w.toFloat() else 0f
+                    child.pivotY = h / 2f
+                    child.rotationY = -72f * offset
+                    child.alpha = 1f - 0.35f * a
+                }
+                "liquid" -> liquid(child, offset, a, w, h, density)
+                else -> {
+                    identity(child)
+                    child.alpha = 1f - 0.45f * a
+                    child.scaleX = 1f - 0.05f * a
+                    child.scaleY = 1f - 0.05f * a
+                }
+            }
+        }
+    }
+
+    /**
+     * Liquid: the page narrows and swells like a drop in motion, and every
+     * icon trails behind by its distance from the leading edge, so a page
+     * flows rather than slides. All offsets scale with sin(pi * progress):
+     * zero at rest, strongest mid-swipe.
+     */
+    private fun liquid(child: View, offset: Float, a: Float, w: Int, h: Float, density: Float) {
+        val wave = kotlin.math.sin(Math.PI * a).toFloat()
+        child.rotationY = 0f
+        child.translationX = 0f
+        child.pivotX = if (offset < 0f) w.toFloat() else 0f
+        child.pivotY = h / 2f
+        child.scaleX = 1f - 0.16f * a
+        child.scaleY = 1f + 0.06f * wave
+        child.alpha = 1f - 0.55f * a * a
+        val page = child as? ViewGroup ?: return
+        for (j in 0 until page.childCount) {
+            val tile = page.getChildAt(j)
+            val cx = ((tile.left + tile.width / 2f) / w).coerceIn(0f, 1f)
+            val trailing = if (scrollDirection > 0) cx else 1f - cx
+            tile.translationX = scrollDirection * w * 0.12f * trailing * wave
+            tile.translationY = -8f * density * wave * kotlin.math.sin(Math.PI * cx).toFloat()
+            val s = 1f - 0.06f * wave * trailing
+            tile.scaleX = s
+            tile.scaleY = s
+        }
+    }
+
+    private fun identity(child: View) {
+        child.alpha = 1f
+        child.scaleX = 1f
+        child.scaleY = 1f
+        child.translationX = 0f
+        child.rotationY = 0f
+    }
+
+    private fun resetTransforms() {
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            identity(child)
+            (child as? ViewGroup)?.let { page ->
+                for (j in 0 until page.childCount) {
+                    page.getChildAt(j).apply {
+                        translationX = 0f
+                        translationY = 0f
+                        scaleX = 1f
+                        scaleY = 1f
+                    }
+                }
+            }
         }
     }
 
