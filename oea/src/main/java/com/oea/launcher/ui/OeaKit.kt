@@ -72,7 +72,11 @@ object OeaInsets {
             window.setDecorFitsSystemWindows(false)
             val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            window.insetsController?.setSystemBarsAppearance(if (lightBars) mask else 0, mask)
+            // Access the controller from an explicitly materialized DecorView.
+            // Window.insetsController can dereference a missing decor on some OEM
+            // builds when called early in Activity.onCreate (before setContentView).
+            val decor = window.decorView
+            decor.windowInsetsController?.setSystemBarsAppearance(if (lightBars) mask else 0, mask)
         } else {
             var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
