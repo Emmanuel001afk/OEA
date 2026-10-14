@@ -104,6 +104,23 @@ class OeaIconController(private val context: Context) {
     }
 
     /** Drops rendered icons (e.g. after a shape, size, pack or theme change). */
+    /**
+     * Under memory pressure Home trades a little icon warmth for headroom: half
+     * the bitmap cache and the packed raw states go, and the LruCache limit is
+     * lowered until the next full invalidate.
+     */
+    fun trimMemory(aggressive: Boolean) {
+        runCatching {
+            if (aggressive) {
+                rendered.evictAll()
+                rawStates.clear()
+                packMappings.clear()
+            } else {
+                rendered.trimToSize(rendered.maxSize() / 2)
+            }
+        }
+    }
+
     fun invalidate() {
         rendered.evictAll()
     }

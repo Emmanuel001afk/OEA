@@ -174,6 +174,12 @@ abstract class OeaGame {
     open fun onBack(): Boolean = false
     /** The GPU context was recreated; engine resources restore themselves. */
     open fun onGpuContextRestored() {}
+    /**
+     * Android reported memory pressure. The engine has already capped its render
+     * scale; a game can drop its own caches here (replayed tracks, level previews,
+     * large lookup tables). [severe] means Android is close to reclaiming hard.
+     */
+    open fun onMemoryPressure(severe: Boolean) {}
     /** A Dynamic Island action button was tapped (see [com.oea.engine.island.LiveActivity.actions]). */
     open fun onIslandAction(actionId: String) {}
     open fun onDestroy() {}

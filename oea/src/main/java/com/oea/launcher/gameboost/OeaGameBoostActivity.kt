@@ -41,6 +41,8 @@ import com.oea.launcher.model.OeaAppModel
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.privilege.Privilege
 import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
@@ -98,7 +100,7 @@ class OeaGameBoostActivity : Activity() {
             setContentView(root)
             render()
             loadApps()
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             OeaScreenFailure.show(this, "Game Boost", error)
         }
     }
@@ -199,7 +201,7 @@ class OeaGameBoostActivity : Activity() {
     private fun render() {
         try {
             renderContent()
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             OeaScreenFailure.show(this, "Game Boost", error)
         }
     }
@@ -535,13 +537,18 @@ class OeaGameBoostActivity : Activity() {
         val group = kit.group(content)
         fun status(ok: Boolean, required: Boolean) = if (ok) "Allowed" else if (required) "Required" else "Off"
         val usage = usageGranted()
-        val overlay = Settings.canDrawOverlays(this)
+        val overlay = OeaPrivileges.canOverlay(this)
         val dnd = getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
         kit.row(group, R.drawable.oic_insights, "Usage access", "Detects when one of your games is in front", value = status(usage, true),
             iconBg = statusBg(usage), iconTint = statusTint(usage)) { openUsageAccess() }
         kit.row(group, R.drawable.oic_layers, "Display over other apps", "Shows the OEA RAM control above games", value = status(overlay, true),
             iconBg = statusBg(overlay), iconTint = statusTint(overlay)) {
-            runCatching { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
+            // One tap: OEA grants it itself when the phone allows that (root or
+            // device owner) and otherwise opens exactly the right Android page.
+            OeaPrivileges.grant(this, Privilege.OVERLAY) { outcome ->
+                toast(outcome.message)
+                handler.postDelayed({ if (loaded) render() }, 700L)
+            }
         }
         kit.row(group, R.drawable.oic_do_not_disturb_on, "Do Not Disturb access", "Lets Game Boost silence notifications", value = status(dnd, false),
             iconBg = statusBg(dnd), iconTint = statusTint(dnd)) {

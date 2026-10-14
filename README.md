@@ -10,7 +10,7 @@ The active launcher path is:
 
 OEA owns the home surface, app model, workspace persistence, drawer, dock, folders, shortcuts, gestures, themes, and system-feature integrations. The engine is initialized lazily, loads the app catalogue away from the UI thread, retains the last good workspace on failure, and publishes its state for future engine-owned features.
 
-See [Launcher engine and live activities](docs/launcher-engine-and-live-activities.md) for the lifecycle boundaries, stability rules, Dynamic Island-style notification design, platform constraints, and verification checklist.
+See [Launcher engine and live activities](docs/launcher-engine-and-live-activities.md) for the lifecycle boundaries, Dynamic Island-style notification design, platform constraints, and verification checklist, and [Stability, permissions and wallpapers](docs/stability-and-privileges.md) for the fault shield, the capability system and the wallpaper/theme engine.
 
 Modules:
 
@@ -47,11 +47,21 @@ OEA ships its own game engine and games, opened from the **OEA Games** app (own 
 - Grid, vertical-list and horizontal All Apps layouts.
 - Long-press app actions, hiding and app-freezer access.
 - Hidden apps as their own space (drawer ⋮ › Hidden apps): open and use hidden apps there, optionally behind the App Lock PIN.
-- Wallpaper-derived launcher theme colors, with bundled nature scenes alongside Android's wallpapers and imported photos.
+- Ten bundled wallpapers drawn in code (mountain dawn, forest river, desert coast, dusk city, aurora, night sky, ocean, terrazzo, linen, deep mesh), applied to Home, the lock screen or both; wallpaper-derived theme colours, with Android's own wallpapers and imported photos still supported.
 - All Apps keeps its current opaque/plain look by default; an optional setting can reveal a translucent wallpaper background.
 - Native Android launcher shortcuts.
 - Live activities in two styles — the card under the status bar and an expandable island under the front camera — usable alone or together with per-app routing. Home expansions do not resize the grid; an optional, permission-gated overlay can show compatible activities across apps (notification access is required for app notification content).
 - The full-screen launcher error page appears only when Home genuinely fails to start; later recoverable errors are logged and the running Home is kept.
+
+## Stability and permissions
+
+- A fault in any OEA part — a game, a widget provider, a socket or audio thread, an accessibility or notification callback — is contained: the failing subsystem stops, Home keeps running, and the problem is recorded. Only a `VirtualMachineError` on the UI thread, or Home failing repeatedly *in safe mode*, is handed back to Android.
+- Games fail politely: the game screen explains what happened and offers the fixes that match the diagnosis (lower quality, reset that game's saved data, leave a CPU core free, or open the standalone game APK). Two faults in two minutes mark the game as unstable, and the hub then leads with the repair.
+- Home rebuilds itself from the saved layout after a fault, and a *stall watchdog* records a blocked UI thread with its stack instead of letting Android show "isn't responding". Repeated problems start **safe mode** (Home without widgets, At a Glance and live activities) with a card that explains it and a way out.
+- **Settings › Stability** lists every contained fault, what OEA did about it, whether a problem log is kept, and offers rebuild/restart. Nothing is ever sent anywhere.
+- Permissions are handled as capabilities: each one shows what it unlocks and what OEA does without it. OEA opens the exact Android page, verifies the result, and distinguishes "off" from "switched on but not bound yet" — so it never asks twice for the same thing.
+- No helper app and no PC: OEA grants by itself whatever Android allows (device owner via `DevicePolicyManager`, or root through its own `su` channel, scoped to OEA's own package and always verified), and falls back to a Home-side or notification presentation otherwise. "Display over other apps" and "Usage access" are the user's to give on a stock device — no third-party app can change that, and OEA says so plainly instead of pretending.
+- Bundled wallpapers are drawn in code at the phone's resolution, applied through Android's wallpaper service (Home, lock screen or both), with a dim control, live previews, and a theme that takes its accent and Home text colour from the scene — and stops following it when another app changes the wallpaper.
 
 ## Independence
 
@@ -61,6 +71,7 @@ OEA does not build, run, or import Launcher3/Lawnchair source code. The reposito
 
 `./gradlew :oea:assembleRelease`
 
-Engine and game unit tests: `./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest`
+Unit tests: `./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest :oea:testDebugUnitTest`
+(the launcher's tests cover the stability rules in `OeaFaultPolicy`, which are pure Kotlin)
 
 The resulting application ID is `com.oea.launcher`.

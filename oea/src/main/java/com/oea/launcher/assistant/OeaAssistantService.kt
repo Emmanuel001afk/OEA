@@ -67,15 +67,23 @@ class OeaAssistantService : AccessibilityService() {
         OeaAssistant.onServiceConnected()
     }
 
+    /**
+     * Accessibility events arrive continuously from every app, so this is the
+     * service's busiest entry point and the last place a thrown exception should
+     * ever reach Android: a fault here would take OEA Assistant (and Home with
+     * it) down. Events are processed defensively instead.
+     */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val watch = foregroundWatch
-        if (watch != null && event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-            event.packageName?.toString() == watch.packageName) {
-            finishForegroundWatch(true)
+        com.oea.launcher.fault.OeaFaultShield.guard("assistant:event") {
+            val watch = foregroundWatch
+            if (watch != null && event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+                event.packageName?.toString() == watch.packageName) {
+                finishForegroundWatch(true)
+            }
+            val active = job ?: return@guard
+            val pkg = event?.packageName?.toString() ?: return@guard
+            if (pkg in active.settingsPackages) scheduleStep(90L)
         }
-        val active = job ?: return
-        val pkg = event?.packageName?.toString() ?: return
-        if (pkg in active.settingsPackages) scheduleStep(90L)
     }
 
     // ======================================================= foreground watch

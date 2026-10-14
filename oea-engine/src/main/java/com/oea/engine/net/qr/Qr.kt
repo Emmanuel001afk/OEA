@@ -19,6 +19,7 @@ import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import com.oea.engine.core.OeaGuard
 import android.os.Looper
 import android.util.Log
 import android.util.Size
@@ -121,7 +122,7 @@ class QrScannerView(context: Context) : FrameLayout(context) {
     private var request: CaptureRequest.Builder? = null
     private var previewSize: Size? = null
     private var sensorOrientation = 90
-    private val decoder = Executors.newSingleThreadExecutor { r -> Thread(r, "oea-qr-decode").apply { isDaemon = true } }
+    private val decoder = OeaGuard.pool("qr", 1, "oea-qr-decode")
     private val busy = AtomicBoolean(false)
     private val done = AtomicBoolean(false)
     private var running = false
@@ -138,7 +139,9 @@ class QrScannerView(context: Context) : FrameLayout(context) {
         if (running) return
         running = true
         done.set(false)
-        thread = HandlerThread("oea-qr-camera").also { it.start() }
+        thread = HandlerThread("oea-qr-camera").apply {
+            setUncaughtExceptionHandler { t, e -> OeaGuard.report("qr-camera", e, fatal = true) }
+        }.also { it.start() }
         handler = Handler(thread!!.looper)
         if (texture.isAvailable) open() else texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) { if (running) open() }

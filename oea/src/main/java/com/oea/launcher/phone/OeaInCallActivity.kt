@@ -114,21 +114,23 @@ open class OeaInCallActivity : Activity() {
     }
 
     override fun onCreate(state: Bundle?) {
-        super.onCreate(state)
-        presentation = intent.getStringExtra(OeaCallUi.EXTRA_PRESENTATION) ?: defaultPresentation()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
+        com.oea.launcher.fault.OeaFaultShield.guard("phone:incall-screen") {
+            super.onCreate(state)
+            presentation = intent.getStringExtra(OeaCallUi.EXTRA_PRESENTATION) ?: defaultPresentation()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            }
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+            palette = OeaTheme.resolve(this)
+            consumeAnswer(intent)
+            render()
         }
-        @Suppress("DEPRECATION")
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-        )
-        palette = OeaTheme.resolve(this)
-        consumeAnswer(intent)
-        render()
     }
 
     /** Answer from the notification: pick up the ringing call as the screen opens. */

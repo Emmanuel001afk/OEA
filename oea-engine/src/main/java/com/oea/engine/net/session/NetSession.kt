@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.oea.engine.EngineSettings
 import com.oea.engine.OeaEngine
+import com.oea.engine.core.OeaGuard
 import com.oea.engine.core.GameDescriptor
 import com.oea.engine.net.ByteReader
 import com.oea.engine.net.ByteWriter
@@ -136,7 +137,7 @@ class NetSession private constructor(
     roomName: String,
 ) : LinkListener {
     private val settingsStore: EngineSettings = OeaEngine.settings
-    private val exec = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "oea-session").apply { isDaemon = true } }
+    private val exec = OeaGuard.scheduled("net-session", "oea-session")
     private val main = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArrayList<SessionListener>()
     private val gameQueue = ConcurrentLinkedQueue<NetMessage>()
@@ -391,7 +392,7 @@ class NetSession private constructor(
 
     override fun onLinkMessage(link: Link, channel: Channel, data: ByteArray) {
         exec.execute {
-            try { handle(link, channel, data) } catch (e: Exception) { Log.w(TAG, "Bad message", e) }
+            try { handle(link, channel, data) } catch (e: Throwable) { OeaGuard.report("net-message", e) }
         }
     }
 

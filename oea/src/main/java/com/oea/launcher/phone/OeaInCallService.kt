@@ -72,8 +72,10 @@ class OeaInCallService : InCallService() {
     }
 
     override fun onCreate() {
-        super.onCreate()
-        OeaCallState.attachService(this)
+        com.oea.launcher.fault.OeaFaultShield.guard("phone:incall-create") {
+            super.onCreate()
+            OeaCallState.attachService(this)
+        }
     }
 
     override fun onCallAdded(call: Call) {

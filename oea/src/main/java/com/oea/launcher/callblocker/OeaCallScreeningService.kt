@@ -15,7 +15,18 @@ import androidx.core.content.ContextCompat
 import kotlin.math.abs
 
 class OeaCallScreeningService : CallScreeningService() {
+    /**
+     * Telecom calls this for every incoming call and expects an answer. A fault
+     * here must never end the process: the call is let through (the safe default
+     * when OEA cannot decide) and the fault is recorded.
+     */
     override fun onScreenCall(callDetails: Call.Details) {
+        if (!com.oea.launcher.fault.OeaFaultShield.guard("call-blocker:screen") { screen(callDetails) }) {
+            runCatching { respondToCall(callDetails, CallResponse.Builder().build()) }
+        }
+    }
+
+    private fun screen(callDetails: Call.Details) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
             callDetails.callDirection == Call.Details.DIRECTION_OUTGOING
         ) {

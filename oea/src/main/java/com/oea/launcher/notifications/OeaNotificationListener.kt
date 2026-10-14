@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.oea.launcher.fault.OeaFaultShield
 import android.os.Handler
 import android.os.Looper
 
@@ -165,12 +166,17 @@ object OeaNotificationState {
 }
 
 class OeaNotificationListener : NotificationListenerService() {
+    /**
+     * Android calls this for every notification, on its own thread. A fault
+     * here must never end the process: the notification is dropped, the rest of
+     * the list keeps working, and Home's dots simply miss one entry.
+     */
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        OeaNotificationState.update(sbn)
+        OeaFaultShield.guard("notifications:posted") { OeaNotificationState.update(sbn) }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        OeaNotificationState.remove(sbn)
+        OeaFaultShield.guard("notifications:removed") { OeaNotificationState.remove(sbn) }
     }
 
     override fun onListenerConnected() {

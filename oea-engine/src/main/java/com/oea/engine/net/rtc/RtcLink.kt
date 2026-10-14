@@ -6,6 +6,7 @@ import android.net.Network
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.oea.engine.core.OeaGuard
 import com.oea.engine.net.ByteReader
 import com.oea.engine.net.ByteWriter
 import com.oea.engine.net.Channel
@@ -95,7 +96,7 @@ class RtcLink internal constructor(
     /** Main-thread callback for UI: state and a detail message. */
     var onState: ((State, String) -> Unit)? = null
 
-    private val exec = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "oea-rtc-$id").apply { isDaemon = true } }
+    private val exec = OeaGuard.scheduled("rtc-link", "oea-rtc-$id")
     private val main = Handler(Looper.getMainLooper())
     private var pc: PeerConnection? = null
     private var reliable: DataChannel? = null
@@ -276,7 +277,7 @@ class RtcLink internal constructor(
             }
         }
 
-        override fun onMessage(buffer: DataChannel.Buffer) {
+        override fun onMessage(buffer: DataChannel.Buffer) = OeaGuard.run("rtc-message") {
             val data = buffer.data
             if (data.remaining() < 1) return
             val bytes = ByteArray(data.remaining())
@@ -477,7 +478,7 @@ class RtcLink internal constructor(
         exec.shutdown()
     }
 
-    private fun post(block: () -> Unit) { main.post(block) }
+    private fun post(block: () -> Unit) { OeaGuard.post("rtc-ui", main, 0L, block) }
 
     /** Runs on the link's thread; silently ignored once the link is closed (late WebRTC callbacks). */
     private fun onExec(block: () -> Unit) {

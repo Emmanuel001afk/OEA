@@ -52,64 +52,68 @@ class OeaGameCaptureService : Service() {
     private var projectionCallback: MediaProjection.Callback? = null
 
     override fun onCreate() {
-        super.onCreate()
-        if (Build.VERSION.SDK_INT >= 26) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL, "OEA Game Capture", NotificationManager.IMPORTANCE_LOW)
-            )
+        com.oea.launcher.fault.OeaFaultShield.guard("game-capture:create") {
+            super.onCreate()
+            if (Build.VERSION.SDK_INT >= 26) {
+                getSystemService(NotificationManager::class.java).createNotificationChannel(
+                    NotificationChannel(CHANNEL, "OEA Game Capture", NotificationManager.IMPORTANCE_LOW)
+                )
+            }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopCapture()
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (intent?.action != ACTION_START) return START_NOT_STICKY
-        val mode = intent.getStringExtra(EXTRA_MODE) ?: OeaGameCaptureActivity.MODE_SCREENSHOT
-        val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-        val data: Intent = if (Build.VERSION.SDK_INT >= 33) {
-            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(EXTRA_RESULT_DATA)
-        } ?: run {
-            clearCaptureState()
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-        } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
-        val manager = getSystemService(MediaProjectionManager::class.java)
-        projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
-        if (projection == null) {
-            // Never leave the Game Boost UI stuck in a capture/recording state
-            // when Android rejects or ends the projection before a session starts.
-            clearCaptureState()
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
+        com.oea.launcher.fault.OeaFaultShield.guard("game-capture:command") {
+            if (intent?.action == ACTION_STOP) {
+                stopCapture()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            if (intent?.action != ACTION_START) return START_NOT_STICKY
+            val mode = intent.getStringExtra(EXTRA_MODE) ?: OeaGameCaptureActivity.MODE_SCREENSHOT
+            val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
+            val data: Intent = if (Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(EXTRA_RESULT_DATA)
+            } ?: run {
+                clearCaptureState()
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
+            val manager = getSystemService(MediaProjectionManager::class.java)
+            projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
+            if (projection == null) {
+                // Never leave the Game Boost UI stuck in a capture/recording state
+                // when Android rejects or ends the projection before a session starts.
+                clearCaptureState()
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
 
-        projectionCallback = object : MediaProjection.Callback() {
-            override fun onStop() {
-                stopCapture(stopProjection = false)
+            projectionCallback = object : MediaProjection.Callback() {
+                override fun onStop() {
+                    stopCapture(stopProjection = false)
+                    stopSelf()
+                }
+            }
+            projection?.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))
+
+            runCatching {
+                if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
+            }.onFailure {
+                stopCapture()
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(this, "OEA capture failed to start. Try again.", Toast.LENGTH_LONG).show()
+                }
                 stopSelf()
             }
+            return START_NOT_STICKY
         }
-        projection?.registerCallback(projectionCallback!!, Handler(Looper.getMainLooper()))
-
-        runCatching {
-            if (mode == OeaGameCaptureActivity.MODE_RECORD) startRecording() else captureScreenshot()
-        }.onFailure {
-            stopCapture()
-            Handler(Looper.getMainLooper()).post {
-                Toast.makeText(this, "OEA capture failed to start. Try again.", Toast.LENGTH_LONG).show()
-            }
-            stopSelf()
-        }
-        return START_NOT_STICKY
     }
 
     private fun size(): Pair<Int, Int> {

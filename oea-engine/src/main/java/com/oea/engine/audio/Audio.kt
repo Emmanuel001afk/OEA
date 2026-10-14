@@ -6,6 +6,7 @@ import android.media.MediaPlayer
 import android.media.SoundPool
 import android.util.Log
 import com.oea.engine.EngineSettings
+import com.oea.engine.core.OeaGuard
 import com.oea.engine.graphics.Camera
 import com.oea.engine.math.MathX
 import com.oea.engine.math.Rng
@@ -67,7 +68,7 @@ class Audio internal constructor(private val context: Context, private val setti
         .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
         .build()
     private val byPoolId = ConcurrentHashMap<Int, Sound>()
-    private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "oea-audio").apply { isDaemon = true } }
+    private val worker = OeaGuard.pool("audio", 1, "oea-audio")
     private var music: MediaPlayer? = null
     private var musicName: String? = null
     @Volatile private var released = false
