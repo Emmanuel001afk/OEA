@@ -147,14 +147,14 @@ class OeaThemeStore private constructor(context: Context) {
         }
 
         /** Decodes at most [maxW]×[maxH] (keeping aspect) without loading the full picture. */
-        fun decodeScaled(maxW: Int, maxH: Int, open: () -> InputStream?): Bitmap? {
+        fun decodeScaled(maxW: Int, maxH: Int, source: () -> InputStream?): Bitmap? {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            open()?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+            source()?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
             var sample = 1
             while (bounds.outWidth / (sample * 2) >= maxW || bounds.outHeight / (sample * 2) >= maxH) sample *= 2
             val options = BitmapFactory.Options().apply { inSampleSize = sample }
-            val decoded = open()?.use { BitmapFactory.decodeStream(it, null, options) } ?: return null
+            val decoded = source()?.use { BitmapFactory.decodeStream(it, null, options) } ?: return null
             val scale = minOf(maxW / decoded.width.toFloat(), maxH / decoded.height.toFloat(), 1f)
             if (scale >= 0.999f) return decoded
             val scaled = Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt().coerceAtLeast(1), (decoded.height * scale).toInt().coerceAtLeast(1), true)
@@ -170,18 +170,38 @@ object OeaThemeImages {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
-    fun open(context: Context, ref: OeaImageRef): InputStream? = when (ref) {
+    /**
+     * A stream of the picture's bytes. Generated artwork has no bytes — it is
+     * drawn — so callers that need pixels use [thumbnail] or [renderForWallpaper].
+     */
+    fun stream(context: Context, ref: OeaImageRef): InputStream? = when (ref) {
         is OeaImageRef.Bundled -> context.resources.openRawResource(ref.resId)
         is OeaImageRef.Imported -> File(ref.path).takeIf { it.isFile }?.inputStream()
+        // Generated pictures are drawn, not decoded; callers that need pixels use
+        // thumbnail(), and the wallpaper applier draws them itself.
+        is OeaImageRef.Generated -> null
     }
 
     /** A preview-sized bitmap (call off the main thread). */
     fun thumbnail(context: Context, ref: OeaImageRef, maxW: Int = 360, maxH: Int = 780): Bitmap? {
         val key = "${ref.key}@$maxW"
         cache.get(key)?.let { return it }
-        val bitmap = runCatching { OeaThemeStore.decodeScaled(maxW, maxH) { open(context, ref) } }.getOrNull() ?: return null
+        val bitmap = when (ref) {
+            is OeaImageRef.Generated -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, maxW, maxH)
+            else -> runCatching { OeaThemeStore.decodeScaled(maxW, maxH) { stream(context, ref) } }.getOrNull()
+        } ?: return null
         cache.put(key, bitmap)
         return bitmap
+    }
+
+    /**
+     * Renders an image at wallpaper size. Bundled and imported pictures go through
+     * Android's decoder; generated artwork is drawn at exactly this size, which is
+     * why the wallpaper applier asks here instead of opening a stream.
+     */
+    fun renderForWallpaper(context: Context, ref: OeaImageRef, width: Int, height: Int): Bitmap? = when (ref) {
+        is OeaImageRef.Generated -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, width, height)
+        else -> runCatching { OeaThemeStore.decodeScaled(width, height) { stream(context, ref) } }.getOrNull()
     }
 
     fun cached(ref: OeaImageRef, maxW: Int = 360): Bitmap? = cache.get("${ref.key}@$maxW")

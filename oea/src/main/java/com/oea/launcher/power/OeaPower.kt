@@ -53,7 +53,14 @@ object OeaPower {
         syncWakeService(context)
     }
 
-    fun wakeFeaturesOn(context: Context) = waveToWake(context) || (liftToWake(context) && liftSensor(context) != null)
+    /**
+     * True when the wake service has anything at all to do: a wake gesture, or the
+     * screen-off gesture, which needs the same sensor while the screen is off.
+     */
+    fun wakeFeaturesOn(context: Context): Boolean {
+        if (waveToWake(context) || (liftToWake(context) && liftSensor(context) != null)) return true
+        return com.oea.launcher.data.OeaDataStore.get(context).waveOffAction() != "none"
+    }
 
     // ------------------------------------------------------------- sensors
 
@@ -169,6 +176,12 @@ object OeaPower {
     fun syncWakeService(context: Context) {
         val app = context.applicationContext
         val intent = Intent(app, OeaWakeService::class.java)
+        // Low mode releases the motion sensors; the user's wave/lift settings are
+        // kept and the service simply comes back when Low mode ends.
+        if (com.oea.launcher.perf.OeaLowMode.active(app)) {
+            app.stopService(intent)
+            return
+        }
         if (!wakeFeaturesOn(app)) {
             app.stopService(intent)
             return

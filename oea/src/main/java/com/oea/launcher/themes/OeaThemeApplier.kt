@@ -90,8 +90,23 @@ object OeaThemeApplier {
     private fun setWallpapers(context: Context, home: OeaImageRef, lock: OeaImageRef, target: Target): Pair<Boolean?, Boolean?> {
         val wm = runCatching { WallpaperManager.getInstance(context) }.getOrNull() ?: return false to false
         if (!wm.isWallpaperSupported || !wm.isSetWallpaperAllowed) return false to false
+        val size = runCatching {
+            val metrics = context.resources.displayMetrics
+            metrics.widthPixels to metrics.heightPixels
+        }.getOrDefault(1080 to 2340)
         fun set(ref: OeaImageRef, which: Int): Boolean = runCatching {
-            OeaThemeImages.open(context, ref)?.use { stream -> wm.setStream(stream, null, true, which) != 0 } ?: false
+            when (ref) {
+                // Artwork OEA draws itself: render at screen size and hand Android
+                // the bitmap. There is no stream to decode, so the old path would
+                // simply have failed and left the lock screen untouched.
+                is OeaImageRef.Generated -> {
+                    val bitmap = OeaThemeImages.renderForWallpaper(context, ref, size.first, size.second) ?: return@runCatching false
+                    val ok = wm.setBitmap(bitmap, null, true, which) != 0
+                    runCatching { bitmap.recycle() }
+                    ok
+                }
+                else -> OeaThemeImages.stream(context, ref)?.use { stream -> wm.setStream(stream, null, true, which) != 0 } ?: false
+            }
         }.onFailure { Log.w(TAG, "Android refused the wallpaper (which=$which)", it) }.getOrDefault(false)
         return when (target) {
             Target.HOME -> set(home, WallpaperManager.FLAG_SYSTEM) to null

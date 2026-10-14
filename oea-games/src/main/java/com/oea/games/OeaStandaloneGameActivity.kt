@@ -46,8 +46,11 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             // Standalone entries are solo applications. Multiplayer sessions
             // are coordinated by the OEA Games hub, not passed across APKs.
             val mode = PlayMode.SOLO
-            if (!OeaEngine.device.supportsEs3) {
-                Toast.makeText(this, "This phone's GPU doesn't support OpenGL ES 3.0, which OEA games need.", Toast.LENGTH_LONG).show()
+            // Ask the driver first: a missing ES 3 configuration would otherwise
+            // surface inside GLSurfaceView's own thread and take the whole app with
+            // it, and a declared ES 2.0 minimum alone is not proof of anything.
+            OeaEngine.surfaceProblem()?.let { reason ->
+                Toast.makeText(this, reason, Toast.LENGTH_LONG).show()
                 finish()
                 return
             }

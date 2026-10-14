@@ -761,9 +761,19 @@ class OeaDynamicIslandView(
         lastPeekAt[payload.key] = SystemClock.uptimeMillis()
         removeCallbacks(peekCollapse)
         if (!expanded) setExpanded(true, animate = true, fromUser = false)
-        if (duration > 0L) {
-            peekUntil = SystemClock.uptimeMillis() + duration
-            postDelayed(peekCollapse, duration)
+        // Two caps on an automatic expansion:
+        //  - the user's own "auto-collapse after" choice, so the island answers
+        //    "what was that" and then gets out of the way;
+        //  - over another app, a hard cap that does not depend on the activity's
+        //    own duration. A capsule that covers an app until it is tapped is the
+        //    single most intrusive thing a launcher can draw, and it is avoidable.
+        var effective = duration
+        if (overlayWindow && duration > 0L) {
+            effective = minOf(duration, store.islandAutoCollapseMs().toLong())
+        }
+        if (effective > 0L) {
+            peekUntil = SystemClock.uptimeMillis() + effective
+            postDelayed(peekCollapse, effective)
         }
     }
 
@@ -1166,6 +1176,18 @@ class OeaDynamicIslandView(
         setExpanded(!expanded, animate = true)
     }
 
+    /**
+     * True while the island is drawn over another app (the optional overlay) and
+     * the user asked expansions to stay small there.
+     *
+     * The camera-style capsule is the reason this exists: around a camera cutout it
+     * is always visible, so an expansion that grows into a full card sits on top of
+     * whatever the user is reading. Compact means "what was that, and the one action
+     * worth taking" — and it collapses on its own after a few seconds.
+     */
+    private fun compactOverApps(): Boolean =
+        overlayWindow && !isCamera && store.islandCompactOverApps()
+
     private fun setExpanded(value: Boolean, animate: Boolean, fromUser: Boolean = true) {
         if (current == null && value) return
         if (expanded == value) return
@@ -1207,7 +1229,7 @@ class OeaDynamicIslandView(
         if (!isCamera) {
             compactRow.visibility = GONE
             header.visibility = VISIBLE
-            details.visibility = if (expanded) VISIBLE else GONE
+            details.visibility = if (expanded && !compactOverApps()) VISIBLE else GONE
             params.width = capsuleWidth()
             params.height = LayoutParams.WRAP_CONTENT
             params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -1230,8 +1252,8 @@ class OeaDynamicIslandView(
         if (expanded) {
             compactRow.visibility = GONE
             header.visibility = VISIBLE
-            details.visibility = VISIBLE
-            val width = minOf(screenWidth - dp(16), dp(440))
+            details.visibility = if (compactOverApps()) GONE else VISIBLE
+            val width = if (compactOverApps()) minOf(screenWidth - dp(16), dp(340)) else minOf(screenWidth - dp(16), dp(440))
             params.width = width
             params.height = LayoutParams.WRAP_CONTENT
             params.gravity = Gravity.TOP or Gravity.START

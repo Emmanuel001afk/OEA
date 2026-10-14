@@ -26,6 +26,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
+import com.oea.launcher.data.OeaDataStore
 
 /**
  * Wakes the screen without the power key.
@@ -52,8 +53,15 @@ class OeaWakeService : Service() {
             val distance = event.values.firstOrNull() ?: return
             val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
             lastCovered = covered
-            if (inCall() || !OeaPower.waveToWake(this@OeaWakeService)) return
-            if (detector?.onReading(covered, SystemClock.elapsedRealtime()) == true) wake("wave")
+            val store = OeaDataStore.get(this@OeaWakeService)
+            val bound = store.waveAction() != "none"
+            val offBound = store.waveOffAction() != "none"
+            if (inCall() || (!bound && !offBound)) return
+            when (detector?.onReading(covered, SystemClock.elapsedRealtime(), screenOffBound = offBound)) {
+                OeaWaveDetector.Result.ON -> if (bound) wake("wave")
+                OeaWaveDetector.Result.OFF -> if (offBound) offGesture()
+                else -> Unit
+            }
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -138,8 +146,12 @@ class OeaWakeService : Service() {
             stopSelf()
             return
         }
-        // Proximity also serves as the pocket guard for lift to wake.
-        val needProximity = OeaPower.waveToWake(this) || (OeaPower.liftToWake(this) && OeaPower.pocketGuard(this))
+        // The screen-off gesture needs the proximity sensor even if no wake
+        // gesture is bound to it; without it the service has nothing to listen for.
+        // Proximity also serves as the pocket guard for lift to wake, and is the
+        // only sensor the screen-off gesture needs.
+        val offGestureBound = OeaDataStore.get(this).waveOffAction() != "none"
+        val needProximity = offGestureBound || OeaPower.waveToWake(this) || (OeaPower.liftToWake(this) && OeaPower.pocketGuard(this))
         proximity = if (needProximity) OeaPower.proximitySensor(this) else null
         lift = if (OeaPower.liftToWake(this)) OeaPower.liftSensor(this) else null
         detector = OeaWaveDetector(OeaPower.sensitivity(this), OeaPower.requireTwoWaves(this), OeaPower.pocketGuard(this))
@@ -188,9 +200,39 @@ class OeaWakeService : Service() {
         return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_RINGTONE
     }
 
+    /**
+     * A wave (or a lift) was recognised. "wake" is the original behaviour; the
+     * others are bound in Settings › Gestures, and every one of them is checked
+     * against the current gesture setting so two gestures can never share an
+     * action by accident.
+     */
     private fun wake(reason: String) {
-        Log.i(TAG, "Waking the screen ($reason)")
-        wakeScreen(this)
+        val action = if (reason == "lift") "wake" else OeaDataStore.get(this).waveAction()
+        Log.i(TAG, "Gesture recognised ($reason) -> $action")
+        when (action) {
+            "lock" -> com.oea.launcher.gesture.OeaGestures.run(this, "wave", "lock")
+            "power_menu" -> com.oea.launcher.gesture.OeaGestures.run(this, "wave", "power_menu")
+            "low" -> com.oea.launcher.gesture.OeaGestures.run(this, "wave", "low")
+            "none" -> Unit
+            else -> wakeScreen(this)
+        }
+    }
+
+    /**
+     * The screen-off gesture fired. It runs the binding for the *screen-off* slot
+     * only, so it can never bump into the wake wave — and it is the one place in
+     * OEA that turns the screen off by gesture, which needs either OEA Assistant
+     * (the lock action) or device admin.
+     */
+    private fun offGesture() {
+        val store = OeaDataStore.get(this)
+        val action = store.waveOffAction()
+        Log.i(TAG, "Screen-off gesture recognised -> $action")
+        when (action) {
+            "lock" -> OeaPower.lockScreen(this)
+            "none" -> Unit
+            else -> com.oea.launcher.gesture.OeaGestures.run(this, "wave_off", action)
+        }
     }
 
     private fun notification(): Notification {
@@ -210,7 +252,8 @@ class OeaWakeService : Service() {
         val what = listOfNotNull(
             if (OeaPower.waveToWake(this)) "wave" else null,
             if (OeaPower.liftToWake(this) && OeaPower.liftSensor(this) != null) "lift" else null,
-        ).joinToString(" or ")
+            if (OeaDataStore.get(this).waveOffAction() != "none") "hold-and-wave" else null,
+        ).joinToString(" or ").ifEmpty { "nothing" }
         return builder
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
             .setContentTitle("Wake gestures are on")

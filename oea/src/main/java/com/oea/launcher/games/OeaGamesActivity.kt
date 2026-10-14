@@ -51,6 +51,7 @@ import com.oea.games.lab.EngineLab
 import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.perf.OeaGameRescue
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
@@ -786,7 +787,72 @@ class OeaGamesActivity : Activity(), SessionListener {
         kit.switchRow(g, R.drawable.oic_headset, "Music", null, s.music) { s.music = it }
         kit.stepperRow(g, R.drawable.oic_gesture, "Aim sensitivity", "Arena and other shooters", (s.lookSensitivity * 10f).toInt(), 2, 30, { String.format(java.util.Locale.US, "%.1f×", it / 10f) }) { s.lookSensitivity = it / 10f }
         kit.note(box, "Thermal protection steps quality down before your phone throttles, and Android's Game Mode (battery or performance) is respected. Changes apply the next time a game starts.")
+
+        // ------------------------------------------------------------ diagnosis
+        // Everything needed to explain "a game will not start", in one place and
+        // copyable, because the answer is almost always one of these four lines:
+        // the GPU, the engine build, the game's own saved state, or a fault OEA
+        // already recorded.
+        kit.sectionTitle(box, "If a game will not start")
+        val diagnosis = diagnosis()
+        val health = kit.group(box)
+        diagnosis.lines.forEachIndexed { index, line ->
+            kit.row(health, if (index == 0) R.drawable.oic_info else 0, line.first, line.second, chevron = false)
+        }
+        kit.row(health, R.drawable.oic_info, "Copy this report", "Paste it anywhere to show what your phone reports") {
+            copy(diagnosis.report)
+            toast("Diagnosis copied")
+        }
+        kit.note(box, "Games need OpenGL ES 3. ${if (OeaEngine.device.supportsEs3) "This phone provides it." else "This phone does not report it, so OEA's games cannot draw a frame here — nothing can change that, and the launcher says so instead of showing a frozen screen."}")
         present(p)
+    }
+
+    /** The facts, gathered without touching the GPU: nothing here starts a game. */
+    private class Diagnosis(val lines: List<Pair<String, String?>>, val report: String)
+
+    private fun diagnosis(): Diagnosis {
+        val device = OeaEngine.device
+        val settings = OeaEngine.settings
+        val lines = mutableListOf<Pair<String, String?>>()
+
+        lines += "Engine" to "OEA Engine ${OeaEngine.VERSION} · protocol ${OeaEngine.PROTOCOL} · " +
+            "${OeaEngine.registry.all().size} games registered"
+
+        val gpu = buildString {
+            append(if (device.supportsEs3) "OpenGL ES 3 available" else "OpenGL ES 3 NOT available")
+            if (device.glVersion.isNotBlank()) append(" · ${device.glVersion}")
+            if (device.gpuRenderer.isNotBlank()) append("\n${device.gpuRenderer}")
+            if (device.maxTextureSize > 0) append("\nmax texture ${device.maxTextureSize}px · up to ${device.maxSamples}× MSAA")
+        }
+        lines += "GPU" to gpu
+
+        lines += "Quality" to "${settings.quality} (this phone suggests ${device.recommendedTier.label}) · " +
+            if (settings.fpsTarget > 0) "${settings.fpsTarget} fps" else "maximum refresh rate"
+
+        val unstable = OeaEngine.registry.all().filter { OeaGameRescue.isUnstable(this, it.id) }
+        lines += "Games marked unstable" to when {
+            unstable.isEmpty() -> "None — every game's last runs finished cleanly"
+            else -> unstable.joinToString(", ") { it.title } + "\nOpen the game from the hub for repair options"
+        }
+
+        val faults = OeaFaultShield.sessionCounts().keys.filter { it.startsWith("game:") }
+        lines += "Faults this session" to if (faults.isEmpty()) "None" else faults.joinToString(", ")
+
+        val report = buildString {
+            appendLine("OEA Engine ${OeaEngine.VERSION} (protocol ${OeaEngine.PROTOCOL})")
+            appendLine("Device: ${device.describe()}")
+            appendLine("GL: ${device.glVersion} / renderer ${device.gpuRenderer} / vendor ${device.gpuVendor}")
+            appendLine("ES3: ${device.supportsEs3} · max texture ${device.maxTextureSize} · MSAA ${device.maxSamples}")
+            appendLine("Quality: ${settings.quality} (recommended ${device.recommendedTier.label}), fps ${settings.fpsTarget}")
+            appendLine("Games: ${OeaEngine.registry.all().joinToString { it.id }}")
+            appendLine("Unstable: ${if (unstable.isEmpty()) "none" else unstable.joinToString { it.id }}")
+            appendLine("Faults: ${if (faults.isEmpty()) "none" else faults.joinToString()}")
+        }.trim()
+
+        val shown = lines.map { (label, value) ->
+            label to value?.replace("\n", " · ")
+        }
+        return Diagnosis(shown, report)
     }
 
     private fun renderServers() {

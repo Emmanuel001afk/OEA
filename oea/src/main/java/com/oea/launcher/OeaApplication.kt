@@ -7,6 +7,7 @@ import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.fault.OeaFaultLog
 import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.games.OeaLauncherIslandHost
+import com.oea.launcher.perf.OeaLowMode
 import com.oea.launcher.privilege.OeaPrivileges
 import com.oea.launcher.runtime.OeaRuntime
 
@@ -36,6 +37,13 @@ class OeaApplication : Application() {
         // OEA Game Engine: register the built-in games and let games publish live
         // activities to the launcher's Dynamic Island. Cheap: no GPU, no network
         // and no game objects are created here.
+        // Low mode: watch the battery so the mode can switch itself on at the
+        // user's threshold, and restore the saved state right away (Home has to
+        // know before its first frame whether it should animate).
+        OeaFaultShield.guard("app:low-mode") {
+            OeaLowMode.observe(this)
+            if (OeaLowMode.active(this)) OeaLowMode.apply(this)
+        }
         OeaFaultShield.guard("app:engine") {
             OeaEngine.init(this)
             OeaEngine.islandHost = OeaLauncherIslandHost(this)

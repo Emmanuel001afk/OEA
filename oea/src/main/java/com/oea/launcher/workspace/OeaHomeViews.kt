@@ -614,6 +614,8 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
                     child.alpha = 1f - 0.35f * a
                 }
                 "liquid" -> liquid(child, offset, a, w, h, density)
+                "depth" -> depth(child, offset, a, w, h, density)
+                "paper" -> paper(child, offset, a, w, h)
                 else -> {
                     identity(child)
                     child.alpha = 1f - 0.45f * a
@@ -625,6 +627,54 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
     }
 
     /**
+     * Depth: the pages are plates at different distances from the eye.
+     *
+     * The page being left shrinks away from the viewer and slides under the one
+     * arriving, which grows past it and settles flat. Nothing rotates, because a
+     * flat rotation is the "just a slide" look this mode is meant to avoid: the
+     * movement is straight towards or away from the viewer, which is what makes a
+     * stack of layers read as having depth rather than as a wallpaper change.
+     */
+    private fun depth(child: View, offset: Float, a: Float, w: Int, h: Float, density: Float) {
+        identity(child)
+        child.cameraDistance = 4000f * density
+        child.pivotX = w / 2f
+        child.pivotY = h * 0.45f
+        val near = kotlin.math.sin(Math.PI * a).toFloat()
+        if (offset <= 0f) {
+            // Leaving: falls back, dims and shrinks slightly.
+            child.scaleX = 1f - 0.16f * a
+            child.scaleY = 1f - 0.16f * a
+            child.translationY = h * 0.02f * a
+            child.alpha = 1f - 0.55f * a
+        } else {
+            // Arriving: comes forward from behind the departing page.
+            child.scaleX = 0.84f + 0.16f * (1f - a)
+            child.scaleY = 0.84f + 0.16f * (1f - a)
+            child.translationY = -h * 0.01f * near
+            child.alpha = 1f - 0.35f * a
+        }
+    }
+
+    /**
+     * Paper: the next sheet slides in over the last one, with a soft shadow along
+     * its leading edge — the way a page turns in a book rather than a carousel.
+     * The departing page barely moves, so the impression is paper being laid down.
+     */
+    private fun paper(child: View, offset: Float, a: Float, w: Int, h: Float) {
+        identity(child)
+        // A sheet being laid down barely moves or fades: it is the shadow along the
+        // edge and the slight tilt of the arriving page that read as paper. Keeping
+        // the movement this small is also what keeps Ink calm rather than busy.
+        child.pivotX = if (offset < 0f) w / 2f else 0f
+        child.pivotY = h / 2f
+        child.rotationY = if (offset < 0f) 0f else 3.5f * a
+        child.scaleX = 1f - 0.015f * a
+        child.scaleY = 1f - 0.015f * a
+        child.alpha = if (offset < 0f) 1f - 0.18f * a else 1f
+    }
+
+    /**
      * Liquid: the page narrows and swells like a drop in motion, and every
      * icon trails behind by its distance from the leading edge, so a page
      * flows rather than slides. All offsets scale with sin(pi * progress):
@@ -632,10 +682,13 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
      */
     private fun liquid(child: View, offset: Float, a: Float, w: Int, h: Float, density: Float) {
         val wave = kotlin.math.sin(Math.PI * a).toFloat()
-        child.rotationY = 0f
         child.translationX = 0f
-        child.pivotX = if (offset < 0f) w.toFloat() else 0f
+        child.pivotX = w / 2f
         child.pivotY = h / 2f
+        // A shallow barrel turn rather than a flat slide: the page curves away
+        // from the finger, which is what sells a physical sheet of glass.
+        child.rotationY = -5.5f * offset
+        child.cameraDistance = 9000f * density
         child.scaleX = 1f - 0.16f * a
         child.scaleY = 1f + 0.06f * wave
         child.alpha = 1f - 0.55f * a * a
@@ -644,10 +697,16 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
             val tile = page.getChildAt(j)
             val cx = ((tile.left + tile.width / 2f) / w).coerceIn(0f, 1f)
             val trailing = if (scrollDirection > 0) cx else 1f - cx
+            // Icons lag behind their page by how far they sit from the leading
+            // edge, drift down and up across the width, and rock a couple of
+            // degrees as they catch up: water, not a slide.
             tile.translationX = scrollDirection * w * 0.12f * trailing * wave
             tile.translationY = -8f * density * wave * kotlin.math.sin(Math.PI * cx).toFloat()
+            tile.rotation = scrollDirection * 2.4f * trailing * wave
+            tile.pivotX = tile.width / 2f
+            tile.pivotY = tile.height / 2f
             val s = 1f - 0.06f * wave * trailing
-            tile.scaleX = s
+            tile.scaleX = s * (1f + 0.03f * wave * (1f - trailing))
             tile.scaleY = s
         }
     }
@@ -657,6 +716,8 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
         child.scaleX = 1f
         child.scaleY = 1f
         child.translationX = 0f
+        child.translationY = 0f
+        child.rotation = 0f
         child.rotationY = 0f
     }
 
@@ -669,6 +730,7 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
                     page.getChildAt(j).apply {
                         translationX = 0f
                         translationY = 0f
+                        rotation = 0f
                         scaleX = 1f
                         scaleY = 1f
                     }

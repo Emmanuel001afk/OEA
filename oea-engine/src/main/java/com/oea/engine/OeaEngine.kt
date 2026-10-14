@@ -47,6 +47,15 @@ object OeaEngine {
             settingsInstance ?: EngineSettings(context).also { settingsInstance = it }
         }
 
+    /**
+     * Why a game surface cannot be created on this phone, or null when it can.
+     *
+     * A launcher calls this *before* opening a game so the answer becomes a
+     * readable sentence on the failure screen, instead of the process dying inside
+     * GLSurfaceView's own thread where nothing can catch it.
+     */
+    fun surfaceProblem(): String? = com.oea.engine.graphics.SurfaceProbe.reason()
+
     /** Hardware capabilities and the recommended quality tier, measured once. */
     val device: DeviceProfile
         get() = profileInstance ?: synchronized(this) {

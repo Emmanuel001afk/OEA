@@ -19,12 +19,24 @@ sealed class OeaImageRef {
         override val key: String get() = "file:$path"
     }
 
+    /**
+     * A picture OEA draws itself (see OeaArtwork). Generated artwork exists so a
+     * theme can have its *own* lock-screen picture — different from the picture
+     * behind Home, and never one of the wallpapers in the library.
+     */
+    data class Generated(val name: String, val title: String) : OeaImageRef() {
+        override val key: String get() = "gen:$name"
+    }
+
     companion object {
         fun parse(key: String?): OeaImageRef? {
             if (key.isNullOrBlank()) return null
             return when {
                 key.startsWith("res:") -> OeaThemeCatalog.bundled(key.removePrefix("res:"))
                 key.startsWith("file:") -> Imported(key.removePrefix("file:")).takeIf { java.io.File(it.path).isFile }
+                key.startsWith("gen:") -> key.removePrefix("gen:")
+                    .takeIf { com.oea.launcher.wallpaper.OeaArtwork.isKnown(it) }
+                    ?.let { Generated(it, com.oea.launcher.wallpaper.OeaArtwork.label(it)) }
                 else -> null
             }
         }
@@ -79,6 +91,18 @@ object OeaThemeCatalog {
     val GRAPHITE_HOME = res("oea_theme_graphite_home", R.drawable.oea_theme_graphite_home, "Graphite waves")
     val GRAPHITE_LOCK = res("oea_theme_graphite_lock", R.drawable.oea_theme_graphite_lock, "Graphite orbits")
 
+    // ------------------------------------------------------------- drawn artwork
+    // OEA draws these itself (OeaArtwork): a lock-screen picture made for each of
+    // the five themes that would otherwise repeat their Home picture on the lock
+    // screen. They are deliberately *not* in the wallpaper library — themes and
+    // wallpapers never share a picture.
+
+    val AURORA_LOCK = OeaImageRef.Generated("aurora_night", "Northern night")
+    val GLASS_LOCK = OeaImageRef.Generated("glass_deep", "Deep glass")
+    val RIDGE_LOCK = OeaImageRef.Generated("ridge_night", "Ridge night")
+    val FOREST_LOCK = OeaImageRef.Generated("forest_mist", "Forest mist")
+    val DUNE_LOCK = OeaImageRef.Generated("dune_dusk", "Dune dusk")
+
     /** Every bundled picture, offered in the wallpaper library too. */
     val bundledImages: List<OeaImageRef.Bundled> = listOf(
         AURORA, LIQUID_GLASS, MOUNTAIN, FOREST, DESERT,
@@ -94,27 +118,27 @@ object OeaThemeCatalog {
      */
     val builtIns: List<OeaThemeSpec> = listOf(
         OeaThemeSpec(
-            "aurora", "Aurora", "Northern lights over a still lake", AURORA, AURORA,
+            "aurora", "Aurora", "Northern lights over a still lake", AURORA, OeaThemeCatalog.AURORA_LOCK,
             accentDark = Color.rgb(95, 227, 192), accentLight = Color.rgb(0, 121, 107), surfaceTint = Color.rgb(24, 70, 82),
             mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "liquid",
         ),
         OeaThemeSpec(
-            "liquid_glass", "Liquid Glass", "Flowing glass, frosted surfaces and liquid motion", LIQUID_GLASS, LIQUID_GLASS,
+            "liquid_glass", "Liquid Glass", "Flowing glass, frosted surfaces and liquid motion", LIQUID_GLASS, OeaThemeCatalog.GLASS_LOCK,
             accentDark = Color.rgb(124, 196, 255), accentLight = Color.rgb(21, 101, 192), surfaceTint = Color.rgb(27, 42, 85),
             mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "liquid",
         ),
         OeaThemeSpec(
-            "mountain_dawn", "Mountain Dawn", "First light on misty peaks", MOUNTAIN, MOUNTAIN,
+            "mountain_dawn", "Mountain Dawn", "First light on misty peaks", MOUNTAIN, OeaThemeCatalog.RIDGE_LOCK,
             accentDark = Color.rgb(255, 180, 138), accentLight = Color.rgb(180, 83, 42), surfaceTint = Color.rgb(107, 74, 58),
             mode = "system", glassStyle = "classic", iconShape = "rounded", dockStyle = "glass", pageEffect = "classic",
         ),
         OeaThemeSpec(
-            "forest_river", "Forest River", "Calm water through deep green woods", FOREST, FOREST,
+            "forest_river", "Forest River", "Calm water through deep green woods", FOREST, OeaThemeCatalog.FOREST_LOCK,
             accentDark = Color.rgb(139, 214, 160), accentLight = Color.rgb(46, 125, 79), surfaceTint = Color.rgb(47, 74, 52),
             mode = "dark", glassStyle = "classic", iconShape = "circle", dockStyle = "glass", pageEffect = "stack",
         ),
         OeaThemeSpec(
-            "desert_coast", "Desert Coast", "Warm dunes meeting the sea", DESERT, DESERT,
+            "desert_coast", "Desert Coast", "Warm dunes meeting the sea", DESERT, OeaThemeCatalog.DUNE_LOCK,
             accentDark = Color.rgb(242, 194, 123), accentLight = Color.rgb(140, 90, 0), surfaceTint = Color.rgb(107, 82, 50),
             mode = "system", glassStyle = "classic", iconShape = "rounded", dockStyle = "solid", pageEffect = "zoom",
         ),

@@ -118,7 +118,7 @@ class GameHost(
 
     private fun setupWindow() {
         val window = activity.window
-        if (Build.VERSION.SDK_INT >= 28) {
+        if (Build.VERSION.SDK_INT >= 28) runCatching {
             window.attributes = window.attributes.apply {
                 layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                 else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -127,20 +127,33 @@ class GameHost(
         immersive()
     }
 
-    /** Hides system bars (swipe from an edge to reveal them briefly). */
+    /**
+     * Hides system bars (swipe from an edge to reveal them briefly).
+     *
+     * Every step is guarded and the controller is reached through the decor view
+     * rather than `Window.getInsetsController()`: that call dereferences the
+     * window's decor, which does not exist yet when a host sets up its window
+     * before `setContentView` — which is exactly what OEA's game activities do, and
+     * which is why a game used to fail to start with a NullPointerException instead
+     * of opening.
+     */
     fun immersive() {
         val window = activity.window
         if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let {
-                it.hide(WindowInsets.Type.systemBars())
-                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            runCatching { window.setDecorFitsSystemWindows(false) }
+            runCatching {
+                val decor = window.decorView
+                val controller = decor.windowInsetsController ?: window.insetsController ?: return@runCatching
+                controller.hide(WindowInsets.Type.systemBars())
+                controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            runCatching {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
         }
     }
 

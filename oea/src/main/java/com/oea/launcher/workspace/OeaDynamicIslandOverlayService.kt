@@ -425,12 +425,52 @@ class OeaDynamicIslandOverlayService : Service() {
         fun ensureRunning(context: Context) {
             if (overlayActive) return
             val app = context.applicationContext
+            // Low mode switches the system-wide island off without forgetting the
+            // user's choice: leaving Low mode brings it straight back.
+            if (com.oea.launcher.perf.OeaLowMode.active(app)) return
             val store = OeaDataStore.get(app)
             if (!store.dynamicIslandEnabled() || !store.islandOnOtherApps() || !com.oea.launcher.privilege.OeaPrivileges.canOverlay(app)) return
             sync(app)
         }
 
+        /** Low mode: stop the overlay service and its foreground notification. */
+        fun stopForLowMode(context: Context) {
+            val app = context.applicationContext
+            overlayActive = false
+            runCatching { app.stopService(Intent(app, OeaDynamicIslandOverlayService::class.java)) }
+        }
+
         /** Starts only from a visible user action or stops when any prerequisite is gone. */
+        /**
+         * Actually tries to draw something and asks whether it worked.
+         *
+         * Android can report `canDrawOverlays` as true and still throw or silently
+         * drop a window (AppOps-backed firmware, multi-profile or "restricted
+         * settings" devices). The settings screen uses this so a toggle that is on
+         * but does nothing is detected and reported instead of looking broken.
+         */
+        fun verifyOverlay(context: Context): Boolean {
+            val app = context.applicationContext
+            if (!com.oea.launcher.privilege.OeaPrivileges.canOverlay(app)) return false
+            val manager = app.getSystemService(WindowManager::class.java) ?: return false
+            val probe = View(app)
+            val params = WindowManager.LayoutParams(
+                1, 1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                android.graphics.PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 0
+                y = 0
+            }
+            return runCatching {
+                manager.addView(probe, params)
+                manager.removeViewImmediate(probe)
+                true
+            }.onFailure { Log.w(TAG, "Overlay permission is set but drawing was refused", it) }.getOrDefault(false)
+        }
+
         fun sync(context: Context) {
             val app = context.applicationContext
             val store = OeaDataStore.get(app)

@@ -36,6 +36,8 @@ import com.oea.launcher.applock.OeaAppLockStore
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.callblocker.OeaCallBlockerActivity
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.perf.OeaLowMode
+import com.oea.launcher.power.OeaPower
 import com.oea.launcher.fault.OeaFaultLog
 import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.freezer.OeaFreezerActivity
@@ -87,6 +89,11 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private val dataStore by lazy { OeaDataStore.get(this) }
+    /** Set while the access doctor is on screen, so a fix can re-verify at once. */
+    private var doctorCheck: (() -> Unit)? = null
+    private val doctorWorkers = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaAccessDoctor").apply { isDaemon = true }
+    }
     private val appQueryWorker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "OeaSettingsApps").apply { isDaemon = true }
     }
@@ -263,14 +270,7 @@ open class OeaSystemToolsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (pendingIslandOverlayEnable) {
-            pendingIslandOverlayEnable = false
-            if (OeaPrivileges.canOverlay(this)) {
-                dataStore.setIslandOnOtherApps(true)
-                OeaDynamicIslandOverlayService.sync(this)
-                toast("Dynamic Island will appear over other apps.")
-            } else {
-                toast("Allow OEA to display over other apps to enable this option.")
-            }
+            finishIslandOverlayRequest(cameFromResult = false)
         } else if (dataStore.islandOnOtherApps()) {
             // Keep persisted UI state honest if the user revoked overlay access
             // from Android Settings while OEA was in the background.
@@ -348,8 +348,11 @@ open class OeaSystemToolsActivity : Activity() {
                 "overview" -> showMultitask()
                 "split" -> showSplit()
                 "access" -> showAccess()
+                "access_doctor" -> showAccessDoctor()
                 "stability" -> showStability()
                 "wallpaper" -> showWallpaperGallery()
+                "modes" -> showModes()
+                "low" -> showLowMode()
                 "about" -> showAbout()
                 else -> showSettings()
             }
@@ -411,11 +414,16 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_splitscreen, "Multitasking", "Overview, split screen and floating windows") { navigate("multitasking") }
         kit.row(group, R.drawable.oic_sports_esports, "Game Boost", if (OeaGameBoostStore.enabled(this)) "On • ${OeaGameBoostStore.games(this).size} games" else "Off") { openActivity(OeaGameBoostActivity::class.java) }
         kit.row(group, R.drawable.oic_stadia_controller_fill, "OEA Games", "Runner, Arena, Chess and the OEA Game Engine") { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java) }
+        kit.row(group, R.drawable.oic_apps, "Mini-apps", "Gallery, notes and calculator — built into OEA, no download") {
+            com.oea.launcher.miniapps.OeaMiniApps.open(this)
+        }
         kit.row(group, R.drawable.oic_call, "Phone", "OEA dialer, contacts and in-call screen") { openActivity(OeaPhoneActivity::class.java) }
         kit.row(group, R.drawable.oic_block, "Call Blocker", "Blocked numbers, allow list, rules and history") { openActivity(OeaCallBlockerActivity::class.java) }
         kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "OEA Games, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_accessibility_new, "Permissions & access", accessSummary()) { navigate("access") }
+        kit.row(group, R.drawable.oic_developer_mode, "Access doctor", "Each permission verified live, with the exact fix — including the ones that look switched on but are not working") { navigate("access_doctor") }
+        kit.row(group, R.drawable.oic_battery_charging_full, "LOW mode", OeaLowMode.summary(this)) { navigate("low") }
         kit.row(group, R.drawable.oic_shield_fill, "Stability", stabilitySummary()) { navigate("stability") }
         kit.row(group, R.drawable.oic_info, "About OEA", "Version $version") { navigate("about") }
         present(page)
@@ -487,8 +495,12 @@ open class OeaSystemToolsActivity : Activity() {
     // ============================================================= appearance
 
     private fun showAppearance() {
-        val page = page("Appearance", "Theme, colours, icons and motion")
+        val page = page("Appearance", "Modes, theme, colours, icons and motion")
         val box = page.content
+        kit.sectionTitle(box, "Mode")
+        var modeGroup = kit.group(box)
+        kit.row(modeGroup, R.drawable.oic_auto_awesome, "Launcher mode", modeSummary()) { navigate("modes") }
+        kit.note(box, "A mode sets the surfaces, motion, icons and wallpaper together. Everything it sets stays editable below, and nothing you change here flips the mode behind your back.")
         kit.sectionTitle(box, "Theme")
         var group = kit.group(box)
         choiceRow(group, R.drawable.oic_dark_mode, "Theme", listOf("system" to "Follow system", "dark" to "Dark", "light" to "Light"), dataStore.themeMode()) { dataStore.setThemeMode(it) }
@@ -614,6 +626,214 @@ open class OeaSystemToolsActivity : Activity() {
         }
     }
 
+    // ================================================================== modes
+
+    private fun modeSummary(): String {
+        val mode = com.oea.launcher.ui.OeaModes.current(this)
+        return if (mode.isLive) "${mode.label} · live" else mode.label
+    }
+
+    /**
+     * The mode picker. Each mode is a preset the user can then edit; the screen
+     * says exactly what a mode will set, so nothing here is a surprise, and a
+     * theme's own colours are never overwritten by the preview.
+     */
+    /**
+     * The mode picker: the one screen that sets the whole look at once.
+     *
+     * Each entry says exactly what it changes — surfaces, motion, icons and the
+     * scene — and what it does *not* touch, because a mode that silently moved the
+     * user's wallpaper would be a bad surprise. Everything a mode sets stays
+     * editable in Appearance afterwards, and the chosen mode is remembered.
+     */
+    private fun showModes() {
+        val page = page("Launcher mode", "One choice that sets the whole look")
+        val box = page.content
+        val current = com.oea.launcher.ui.OeaModes.current(this)
+        kit.note(box, "A mode sets the surfaces, the page motion, the icon shape and the scene behind your icons together. Nothing else changes: same apps, same folders, same layout. Android's wallpaper is only touched by the modes that say so.")
+
+        com.oea.launcher.ui.OeaMode.entries.forEach { mode ->
+            val spec = com.oea.launcher.ui.OeaModes.spec(mode)
+            val inUse = mode == current
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                background = kit.rounded(
+                    if (inUse) OeaTheme.blend(palette.card, palette.accent, 0.14f) else palette.card,
+                    24,
+                    if (inUse) OeaTheme.alpha(palette.accent, 0x55) else palette.stroke,
+                    1,
+                )
+                isClickable = true
+                setOnClickListener { applyMode(mode) }
+            }
+            val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            head.addView(kit.text(mode.label, 17f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+            head.addView(modePreview(spec), LinearLayout.LayoutParams(dp(78), dp(42)).apply { rightMargin = dp(10) })
+            if (inUse) head.addView(kit.text("In use", 12f, palette.accent, OeaType.medium))
+            card.addView(head)
+            card.addView(kit.text(mode.tagline, 13.5f, palette.accent, OeaType.medium).apply { setPadding(0, dp(4), 0, 0) })
+            card.addView(kit.text(mode.detail, 12.5f, palette.textSecondary).apply {
+                setPadding(0, dp(5), 0, 0)
+                setLineSpacing(dp(2).toFloat(), 1f)
+            })
+            val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(9), 0, 0) }
+            modeChips(spec).forEach { chip ->
+                chips.addView(kit.text(chip, 11f, palette.textSecondary, OeaType.medium).apply {
+                    setPadding(dp(9), dp(3), dp(9), dp(3))
+                    background = kit.rounded(palette.cardHigh, 20, palette.stroke, 1)
+                }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
+            }
+            card.addView(chips)
+            if (mode.isLive) {
+                card.addView(kit.text("Live scene drawn by Home · Android's wallpaper untouched", 11.5f, palette.accent).apply { setPadding(0, dp(8), 0, 0) })
+            }
+            box.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        }
+
+        kit.sectionTitle(box, "The scene behind your icons")
+        val details = kit.group(box)
+        kit.row(details, R.drawable.oic_wallpaper, "Wallpaper source", wallpaperSourceSummary()) { navigate("wallpaper") }
+        kit.switchRow(details, R.drawable.oic_contrast, "Theme follows the scene", "The accent and Home's text colour are taken from the artwork", com.oea.launcher.wallpaper.OeaWallpaperStore.themeFollowsScene(this)) {
+            com.oea.launcher.wallpaper.OeaWallpaperStore.setThemeFollowsScene(this, it)
+            com.oea.launcher.ui.OeaTheme.invalidate()
+            rerender()
+        }
+        kit.stepperRow(details, R.drawable.oic_gesture, "Parallax", "How far layered scenes move with your pages", dataStore.parallaxStrength() / 10, 0, 10, { "${it * 10}%" }) {
+            dataStore.setParallaxStrength(it * 10)
+        }
+        kit.note(box, "Tide, Depth and Ink are OEA's own: Home draws them itself, so nothing is written to Android's wallpaper and the lock screen keeps whatever you set there.")
+        present(page)
+    }
+
+    /** A tiny strip of what a mode looks like: the surface, its accent, its scene. */
+    private fun modePreview(spec: com.oea.launcher.ui.ModeSpec): View {
+        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val accent = spec.scene?.let { com.oea.launcher.wallpaper.OeaLiveScenes.accent(it, !palette.dark) } ?: palette.accent
+        val scene = spec.scene?.let { com.oea.launcher.wallpaper.OeaLiveScenes.accent(it, true) } ?: palette.cardHigh
+        listOf(palette.glass, accent, scene).forEachIndexed { index, colour ->
+            strip.addView(View(this).apply {
+                background = kit.rounded(colour, 8, OeaTheme.alpha(palette.stroke, 0x66), 1)
+            }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { if (index < 2) rightMargin = dp(3) })
+        }
+        return strip
+    }
+
+    /** Plain-language chips: what this mode changes. */
+    private fun modeChips(spec: com.oea.launcher.ui.ModeSpec): List<String> {
+        val chips = mutableListOf<String>()
+        when (spec.glass) {
+            OeaDataStore.GLASS_LIQUID -> chips += "Liquid glass"
+            OeaDataStore.GLASS_CLASSIC -> chips += "Classic surfaces"
+        }
+        spec.effect?.let { chips += "Motion: $it" }
+        spec.iconShape?.let { shape -> chips += "Icons: ${shape.replaceFirstChar { letter -> letter.uppercase() }}" }
+        if (spec.wallpaperSource == OeaDataStore.WALLPAPER_OEA) chips += "Drawn by Home"
+        return chips
+    }
+
+    private fun applyMode(mode: com.oea.launcher.ui.OeaMode) {
+        com.oea.launcher.ui.OeaModes.apply(this, mode)
+        toast("${mode.label} mode applied")
+        rerender()
+    }
+
+    private fun wallpaperSourceSummary(): String =
+        if (dataStore.wallpaperSource() == OeaDataStore.WALLPAPER_OEA) "Drawn by Home · ${com.oea.launcher.wallpaper.OeaHomeScene.describe(this)}"
+        else "Android's wallpaper · ${com.oea.launcher.wallpaper.OeaHomeScene.describe(this)}"
+
+    // =============================================================== low mode
+
+    /**
+     * LOW mode's screen. Every row states what the mode actually does on *this*
+     * phone, including which layers are unavailable without device owner or root.
+     */
+    /**
+     * LOW mode's own screen.
+     *
+     * It states what the mode actually does on *this* phone, and separates the
+     * parts that always work from the parts that need a role the phone may not have
+     * granted, so the user never has to guess which of the two they are looking at.
+     */
+    private fun showLowMode() {
+        val page = page("LOW mode", "OEA's own power saving")
+        val box = page.content
+        val active = OeaLowMode.active(this)
+        val (percent, charging) = OeaLowMode.battery(this)
+
+        if (active) {
+            kit.banner(box, R.drawable.oic_battery_charging_full, "LOW mode is on",
+                OeaLowMode.summary(this).replaceFirstChar { letter -> letter.uppercase() } + ". Home is running light.", OeaKit.Tone.INFO, "Turn off") {
+                OeaLowMode.setEnabled(this, false)
+                rerender()
+            }
+        } else {
+            val body = when {
+                percent in 0..100 && charging -> "$percent% and charging. OEA will not switch itself on while the phone is plugged in."
+                percent in 0..100 -> "$percent% battery."
+                else -> "The battery level is not readable on this phone, so only the manual switch applies."
+            }
+            kit.banner(box, R.drawable.oic_battery_full, "LOW mode is off", body, OeaKit.Tone.INFO)
+        }
+
+        kit.sectionTitle(box, "What it turns off")
+        kit.note(box, "OEA's own costs, and only OEA's: the live scene under your icons stops animating, pages stop moving, At a Glance and the islands hide, the system-wide island overlay service stops, Game Boost sessions end and stay off, and the wave and lift sensors are released. No app is killed and nothing of yours is changed, so everything comes back exactly as it was the moment LOW mode ends.")
+
+        kit.sectionTitle(box, "Switching")
+        val switching = kit.group(box)
+        kit.switchRow(switching, R.drawable.oic_battery_charging_full, "LOW mode", "Turn it on now", active) {
+            OeaLowMode.setEnabled(this, it)
+            rerender()
+        }
+        kit.switchRow(switching, R.drawable.oic_battery_full, "Turn on by itself", "When the battery gets low, without asking", dataStore.lowModeAuto()) {
+            dataStore.setLowModeAuto(it)
+            rerender()
+        }
+        kit.stepperRow(switching, R.drawable.oic_insights, "Turn on at", "Battery percentage", dataStore.lowModeThreshold() / 5, 1, 10, { "${it * 5}%" }) {
+            dataStore.setLowModeThreshold(it * 5)
+        }
+        kit.stepperRow(switching, R.drawable.oic_refresh, "Turn off at", "Or as soon as the phone is charging", dataStore.lowModeExit() / 5, 2, 16, { "${it * 5}%" }) {
+            dataStore.setLowModeExit(it * 5)
+        }
+        kit.note(box, "One that switched itself on also switches itself off when the battery recovers or the phone is plugged in. One you turned on by hand stays on until you turn it off.")
+
+        kit.sectionTitle(box, "Going further")
+        val deep = kit.group(box)
+        val backend = OeaAppFreezer.backend(this)
+        if (backend == OeaAppFreezer.Backend.NONE) {
+            kit.row(deep, R.drawable.oic_info, "Suspend chosen apps", "Not available here: it needs device owner or root, and OEA will not pretend otherwise", chevron = false)
+        } else {
+            kit.switchRow(deep, R.drawable.oic_block, "Suspend chosen apps",
+                "Stops the apps you pick while LOW mode is on (${backend.name.lowercase().replace('_', ' ')})", dataStore.lowModeSuspendApps()) {
+                dataStore.setLowModeSuspendApps(it)
+                OeaLowMode.apply(this)
+                rerender()
+            }
+            kit.row(deep, R.drawable.oic_apps, "Apps to suspend", "${dataStore.lowModeAppList().size} chosen") { chooseLowModeApps() }
+        }
+        present(page)
+    }
+
+    /** Pick the apps LOW mode suspends; only reachable with a backend that can. */
+    private fun chooseLowModeApps() {
+        val apps = requireApps() ?: return
+        val chosen = dataStore.lowModeAppList()
+        val names = apps.sortedBy { it.label.lowercase() }
+        kit.sheet("Apps to suspend", "Tap to add or remove; OEA verifies every change with Android") { panel, dialog ->
+            names.forEach { app ->
+                val selected = chosen.contains(app.packageName)
+                kit.row(panel, 0, (if (selected) "✓ " else "") + app.label, null, chevron = false) {
+                    val next = dataStore.lowModeAppList().toMutableSet()
+                    if (!next.add(app.packageName)) next.remove(app.packageName)
+                    dataStore.setLowModeAppList(next)
+                    dialog.dismiss()
+                    chooseLowModeApps()
+                }
+            }
+            kit.note(panel, "Suspended apps are hidden from OEA until LOW mode ends, exactly like the Freezer's own suspensions.")
+        }
+    }
+
     /**
      * OEA's own wallpapers: drawn by OEA at the phone's resolution, applied
      * through Android's wallpaper service (install-time permission, no prompt),
@@ -624,6 +844,54 @@ open class OeaSystemToolsActivity : Activity() {
         val box = page.content
         val current = OeaWallpaperStore.scene(this)
         kit.note(box, "These replace the system wallpaper on the target you choose. Your own photos, the stock picker and Android's live wallpapers keep working exactly as before.")
+
+        kit.sectionTitle(box, "Where Home's background lives")
+        val source = kit.group(box)
+        choiceRow(source, R.drawable.oic_wallpaper, "Wallpaper source",
+            listOf(
+                OeaDataStore.WALLPAPER_SYSTEM to "Android's wallpaper",
+                OeaDataStore.WALLPAPER_OEA to "Drawn by Home (OEA only)",
+            ),
+            dataStore.wallpaperSource()) {
+            dataStore.setWallpaperSource(it)
+            rerender()
+        }
+        kit.note(box, "Drawn by Home keeps Android's wallpaper — and your lock screen — completely untouched: Home paints its own background behind the icons, so nothing is written to the system. Every scene below works in both sources; the live ones animate only when Home draws them.")
+
+        kit.sectionTitle(box, "Live scenes")
+        val live = kit.group(box)
+        com.oea.launcher.wallpaper.OeaLiveScenes.ids.forEach { id ->
+            val liveCurrent = com.oea.launcher.wallpaper.OeaHomeScene.live(this) == id
+            val label = com.oea.launcher.wallpaper.OeaLiveScenes.label(id)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                isClickable = true
+                setOnClickListener { pickLiveScene(id) }
+            }
+            val preview = ImageView(this)
+            runCatching {
+                preview.setImageBitmap(
+                    com.oea.launcher.wallpaper.OeaLiveScenes.still(id, dp(54), dp(90)),
+                )
+            }
+            preview.scaleType = ImageView.ScaleType.CENTER_CROP
+            preview.background = kit.rounded(Color.TRANSPARENT, 12, palette.stroke, 1)
+            row.addView(preview, LinearLayout.LayoutParams(dp(54), dp(90)).apply { rightMargin = dp(14) })
+            val text = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            text.addView(kit.text(label, 15.5f, palette.text, OeaType.medium))
+            text.addView(kit.text(com.oea.launcher.wallpaper.OeaLiveScenes.blurb(id), 12.5f, palette.textSecondary).apply { setLineSpacing(dp(2).toFloat(), 1f) })
+            if (liveCurrent) text.addView(kit.text("In use", 12f, palette.accent, OeaType.medium).apply { setPadding(0, dp(4), 0, 0) })
+            row.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
+            val swatch = View(this).apply { background = kit.oval(com.oea.launcher.wallpaper.OeaLiveScenes.accent(id, true)) }
+            row.addView(swatch, LinearLayout.LayoutParams(dp(22), dp(22)))
+            live.addView(row)
+        }
+        kit.row(live, R.drawable.oic_close, "No live scene", "Use the still scenes below, or Android's wallpaper") {
+            com.oea.launcher.wallpaper.OeaHomeScene.clearLive(this)
+            rerender()
+        }
 
         val group = kit.group(box)
         kit.stepperRow(group, R.drawable.oic_contrast, "Dim", "Darkens the scene when icons need more contrast", OeaWallpaperStore.dimPercent(this) / 5, 0, 12, { "${it * 5}%" }) {
@@ -636,8 +904,9 @@ open class OeaSystemToolsActivity : Activity() {
         }
 
         kit.sectionTitle(box, "Scenes")
+        kit.note(box, "Drawn for Home. The Themes app has a separate lock-screen set with its own artwork.")
         val list = kit.group(box)
-        OeaWallpaper.entries.forEach { scene ->
+        OeaWallpaper.homeSet.forEach { scene ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -670,6 +939,70 @@ open class OeaSystemToolsActivity : Activity() {
         present(page)
     }
 
+    /**
+     * A live scene can either be drawn by Home (nothing is written to Android) or
+     * rendered once and set as a normal wallpaper, which works from the lock
+     * screen too.
+     */
+    private fun pickLiveScene(id: String) {
+        val label = com.oea.launcher.wallpaper.OeaLiveScenes.label(id)
+        val host = this
+        kit.sheet(label, "Drawn by Home, frame by frame") { panel, dialog ->
+            panel.addView(kit.hscroll(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                val home = kit.primaryButton("Draw on Home", R.drawable.oic_wallpaper) {
+                    dialog.dismiss()
+                    com.oea.launcher.wallpaper.OeaHomeScene.setLive(host, id)
+                    dataStore.setWallpaperSource(OeaDataStore.WALLPAPER_OEA)
+                    toast("$label is drawn by Home; Android's wallpaper is untouched")
+                    rerender()
+                }
+                addView(home, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
+                OeaWallpaperStore.Target.entries.forEach { target ->
+                    val button = kit.tonalButton("Freeze to ${target.label}", R.drawable.oic_refresh) {
+                        dialog.dismiss()
+                        freezeLiveScene(id, target)
+                    }
+                    addView(button, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
+                }
+            }))
+            kit.note(panel, "Drawing on Home means the scene moves with your pages, and Depth follows your swipe. Freezing renders one frame and gives it to Android, so it also appears on the lock screen — from then on it is a picture, and the theme stops following it.")
+        }
+    }
+
+    /**
+     * Renders one frame of a live scene off the main thread and hands it to
+     * Android as an ordinary wallpaper, which is also what makes it appear on the
+     * lock screen. Rendering never runs on the UI thread, and a failure only ever
+     * produces a message.
+     */
+    private fun freezeLiveScene(id: String, target: OeaWallpaperStore.Target) {
+        toast("Rendering the scene…")
+        val app = this
+        val metrics = resources.displayMetrics
+        Thread {
+            val frame = runCatching {
+                com.oea.launcher.wallpaper.OeaLiveScenes.still(id, metrics.widthPixels, metrics.heightPixels)
+            }.getOrNull()
+            runOnUiThread {
+                if (isFinishing) {
+                    frame?.recycle()
+                    return@runOnUiThread
+                }
+                if (frame == null) {
+                    toast("The scene could not be rendered on this device")
+                    return@runOnUiThread
+                }
+                com.oea.launcher.wallpaper.OeaWallpaperStore.applyBitmap(app, frame, target) { result ->
+                    runCatching { frame.recycle() }
+                    if (isFinishing) return@applyBitmap
+                    toast(result.message)
+                    if (result is com.oea.launcher.wallpaper.OeaWallpaperStore.Result.Applied) rerender()
+                }
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
     private fun wallpaperTargetSheet(scene: OeaWallpaper) {
         kit.sheet(scene.label, scene.blurb) { panel, dialog ->
             panel.addView(kit.hscroll(LinearLayout(this).apply {
@@ -700,7 +1033,7 @@ open class OeaSystemToolsActivity : Activity() {
         val scene = OeaWallpaperStore.scene(this)
         val target = OeaWallpaperStore.lastTarget(this)
         return when {
-            scene == null -> "${OeaWallpaper.entries.size} bundled scenes, drawn to fit this screen"
+            scene == null -> "${OeaWallpaper.homeSet.size} bundled scenes, drawn to fit this screen"
             target == null -> "${scene.label} (in use)"
             else -> "${scene.label} on the ${target.label.lowercase()}"
         }
@@ -715,16 +1048,7 @@ open class OeaSystemToolsActivity : Activity() {
     @Deprecated("Activity results are routed manually for this simple flow")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_ISLAND_OVERLAY) {
-            if (OeaPrivileges.canOverlay(this)) {
-                dataStore.setIslandOnOtherApps(true)
-                OeaDynamicIslandOverlayService.sync(this)
-                toast("Dynamic Island will appear over other apps.")
-            } else {
-                dataStore.setIslandOnOtherApps(false)
-                toast("Overlay permission was not granted.")
-            }
-            pendingIslandOverlayEnable = false
-            if (current == "notifications") rerender()
+            finishIslandOverlayRequest(cameFromResult = true)
             return
         }
         @Suppress("DEPRECATION")
@@ -785,16 +1109,78 @@ open class OeaSystemToolsActivity : Activity() {
     // =============================================================== gestures
 
     private fun showGestures() {
-        val page = page("Gestures", "Fast actions from anywhere on Home")
+        val page = page("Gestures", "Fast actions, each one bound separately")
         val box = page.content
         assistantBanner(box)
+
+        kit.sectionTitle(box, "Touch")
         val group = kit.group(box)
         kit.row(group, R.drawable.oic_swipe_up, "Swipe up", null, value = "App drawer", chevron = false)
-        choiceRow(group, R.drawable.oic_swipe_down, "Swipe down", listOf("notifications" to "Notifications", "quick_settings" to "Quick Settings", "quick_controls" to "OEA Quick controls", "search" to "Search", "none" to "Nothing"), dataStore.swipeDownAction()) { dataStore.setSwipeDownAction(it) }
-        choiceRow(group, R.drawable.oic_touch_app, "Double-tap", listOf("lock" to "Lock screen", "power_menu" to "Power menu", "quick_controls" to "OEA Quick controls", "drawer" to "Open app drawer", "none" to "Nothing"), dataStore.doubleTapAction()) { dataStore.setDoubleTapAction(it) }
-        choiceRow(group, R.drawable.oic_layers, "Recent apps (Home menu)", listOf("system" to "Android Recents", "oea" to "OEA Overview"), dataStore.recentsMode()) { dataStore.setRecentsMode(it) }
-        kit.note(box, "Long-press an empty spot for the Home menu. Long-press an icon for its shortcuts and actions, then drag to move it.")
+        gestureRow(group, "swipe_down", R.drawable.oic_swipe_down, "Swipe down")
+        gestureRow(group, "double_tap", R.drawable.oic_touch_app, "Double-tap")
+        gestureRow(group, "triple_tap", R.drawable.oic_touch_app, "Triple-tap")
+        gestureRow(group, "two_finger", R.drawable.oic_gesture, "Two-finger swipe")
+        gestureRow(group, "long_press", R.drawable.oic_widgets, "Long-press empty Home")
+
+        kit.sectionTitle(box, "Motion")
+        val motion = kit.group(box)
+        gestureRow(motion, "wave", R.drawable.oic_gesture, "Wave in front of the phone")
+        kit.switchRow(motion, R.drawable.oic_touch_app, "Wave to wake, lift to wake", "Uses the proximity and motion sensors only while these are on", OeaPower.waveToWake(this) || OeaPower.liftToWake(this)) {
+            OeaPower.set(this, com.oea.launcher.power.OeaPower.KEY_WAVE, it)
+            OeaPower.set(this, com.oea.launcher.power.OeaPower.KEY_LIFT, it)
+            OeaPower.syncWakeService(this)
+            rerender()
+        }
+        kit.stepperRow(motion, R.drawable.oic_contrast, "Wave sensitivity", "How deliberate a wave has to be", OeaPower.sensitivity(this), 0, 2, { listOf("Low", "Standard", "High")[it] }) {
+            OeaPower.setSensitivity(this, it)
+            OeaPower.syncWakeService(this)
+        }
+        kit.switchRow(motion, R.drawable.oic_gesture, "Two waves", "One wave is easy to trigger by accident; two are deliberate", OeaPower.requireTwoWaves(this)) {
+            OeaPower.prefs(this).edit().putBoolean(com.oea.launcher.power.OeaPower.KEY_TWO_WAVES, it).apply()
+            OeaPower.syncWakeService(this)
+        }
+        kit.switchRow(motion, R.drawable.oic_visibility_off, "Pocket guard", "Ignore waves and lifts while the phone is covered", OeaPower.pocketGuard(this)) {
+            OeaPower.prefs(this).edit().putBoolean(com.oea.launcher.power.OeaPower.KEY_POCKET, it).apply()
+        }
+        if (com.oea.launcher.perf.OeaLowMode.active(this)) {
+            kit.banner(box, R.drawable.oic_battery_charging_full, "LOW mode is on",
+                "Motion gestures are released while LOW mode is on, so their sensors cost nothing. The settings above are kept.", OeaKit.Tone.INFO)
+        }
+
+        kit.sectionTitle(box, "Recently used")
+        val recents = kit.group(box)
+        choiceRow(recents, R.drawable.oic_layers, "Recent apps (Home menu)", listOf("system" to "Android Recents", "oea" to "OEA Overview"), dataStore.recentsMode()) { dataStore.setRecentsMode(it) }
+        kit.note(box, "Double-tap and triple-tap are told apart by time: after the second tap Home waits a quarter of a second to see whether a third one comes, so the same taps can never run both actions.")
         present(page)
+    }
+
+    /**
+     * One gesture slot. The sheet only lists the actions that make sense for that
+     * gesture, and warns when another gesture already has the same action, so two
+     * gestures can never silently do the same thing.
+     */
+    private fun gestureRow(group: LinearLayout, slot: String, icon: Int, title: String) {
+        val current = com.oea.launcher.gesture.OeaGestures.action(this, slot)
+        val conflicts = com.oea.launcher.gesture.OeaGestures.conflicts(this, current, ignore = slot)
+        kit.row(group, icon, title, if (conflicts.isEmpty()) null else "Also bound to ${conflicts.size} other gesture${if (conflicts.size == 1) "" else "s"}", value = com.oea.launcher.gesture.OeaGestures.actionLabel(current)) {
+            val allowed = com.oea.launcher.gesture.OeaGestures.allowed[slot].orEmpty()
+            val labels = allowed.map { com.oea.launcher.gesture.OeaGestures.actionLabel(it) }
+            val index = allowed.indexOf(current).coerceAtLeast(0)
+            kit.choose(title, "Each gesture has its own binding; OEA warns before two gestures share one.", labels, index) { pick ->
+                val action = allowed[pick]
+                val taken = com.oea.launcher.gesture.OeaGestures.conflicts(this, action, ignore = slot)
+                if (taken.isEmpty()) {
+                    com.oea.launcher.gesture.OeaGestures.set(this, slot, action)
+                    rerender()
+                } else {
+                    kit.confirm(
+                        "That action is already used",
+                        "${com.oea.launcher.gesture.OeaGestures.actionLabel(action)} is already bound to ${taken.joinToString { com.oea.launcher.gesture.OeaGestures.slots[it] ?: it }}. Two gestures would then do the same thing; give that one a different action first.",
+                        "OK",
+                    ) { rerender() }
+                }
+            }
+        }
     }
 
     private fun assistantBanner(box: LinearLayout) {
@@ -886,8 +1272,49 @@ open class OeaSystemToolsActivity : Activity() {
                 rerender()
             }
         }
-        if (power.waveToWake(this) && proximity != null) {
-            val status = kit.text("Test it: cover and uncover the sensor near the front camera.", 13f, palette.textSecondary).apply {
+        // ---- the screen-off gesture, bound on its own row
+        val offBound = dataStore.waveOffAction() != "none"
+        kit.switchRow(group, R.drawable.oic_lock, "Turn the screen off by gesture",
+            "Hold a hand over the screen, uncover it, then wave once within a second and a half",
+            offBound) { on ->
+            dataStore.setWaveOffAction(if (on) "lock" else "none")
+            power.syncWakeService(this)
+            rerender()
+        }
+        if (offBound) {
+            kit.row(group, R.drawable.oic_touch_app, "Screen-off gesture action",
+                "Its own binding: the wave gesture above can never run this, and this can never wake the screen",
+                value = labelFor(dataStore.waveOffAction(), mapOf("lock" to "Lock the screen"))) {
+                kit.choose(
+                    "What should the screen-off gesture do?",
+                    "Only actions that make sense with the screen off are listed.",
+                    listOf("Lock the screen", "Nothing"),
+                    if (dataStore.waveOffAction() == "lock") 0 else 1,
+                ) { pick ->
+                    dataStore.setWaveOffAction(if (pick == 0) "lock" else "none")
+                    power.syncWakeService(this)
+                    rerender()
+                }
+            }
+            if (!OeaAssistant.isConnected() && !power.deviceAdminCanLock(this)) {
+                kit.note(box, "Locking by gesture needs OEA Assistant (the lock behaves like the power key) or OEA's Device admin. Without one of the two, the gesture will report that it cannot lock instead of appearing to do nothing.")
+            }
+        }
+        // ---- what this phone can actually do, checked live
+        kit.sectionTitle(box, "What this phone provides")
+        val caps = kit.group(box)
+        kit.row(caps, R.drawable.oic_visibility_off, "Proximity sensor",
+            if (proximity != null) "Available (${proximity.name}) — drives both wave gestures" else "Not exposed by this phone, so no wave gesture can work here",
+            chevron = false)
+        kit.row(caps, R.drawable.oic_phone_android, "Pick-up sensor",
+            if (lift != null) "Available (${lift.name})" else "Not exposed: lift to wake stays switched off",
+            chevron = false)
+        kit.row(caps, R.drawable.oic_battery_charging_full, "Screen-off listening",
+            if (power.wakeFeaturesOn(this)) "On — the wake service is registered while the screen is off" else "Off — switch on a gesture above",
+            chevron = false)
+
+        if (proximity != null && (power.waveToWake(this) || offBound)) {
+            val status = kit.text("Test it: cover and uncover the sensor near the front camera, or hold a hand over it and wave.", 13f, palette.textSecondary).apply {
                 setPadding(dp(18), dp(10), dp(18), dp(14))
                 setLineSpacing(dp(2).toFloat(), 1f)
             }
@@ -950,6 +1377,46 @@ open class OeaSystemToolsActivity : Activity() {
         present(page)
     }
 
+    /**
+     * The live sensor test: it runs the *same* detector the wake service runs, so
+     * what the user sees here is exactly what will happen with the screen off.
+     *
+     * It reports the two patterns separately, because they are two gestures: a
+     * normal wave (wake) and "hold a hand over the screen, uncover, wave again"
+     * (the screen-off gesture). Both are counted, so the row can say which gesture
+     * the phone actually recognised instead of only "no gesture yet".
+     */
+    /**
+     * The single path every overlay request ends in — the toggle, the return from
+     * Android Settings, and the re-check on resume.
+     *
+     * Android's own "Display over other apps" switch on some phones (and
+     * AppOps-based firmware) answers "allowed" to the check while draw-over
+     * still fails, which is exactly the "it is on but nothing happens" report.
+     * The state is therefore verified against the real draw path as well, and
+     * whatever the answer is, the user is told it and the setting matches.
+     */
+    private fun finishIslandOverlayRequest(cameFromResult: Boolean) {
+        pendingIslandOverlayEnable = false
+        val granted = OeaPrivileges.canOverlay(this)
+        val verified = granted && OeaDynamicIslandOverlayService.verifyOverlay(this)
+        if (verified) {
+            dataStore.setIslandOnOtherApps(true)
+            OeaDynamicIslandOverlayService.sync(this)
+            if (cameFromResult) toast("Dynamic Island will appear over other apps.")
+        } else {
+            dataStore.setIslandOnOtherApps(false)
+            OeaDynamicIslandOverlayService.sync(this)
+            toast(
+                when {
+                    !granted -> "Android did not grant Display over other apps, so the island stays on Home only."
+                    else -> "Android reports the permission, but drawing over apps was refused. Try restarting OEA; if it persists, the phone's firmware is blocking it and the island stays on Home only."
+                },
+            )
+        }
+        if (current == "notifications" || current == "overview") rerender()
+    }
+
     private fun startWaveTest(sensor: android.hardware.Sensor, status: TextView) {
         stopWaveTest()
         val sm = getSystemService(android.hardware.SensorManager::class.java) ?: return
@@ -957,14 +1424,23 @@ open class OeaSystemToolsActivity : Activity() {
         val detector = com.oea.launcher.power.OeaWaveDetector(power.sensitivity(this), power.requireTwoWaves(this), power.pocketGuard(this))
         detector.reset(android.os.SystemClock.elapsedRealtime(), false)
         var waves = 0
+        var offWaves = 0
         val listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(event: android.hardware.SensorEvent) {
                 val distance = event.values.firstOrNull() ?: return
                 val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
-                if (detector.onReading(covered, android.os.SystemClock.elapsedRealtime())) waves++
-                status.text = (if (covered) "Sensor covered" else "Sensor clear") +
-                    (if (waves > 0) " • detected $waves wake gesture" + (if (waves == 1) "" else "s") + " ✓" else " • no wake gesture yet")
-                status.setTextColor(if (waves > 0) palette.success else palette.textSecondary)
+                when (detector.onReading(covered, android.os.SystemClock.elapsedRealtime(), screenOffBound = true)) {
+                    com.oea.launcher.power.OeaWaveDetector.Result.ON -> waves++
+                    com.oea.launcher.power.OeaWaveDetector.Result.OFF -> offWaves++
+                    else -> Unit
+                }
+                val parts = mutableListOf(if (covered) "Sensor covered" else "Sensor clear")
+                if (waves > 0) parts += "wave ×$waves ✓"
+                if (offWaves > 0) parts += "hold-and-wave ×$offWaves ✓"
+                if (detector.armedForScreenOff) parts += "hold seen — now wave"
+                if (waves == 0 && offWaves == 0) parts += "no gesture yet"
+                status.text = parts.joinToString(" • ")
+                status.setTextColor(if (waves > 0 || offWaves > 0) palette.success else palette.textSecondary)
             }
             override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
         }
@@ -1062,14 +1538,21 @@ open class OeaSystemToolsActivity : Activity() {
                     rerender()
                 } else {
                     pendingIslandOverlayEnable = true
-                    runCatching {
+                    // Prefer the per-app screen, and fall back to the global list
+                    // (some firmware has no per-app entry) and to OEA's own
+                    // request screen — three routes, so "it just didn't work" is
+                    // never the end of it.
+                    val opened = runCatching {
                         startActivityForResult(
                             Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
                             REQUEST_ISLAND_OVERLAY,
                         )
-                    }.onFailure {
+                    }.isSuccess || runCatching {
+                        startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION), REQUEST_ISLAND_OVERLAY)
+                    }.isSuccess
+                    if (!opened && !OeaPrivileges.requestOverlay(this, REQUEST_ISLAND_OVERLAY)) {
                         pendingIslandOverlayEnable = false
-                        toast("Open Android Settings › Display over other apps for OEA.")
+                        toast("OEA could not open Android's Display over other apps screen. Android Settings › Apps › OEA › Display over other apps grants it by hand.")
                         rerender()
                     }
                 }
@@ -1102,6 +1585,19 @@ open class OeaSystemToolsActivity : Activity() {
             kit.switchRow(islandGroup, R.drawable.oic_open_in_full, "Expand for new activity",
                 "Opens briefly for a new message, a new song, a charger or a game event, and stays open while a call is ringing. Tap to close; it won't reopen for the same thing.",
                 dataStore.islandPeek()) { dataStore.setIslandPeek(it) }
+            if (dataStore.islandPeek()) {
+                kit.stepperRow(islandGroup, R.drawable.oic_timer, "Auto-collapse after",
+                    "How long an automatic expansion stays open, in seconds",
+                    (dataStore.islandAutoCollapseMs() / 1000).toInt().coerceIn(2, 60), 2, 60, { "$it s" }) {
+                    dataStore.setIslandAutoCollapseMs(it * 1000)
+                }
+                kit.switchRow(islandGroup, R.drawable.oic_visibility_off, "Keep it small over other apps",
+                    "While you are in another app, an expansion stays compact (title and one action) instead of covering content, and collapses by itself when you touch outside it.",
+                    dataStore.islandCompactOverApps()) {
+                    dataStore.setIslandCompactOverApps(it)
+                    OeaDynamicIslandOverlayService.sync(this)
+                }
+            }
             kit.switchRow(islandGroup, R.drawable.oic_mic, "Camera & microphone dots",
                 "Green and orange dots inside the island while any app uses the camera or microphone. Android 12+ shows its own indicator, so the island only shows dots on top of an activity it already shows; on older Android it can show them on their own.",
                 dataStore.islandPrivacyDots()) { dataStore.setIslandPrivacyDots(it) }
@@ -2275,6 +2771,97 @@ open class OeaSystemToolsActivity : Activity() {
      * 2. OEA grants by itself whatever Android lets it grant (root or device
      *    owner) and only asks the user for the rest — no helper app, no PC.
      */
+    /**
+     * The access doctor: every permission OEA uses, *verified live* rather than
+     * read off Android's switches, with the exact fix for each one.
+     *
+     * This is the screen for "it says it is on but nothing happens": each row shows
+     * what OEA observed, and a row that is switched on but not working says so and
+     * offers the repair instead of looking healthy.
+     */
+    private fun showAccessDoctor() {
+        val page = page("Access doctor", "Every permission verified, with the fix for each one")
+        val box = page.content
+        val status = kit.text("Checking what OEA can actually do…", 13f, palette.textSecondary).apply {
+            setPadding(dp(6), dp(6), dp(6), dp(10))
+        }
+        box.addView(status)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(list, LinearLayout.LayoutParams(-1, -2))
+
+        fun render(findings: List<com.oea.launcher.privilege.OeaAccessDoctor.Finding>) {
+            list.removeAllViews()
+            val working = findings.count { it.isReady }
+            status.text = "$working of ${findings.size} checks pass. The rest are listed first, with what to do about each."
+            status.setTextColor(if (working == findings.size) palette.success else palette.textSecondary)
+            findings.forEach { finding ->
+                val group = kit.group(list)
+                val tone = when (finding.state) {
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.WORKING -> OeaKit.Tone.SUCCESS
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.STALE -> OeaKit.Tone.DANGER
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.NEEDS_TAP -> OeaKit.Tone.WARNING
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.OEA_CAN_FIX -> OeaKit.Tone.INFO
+                    com.oea.launcher.privilege.OeaAccessDoctor.State.UNAVAILABLE -> OeaKit.Tone.INFO
+                }
+                kit.banner(group, if (finding.isReady) R.drawable.oic_check_circle_fill else R.drawable.oic_warning_fill, finding.privilege.title, finding.evidence, tone = tone)
+                kit.row(group, R.drawable.oic_settings, finding.privilege.summary, finding.advice, chevron = false)
+                if (!finding.isReady) {
+                    val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(4), dp(8), dp(12)) }
+                    actions.addView(kit.tonalButton("Fix this", R.drawable.oic_shield) {
+                        // One route for every state: OeaPrivileges decides whether it
+                        // can grant it itself, opens the right Android page, or says
+                        // plainly that this device cannot.
+                        OeaPrivileges.grant(this, finding.privilege) { outcome ->
+                            toast(outcome.message)
+                            doctorReload()
+                        }
+                    }, LinearLayout.LayoutParams(-2, dp(42)))
+                    if (finding.command != null) {
+                        actions.addView(kit.quietButton("Copy command", R.drawable.oic_text_fields) {
+                            runCatching {
+                                val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("OEA", finding.command))
+                                toast("Command copied. It is what OEA itself would run.")
+                            }
+                        }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(8) })
+                    }
+                    group.addView(actions)
+                }
+            }
+        }
+
+        fun check() {
+            status.text = "Checking what OEA can actually do…"
+            doctorWorkers.execute {
+                val findings = runCatching { com.oea.launcher.privilege.OeaAccessDoctor.examine(this) }.getOrDefault(emptyList())
+                runOnUiThread { if (!isDestroyed) render(findings) }
+            }
+        }
+        doctorCheck = ::check
+
+        val actions = kit.group(box)
+        kit.row(actions, R.drawable.oic_shield_fill, "Repair everything OEA can repair", "Uses OEA's own channel — no PC and no other app") {
+            OeaPrivileges.repairAll(this) { summary ->
+                toast(summary.describe())
+                check()
+            }
+        }
+        kit.row(actions, R.drawable.oic_refresh, "Check again", "Verifies each permission live, including drawing a test window") { check() }
+        kit.row(actions, R.drawable.oic_info, "Why some rows stay manual", "Android only lets the user turn on accessibility and notification access on most phones. OEA shows exactly which screen.") {
+            toast("Accessibility and notification access have no API a normal app can call; OEA opens the exact page instead.")
+        }
+        kit.note(
+            box,
+            "Nothing here is required. A permission that stays off only limits the feature that uses it: every one of them falls back to OEA's own Home surface, so the launcher keeps working.",
+        )
+        present(page)
+        check()
+    }
+
+    private fun doctorReload() {
+        doctorCheck?.invoke()
+    }
+
     private fun showAccess() {
         val page = page("Permissions & access", "What OEA can use, what it unlocks, and what it does without it")
         val box = page.content

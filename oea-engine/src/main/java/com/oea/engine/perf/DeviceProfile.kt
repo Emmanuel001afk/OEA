@@ -89,7 +89,16 @@ class DeviceProfile private constructor(
     @Volatile var recommendedTier: QualityTier = computeTier()
         private set
 
-    val supportsEs3 get() = glEsVersion >= 0x30000
+    /**
+     * Whether this phone can run an OpenGL ES 3.0 context.
+     *
+     * Android's own `reqGlEsVersion` is the first answer, but it is a *declared*
+     * minimum and plenty of phones report 2.0 while running ES 3.x perfectly well.
+     * The other answer is the driver's own version string, which is only known once
+     * a context exists. Either one is enough: a game is never blocked by a field
+     * Android merely declares, only by a real context that fails to arrive.
+     */
+    val supportsEs3 get() = glEsVersion >= 0x30000 || glVersion.startsWith("OpenGL ES 3")
 
     internal fun updateGpu(renderer: String, vendor: String, version: String, maxTexture: Int, samples: Int, extensions: String) {
         gpuRenderer = renderer
