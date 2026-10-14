@@ -79,9 +79,18 @@ class OeaGameCaptureService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-        } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
+        // A refused media-projection promotion must not crash OEA; the capture
+        // simply doesn't start and Game Boost's controls return to normal.
+        val promoted = runCatching {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
+        }.onFailure { android.util.Log.w("OeaGameCapture", "Capture could not enter the foreground", it) }.isSuccess
+        if (!promoted) {
+            clearCaptureState()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val manager = getSystemService(MediaProjectionManager::class.java)
         projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull()
         if (projection == null) {

@@ -49,15 +49,65 @@ object OeaTheme {
     private val FALLBACK_ACCENT_DARK = Color.rgb(138, 180, 248)
     private val FALLBACK_ACCENT_LIGHT = Color.rgb(26, 102, 220)
 
+    /**
+     * Palette for the current settings, wallpaper and configuration.
+     *
+     * Resolving used to cost two WallpaperManager binder calls every time, and
+     * it runs on every Home resume, every settings change and (with themed
+     * icons) once per icon. The palette is now cached and recomputed only when
+     * one of its inputs changes: the OEA appearance settings, the applied OEA
+     * theme, the configuration (night mode, Material You overlays) or the
+     * wallpaper colours, which Android reports through a listener.
+     */
     fun resolve(context: Context, wallpaperLightOverride: Boolean? = null): OeaPalette {
         val store = OeaDataStore.get(context)
+        val key = buildString {
+            append(store.themeMode()).append('|').append(store.accentMode()).append('|')
+            append(store.themeAccentDark()).append('|').append(store.themeAccentLight()).append('|')
+            append(store.themeSurfaceTint()).append('|')
+            append(context.resources.configuration.hashCode()).append('|')
+            append(wallpaperLightOverride).append('|').append(colorsGeneration)
+        }
+        synchronized(cacheLock) {
+            val cached = cachedPalette
+            if (cached != null && key == cachedKey) return cached
+        }
+        val palette = compute(context, store, wallpaperLightOverride)
+        synchronized(cacheLock) {
+            cachedKey = key
+            cachedPalette = palette
+        }
+        return palette
+    }
+
+    /** Forces the next [resolve] to recompute (wallpaper or theme changed). */
+    fun invalidate() {
+        colorsGeneration++
+        colorsLoaded = false
+        synchronized(cacheLock) {
+            cachedKey = null
+            cachedPalette = null
+        }
+    }
+
+    private val cacheLock = Any()
+    @Volatile private var cachedKey: String? = null
+    @Volatile private var cachedPalette: OeaPalette? = null
+    @Volatile private var colorsGeneration = 0
+    @Volatile private var colorsLoaded = false
+    @Volatile private var cachedColors: WallpaperColors? = null
+    @Volatile private var colorsListener: Any? = null
+
+    private fun compute(context: Context, store: OeaDataStore, wallpaperLightOverride: Boolean?): OeaPalette {
         val dark = when (store.themeMode()) {
             "dark" -> true
             "light" -> false
             else -> isSystemNight(context)
         }
         val wallpaperLight = wallpaperLightOverride ?: wallpaperIsLight(context) ?: false
-        val accent = when (store.accentMode()) {
+        val themed = store.accentMode() == "theme"
+        val themeAccent = if (themed) (if (dark) store.themeAccentDark() else store.themeAccentLight()).takeIf { it != 0 } else null
+        val accent = if (themeAccent != null) themeAccent else when (store.accentMode()) {
             "blue" -> if (dark) FALLBACK_ACCENT_DARK else FALLBACK_ACCENT_LIGHT
             "teal" -> if (dark) Color.rgb(102, 217, 204) else Color.rgb(0, 121, 107)
             "violet" -> if (dark) Color.rgb(196, 168, 255) else Color.rgb(103, 80, 164)
@@ -75,23 +125,26 @@ object OeaTheme {
         val textSecondary: Int
         val accentSoft: Int
         val onAccentSoft: Int
+        val tint = if (themed) store.themeSurfaceTint().takeIf { it != 0 } else null
         if (dark) {
-            background = sys(context, android.R.color.system_neutral1_900, dyn) ?: Color.rgb(14, 16, 20)
+            background = tint?.let { blend(Color.rgb(12, 14, 19), it, 0.10f) }
+                ?: sys(context, android.R.color.system_neutral1_900, dyn) ?: Color.rgb(14, 16, 20)
             val n800 = sys(context, android.R.color.system_neutral1_800, dyn) ?: Color.rgb(34, 38, 46)
             card = blend(background, n800, 0.42f)
             cardHigh = blend(background, n800, 0.78f)
             text = sys(context, android.R.color.system_neutral1_50, dyn) ?: Color.rgb(242, 244, 247)
             textSecondary = sys(context, android.R.color.system_neutral2_200, dyn) ?: Color.rgb(170, 178, 190)
-            accentSoft = sys(context, android.R.color.system_accent1_700, dyn) ?: blend(background, accent, 0.28f)
-            onAccentSoft = sys(context, android.R.color.system_accent1_100, dyn) ?: blend(Color.WHITE, accent, 0.25f)
+            accentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_700, dyn)) ?: blend(background, accent, 0.28f)
+            onAccentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_100, dyn)) ?: blend(Color.WHITE, accent, 0.25f)
         } else {
-            background = sys(context, android.R.color.system_neutral1_10, dyn) ?: Color.rgb(246, 247, 250)
+            background = tint?.let { blend(Color.rgb(248, 249, 251), it, 0.07f) }
+                ?: sys(context, android.R.color.system_neutral1_10, dyn) ?: Color.rgb(246, 247, 250)
             card = Color.WHITE
             cardHigh = sys(context, android.R.color.system_neutral1_100, dyn) ?: Color.rgb(232, 235, 241)
             text = sys(context, android.R.color.system_neutral1_900, dyn) ?: Color.rgb(24, 27, 33)
             textSecondary = sys(context, android.R.color.system_neutral2_700, dyn) ?: Color.rgb(84, 92, 106)
-            accentSoft = sys(context, android.R.color.system_accent1_100, dyn) ?: blend(Color.WHITE, accent, 0.18f)
-            onAccentSoft = sys(context, android.R.color.system_accent1_800, dyn) ?: blend(Color.BLACK, accent, 0.55f)
+            accentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_100, dyn)) ?: blend(Color.WHITE, accent, 0.18f)
+            onAccentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_800, dyn)) ?: blend(Color.BLACK, accent, 0.55f)
         }
         val onAccent = if (luminance(accent) > 0.45f) Color.rgb(16, 20, 28) else Color.WHITE
         return OeaPalette(
@@ -136,11 +189,36 @@ object OeaTheme {
         return luminance(colors.primaryColor.toArgb()) > 0.6f
     }
 
+    /**
+     * The system wallpaper's colours, cached until Android reports a change.
+     * One process-wide listener keeps every OEA screen in sync without each
+     * caller asking WallpaperManager again.
+     */
     private fun wallpaperColors(context: Context): WallpaperColors? {
         if (Build.VERSION.SDK_INT < 27) return null
-        return runCatching {
-            WallpaperManager.getInstance(context).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
-        }.getOrNull()
+        ensureColorsListener(context)
+        if (!colorsLoaded) {
+            cachedColors = runCatching {
+                WallpaperManager.getInstance(context.applicationContext).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+            }.getOrNull()
+            colorsLoaded = true
+        }
+        return cachedColors
+    }
+
+    private fun ensureColorsListener(context: Context) {
+        if (Build.VERSION.SDK_INT < 27 || colorsListener != null) return
+        synchronized(cacheLock) {
+            if (colorsListener != null) return
+            val listener = WallpaperManager.OnColorsChangedListener { _, which ->
+                if ((which and WallpaperManager.FLAG_SYSTEM) != 0) invalidate()
+            }
+            val registered = runCatching {
+                WallpaperManager.getInstance(context.applicationContext)
+                    .addOnColorsChangedListener(listener, android.os.Handler(android.os.Looper.getMainLooper()))
+            }.isSuccess
+            if (registered) colorsListener = listener
+        }
     }
 
     private fun dynamicAccent(context: Context, dark: Boolean): Int? {

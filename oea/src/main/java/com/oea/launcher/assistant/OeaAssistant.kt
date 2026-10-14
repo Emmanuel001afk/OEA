@@ -59,6 +59,17 @@ object OeaAssistant {
     fun watchForeground(packageName: String, timeoutMs: Long, callback: (Boolean) -> Unit): Boolean =
         OeaAssistantService.instance?.watchForeground(packageName, timeoutMs, callback) == true
 
+    /** Package of the window in front, from OEA Assistant (null when it isn't running). */
+    fun foregroundPackage(): String? = OeaAssistantService.instance?.currentForegroundPackage()
+
+    /** Lets OEA Assistant start or stop following other apps' windows (Game Boost on/off). */
+    fun refreshEventMask() {
+        main.post { OeaAssistantService.instance?.refreshEventMask() }
+    }
+
+    /** Opens Android's power menu (power off / restart) — useful when the power key is faulty. */
+    fun openPowerMenu(): Boolean = perform(AccessibilityService.GLOBAL_ACTION_POWER_DIALOG)
+
     /** True when two app windows currently share the screen (Android split screen). */
     fun isSplitScreenActive(): Boolean = OeaAssistantService.instance?.isSplitScreenActive() == true
 

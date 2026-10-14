@@ -75,6 +75,7 @@ open class OeaSystemToolsActivity : Activity() {
         private const val REQUEST_WALLPAPER = 0x4F58
         private const val REQUEST_CONTACTS = 0x4F59
         private const val REQUEST_ISLAND_OVERLAY = 0x4F5A
+        private const val FREEZER_LIST_FRESH_MS = 30_000L
     }
 
     private val dataStore by lazy { OeaDataStore.get(this) }
@@ -1028,6 +1029,8 @@ open class OeaSystemToolsActivity : Activity() {
     private val freezerBusy = linkedSetOf<String>()
     private val freezerJustFrozen = HashMap<String, Long>()
     private var freezerOperationRunning = false
+    private var freezerBackendShown: OeaAppFreezer.Backend? = null
+    private var freezerAppsLoadedAt = 0L
 
     private fun freezerIce(): Int = if (palette.dark) Color.rgb(112, 212, 255) else Color.rgb(0, 118, 186)
 
@@ -1042,7 +1045,10 @@ open class OeaSystemToolsActivity : Activity() {
      * CI regression guards retain the previous SELECT VISIBLE and REFRESH STATE control identifiers.
      */
     private fun showFreezer() {
+        // Root (if any) is detected once in the background; the screen updates when it is known.
+        OeaAppFreezer.primeRootCheck { if (!isDestroyed && current == "freezer" && OeaAppFreezer.backend(this) != freezerBackendShown) rerender() }
         val backend = OeaAppFreezer.backend(this)
+        freezerBackendShown = backend
         val systemMode = OeaAppFreezer.mode(this) == OeaAppFreezer.Mode.SYSTEM
         val standalone = current == rootScreen && stack.isEmpty()
         val ice = freezerIce()
@@ -1181,6 +1187,7 @@ open class OeaSystemToolsActivity : Activity() {
                     if (isDestroyed) return@runOnUiThread
                     freezerApps = loaded
                     freezerAppsIncludeSystem = includeSystem
+                    freezerAppsLoadedAt = android.os.SystemClock.elapsedRealtime()
                     loadingApps = false
                     renderApps()
                 }
@@ -1505,8 +1512,11 @@ open class OeaSystemToolsActivity : Activity() {
         renderApps()
         setContentView(root)
         currentScroll = null
-        // Show the last list immediately, then refresh it in the background.
-        reload()
+        // Show the last list immediately. Re-reading every installed app (and
+        // its label) on each resume made the list visibly reload; refresh only
+        // when the list is missing or stale. "Refresh state" always re-reads.
+        val stale = android.os.SystemClock.elapsedRealtime() - freezerAppsLoadedAt > FREEZER_LIST_FRESH_MS
+        if (freezerApps == null || freezerAppsIncludeSystem != freezerShowSystem || stale) reload()
     }
 
     private fun loadInstalledFreezerApps(includeSystemApps: Boolean = false): List<OeaAppInfo> =
@@ -1621,7 +1631,10 @@ open class OeaSystemToolsActivity : Activity() {
             protectedLaunch(app) {
                 val launch = packageManager.getLaunchIntentForPackage(app.packageName)
                 if (launch == null) toast("This app has no launchable activity.")
-                else runCatching { startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { toast("Android could not open ${app.label}.") }
+                else runCatching {
+                    startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(this, app.packageName)
+                }.onFailure { toast("Android could not open ${app.label}.") }
             }
         }
 
