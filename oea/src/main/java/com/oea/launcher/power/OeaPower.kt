@@ -169,6 +169,12 @@ object OeaPower {
     fun syncWakeService(context: Context) {
         val app = context.applicationContext
         val intent = Intent(app, OeaWakeService::class.java)
+        // Low mode releases the motion sensors; the user's wave/lift settings are
+        // kept and the service simply comes back when Low mode ends.
+        if (com.oea.launcher.perf.OeaLowMode.active(app)) {
+            app.stopService(intent)
+            return
+        }
         if (!wakeFeaturesOn(app)) {
             app.stopService(intent)
             return

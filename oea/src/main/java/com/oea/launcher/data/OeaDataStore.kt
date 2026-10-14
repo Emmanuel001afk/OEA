@@ -212,6 +212,95 @@ class OeaDataStore private constructor(context: Context) {
     fun doubleTapAction() = prefs.getString(KEY_DOUBLE_TAP, "lock") ?: "lock"
     fun setDoubleTapAction(v: String) { prefs.edit().putString(KEY_DOUBLE_TAP, v).apply() }
 
+    /**
+     * Triple-tap on Home. It has its own key and its own tap count, so it can
+     * never fire for the same sequence as the double-tap: OeaGestures owns the
+     * timing that separates them.
+     */
+    fun tripleTapAction() = prefs.getString(KEY_TRIPLE_TAP, "none") ?: "none"
+    fun setTripleTapAction(v: String) { prefs.edit().putString(KEY_TRIPLE_TAP, v).apply() }
+
+    /** Two-finger swipe on Home: a different pointer count from the one-finger swipe. */
+    fun twoFingerSwipeAction() = prefs.getString(KEY_TWO_FINGER, "none") ?: "none"
+    fun setTwoFingerSwipeAction(v: String) { prefs.edit().putString(KEY_TWO_FINGER, v).apply() }
+
+    /** Long-press on an empty part of Home: "wallpaper", "widgets", "settings" or "none". */
+    fun emptyLongPressAction() = prefs.getString(KEY_EMPTY_LONG_PRESS, "wallpaper") ?: "wallpaper"
+    fun setEmptyLongPressAction(v: String) { prefs.edit().putString(KEY_EMPTY_LONG_PRESS, v).apply() }
+
+    /** What a wave in front of the proximity sensor does: "wake", "lock", "power_menu", "low" or "none". */
+    fun waveAction() = prefs.getString(KEY_WAVE_ACTION, "wake") ?: "wake"
+    fun setWaveAction(v: String) { prefs.edit().putString(KEY_WAVE_ACTION, v).apply() }
+
+    // ---------------------------------------------------------- launcher mode
+
+    /** The launcher's whole look: classic, liquid, tide, depth or ink. */
+    fun launcherMode() = prefs.getString(KEY_LAUNCHER_MODE, "classic")?.takeIf { it in MODES } ?: "classic"
+    fun setLauncherMode(v: String) { prefs.edit().putString(KEY_LAUNCHER_MODE, if (v in MODES) v else "classic").apply() }
+
+    /** True once the user picked a mode themselves, so themes do not silently change it afterwards. */
+    fun modeChosen() = prefs.getBoolean(KEY_MODE_CHOSEN, false)
+    fun setModeChosen(v: Boolean) { prefs.edit().putBoolean(KEY_MODE_CHOSEN, v).apply() }
+
+    // ------------------------------------------------------------- wallpaper
+
+    /**
+     * Who owns Home's wallpaper.
+     *
+     * - [WALLPAPER_SYSTEM]: Android's wallpaper is the one you see; OEA's window is
+     *   transparent over it, which is how the wallpaper also reaches the lock
+     *   screen, widgets and the recents thumbnail.
+     * - [WALLPAPER_OEA]: Home draws the wallpaper itself, under its own icons, so it
+     *   can be live (Tide) and needs no wallpaper service call at all. Android's own
+     *   wallpaper is left completely alone.
+     */
+    fun wallpaperSource() = prefs.getString(KEY_WALLPAPER_SOURCE, WALLPAPER_SYSTEM)
+        ?.takeIf { it == WALLPAPER_SYSTEM || it == WALLPAPER_OEA } ?: WALLPAPER_SYSTEM
+    fun setWallpaperSource(v: String) {
+        prefs.edit().putString(KEY_WALLPAPER_SOURCE, if (v == WALLPAPER_OEA) WALLPAPER_OEA else WALLPAPER_SYSTEM).apply()
+    }
+
+    /** The scene Home draws when [wallpaperSource] is OEA: a scene id such as "tide", "depth", "ink" or "mountain_dawn". */
+    fun homeScene() = prefs.getString(KEY_HOME_SCENE, null)
+    fun setHomeScene(v: String?) { prefs.edit().putString(KEY_HOME_SCENE, v).apply() }
+
+    /** Parallax strength for the Depth mode and layered scenes, 0..100. */
+    fun parallaxStrength() = prefs.getInt(KEY_PARALLAX, 45).coerceIn(0, 100)
+    fun setParallaxStrength(v: Int) { prefs.edit().putInt(KEY_PARALLAX, v.coerceIn(0, 100)).apply() }
+
+    // --------------------------------------------------------------- low mode
+
+    /** OEA's own power-saving mode. See OeaLowMode for exactly what it turns off. */
+    fun lowModeEnabled() = prefs.getBoolean(KEY_LOW_MODE, false)
+    fun setLowModeEnabled(v: Boolean) { prefs.edit().putBoolean(KEY_LOW_MODE, v).apply() }
+
+    /** Turn Low mode on by itself when the battery drops to [lowModeThreshold] percent. */
+    fun lowModeAuto() = prefs.getBoolean(KEY_LOW_MODE_AUTO, true)
+    fun setLowModeAuto(v: Boolean) { prefs.edit().putBoolean(KEY_LOW_MODE_AUTO, v).apply() }
+
+    fun lowModeThreshold() = prefs.getInt(KEY_LOW_MODE_THRESHOLD, 15).coerceIn(5, 50)
+    fun setLowModeThreshold(v: Int) { prefs.edit().putInt(KEY_LOW_MODE_THRESHOLD, v.coerceIn(5, 50)).apply() }
+
+    /** Leave Low mode once the battery is back above this percent, or the phone is charging. */
+    fun lowModeExit() = prefs.getInt(KEY_LOW_MODE_EXIT, 25).coerceIn(10, 80)
+    fun setLowModeExit(v: Int) { prefs.edit().putInt(KEY_LOW_MODE_EXIT, v.coerceIn(10, 80)).apply() }
+
+    /** In Low mode, also suspend the chosen apps, only ever with device owner. */
+    fun lowModeSuspendApps() = prefs.getBoolean(KEY_LOW_MODE_SUSPEND, false)
+    fun setLowModeSuspendApps(v: Boolean) { prefs.edit().putBoolean(KEY_LOW_MODE_SUSPEND, v).apply() }
+
+    /** The apps Low mode suspends (package names). */
+    fun lowModeAppList(): Set<String> = prefs.getStringSet(KEY_LOW_MODE_APPS, emptySet()).orEmpty()
+    fun setLowModeAppList(v: Set<String>) { prefs.edit().putStringSet(KEY_LOW_MODE_APPS, v).apply() }
+
+    /**
+     * True when Low mode switched itself on because of the battery. Only an
+     * automatic engagement lifts by itself; a manual one stays until the user
+     * turns it off.
+     */
+    fun lowModeAutoEngaged() = prefs.getBoolean(KEY_LOW_MODE_AUTO_ENGAGED, false)
+    fun setLowModeAutoEngaged(v: Boolean) { prefs.edit().putBoolean(KEY_LOW_MODE_AUTO_ENGAGED, v).apply() }
+
     /** Recents button: "system" (Android Recents via OEA Assistant) or "oea" (OEA Overview). */
     fun recentsMode() = prefs.getString(KEY_RECENTS_MODE, "system") ?: "system"
     fun setRecentsMode(v: String) { prefs.edit().putString(KEY_RECENTS_MODE, v).apply() }
@@ -352,10 +441,29 @@ class OeaDataStore private constructor(context: Context) {
         const val GLASS_CLASSIC = "classic"
         const val GLASS_LIQUID = "liquid"
         val PAGE_EFFECTS = listOf("classic", "liquid", "cube", "stack", "zoom", "fade", "none")
+        val MODES = listOf("classic", "liquid", "tide", "depth", "ink")
+        const val WALLPAPER_SYSTEM = "system"
+        const val WALLPAPER_OEA = "oea"
         private const val KEY_THEMED_ICONS = "themed_icons"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_SWIPE_DOWN = "gesture_swipe_down"
         private const val KEY_DOUBLE_TAP = "gesture_double_tap"
+        private const val KEY_TRIPLE_TAP = "gesture_triple_tap"
+        private const val KEY_TWO_FINGER = "gesture_two_finger"
+        private const val KEY_EMPTY_LONG_PRESS = "gesture_empty_long_press"
+        private const val KEY_WAVE_ACTION = "gesture_wave_action"
+        private const val KEY_LAUNCHER_MODE = "launcher_mode"
+        private const val KEY_MODE_CHOSEN = "launcher_mode_chosen"
+        private const val KEY_WALLPAPER_SOURCE = "wallpaper_source"
+        private const val KEY_HOME_SCENE = "home_scene"
+        private const val KEY_PARALLAX = "parallax_strength"
+        private const val KEY_LOW_MODE = "low_mode_enabled"
+        private const val KEY_LOW_MODE_AUTO = "low_mode_auto"
+        private const val KEY_LOW_MODE_THRESHOLD = "low_mode_threshold"
+        private const val KEY_LOW_MODE_EXIT = "low_mode_exit"
+        private const val KEY_LOW_MODE_SUSPEND = "low_mode_suspend_apps"
+        private const val KEY_LOW_MODE_APPS = "low_mode_apps"
+        private const val KEY_LOW_MODE_AUTO_ENGAGED = "low_mode_auto_engaged"
         private const val KEY_RECENTS_MODE = "recents_mode"
         private const val KEY_DRAWER_CATEGORIES = "drawer_categories"
         private const val KEY_DRAWER_KEYBOARD = "drawer_keyboard"

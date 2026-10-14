@@ -53,6 +53,7 @@ class OeaWakeService : Service() {
             val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
             lastCovered = covered
             if (inCall() || !OeaPower.waveToWake(this@OeaWakeService)) return
+            if (OeaPower.waveAction(this@OeaWakeService) == "none") return
             if (detector?.onReading(covered, SystemClock.elapsedRealtime()) == true) wake("wave")
         }
 
@@ -188,9 +189,22 @@ class OeaWakeService : Service() {
         return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_RINGTONE
     }
 
+    /**
+     * A wave (or a lift) was recognised. "wake" is the original behaviour; the
+     * others are bound in Settings › Gestures, and every one of them is checked
+     * against the current gesture setting so two gestures can never share an
+     * action by accident.
+     */
     private fun wake(reason: String) {
-        Log.i(TAG, "Waking the screen ($reason)")
-        wakeScreen(this)
+        val action = if (reason == "lift") "wake" else OeaPower.waveAction(this)
+        Log.i(TAG, "Gesture recognised ($reason) -> $action")
+        when (action) {
+            "lock" -> com.oea.launcher.gesture.OeaGestures.run(this, "wave", "lock")
+            "power_menu" -> com.oea.launcher.gesture.OeaGestures.run(this, "wave", "power_menu")
+            "low" -> com.oea.launcher.gesture.OeaGestures.run(this, "wave", "low")
+            "none" -> Unit
+            else -> wakeScreen(this)
+        }
     }
 
     private fun notification(): Notification {

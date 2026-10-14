@@ -1,32 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Single-colour OEA monogram for themed icons and notifications. -->
-    <group android:pivotX="54" android:pivotY="54.25" android:scaleX="0.78" android:scaleY="0.78">
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="6.2"
-            android:strokeLineCap="round"
-            android:pathData="M33,42 A12,12 0,1 1,33 66 A12,12 0,1 1,33 42 Z" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M41.5,41.8 A3.7,3.7 0,1 1,41.5 49.2 A3.7,3.7 0,1 1,41.5 41.8 Z" />
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="6.2"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round"
-            android:pathData="M52.5,42 L52.5,66 M52.5,42 L65,42 M52.5,54 L62.5,54 M52.5,66 L65,66" />
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="6.2"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round"
-            android:pathData="M70.5,66.5 L79,41.5 L87.5,66.5 M74,57.8 L84,57.8" />
-    </group>
+    <!-- Single-colour OEA glyph for themed icons and notifications: the same
+         Home-screen grid flattened into one silhouette Android can tint. -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M36.90,30.50 H45.10 A6.40,6.40 0 0 1 51.50,36.90 V45.10 A6.40,6.40 0 0 1 45.10,51.50 H36.90 A6.40,6.40 0 0 1 30.50,45.10 V36.90 A6.40,6.40 0 0 1 36.90,30.50 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M64.30,27.50 H73.10 A7.40,7.40 0 0 1 80.50,34.90 V43.70 A7.40,7.40 0 0 1 73.10,51.10 H64.30 A7.40,7.40 0 0 1 56.90,43.70 V34.90 A7.40,7.40 0 0 1 64.30,27.50 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M36.90,56.50 H45.10 A6.40,6.40 0 0 1 51.50,62.90 V71.10 A6.40,6.40 0 0 1 45.10,77.50 H36.90 A6.40,6.40 0 0 1 30.50,71.10 V62.90 A6.40,6.40 0 0 1 36.90,56.50 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M62.90,56.50 H71.10 A6.40,6.40 0 0 1 77.50,62.90 V71.10 A6.40,6.40 0 0 1 71.10,77.50 H62.90 A6.40,6.40 0 0 1 56.50,71.10 V62.90 A6.40,6.40 0 0 1 62.90,56.50 Z" />
 </vector>

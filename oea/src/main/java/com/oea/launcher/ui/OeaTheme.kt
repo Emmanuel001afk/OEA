@@ -7,6 +7,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.wallpaper.OeaHomeScene
 import com.oea.launcher.wallpaper.OeaWallpaper
 import com.oea.launcher.wallpaper.OeaWallpaperStore
 
@@ -107,15 +108,14 @@ object OeaTheme {
             else -> isSystemNight(context)
         }
         // An applied OEA theme (the Themes app) owns the accent. When no theme
-        // is applied, one of OEA's own wallpapers is the wallpaper: its own
-        // brightness decides Home's text colour and, if the user allows it, the
-        // accent. Android's wallpaper colours would describe a different image.
-        val scene = if (OeaWallpaperStore.themeFollowsScene(context) && OeaWallpaperStore.coversHome(context)) {
-            OeaWallpaperStore.scene(context)
-        } else {
-            null
-        }
-        val wallpaperLight = wallpaperLightOverride ?: scene?.light ?: wallpaperIsLight(context) ?: false
+        // is applied, whatever Home is actually showing wins: a scene OEA applied
+        // to Android's wallpaper, or a scene Home draws itself (including the live
+        // ones in OeaModes). Its brightness decides Home's text colour and, if the
+        // user allows it, the accent — Android's wallpaper colours would describe a
+        // different image entirely.
+        val scene = OeaHomeScene.still(context)
+        val wallpaperLight = wallpaperLightOverride ?: OeaHomeScene.light(context)
+            ?: wallpaperIsLight(context) ?: false
         val themed = store.accentMode() == "theme"
         val themeAccent = if (themed) (if (dark) store.themeAccentDark() else store.themeAccentLight()).takeIf { it != 0 } else null
         val accent = if (themeAccent != null) themeAccent else when (store.accentMode()) {
@@ -129,7 +129,7 @@ object OeaTheme {
             "coral" -> if (dark) Color.rgb(255, 171, 145) else Color.rgb(191, 54, 12)
             "lime" -> if (dark) Color.rgb(197, 225, 165) else Color.rgb(51, 105, 30)
             "slate" -> if (dark) Color.rgb(176, 190, 197) else Color.rgb(55, 71, 79)
-            else -> scene?.let { sceneAccent(it, dark) } ?: dynamicAccent(context, dark) ?: wallpaperAccent(context, dark)
+            else -> sceneAccent(scene, dark, context) ?: dynamicAccent(context, dark) ?: wallpaperAccent(context, dark)
                 ?: if (dark) FALLBACK_ACCENT_DARK else FALLBACK_ACCENT_LIGHT
         }
         val dyn = Build.VERSION.SDK_INT >= 31 && store.accentMode() == "wallpaper"
@@ -240,8 +240,14 @@ object OeaTheme {
      * A bundled scene's own colour, tuned to read as an accent on the current
      * theme: lighter on dark panels, deeper on light ones, and never washed out.
      */
-    private fun sceneAccent(scene: OeaWallpaper, dark: Boolean): Int {
-        val hsl = hsl(scene.accent)
+    /**
+     * The accent a scene asks for: a live scene states its own, a still scene
+     * states the colour it was drawn around, and both are pushed through the same
+     * saturation/lightness curve so text and icons stay readable on them.
+     */
+    private fun sceneAccent(scene: OeaWallpaper?, dark: Boolean, context: Context): Int? {
+        val raw = OeaHomeScene.accent(context, dark) ?: scene?.accent ?: return null
+        val hsl = hsl(raw)
         val saturation = hsl[1].coerceIn(0.42f, 0.9f)
         val lightness = if (dark) 0.74f else 0.42f
         return hslToColor(hsl[0], saturation, lightness)

@@ -124,6 +124,39 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val launcherApps: LauncherApps? = context.getSystemService(LauncherApps::class.java)
 
     private val scrim = View(context)
+
+    /**
+     * Home's own wallpaper surface, used only when the user chose the OEA
+     * wallpaper source (OeaDataStore.WALLPAPER_OEA). It sits under the scrim, so
+     * the status-bar gradient still works, and it is the reason a scene can be
+     * live: Home draws it itself and Android's wallpaper is never touched.
+     */
+    private val wallpaperBackdrop = FrameLayout(context)
+    private var liveBackdrop: com.oea.launcher.wallpaper.OeaLiveSceneView? = null
+    private var backdropKey: String? = null
+    /** Home's page position, 0 = first page; drives Depth's parallax. */
+    private var pageProgress = 0f
+
+    /**
+     * Liquid glass surfaces that answer the finger: the dock and the search bar.
+     * [touchedGlass] is whichever the current touch started on, so one gesture
+     * never blooms two panes at once.
+     */
+    private var dockGlass: com.oea.launcher.ui.OeaGlassDrawable? = null
+    private var searchGlass: com.oea.launcher.ui.OeaGlassDrawable? = null
+    private var searchGlassView: View? = null
+    private var touchedGlass: com.oea.launcher.ui.OeaGlassDrawable? = null
+
+    /**
+     * Taps are counted here, never dispatched straight from the detector: that is
+     * what lets double-tap and triple-tap coexist (see OeaTapRouter).
+     */
+    private val tapRouter = com.oea.launcher.gesture.OeaTapRouter()
+    private var twoFingerDownY = 0f
+    private var twoFingerStartX = 0f
+    private var twoFingerHandled = false
+    private var backdropWidth = 0
+    private var backdropHeight = 0
     private val homeLayer = FrameLayout(context)
     private val homeColumn = LinearLayout(context)
     internal val glance = OeaGlanceView(context)
@@ -215,6 +248,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     // =================================================================== views
 
     private fun buildViews() {
+        addView(wallpaperBackdrop, LayoutParams(-1, -1))
+        wallpaperBackdrop.visibility = GONE
         addView(scrim, LayoutParams(-1, -1))
         addView(homeLayer, LayoutParams(-1, -1))
         homeColumn.orientation = LinearLayout.VERTICAL
@@ -250,9 +285,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             topMargin = dp(18)
         })
         homeColumn.addView(topSearchHost, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
-        pager.onScroll = { position -> indicator.position = position }
+        pager.onScroll = { position ->
+            indicator.position = position
+            pageProgress = position
+            liveBackdrop?.parallax = position * 2f - 1f
+            // A page in motion drags the glass with it: the panes the finger is
+            // not touching bend with the swipe and flatten again when it settles.
+            val drift = position - Math.round(position)
+            val bend = if (Math.abs(drift) < 0.01f) 0f else -drift * 2.6f
+            dockGlass?.liquify(bend)
+            searchGlass?.liquify(bend * 0.7f)
+        }
         pager.onPageChanged = { page -> ws.setCurrentPage(page) }
-        pager.effect = store.pageEffect()
+        pager.effect = appliedPageEffect()
         homeColumn.addView(pager, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(6) })
         homeColumn.addView(indicator, LinearLayout.LayoutParams(-1, dp(20)))
         homeColumn.addView(bannerHost, LinearLayout.LayoutParams(-1, -2))
@@ -266,8 +311,25 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         })
         homeColumn.addView(bottomSearchHost, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
 
+        wallpaperBackdrop.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                backdropKey = null
+                applyWallpaperBackdrop()
+            }
+        }
+        tapRouter.attach(main)
+        tapRouter.onDoubleTap = {
+            if (!drawerOpen && drag == null) gesture("double_tap")
+        }
+        tapRouter.onTripleTap = {
+            if (!drawerOpen && drag == null) gesture("triple_tap")
+        }
         val homeGestures = GestureDetector(context, emptyGestureListener())
-        homeColumn.setOnTouchListener { _, event -> homeGestures.onTouchEvent(event); true }
+        homeColumn.setOnTouchListener { _, event ->
+            homeGestures.onTouchEvent(event)
+            trackTwoFinger(event)
+            true
+        }
 
         drawer.visibility = GONE
         addView(drawer, LayoutParams(-1, -1))
@@ -284,25 +346,146 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private fun emptyGestureListener() = object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent) = true
-        override fun onDoubleTap(e: MotionEvent): Boolean {
-            onHomeDoubleTap()
+
+        /**
+         * A confirmed tap only *counts*; the router decides afterwards whether it
+         * was a double or a triple tap. GestureDetector's own onDoubleTap is
+         * deliberately not used, because it fires too early for a third tap to
+         * ever be seen.
+         */
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            if (drag == null && !drawerOpen) tapRouter.tap()
             return true
         }
+
         override fun onLongPress(e: MotionEvent) {
             if (drag != null || drawerOpen) return
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            menus.showHomeMenu(e.rawX, e.rawY)
+            val action = store.emptyLongPressAction()
+            when (action) {
+                "widgets" -> menus.showWidgetPicker(pager.currentPage)
+                "settings" -> openSystemTool("")
+                "low" -> gesture("long_press")
+                else -> menus.showHomeMenu(e.rawX, e.rawY)   // "wallpaper" and anything unexpected
+            }
         }
     }
 
+    /**
+     * Two-finger swipe. Detected from the pointer count and the axis, so it can
+     * never be confused with the one-finger swipe-up (which the pager owns) or
+     * with a tap: the fingers must move past the touch slop, and vertically.
+     */
+    private fun trackTwoFinger(event: MotionEvent) {
+        if (store.twoFingerSwipeAction() == "none") return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount == 2) {
+                    twoFingerHandled = false
+                    twoFingerDownY = event.getY(0)
+                    twoFingerStartX = event.getX(0)
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount < 2 || twoFingerHandled || drawerOpen || drag != null) return
+                val dy = event.getY(0) - twoFingerDownY
+                val dx = kotlin.math.abs(event.getX(0) - twoFingerStartX)
+                if (kotlin.math.abs(dy) > dp(44) && kotlin.math.abs(dy) > dx * 1.4f) {
+                    twoFingerHandled = true
+                    gesture("two_finger")
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> twoFingerHandled = false
+        }
+    }
+
+    /** Runs one gesture through the registry, with Home performing it in place. */
+    private fun gesture(slot: String): Boolean =
+        com.oea.launcher.gesture.OeaGestures.run(context, slot, homeAction = ::performHomeAction)
+
+    /**
+     * Liquid glass reacts to the finger before dispatch continues, exactly like a
+     * physical surface: the pane under the touch presses in, the specular
+     * highlight follows the finger across it, and letting go releases the pane
+     * with a short spring. Nothing here consumes the event, so taps, drags and
+     * gestures behave exactly as before.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        com.oea.launcher.fault.OeaFaultShield.guard("home:glass-touch") { trackGlass(ev) }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun trackGlass(event: MotionEvent) {
+        if (store.glassStyle() != OeaDataStore.GLASS_LIQUID) return
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            touchedGlass = glassAt(event.rawX, event.rawY)
+            touchedGlass?.press(1f)
+        }
+        val glass = touchedGlass ?: return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                val fraction = fractionInside(glass, event.rawX)
+                if (fraction != null) glass.specular(fraction, 0.12f)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                releaseGlass(glass)
+                touchedGlass = null
+            }
+        }
+    }
+
+    /** The liquid pane that contains a screen point, if any. */
+    private fun glassAt(rawX: Float, rawY: Float): com.oea.launcher.ui.OeaGlassDrawable? {
+        val point = IntArray(2)
+        searchGlassView?.let { view ->
+            if (view.visibility == VISIBLE && view.width > 0) {
+                view.getLocationOnScreen(point)
+                if (rawX >= point[0] && rawX <= point[0] + view.width && rawY >= point[1] && rawY <= point[1] + view.height) {
+                    return searchGlass
+                }
+            }
+        }
+        dockGlass?.let {
+            dockFrame.getLocationOnScreen(point)
+            if (dockFrame.width > 0 && rawX >= point[0] && rawX <= point[0] + dockFrame.width &&
+                rawY >= point[1] && rawY <= point[1] + dockFrame.height
+            ) {
+                return it
+            }
+        }
+        return null
+    }
+
+    /** Where a screen x sits inside a pane, 0..1, or null when the pane is gone. */
+    private fun fractionInside(glass: com.oea.launcher.ui.OeaGlassDrawable, rawX: Float): Float? {
+        val view = if (glass === searchGlass) searchGlassView else dockFrame
+        if (view == null || view.width <= 0) return null
+        val point = IntArray(2)
+        view.getLocationOnScreen(point)
+        return ((rawX - point[0]) / view.width).coerceIn(0f, 1f)
+    }
+
+    /** Springs a pane back to rest instead of snapping it. */
+    private fun releaseGlass(glass: com.oea.launcher.ui.OeaGlassDrawable) {
+        val animator = ValueAnimator.ofFloat(1f, 0f).setDuration(180L)
+        animator.interpolator = DecelerateInterpolator(2.2f)
+        animator.addUpdateListener { glass.press(it.animatedValue as Float) }
+        animator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) = glass.reset()
+        })
+        animator.start()
+    }
+
     private fun searchPill(): View {
+        val glass = if (store.glassStyle() == OeaDataStore.GLASS_LIQUID) {
+            com.oea.launcher.ui.OeaGlassDrawable(palette.glassStrong, dp(28).toFloat(), density, palette.accent)
+        } else null
         val pill = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(18), 0, dp(8), 0)
             background = kit.ripple(
-                if (store.glassStyle() == OeaDataStore.GLASS_LIQUID) com.oea.launcher.ui.OeaGlassDrawable(palette.glassStrong, dp(28).toFloat(), density, palette.accent)
-                else kit.rounded(palette.glassStrong, 28, palette.glassStroke, 1),
+                glass ?: kit.rounded(palette.glassStrong, 28, palette.glassStroke, 1),
                 28,
             )
             isClickable = true
@@ -327,10 +510,25 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 setOnClickListener { startSafely(Intent(voice).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH)) }
             }, LinearLayout.LayoutParams(dp(42), dp(42)))
         }
+        // The ripple draws inside the glass, so the surface itself blooms on touch.
+        if (glass != null) {
+            searchGlass = glass
+            searchGlassView = pill
+        } else {
+            searchGlass = null
+            searchGlassView = null
+        }
         return pill
     }
 
     /** Re-applies colours to every piece of chrome (not the pages themselves). */
+    /**
+     * Page motion is a real battery cost, so Low mode overrides the user's choice
+     * while it is on and restores it the moment it ends.
+     */
+    private fun appliedPageEffect(): String =
+        if (com.oea.launcher.perf.OeaLowMode.active(context)) "none" else store.pageEffect()
+
     private fun applyChrome() {
         kit.palette = palette
         appLoadStatus.setTextColor(palette.text)
@@ -344,10 +542,21 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         indicator.color = palette.homeText
         val liquid = store.glassStyle() == OeaDataStore.GLASS_LIQUID
         dockFrame.background = when (store.dockStyle()) {
-            "none" -> null
-            "solid" -> kit.rounded(palette.glassStrong, 30)
-            else -> if (liquid) com.oea.launcher.ui.OeaGlassDrawable(palette.glass, dp(30).toFloat(), density, palette.accent)
-                else kit.rounded(palette.glass, 30, palette.glassStroke, 1)
+            "none" -> {
+                dockGlass = null
+                null
+            }
+            "solid" -> {
+                dockGlass = null
+                kit.rounded(palette.glassStrong, 30)
+            }
+            else -> if (liquid) {
+                com.oea.launcher.ui.OeaGlassDrawable(palette.glass, dp(30).toFloat(), density, palette.accent)
+                    .also { dockGlass = it }
+            } else {
+                dockGlass = null
+                kit.rounded(palette.glass, 30, palette.glassStroke, 1)
+            }
         }
         (dockFrame.layoutParams as? LinearLayout.LayoutParams)?.let {
             it.height = dockHeight()
@@ -555,12 +764,82 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             refreshBadges()
         }
         applySafeModeVisibility()
+        applyWallpaperBackdrop()
         glance.refresh()
         dynamicIsland.refresh()
         cameraIsland.refresh()
         renderBanner()
         rebindNotificationListener()
         updateSystemBars()
+    }
+
+    /**
+     * Decides what sits behind Home's icons.
+     *
+     * With Android's wallpaper source the backdrop stays invisible and Home's
+     * window is transparent over the real wallpaper, exactly as before. With the
+     * OEA source, Home paints the scene itself: a live one (Tide, Depth, Ink,
+     * Aurora) is drawn frame by frame, a still one is rendered once per size, and
+     * Low mode or safe mode freezes anything animated so power saving is real.
+     */
+    private fun applyWallpaperBackdrop() {
+        val source = if (store.wallpaperSource() == OeaDataStore.WALLPAPER_OEA &&
+            !com.oea.launcher.fault.OeaFaultShield.safeMode
+        ) store.homeScene() else null
+        if (source == null) {
+            liveBackdrop?.release()
+            liveBackdrop = null
+            backdropKey = null
+            wallpaperBackdrop.visibility = GONE
+            return
+        }
+        wallpaperBackdrop.visibility = VISIBLE
+        val frozen = com.oea.launcher.perf.OeaLowMode.active(context)
+        if (com.oea.launcher.wallpaper.OeaLiveScenes.isLive(source)) {
+            val existing = liveBackdrop
+            if (existing != null && existing.sceneId == source) {
+                existing.animated = !frozen
+                return
+            }
+            existing?.release()
+            wallpaperBackdrop.removeAllViews()
+            val view = com.oea.launcher.wallpaper.OeaLiveScenes.view(context, source)
+            view.animated = !frozen
+            view.parallax = pageProgress * 2f - 1f
+            liveBackdrop = view
+            backdropKey = source
+            wallpaperBackdrop.addView(view, LayoutParams(-1, -1))
+            return
+        }
+        liveBackdrop?.release()
+        liveBackdrop = null
+        val scene = com.oea.launcher.wallpaper.OeaWallpaper.byId(source) ?: return
+        val width = wallpaperBackdrop.width
+        val height = wallpaperBackdrop.height
+        if (width <= 0 || height <= 0) {
+            // Not measured yet: keep the previous frame and try again after layout.
+            wallpaperBackdrop.post { applyWallpaperBackdrop() }
+            return
+        }
+        val dim = com.oea.launcher.wallpaper.OeaWallpaperStore.dimPercent(context)
+        val key = "${scene.id}:${width}x$height:$dim"
+        if (key == backdropKey) return
+        backdropKey = key
+        // Half the screen resolution is plenty for a gradient scene and keeps the
+        // render off the critical path of Home's first frame.
+        val renderWidth = (width / 2).coerceIn(360, com.oea.launcher.wallpaper.OeaWallpaperRenderer.MAX_EDGE)
+        val renderHeight = (renderWidth.toFloat() / width * height).toInt().coerceAtLeast(360)
+        val bitmap = com.oea.engine.core.OeaGuard.call("home:backdrop", null as android.graphics.Bitmap?) {
+            com.oea.launcher.wallpaper.OeaWallpaperRenderer.render(scene, renderWidth, renderHeight)
+        } ?: return
+        wallpaperBackdrop.removeAllViews()
+        wallpaperBackdrop.background = android.graphics.drawable.BitmapDrawable(resources, bitmap)
+        if (dim > 0) {
+            wallpaperBackdrop.addView(
+                View(context).apply { setBackgroundColor(android.graphics.Color.argb(dim * 255 / 100, 0, 0, 0)) },
+                LayoutParams(-1, -1),
+            )
+        }
     }
 
     /**
@@ -571,7 +850,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
      */
     private fun applySafeModeVisibility() {
         val safe = com.oea.launcher.fault.OeaFaultShield.safeMode
-        val optional = if (safe) GONE else VISIBLE
+        // Low mode hides the same optional surfaces as safe mode, plus the live
+        // activities: they poll and animate, which is exactly what it is for.
+        val light = safe || com.oea.launcher.perf.OeaLowMode.active(context)
+        val optional = if (light) GONE else VISIBLE
         if (glance.visibility != optional) glance.visibility = optional
         if (dynamicIsland.visibility != optional) dynamicIsland.visibility = optional
         if (cameraIsland.visibility != optional) cameraIsland.visibility = optional
@@ -664,9 +946,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val chromeRefresh = Runnable {
         palette = OeaTheme.resolve(context)
         applyChrome()
+        // Toggling Low mode from Settings must be visible at once, without
+        // rebuilding the pages: this is the same pass that runs on resume.
+        applySafeModeVisibility()
         glance.applyStyle()
         glance.refresh()
-        pager.effect = store.pageEffect()
+        pager.effect = appliedPageEffect()
+        backdropKey = null
+        applyWallpaperBackdrop()
     }
 
     private val themeRefresh = Runnable {
@@ -674,7 +961,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         applyChrome()
         glance.applyStyle()
         glance.refresh()
-        pager.effect = store.pageEffect()
+        pager.effect = appliedPageEffect()
         rebuild()
     }
 
@@ -1593,26 +1880,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
-    private fun onHomeDoubleTap() {
-        if (drawerOpen || drag != null) return
-        when (store.doubleTapAction()) {
-            "lock" -> if (com.oea.launcher.power.OeaPower.lockScreen(context) != com.oea.launcher.power.OeaPower.LockResult.LOCKED) {
-                menus.showAssistantNeeded("Double-tap to lock")
-            }
-            "power_menu" -> if (!com.oea.launcher.power.OeaPower.openPowerMenu()) menus.showAssistantNeeded("Double-tap for the power menu")
-            "quick_controls" -> openQuickControls()
-            "drawer" -> openDrawer()
-            else -> Unit
-        }
-    }
-
     private fun onHomeSwipeDown() {
-        when (store.swipeDownAction()) {
-            "notifications" -> if (!OeaSystemActions.expandNotifications(context)) menus.showAssistantNeeded("Swipe down for notifications")
-            "quick_settings" -> if (!OeaSystemActions.expandQuickSettings(context)) menus.showAssistantNeeded("Swipe down for Quick Settings")
-            "search" -> openDrawer(searchFocus = true)
-            "quick_controls" -> openQuickControls()
-            else -> Unit
+        // Bound through the gesture registry, so a swipe-down and any other
+        // gesture can never end up sharing an action without the warning.
+        val action = store.swipeDownAction()
+        when (action) {
+            "notifications" -> if (!com.oea.launcher.gesture.OeaGestures.expandNotifications(context)) {
+                menus.showAssistantNeeded("Swipe down for notifications")
+            }
+            "quick_settings" -> if (!com.oea.launcher.gesture.OeaGestures.expandQuickSettings(context)) {
+                menus.showAssistantNeeded("Swipe down for Quick Settings")
+            }
+            "silence", "volume", "low" -> gesture("swipe_down")
+            else -> gesture("swipe_down")
         }
     }
 
@@ -2534,12 +2814,24 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     internal fun currentPage() = pager.currentPage
 
     /** Actions OEA Settings can request on Home. */
-    fun performHomeAction(action: String) {
+    fun performHomeAction(action: String): Boolean {
         when {
             action == "widgets" -> menus.showWidgetPicker(pager.currentPage)
             action == "drawer" -> openDrawer()
             action == "search" -> openDrawer(searchFocus = true)
             action == "hidden" -> openHiddenApps()
+            action == "quick_controls" -> openQuickControls()
+            action == "notifications" -> if (!com.oea.launcher.gesture.OeaGestures.expandNotifications(context)) {
+                menus.showAssistantNeeded("Notifications")
+            }
+            action == "quick_settings" -> if (!com.oea.launcher.gesture.OeaGestures.expandQuickSettings(context)) {
+                menus.showAssistantNeeded("Quick Settings")
+            }
+            action == "wallpaper" -> openSystemTool("wallpaper")
+            action == "themes" -> runCatching {
+                startActivity(Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            action == "settings" -> openSystemTool("")
             // Stability screen: rebuild in place, or restart Home's window.
             action == "rebuild" -> {
                 val rebuilt = recoverSurface()
@@ -2548,7 +2840,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
             action == "restart" -> hostActivity?.recreate()
             action.startsWith(HOME_ACTION_ADD_APPS) -> addAppsFromSettings(action.removePrefix(HOME_ACTION_ADD_APPS))
+            else -> return false
         }
+        return true
     }
 
     /** "pkg/cls,pkg/cls" from OEA Settings: give each app its own Home icon. */
@@ -2974,7 +3268,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             "search_wallpaper_visible", "hidden_apps",
         )
         /** Settings that restyle Home's chrome (dock, search bar, glance, glass, page motion) without new pages. */
-        private val CHROME_KEYS = setOf("dock_style", "search_bar_position", "glance_style", "glass_style", "page_effect")
+        private val CHROME_KEYS = setOf("dock_style", "search_bar_position", "glance_style", "glass_style", "page_effect", "low_mode_enabled")
         /** Breathing room between a widget and its cell edges. */
         private const val WIDGET_INSET_DP = 6
         private const val HANDLE_NONE = 0

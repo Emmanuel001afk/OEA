@@ -5,10 +5,11 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- OEA brand badge for in-app headers, About and loading states: the
-         launcher icon (midnight field + refined monogram) as one drawable.
-         Replacing the monogram here and in ic_oea_launcher_* swaps the logo
-         everywhere. -->
+    <!-- OEA's brand badge for in-app headers, About and loading states: the
+         launcher icon as a single drawable — the rounded midnight field, the
+         teal/blue glow and the lifted app-grid glyph. The layers are kept in
+         step with ic_oea_launcher_background/foreground, so replacing the
+         launcher icon replaces the badge everywhere. -->
     <path android:pathData="M30,2 L78,2 C96,2 106,12 106,30 L106,78 C106,96 96,106 78,106 L30,106 C12,106 2,96 2,78 L2,30 C2,12 12,2 30,2 Z">
         <aapt:attr name="android:fillColor">
             <gradient
@@ -17,38 +18,62 @@
                 android:startY="6"
                 android:endX="98"
                 android:endY="104">
-                <item android:offset="0" android:color="#FF16245A" />
-                <item android:offset="0.55" android:color="#FF0B1224" />
-                <item android:offset="1" android:color="#FF060912" />
+                <item android:offset="0" android:color="#FF17265E" />
+                <item android:offset="0.5" android:color="#FF0B1224" />
+                <item android:offset="1" android:color="#FF05070F" />
             </gradient>
         </aapt:attr>
     </path>
-    <group android:pivotX="54" android:pivotY="54.25" android:scaleX="1.12" android:scaleY="1.12">
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFF4F7FF"
-            android:strokeWidth="6.2"
-            android:strokeLineCap="round"
-            android:pathData="M33,42 A12,12 0,1 1,33 66 A12,12 0,1 1,33 42 Z" />
-        <path
-            android:fillColor="#FF0B1224"
-            android:pathData="M41.5,40.9 A4.6,4.6 0,1 1,41.5 50.1 A4.6,4.6 0,1 1,41.5 40.9 Z" />
-        <path
-            android:fillColor="#FF2EE0D6"
-            android:pathData="M41.5,42.3 A3.2,3.2 0,1 1,41.5 48.7 A3.2,3.2 0,1 1,41.5 42.3 Z" />
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FF6E8BFF"
-            android:strokeWidth="6.2"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round"
-            android:pathData="M52.5,42 L52.5,66 M52.5,42 L65,42 M52.5,54 L62.5,54 M52.5,66 L65,66" />
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FF2EE0D6"
-            android:strokeWidth="6.2"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round"
-            android:pathData="M70.5,66.5 L79,41.5 L87.5,66.5 M74,57.8 L84,57.8" />
+    <path android:pathData="M54,10a44,44 0,1 1,0 88a44,44 0,1 1,0 -88z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="52"
+                android:centerY="46"
+                android:gradientRadius="46">
+                <item android:offset="0" android:color="#4A2BC7D8" />
+                <item android:offset="0.55" android:color="#262B4FD8" />
+                <item android:offset="1" android:color="#00000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <group android:translateX="8" android:translateY="8" android:scaleX="0.86" android:scaleY="0.86">
+        <!-- The OEA launcher glyph: a Home screen's app grid, with the top-right app
+                 lifted the way Android shows an app being picked up, and one accent tile
+                 carrying OEA's teal/blue identity. Every shape sits inside the
+                 adaptive-icon safe circle (radius 33 around 54,54) so no mask clips it. -->
+            <path android:fillColor="#59040912" android:pathData="M65.70,29.40 H72.90 A8.20,8.20 0 0 1 81.10,37.60 V44.80 A8.20,8.20 0 0 1 72.90,53.00 H65.70 A8.20,8.20 0 0 1 57.50,44.80 V37.60 A8.20,8.20 0 0 1 65.70,29.40 Z" />
+            <path android:pathData="M36.90,30.50 H45.10 A6.40,6.40 0 0 1 51.50,36.90 V45.10 A6.40,6.40 0 0 1 45.10,51.50 H36.90 A6.40,6.40 0 0 1 30.50,45.10 V36.90 A6.40,6.40 0 0 1 36.90,30.50 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient android:type="linear" android:startX="0" android:startY="28" android:endX="0" android:endY="82">
+                        <item android:offset="0" android:color="#FFF8FBFF" />
+                        <item android:offset="1" android:color="#FFD6E2F6" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+            <path android:pathData="M64.30,27.50 H73.10 A7.40,7.40 0 0 1 80.50,34.90 V43.70 A7.40,7.40 0 0 1 73.10,51.10 H64.30 A7.40,7.40 0 0 1 56.90,43.70 V34.90 A7.40,7.40 0 0 1 64.30,27.50 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient android:type="linear" android:startX="55" android:startY="26" android:endX="80" android:endY="55">
+                        <item android:offset="0" android:color="#FF3BF2E4" />
+                        <item android:offset="1" android:color="#FF3F7DFF" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+            <path android:pathData="M36.90,56.50 H45.10 A6.40,6.40 0 0 1 51.50,62.90 V71.10 A6.40,6.40 0 0 1 45.10,77.50 H36.90 A6.40,6.40 0 0 1 30.50,71.10 V62.90 A6.40,6.40 0 0 1 36.90,56.50 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient android:type="linear" android:startX="0" android:startY="28" android:endX="0" android:endY="82">
+                        <item android:offset="0" android:color="#FFF8FBFF" />
+                        <item android:offset="1" android:color="#FFD6E2F6" />
+                    </gradient>
+                </aapt:attr>
+            </path>
+            <path android:pathData="M62.90,56.50 H71.10 A6.40,6.40 0 0 1 77.50,62.90 V71.10 A6.40,6.40 0 0 1 71.10,77.50 H62.90 A6.40,6.40 0 0 1 56.50,71.10 V62.90 A6.40,6.40 0 0 1 62.90,56.50 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient android:type="linear" android:startX="0" android:startY="28" android:endX="0" android:endY="82">
+                        <item android:offset="0" android:color="#FFF8FBFF" />
+                        <item android:offset="1" android:color="#FFD6E2F6" />
+                    </gradient>
+                </aapt:attr>
+            </path>
     </group>
 </vector>

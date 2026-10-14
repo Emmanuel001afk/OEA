@@ -78,6 +78,7 @@ object OeaGameBoost {
     /** OEA launched [packageName] from one of its own surfaces. */
     fun onAppLaunched(context: Context, packageName: String) {
         val app = context.applicationContext
+        if (com.oea.launcher.perf.OeaLowMode.active(app)) return
         if (!OeaGameBoostStore.enabled(app)) return
         if (packageName == app.packageName) return
         if (!OeaGameBoostStore.isGame(app, packageName)) return
@@ -91,6 +92,7 @@ object OeaGameBoost {
     /** OEA Assistant saw a new window in front (event driven; no polling). */
     fun onWindowChanged(context: Context, packageName: String, className: String?) {
         val app = context.applicationContext
+        if (com.oea.launcher.perf.OeaLowMode.active(app)) return
         if (!OeaGameBoostStore.enabled(app)) return
         val running = service
         if (running != null && running.currentGame() != null) {
@@ -99,6 +101,17 @@ object OeaGameBoost {
         }
         if (packageName == app.packageName) return
         if (OeaGameBoostStore.isGame(app, packageName)) startSession(app, packageName)
+    }
+
+    /**
+     * Low mode is on: end any running session and stop the overlay service.
+     * Sessions also refuse to start while Low mode is active (see [onAppLaunched]
+     * and [onWindowChanged]), so this cannot simply be undone by opening a game.
+     */
+    fun onLowMode(context: Context) {
+        val app = context.applicationContext
+        runCatching { app.stopService(Intent(app, OeaGameBoostService::class.java)) }
+            .onFailure { Log.w(TAG, "Game Boost service did not stop for Low mode", it) }
     }
 
     /** OEA Home came to the front: any running game session has ended. */

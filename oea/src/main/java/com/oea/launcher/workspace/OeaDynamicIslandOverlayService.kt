@@ -425,9 +425,19 @@ class OeaDynamicIslandOverlayService : Service() {
         fun ensureRunning(context: Context) {
             if (overlayActive) return
             val app = context.applicationContext
+            // Low mode switches the system-wide island off without forgetting the
+            // user's choice: leaving Low mode brings it straight back.
+            if (com.oea.launcher.perf.OeaLowMode.active(app)) return
             val store = OeaDataStore.get(app)
             if (!store.dynamicIslandEnabled() || !store.islandOnOtherApps() || !com.oea.launcher.privilege.OeaPrivileges.canOverlay(app)) return
             sync(app)
+        }
+
+        /** Low mode: stop the overlay service and its foreground notification. */
+        fun stopForLowMode(context: Context) {
+            val app = context.applicationContext
+            overlayActive = false
+            runCatching { app.stopService(Intent(app, OeaDynamicIslandOverlayService::class.java)) }
         }
 
         /** Starts only from a visible user action or stops when any prerequisite is gone. */

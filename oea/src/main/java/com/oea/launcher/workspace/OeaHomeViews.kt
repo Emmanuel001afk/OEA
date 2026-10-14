@@ -632,10 +632,13 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
      */
     private fun liquid(child: View, offset: Float, a: Float, w: Int, h: Float, density: Float) {
         val wave = kotlin.math.sin(Math.PI * a).toFloat()
-        child.rotationY = 0f
         child.translationX = 0f
-        child.pivotX = if (offset < 0f) w.toFloat() else 0f
+        child.pivotX = w / 2f
         child.pivotY = h / 2f
+        // A shallow barrel turn rather than a flat slide: the page curves away
+        // from the finger, which is what sells a physical sheet of glass.
+        child.rotationY = -5.5f * offset
+        child.cameraDistance = 9000f * density
         child.scaleX = 1f - 0.16f * a
         child.scaleY = 1f + 0.06f * wave
         child.alpha = 1f - 0.55f * a * a
@@ -644,10 +647,16 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
             val tile = page.getChildAt(j)
             val cx = ((tile.left + tile.width / 2f) / w).coerceIn(0f, 1f)
             val trailing = if (scrollDirection > 0) cx else 1f - cx
+            // Icons lag behind their page by how far they sit from the leading
+            // edge, drift down and up across the width, and rock a couple of
+            // degrees as they catch up: water, not a slide.
             tile.translationX = scrollDirection * w * 0.12f * trailing * wave
             tile.translationY = -8f * density * wave * kotlin.math.sin(Math.PI * cx).toFloat()
+            tile.rotation = scrollDirection * 2.4f * trailing * wave
+            tile.pivotX = tile.width / 2f
+            tile.pivotY = tile.height / 2f
             val s = 1f - 0.06f * wave * trailing
-            tile.scaleX = s
+            tile.scaleX = s * (1f + 0.03f * wave * (1f - trailing))
             tile.scaleY = s
         }
     }
@@ -657,6 +666,8 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
         child.scaleX = 1f
         child.scaleY = 1f
         child.translationX = 0f
+        child.translationY = 0f
+        child.rotation = 0f
         child.rotationY = 0f
     }
 
@@ -669,6 +680,7 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
                     page.getChildAt(j).apply {
                         translationX = 0f
                         translationY = 0f
+                        rotation = 0f
                         scaleX = 1f
                         scaleY = 1f
                     }
