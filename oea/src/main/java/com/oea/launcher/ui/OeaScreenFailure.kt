@@ -63,8 +63,8 @@ object OeaScreenFailure {
         onClose: (() -> Unit)?,
     ): View {
         val dark = palette?.dark ?: true
-        val background = palette?.background ?: Color.rgb(12, 15, 21)
-        val text = palette?.text ?: Color.WHITE
+        val backgroundColor = palette?.background ?: Color.rgb(12, 15, 21)
+        val textColor = palette?.text ?: Color.WHITE
         val secondary = palette?.textSecondary ?: Color.rgb(184, 192, 207)
         val accent = palette?.accent ?: Color.rgb(138, 180, 248)
         val card = palette?.card ?: Color.rgb(22, 26, 34)
@@ -80,7 +80,7 @@ object OeaScreenFailure {
         }
 
         val root = ScrollView(activity).apply {
-            setBackgroundColor(background)
+            setBackgroundColor(backgroundColor)
             isFillViewport = true
         }
         val column = LinearLayout(activity).apply {
@@ -90,7 +90,7 @@ object OeaScreenFailure {
         }
         root.addView(column, ViewGroup.LayoutParams(-1, -2))
 
-        val headline = label(screen, 24f, text, OeaType.medium)
+        val headline = label(screen, 24f, textColor, OeaType.medium)
         column.addView(headline)
         val intro = label("This part of OEA stopped, so nothing else was affected. Your Home screen, layout and settings are untouched.", 14f, secondary)
         intro.setLineSpacing(dp(3).toFloat(), 1f)
@@ -139,7 +139,7 @@ object OeaScreenFailure {
                 cornerRadius = dp(22).toFloat()
                 if (!filled) setStroke(maxOf(1, dp(1)), stroke)
             }
-            setTextColor(if (filled) (palette?.onAccent ?: Color.rgb(16, 20, 28)) else text)
+            setTextColor(if (filled) (palette?.onAccent ?: Color.rgb(16, 20, 28)) else textColor)
             setOnClickListener { OeaFaultShield.guard("failure:action") { action() } }
         }
         if (onClose != null) {

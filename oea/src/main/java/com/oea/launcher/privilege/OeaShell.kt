@@ -41,8 +41,6 @@ object OeaShell {
     /** Result of one shell command. */
     data class Output(val ok: Boolean, val text: String, val exit: Int) {
         val failed get() = !ok
-        operator fun component1() = ok
-        operator fun component2() = text
     }
 
     /** True when a su binary answers on this device. Probed once per process. */
