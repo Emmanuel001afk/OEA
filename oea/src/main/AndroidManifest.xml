@@ -141,6 +141,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- OEA mini-apps: the small tools built into the launcher (gallery,
+             notes, calculator). Their own task, so a mini-app that faults is
+             contained and cannot take Home with it. -->
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaMiniAppActivity"
+            android:exported="false"
+            android:label="OEA mini-apps"
+            android:launchMode="singleTop"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- OEA Games: the hub for games built on the OEA Game Engine. Its own
              task (like Game Boost), so a running game resumes from the icon or
              the Dynamic Island. Not singleTask: that would close a running game. -->

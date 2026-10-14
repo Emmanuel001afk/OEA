@@ -408,6 +408,9 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_splitscreen, "Multitasking", "Overview, split screen and floating windows") { navigate("multitasking") }
         kit.row(group, R.drawable.oic_sports_esports, "Game Boost", if (OeaGameBoostStore.enabled(this)) "On • ${OeaGameBoostStore.games(this).size} games" else "Off") { openActivity(OeaGameBoostActivity::class.java) }
         kit.row(group, R.drawable.oic_stadia_controller_fill, "OEA Games", "Runner, Arena, Chess and the OEA Game Engine") { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java) }
+        kit.row(group, R.drawable.oic_apps, "Mini-apps", "Gallery, notes and calculator — built into OEA, no download") {
+            com.oea.launcher.miniapps.OeaMiniApps.open(this)
+        }
         kit.row(group, R.drawable.oic_call, "Phone", "OEA dialer, contacts and in-call screen") { openActivity(OeaPhoneActivity::class.java) }
         kit.row(group, R.drawable.oic_block, "Call Blocker", "Blocked numbers, allow list, rules and history") { openActivity(OeaCallBlockerActivity::class.java) }
         kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "OEA Games, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }

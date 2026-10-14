@@ -392,6 +392,9 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                 }
             }
             popupRow(card, kit.icon(R.drawable.oic_widgets, palette.text), "Widgets") { showWidgetPicker(w.currentPage()) }
+            popupRow(card, kit.icon(R.drawable.oic_apps, palette.text), "Mini-apps") {
+                if (!com.oea.launcher.miniapps.OeaMiniApps.open(context)) w.toast("Mini-apps could not be opened")
+            }
             popupRow(card, kit.icon(R.drawable.oic_settings, palette.text), "Home settings") { w.openSystemTool("home") }
             popupRow(card, kit.icon(R.drawable.oic_layers, palette.text), "Recent apps") { openRecents() }
             popupRow(card, kit.icon(R.drawable.oic_view_carousel, palette.text), "Add page") { w.addPage() }
