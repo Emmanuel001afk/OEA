@@ -134,6 +134,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val wallpaperBackdrop = FrameLayout(context)
     private var liveBackdrop: com.oea.launcher.wallpaper.OeaLiveSceneView? = null
     private var backdropKey: String? = null
+    /**
+     * Ink mode's paper grain and press bloom. Both are created for every mode (they
+     * cost nothing while hidden) and shown only while Ink is the mode in use, so
+     * switching modes never has to build a view on the main thread.
+     */
+    private var paperSheet: com.oea.launcher.ui.OeaModeCharacter.PaperOverlay? = null
+    private var inkBloom: com.oea.launcher.ui.OeaModeCharacter.InkBloomView? = null
+    /** The motion of the mode in use: parallax, trail and press feedback. */
+    private var character = com.oea.launcher.ui.OeaModeCharacter.CLASSIC
+
     /** Home's page position, 0 = first page; drives Depth's parallax. */
     private var pageProgress = 0f
 
@@ -251,6 +261,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         addView(wallpaperBackdrop, LayoutParams(-1, -1))
         wallpaperBackdrop.visibility = GONE
         addView(scrim, LayoutParams(-1, -1))
+
+        // Ink mode's two surfaces, in the chrome layer with the scrim: the paper
+        // grain sits over the wallpaper and under the icons, and the bloom is drawn
+        // on the same layer so a press marks the page rather than the pane.
+        val sheet = com.oea.launcher.ui.OeaModeCharacter.PaperOverlay(context).apply { visibility = GONE }
+        val bloom = com.oea.launcher.ui.OeaModeCharacter.InkBloomView(context).apply { visibility = GONE }
+        paperSheet = sheet
+        inkBloom = bloom
+        addView(sheet, LayoutParams(-1, -1))
+        addView(bloom, LayoutParams(-1, -1))
         addView(homeLayer, LayoutParams(-1, -1))
         homeColumn.orientation = LinearLayout.VERTICAL
         homeColumn.clipChildren = false
@@ -288,7 +308,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pager.onScroll = { position ->
             indicator.position = position
             pageProgress = position
-            liveBackdrop?.parallax = position * 2f - 1f
+            // The backdrop drifts against the pages by as much as the mode asks for:
+            // Tide's water moves most, Depth's ridges are read as distance, and Ink's
+            // paper stays put because a sheet of paper does not slide under its ink.
+            liveBackdrop?.parallax = (position * 2f - 1f) * character.parallax
             // A page in motion drags the glass with it: the panes the finger is
             // not touching bend with the swipe and flatten again when it settles.
             val drift = position - Math.round(position)
@@ -416,6 +439,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     private fun trackGlass(event: MotionEvent) {
+        if (character.ink) {
+            // Ink mode: the press spreads ink on the page instead of pressing glass.
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) bloomInk(event.rawX, event.rawY)
+            return
+        }
         if (store.glassStyle() != OeaDataStore.GLASS_LIQUID) return
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             touchedGlass = glassAt(event.rawX, event.rawY)
@@ -463,6 +491,19 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val point = IntArray(2)
         view.getLocationOnScreen(point)
         return ((rawX - point[0]) / view.width).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Starts an ink bloom at a screen point. The point is moved into the bloom
+     * view's own coordinates, so the stain appears under the finger wherever the
+     * workspace happens to sit on screen.
+     */
+    private fun bloomInk(rawX: Float, rawY: Float) {
+        val view = inkBloom ?: return
+        if (view.visibility != VISIBLE || view.width <= 0) return
+        val point = IntArray(2)
+        view.getLocationOnScreen(point)
+        view.bloom(rawX - point[0], rawY - point[1], dp(150).toFloat())
     }
 
     /** Springs a pane back to rest instead of snapping it. */
@@ -526,6 +567,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
      * Page motion is a real battery cost, so Low mode overrides the user's choice
      * while it is on and restores it the moment it ends.
      */
+    /** True when the mode's own glass is a liquid pane (so it can carry light). */
+    private fun liquidGlassRequested(): Boolean = store.glassStyle() == OeaDataStore.GLASS_LIQUID
+
     private fun appliedPageEffect(): String =
         if (com.oea.launcher.perf.OeaLowMode.active(context)) "none" else store.pageEffect()
 
@@ -540,6 +584,17 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             intArrayOf(palette.scrimTop, Color.TRANSPARENT, Color.TRANSPARENT, palette.scrimBottom),
         )
         indicator.color = palette.homeText
+
+        // ---- the mode's character: its motion, its paper and its press feedback
+        character = com.oea.launcher.ui.OeaModeCharacter.current(context)
+        val lowMode = com.oea.launcher.perf.OeaLowMode.active(context)
+        paperSheet?.visibility = if (character.paper && !lowMode) VISIBLE else GONE
+        inkBloom?.visibility = if (character.ink && !lowMode) VISIBLE else GONE
+        dockFrame.elevation = dp(character.lift).toFloat()
+        // The pager reads its effect from the mode, so a mode change is felt in the
+        // very next swipe instead of waiting for a rebuild.
+        pager.effect = appliedPageEffect()
+
         val liquid = store.glassStyle() == OeaDataStore.GLASS_LIQUID
         dockFrame.background = when (store.dockStyle()) {
             "none" -> {
@@ -575,6 +630,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         dockGrid.highlightColor = OeaTheme.alpha(palette.homeText, 0x30)
         glance.setPalette(palette)
         drawer.applyPalette()
+        // Moving light inside the glass is a Liquid/Tide trait. It is applied here,
+        // after the panes above have been (re)built, and switched off in Low mode
+        // and for every mode that does not ask for it — no frame is spent drawing
+        // light nobody asked to see.
+        val caustics = character.caustics && !lowMode && liquidGlassRequested()
+        dockGlass?.setCaustics(caustics)
+        searchGlass?.setCaustics(caustics)
+
         renderBanner()
         updateSystemBars()
     }
@@ -808,7 +871,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             wallpaperBackdrop.removeAllViews()
             val view = com.oea.launcher.wallpaper.OeaLiveScenes.view(context, source)
             view.animated = !frozen
-            view.parallax = pageProgress * 2f - 1f
+            view.parallax = (pageProgress * 2f - 1f) * character.parallax
             liveBackdrop = view
             backdropKey = source
             wallpaperBackdrop.addView(view, LayoutParams(-1, -1))

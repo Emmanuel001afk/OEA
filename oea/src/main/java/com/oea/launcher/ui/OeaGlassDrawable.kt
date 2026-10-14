@@ -71,10 +71,85 @@ class OeaGlassDrawable(
     /** How far the pane is bent by motion, −1..1; 0 leaves it flat. */
     private var bend = 0f
 
+    /**
+     * Moving light inside the glass (Liquid and Tide). Real glass under a moving
+     * sky is never still: a broad highlight drifts slowly across the pane, which
+     * is what makes the surface read as glass even while nothing is being touched.
+     * The loop is one frame callback and one invalidate per frame, and it stops
+     * the moment the mode or the screen does.
+     */
+    private var causticsOn = false
+    private var causticsPhase = 0f
+    private var causticsCallback: android.view.Choreographer.FrameCallback? = null
+
+    fun setCaustics(enabled: Boolean) {
+        if (enabled == causticsOn) return
+        causticsOn = enabled
+        if (enabled) startCaustics() else stopCaustics()
+        invalidateSelf()
+    }
+
+    private fun startCaustics() {
+        if (causticsCallback != null) return
+        val callback = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (!causticsOn) {
+                    causticsCallback = null
+                    return
+                }
+                // A slow drift: one full sweep takes about nine seconds, which reads
+                // as light moving rather than as an animation playing.
+                causticsPhase = (causticsPhase + 1f / (9f * 60f)) % 1f
+                invalidateSelf()
+                android.view.Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+        causticsCallback = callback
+        runCatching { android.view.Choreographer.getInstance().postFrameCallback(callback) }
+            .onFailure { causticsCallback = null }
+    }
+
+    private fun stopCaustics() {
+        val callback = causticsCallback ?: return
+        causticsCallback = null
+        runCatching { android.view.Choreographer.getInstance().removeFrameCallback(callback) }
+    }
+
+    override fun setVisible(visible: Boolean, restart: Boolean): Boolean {
+        if (!visible) stopCaustics() else if (causticsOn) startCaustics()
+        return super.setVisible(visible, restart)
+    }
+
     override fun onBoundsChange(bounds: Rect) {
         super.onBoundsChange(bounds)
         rebuild()
     }
+
+    /** The drifting highlight: a wide, very soft band of light inside the glass. */
+    private fun caustic(canvas: Canvas, b: Rect) {
+        if (!causticsOn) return
+        val w = b.width().toFloat()
+        val h = b.height().toFloat()
+        if (w <= 0f || h <= 0f) return
+        val travel = w * 1.6f
+        val x = -w * 0.3f + travel * causticsPhase
+        sheen.shader = LinearGradient(
+            x - w * 0.5f, 0f, x + w * 0.5f, h,
+            intArrayOf(
+                Color.TRANSPARENT,
+                OeaTheme.alpha(OeaTheme.blend(fill, Color.WHITE, 0.5f), 0x1E),
+                OeaTheme.alpha(tintOrAccent(), 0x14),
+                Color.TRANSPARENT,
+            ),
+            floatArrayOf(0f, 0.4f, 0.6f, 1f), Shader.TileMode.CLAMP,
+        )
+        canvas.drawRoundRect(rect, radiusWithBend(h), radiusWithBend(h), sheen)
+        sheen.shader = null
+    }
+
+    private fun tintOrAccent(): Int = if (tint != 0) tint else fill
+
+    private fun radiusWithBend(h: Float): Float = min(radius * (1f - 0.03f * abs(bend)), h / 2f)
 
     /** Recomputes every shader from the current bounds and state. */
     private fun rebuild() {
@@ -169,6 +244,9 @@ class OeaGlassDrawable(
         val rr = min(r, rect.height() / 2f)
         canvas.drawRoundRect(rect, rr, rr, body)
         canvas.drawRoundRect(rect, rr, rr, grain)
+        // Moving light inside the glass, between the body and the highlights that
+        // sit on top of it.
+        caustic(canvas, b)
         canvas.drawRoundRect(rect, rr, rr, sheen)
         if (glow.shader != null) canvas.drawRoundRect(rect, rr, rr, glow)
 

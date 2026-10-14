@@ -50,12 +50,12 @@ enum class OeaMode(
     DEPTH(
         "depth", "Depth",
         "Four ridges, four distances",
-        "Home draws layered ridges that shift against each other as you move between pages: the nearest moves most, the furthest almost not at all.",
+        "Home draws layered ridges that shift against each other as you move between pages: the nearest moves most, the furthest almost not at all. Pages themselves move towards and away from you, so the interface and the ridges share one sense of distance.",
     ),
     INK(
         "ink", "Ink",
         "Paper, brush and seal",
-        "A light, monochrome page drawn by hand: paper fibre, soft ink washes, one decisive stroke and a single red seal that becomes the accent.",
+        "A light, monochrome page drawn by hand: paper fibre, soft ink washes, one decisive stroke and a single red seal that becomes the accent. Pages settle like sheets of paper, and every press spreads ink on the page.",
     );
 
     val isLive: Boolean get() = this == TIDE || this == DEPTH || this == INK
@@ -76,6 +76,8 @@ data class ModeSpec(
     val scene: String? = null,
     val accent: String? = null,
     val animationSpeed: Int? = null,
+    /** How far the backdrop drifts against the pages, in per cent. */
+    val parallax: Int? = null,
 )
 
 object OeaModes {
@@ -93,6 +95,7 @@ object OeaModes {
             iconShape = "squircle",
             dock = "glass",
             animationSpeed = 2,
+            parallax = 60,
         )
         OeaMode.TIDE -> ModeSpec(
             glass = OeaDataStore.GLASS_LIQUID,
@@ -104,10 +107,11 @@ object OeaModes {
             scene = OeaLiveScenes.TIDE,
             accent = "wallpaper",
             animationSpeed = 1,
+            parallax = 95,
         )
         OeaMode.DEPTH -> ModeSpec(
             glass = OeaDataStore.GLASS_CLASSIC,
-            effect = "classic",
+            effect = "depth",
             iconShape = "rounded",
             dock = "glass",
             themeMode = "dark",
@@ -115,10 +119,11 @@ object OeaModes {
             scene = OeaLiveScenes.DEPTH,
             accent = "wallpaper",
             animationSpeed = 1,
+            parallax = 100,
         )
         OeaMode.INK -> ModeSpec(
             glass = OeaDataStore.GLASS_CLASSIC,
-            effect = "fade",
+            effect = "paper",
             iconShape = "circle",
             dock = "none",
             themeMode = "light",
@@ -126,6 +131,7 @@ object OeaModes {
             scene = OeaLiveScenes.INK,
             accent = "wallpaper",
             animationSpeed = 0,
+            parallax = 20,
         )
     }
 
@@ -153,6 +159,7 @@ object OeaModes {
         spec.iconShape?.let { store.setIconShape(it) }
         spec.dock?.let { store.setDockStyle(it) }
         spec.animationSpeed?.let { store.setAnimationSpeed(it) }
+        spec.parallax?.let { store.setParallaxStrength(it) }
         if (!keepWallpaper) {
             spec.themeMode?.let { store.setThemeMode(it) }
             spec.accent?.let { store.setAccentMode(it) }

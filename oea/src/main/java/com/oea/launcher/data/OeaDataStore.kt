@@ -479,7 +479,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_ISLAND_PRIVACY = "island_privacy_dots"
         const val GLASS_CLASSIC = "classic"
         const val GLASS_LIQUID = "liquid"
-        val PAGE_EFFECTS = listOf("classic", "liquid", "cube", "stack", "zoom", "fade", "none")
+        val PAGE_EFFECTS = listOf("classic", "liquid", "cube", "stack", "zoom", "fade", "none", "depth", "paper")
         val MODES = listOf("classic", "liquid", "tide", "depth", "ink")
         const val WALLPAPER_SYSTEM = "system"
         const val WALLPAPER_OEA = "oea"
