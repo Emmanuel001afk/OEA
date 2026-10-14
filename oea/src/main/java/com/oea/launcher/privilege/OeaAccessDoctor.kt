@@ -1,7 +1,12 @@
 package com.oea.launcher.privilege
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * OEA's own access doctor: what OEA is allowed to do, *verified*, and what it can
@@ -90,7 +95,9 @@ object OeaAccessDoctor {
         return when (privilege) {
             Privilege.OVERLAY -> {
                 val reported = OeaPrivileges.canOverlay(app)
-                val draws = reported && com.oea.launcher.workspace.OeaDynamicIslandOverlayService.verifyOverlay(app)
+                // Adding a real window needs a thread with a Looper, so this one
+                // check is posted to the main thread and waited for.
+                val draws = reported && onMain { com.oea.launcher.workspace.OeaDynamicIslandOverlayService.verifyOverlay(app) }
                 when {
                     draws -> Finding(privilege, State.WORKING, "OEA drew a test window over the screen and it stayed.", "Nothing to do.")
                     reported -> Finding(
@@ -223,6 +230,28 @@ object OeaAccessDoctor {
      * anything extra installed.
      */
     private val DEVICE_OWNER_RECEIVER = "com.oea.launcher.power.OeaDeviceAdminReceiver"
+
+    /**
+     * Runs a short check on the main thread and waits for it. Only used for the one
+     * capability that has to touch the window manager; everything else is answered
+     * from Android's own services on the calling thread.
+     */
+    private fun onMain(block: () -> Boolean): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) return runCatching(block).getOrDefault(false)
+        val latch = CountDownLatch(1)
+        val answer = AtomicBoolean(false)
+        val posted = runCatching {
+            Handler(Looper.getMainLooper()).post {
+                answer.set(runCatching(block).getOrDefault(false))
+                latch.countDown()
+            }
+        }.isSuccess
+        if (!posted) return false
+        // A blocked main thread must not hang the doctor: answer "not verified"
+        // and let the row say so rather than freezing the screen.
+        runCatching { latch.await(900L, TimeUnit.MILLISECONDS) }
+        return answer.get()
+    }
 
     /**
      * The command as it should be shown: with OEA's own `su -c` prefix when the
