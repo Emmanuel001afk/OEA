@@ -158,6 +158,7 @@ class OeaDynamicIslandView(
     private var peekUntil = 0L
     private var peekKey: String? = null
     private var userClosedSignature: String? = null
+    private val lastPeekAt = HashMap<String, Long>()
     private val peekCollapse = Runnable {
         if (expanded && current?.ringing != true && SystemClock.uptimeMillis() >= peekUntil - 50L) setExpanded(false, animate = true)
     }
@@ -733,8 +734,17 @@ class OeaDynamicIslandView(
         val newActivity = previous?.key != payload.key
         return when (payload.kind) {
             Kind.NOTIFICATION -> {
-                val fresh = (payload.notification?.postTime ?: 0L) > System.currentTimeMillis() - FRESH_NOTIFICATION_MS
-                if (fresh && (newActivity || previous?.title != payload.title || previous.subtitle != payload.subtitle)) PEEK_NOTIFICATION_MS else 0L
+                val sbn = payload.notification ?: return 0L
+                val fresh = sbn.postTime > System.currentTimeMillis() - FRESH_NOTIFICATION_MS
+                val changed = previous?.title != payload.title || previous.subtitle != payload.subtitle
+                // Ongoing notifications (downloads, navigation, timers) update
+                // constantly: they peek only when they first appear. Updates the
+                // app marked "alert once" never peek, and one activity peeks at
+                // most every PEEK_REPEAT_MS.
+                val alertOnce = (sbn.notification.flags and Notification.FLAG_ONLY_ALERT_ONCE) != 0
+                val wanted = fresh && (newActivity || (changed && !sbn.isOngoing && !alertOnce))
+                val last = lastPeekAt[payload.key] ?: 0L
+                if (wanted && SystemClock.uptimeMillis() - last > PEEK_REPEAT_MS) PEEK_NOTIFICATION_MS else 0L
             }
             Kind.MEDIA -> if (!newActivity && previous?.title != payload.title) PEEK_MEDIA_MS else 0L
             Kind.CHARGING -> if (newActivity) PEEK_CHARGING_MS else 0L
@@ -747,6 +757,8 @@ class OeaDynamicIslandView(
 
     private fun peek(payload: Payload, duration: Long) {
         peekKey = payload.key
+        if (lastPeekAt.size > 64) lastPeekAt.clear()
+        lastPeekAt[payload.key] = SystemClock.uptimeMillis()
         removeCallbacks(peekCollapse)
         if (!expanded) setExpanded(true, animate = true, fromUser = false)
         if (duration > 0L) {
@@ -1358,6 +1370,7 @@ class OeaDynamicIslandView(
         const val PEEK_MEDIA_MS = 3_000L
         const val PEEK_CHARGING_MS = 2_500L
         const val FRESH_NOTIFICATION_MS = 8_000L
+        const val PEEK_REPEAT_MS = 12_000L
     }
 
     /** One or two small dots: green for the camera, orange for the microphone. */
