@@ -41,7 +41,7 @@ object OeaLiveScenes {
     /** Longest edge of a still frame; larger screens are downscaled by Android. */
     const val MAX_EDGE = 2400
 
-    private const val FRAME_MS = 33L
+    internal const val FRAME_MS = 33L
 
     val ids = listOf(TIDE, DEPTH, INK, AURORA)
 
@@ -397,7 +397,7 @@ class OeaLiveSceneView(context: Context, var sceneId: String) : View(context) {
         override fun run() {
             if (!running) return
             val now = SystemClock.uptimeMillis()
-            if (now - lastFrame >= FRAME_MS) {
+            if (now - lastFrame >= OeaLiveScenes.FRAME_MS) {
                 lastFrame = now
                 invalidate()
             }

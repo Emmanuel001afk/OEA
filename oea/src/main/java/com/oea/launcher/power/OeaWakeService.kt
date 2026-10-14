@@ -26,6 +26,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
+import com.oea.launcher.data.OeaDataStore
 
 /**
  * Wakes the screen without the power key.
@@ -53,7 +54,7 @@ class OeaWakeService : Service() {
             val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
             lastCovered = covered
             if (inCall() || !OeaPower.waveToWake(this@OeaWakeService)) return
-            if (OeaPower.waveAction(this@OeaWakeService) == "none") return
+            if (OeaDataStore.get(this@OeaWakeService).waveAction() == "none") return
             if (detector?.onReading(covered, SystemClock.elapsedRealtime()) == true) wake("wave")
         }
 
@@ -196,7 +197,7 @@ class OeaWakeService : Service() {
      * action by accident.
      */
     private fun wake(reason: String) {
-        val action = if (reason == "lift") "wake" else OeaPower.waveAction(this)
+        val action = if (reason == "lift") "wake" else OeaDataStore.get(this).waveAction()
         Log.i(TAG, "Gesture recognised ($reason) -> $action")
         when (action) {
             "lock" -> com.oea.launcher.gesture.OeaGestures.run(this, "wave", "lock")

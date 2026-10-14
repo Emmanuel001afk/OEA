@@ -51,6 +51,7 @@ import com.oea.games.lab.EngineLab
 import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.perf.OeaGameRescue
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
@@ -844,8 +845,8 @@ class OeaGamesActivity : Activity(), SessionListener {
             appendLine("ES3: ${device.supportsEs3} · max texture ${device.maxTextureSize} · MSAA ${device.maxSamples}")
             appendLine("Quality: ${settings.quality} (recommended ${device.recommendedTier.label}), fps ${settings.fpsTarget}")
             appendLine("Games: ${OeaEngine.registry.all().joinToString { it.id }}")
-            appendLine("Unstable: ${unstable.joinToString { it.id }.ifEmpty { "none" }}")
-            appendLine("Faults: ${faults.joinToString().ifEmpty { "none" }}")
+            appendLine("Unstable: ${if (unstable.isEmpty()) "none" else unstable.joinToString { it.id }}")
+            appendLine("Faults: ${if (faults.isEmpty()) "none" else faults.joinToString()}")
         }.trim()
 
         val shown = lines.map { (label, value) ->

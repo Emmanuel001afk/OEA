@@ -2828,7 +2828,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 menus.showAssistantNeeded("Quick Settings")
             }
             action == "wallpaper" -> openSystemTool("wallpaper")
-            action == "themes" -> runCatching {
+            action == "themes" -> runCatching<Unit> {
                 startActivity(Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             action == "settings" -> openSystemTool("")

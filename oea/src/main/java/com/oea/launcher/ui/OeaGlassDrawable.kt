@@ -141,6 +141,7 @@ class OeaGlassDrawable(
         outer.shader = LinearGradient(
             0f, top, 0f, bottom,
             intArrayOf(Color.argb(0x2E, 0, 0, 0), Color.argb(0x14, 0, 0, 0)),
+            floatArrayOf(0f, 1f),
             Shader.TileMode.CLAMP,
         )
 

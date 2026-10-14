@@ -75,10 +75,21 @@ class OeaGameActivity : Activity(), HostUi {
         }
         gameId = descriptor.id
         gameTitle = descriptor.title
-        if (!OeaEngine.device.supportsEs3) {
-            toast("This phone's GPU doesn't support OpenGL ES 3.0, which OEA games need.")
-            finish()
+        // Two questions, answered before a GLSurfaceView exists.
+        //
+        // First: does the driver actually provide an OpenGL ES 3 configuration?
+        // Asking now keeps a "no config" answer from surfacing inside GLSurfaceView's
+        // own thread, where it would kill the process instead of the game.
+        val problem = OeaEngine.surfaceProblem()
+        if (problem != null) {
+            showFailure(IllegalStateException(problem))
             return
+        }
+        // Second: a declared ES 2.0 minimum is not proof of anything — plenty of
+        // phones run ES 3 contexts while reporting 2.0 — so the game is attempted
+        // either way and the engine checks the real context once it exists.
+        if (!OeaEngine.device.supportsEs3) {
+            toast("Starting anyway: this phone declares OpenGL ES 2.0, so OEA will try the 3.0 context.")
         }
         val h = GameHost(this, descriptor, launch, this)
         host = h
