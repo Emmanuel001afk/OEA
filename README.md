@@ -68,3 +68,13 @@ OEA does not build, run, or import Launcher3/Lawnchair source code. The reposito
 Unit tests: `./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest :oea:testDebugUnitTest`
 
 The resulting application ID is `com.oea.launcher`.
+
+### Updating without losing your Home
+
+Android only installs an update over an existing app when both are signed with the same key. GitHub's build machines create a new random debug key for every run, so CI-built APKs can't update each other in place, and uninstalling first erases OEA's layout and settings. To make every build use one stable key, create a keystore once and store it as a repository secret (it never appears in the repository):
+
+1. `keytool -genkeypair -keystore oea-debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=OEA Debug,O=OEA,C=US"`
+2. `base64 -w0 oea-debug.keystore` and copy the output.
+3. GitHub › Settings › Secrets and variables › Actions › New repository secret: name `OEA_DEBUG_KEYSTORE_BASE64`, value: the copied text.
+
+Both APK workflows then sign with it. The first install after this change needs one last uninstall (the installed OEA was signed with an old random key); after that, updates install in place.
