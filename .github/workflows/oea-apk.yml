@@ -235,7 +235,7 @@ jobs:
               grep -E '^e: ' "$RUNNER_TEMP/gradle.log" || true
               grep -E '(^|[^A-Za-z])(error|Error|ERROR):' "$RUNNER_TEMP/gradle.log" | grep -vE '^e: ' || true
               grep -A4 'What went wrong' "$RUNNER_TEMP/gradle.log" || true
-            } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -10 | while IFS= read -r line; do
+            } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -60 | while IFS= read -r line; do
               printf '::error::%s\n' "${line//%/%25}"
             done
             exit 1
@@ -249,7 +249,7 @@ jobs:
               grep -E '^e: ' "$RUNNER_TEMP/tests.log" || true
               grep -E 'FAILED|AssertionError|Exception:' "$RUNNER_TEMP/tests.log" | grep -vE '^e: ' || true
               grep -A4 'What went wrong' "$RUNNER_TEMP/tests.log" || true
-            } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -10 | while IFS= read -r line; do
+            } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -60 | while IFS= read -r line; do
               printf '::error::%s\n' "${line//%/%25}"
             done
             exit 1

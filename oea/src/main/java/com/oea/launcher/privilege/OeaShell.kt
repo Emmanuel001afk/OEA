@@ -109,7 +109,7 @@ object OeaShell {
      * Android sometimes applies an appops or secure-settings change a moment
      * after the command returns, so one immediate read is not proof.
      */
-    fun applyAndVerify(command: String, check: () -> Boolean, attempts: Int = 4, pauseMs: Long = 220L): Boolean {
+    fun applyAndVerify(command: String, attempts: Int = 4, pauseMs: Long = 220L, check: () -> Boolean): Boolean {
         val result = run(command)
         if (result.failed && !check()) {
             lastError = result.text

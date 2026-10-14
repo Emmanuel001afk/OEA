@@ -215,7 +215,10 @@ object OeaPrivileges {
     /** Whether Android itself reports the service as enabled for this user. */
     fun accessibilityServiceBound(context: Context): Boolean = runCatching {
         val manager = context.getSystemService(AccessibilityManager::class.java) ?: return false
-        manager.enabledAccessibilityServiceList.any { it.packageName == context.packageName }
+        // getEnabledAccessibilityServiceList(-1) asks for every feedback type;
+        // each service reports the package that hosts it.
+        manager.getEnabledAccessibilityServiceList(-1)
+            .any { it.resolveInfo?.serviceInfo?.packageName == context.packageName }
     }.getOrDefault(false)
 
     /**
