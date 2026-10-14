@@ -324,6 +324,7 @@ class OeaGameBoostService : Service() {
                         if (activeGame == null) beginDndSession()
                         setKeepScreenOn(false)
                         activeGame = game
+                        publishMonitoringNotification(active = true)
                         activate(game)
                         panelView?.let(::closePanel)
                     } else {
@@ -383,6 +384,7 @@ class OeaGameBoostService : Service() {
                             val endingGame = activeGame
                             diagnostic(android.util.Log.WARN, "foreground-monitor ending session=$endingGame foreground=$game samples=$nonGameForegroundSamples source=$lastForegroundSource eventAt=$lastForegroundEventAt activity=$foregroundActivityClass")
                             activeGame = null
+                            publishMonitoringNotification(active = false)
                             nonGameForegroundSamples = 0
                             lastNonGamePackage = null
                             endingGame?.let(::deactivate)
@@ -416,12 +418,32 @@ class OeaGameBoostService : Service() {
         super.onCreate()
         diagnostic(android.util.Log.WARN, "service onCreate sdk=${Build.VERSION.SDK_INT} process=${android.os.Process.myPid()} overlayPermission=${Settings.canDrawOverlays(this)} usageAccess=${isUsageAccessGranted()} enabled=${OeaGameBoostStore.enabled(this)}")
         createChannel()
-        val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.sym_def_app_icon)
-            .setContentTitle("OEA RAM").setContentText("Game session active").setOngoing(true).build()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
-        else startForeground(NOTIFICATION_ID, notification)
+        // This service starts to monitor for eligible foreground games. Do not
+        // claim a game session is active until foreground detection confirms one.
+        publishMonitoringNotification(active = false)
         handler.post(tick)
     }
+    private fun publishMonitoringNotification(active: Boolean) {
+        val title = if (active) "OEA RAM" else "OEA Game Boost"
+        val text = if (active) "Game session active" else "Waiting for a selected game"
+        val notification = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.sym_def_app_icon)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOngoing(true)
+            .setCategory(android.app.Notification.CATEGORY_SERVICE)
+            .build()
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         diagnostic(android.util.Log.INFO, "service onStartCommand action=${intent?.action} flags=$flags startId=$startId activeGame=$activeGame overlayAttached=${overlay?.parent != null}")
         if (intent?.action == ACTION_REFRESH) {
@@ -440,6 +462,7 @@ class OeaGameBoostService : Service() {
         diagnostic(android.util.Log.WARN, "service onDestroy activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
         handler.removeCallbacksAndMessages(null)
         activeGame?.let(::deactivate)
+        publishMonitoringNotification(active = false)
         removeWakeOverlay()
         removeOverlay()
         super.onDestroy()
