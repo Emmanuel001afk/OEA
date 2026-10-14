@@ -159,6 +159,15 @@ class OeaDynamicIslandView(
     private var swipeStartRawY = 0f
     private var notificationSwipeTarget: StatusBarNotification? = null
     private var notificationSwipeIntercepted = false
+    // A deliberate long-press drag moves the camera island without stealing normal taps.
+    private var cameraDragDownTime = 0L
+    private var cameraDragStartX = 0f
+    private var cameraDragStartY = 0f
+    private var cameraDragOriginX = 0
+    private var cameraDragOriginY = 0
+    private var cameraDragX = 0
+    private var cameraDragY = 0
+    private var cameraDragging = false
 
     /** Fired when the user expands/collapses (the camera style tints the status bar). */
     var onExpandedChanged: ((Boolean) -> Unit)? = null
@@ -338,7 +347,7 @@ class OeaDynamicIslandView(
     fun reservedHeight(): Int = when {
         visibility != VISIBLE -> 0
         isCamera -> {
-            val cameraTop = maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+            val cameraTop = maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(if (cameraDragging) cameraDragY else store.islandCameraOffsetY())
             (cameraTop + dp(CAMERA_PILL_DP) + dp(8) - statusBarHeight).coerceAtLeast(0)
         }
         else -> lastCollapsedHeight.coerceAtLeast(0)
@@ -632,6 +641,37 @@ class OeaDynamicIslandView(
             swipeStartRawX = event.rawX
             swipeStartRawY = event.rawY
             notificationSwipeIntercepted = false
+            cameraDragging = false
+            if (isCamera && downInsideCard && !expanded) {
+                cameraDragDownTime = event.eventTime
+                cameraDragStartX = event.rawX
+                cameraDragStartY = event.rawY
+                cameraDragOriginX = store.islandCameraOffsetX()
+                cameraDragOriginY = store.islandCameraOffsetY()
+                cameraDragX = cameraDragOriginX
+                cameraDragY = cameraDragOriginY
+            } else {
+                cameraDragDownTime = 0L
+            }
+        }
+        if (isCamera && cameraDragDownTime != 0L) {
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - cameraDragStartX
+                    val dy = event.rawY - cameraDragStartY
+                    val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                    if (event.eventTime - cameraDragDownTime >= CAMERA_DRAG_HOLD_MS &&
+                        (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop)
+                    ) {
+                        cameraDragging = true
+                        notificationSwipeTarget = null
+                        notificationSwipeIntercepted = false
+                        return true
+                    }
+                }
+                android.view.MotionEvent.ACTION_UP,
+                android.view.MotionEvent.ACTION_CANCEL -> cameraDragDownTime = 0L
+            }
         }
         val notification = notificationSwipeTarget
         if (notification == null || !notification.isClearable || !OeaNotificationState.connected) return false
@@ -659,6 +699,30 @@ class OeaDynamicIslandView(
     }
 
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (cameraDragging) {
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    cameraDragX = cameraDragOriginX + ((event.rawX - cameraDragStartX) / density).toInt()
+                    cameraDragY = cameraDragOriginY + ((event.rawY - cameraDragStartY) / density).toInt()
+                    applyLayout()
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    cameraDragging = false
+                    cameraDragDownTime = 0L
+                    store.setIslandCameraPosition(cameraDragX, cameraDragY)
+                    applyLayout()
+                    performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    cameraDragging = false
+                    cameraDragDownTime = 0L
+                    cameraDragX = cameraDragOriginX
+                    cameraDragY = cameraDragOriginY
+                    applyLayout()
+                }
+            }
+            return true
+        }
         if (!notificationSwipeIntercepted) return super.onTouchEvent(event)
         val notification = notificationSwipeTarget
         val dx = event.rawX - swipeStartRawX
@@ -995,7 +1059,7 @@ class OeaDynamicIslandView(
         val screenWidth = resources.displayMetrics.widthPixels
         val screenHeight = resources.displayMetrics.heightPixels
         val pillHeight = dp(CAMERA_PILL_DP)
-        val cameraX = dp(store.islandCameraOffsetX())
+        val cameraX = dp(if (cameraDragging) cameraDragX else store.islandCameraOffsetX())
         val pillTop = cameraPillTop(screenHeight, pillHeight)
         val centerX = ((cutout?.centerX() ?: (screenWidth / 2)) + cameraX).coerceIn(0, screenWidth)
         if (expanded) {
@@ -1129,6 +1193,7 @@ class OeaDynamicIslandView(
         const val CAMERA_SIDE_DP = 40
         /** Height of the collapsed camera pill. */
         const val CAMERA_PILL_DP = 32
+        const val CAMERA_DRAG_HOLD_MS = 420L
     }
 
     /** Three animated bars shown in the camera pill while media is playing. */
