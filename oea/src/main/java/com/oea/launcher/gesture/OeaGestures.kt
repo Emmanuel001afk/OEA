@@ -64,6 +64,9 @@ object OeaGestures {
         "swipe_down" to listOf("none", "notifications", "quick_settings", "quick_controls", "search", "silence", "volume"),
         "long_press" to listOf("none", "wallpaper", "widgets", "settings", "low"),
         "wave" to listOf("none", "wake", "lock", "power_menu", "low", "volume", "silence"),
+        // The screen-off pattern is its own slot with its own list: nothing that
+        // only makes sense with the screen on (a drawer, a search box) is offered.
+        "wave_off" to listOf("none", "lock"),
     )
 
     /** Every action, with a plain description, for the Settings sheet. */
@@ -99,6 +102,7 @@ object OeaGestures {
             "swipe_down" -> store.swipeDownAction()
             "long_press" -> store.emptyLongPressAction()
             "wave" -> store.waveAction()
+            "wave_off" -> store.waveOffAction()
             else -> "none"
         }
     }
@@ -114,6 +118,7 @@ object OeaGestures {
             "swipe_down" -> store.setSwipeDownAction(value)
             "long_press" -> store.setEmptyLongPressAction(value)
             "wave" -> store.setWaveAction(value)
+            "wave_off" -> store.setWaveOffAction(value)
         }
         // The wake service keeps its sensors only while a sensor gesture is bound,
         // so binding "none" releases the hardware immediately.

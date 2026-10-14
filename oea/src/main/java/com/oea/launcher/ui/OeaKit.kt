@@ -64,26 +64,68 @@ object OeaInsets {
         insets.getInsets(WindowInsets.Type.ime()).bottom
     } else 0
 
-    /** Transparent, edge-to-edge system bars with icon colours matching the surface. */
+    /**
+     * Transparent, edge-to-edge system bars with icon colours matching the surface.
+     *
+     * This must never throw, and there is one specific reason it used to:
+     * `Window.getInsetsController()` does not create the window's decor — it
+     * dereferences it. Called before the decor exists (which is exactly the case
+     * when an OEA screen sets up its bars *before* `setContentView`, as every OEA
+     * screen does) it throws a NullPointerException on `DecorView`. On older
+     * Android the deprecated `statusBarColor` setter happened to install the decor
+     * first, so the crash only appeared on newer versions, where that setter is a
+     * no-op — which is why OEA Home and OEA Settings fell over together.
+     *
+     * The fix is to ask for `window.decorView` (which *does* install it) and to
+     * treat every step as optional.
+     */
     fun edgeToEdge(window: Window, lightBars: Boolean) {
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false)
-            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            // Access the controller from an explicitly materialized DecorView.
-            // Window.insetsController can dereference a missing decor on some OEM
-            // builds when called early in Activity.onCreate (before setContentView).
-            val decor = window.decorView
-            decor.windowInsetsController?.setSystemBarsAppearance(if (lightBars) mask else 0, mask)
-        } else {
-            var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            if (lightBars) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        runCatching {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = flags
+            window.statusBarColor = Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = Color.TRANSPARENT
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            runCatching { window.setDecorFitsSystemWindows(false) }
+            applyBarAppearance(window, lightBars)
+        } else {
+            runCatching {
+                var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                if (lightBars) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = flags
+            }
+        }
+    }
+
+    /**
+     * Icon colours for the status and navigation bars: [lightBars] means dark
+     * icons on a light surface. The controller is fetched through `decorView`, and
+     * if the decor is not up yet the attempt is repeated once it is — never
+     * skipped, because a launcher with unreadable status-bar icons is the same bug
+     * wearing a different hat.
+     */
+    fun applyBarAppearance(window: Window, lightBars: Boolean) {
+        if (Build.VERSION.SDK_INT < 30) return
+        val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        val appearance = if (lightBars) mask else 0
+        val apply: (WindowInsetsController?) -> Unit = { controller ->
+            runCatching { controller?.setSystemBarsAppearance(appearance, mask) }
+        }
+        val decor = runCatching { window.decorView }.getOrNull()
+        if (decor == null) return
+        val controller = runCatching { decor.windowInsetsController }.getOrNull()
+            ?: runCatching { window.insetsController }.getOrNull()
+        if (controller != null) {
+            apply(controller)
+        } else {
+            // The window exists but its insets controller does not yet: try once
+            // more after the first layout pass.
+            runCatching { decor.post { apply(runCatching { decor.windowInsetsController }.getOrNull()) } }
         }
     }
 }

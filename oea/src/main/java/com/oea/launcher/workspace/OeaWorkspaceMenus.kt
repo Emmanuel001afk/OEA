@@ -320,6 +320,64 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         }
     }
 
+    // ========================================================= embedded panels
+
+    /**
+     * A panel built from the same pieces as a popup, but handed to the caller so it
+     * can be assembled — and dismissed — by whatever owns it.
+     *
+     * This is what lets Home show things like Quick controls *inside* Home instead
+     * of launching a screen: the launcher stays in front, the user keeps their
+     * place, and nothing about opening a control can look like "OEA closed".
+     */
+    fun panel(widthDp: Int, build: (LinearLayout) -> Unit): LinearLayout {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = kit.rounded(palette.background, 26, palette.stroke, 1)
+            elevation = dp(14).toFloat()
+            setPadding(dp(6), dp(8), dp(6), dp(8))
+            clipToOutline = true
+            isClickable = true
+        }
+        build(card)
+        val overlay = w.overlay
+        card.measure(
+            View.MeasureSpec.makeMeasureSpec(min(dp(widthDp), overlay.width - dp(24)).coerceAtLeast(dp(160)), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(overlay.height, View.MeasureSpec.AT_MOST),
+        )
+        return card
+    }
+
+    /** Places a panel from [panel] in the overlay, anchored like a popup. */
+    fun showPanel(anchor: Rect, card: LinearLayout, scrimDismiss: () -> Unit) {
+        dismissPopups()
+        val overlay = w.overlay
+        val scrim = View(context).apply {
+            isClickable = true
+            setOnClickListener { scrimDismiss() }
+        }
+        overlay.addView(scrim, FrameLayout.LayoutParams(-1, -1))
+        val loc = IntArray(2)
+        overlay.getLocationOnScreen(loc)
+        val cardH = card.measuredHeight
+        val cardW = card.measuredWidth
+        val top = anchor.top - loc[1]
+        val below = anchor.bottom - loc[1] + dp(8)
+        val fitsBelow = below + cardH <= overlay.height - insetBottom - dp(8)
+        val y = if (fitsBelow) below else (top - cardH - dp(8)).coerceAtLeast(insetTop + dp(8))
+        val x = (anchor.centerX() - loc[0] - cardW / 2).coerceIn(dp(12), (overlay.width - cardW - dp(12)).coerceAtLeast(dp(12)))
+        overlay.addView(card, FrameLayout.LayoutParams(cardW, -2).apply {
+            leftMargin = x
+            topMargin = y
+        })
+        card.alpha = 0f
+        card.scaleX = 0.9f
+        card.scaleY = 0.9f
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(190L).setInterpolator(DecelerateInterpolator(1.8f)).start()
+        popup = card
+        popupScrim = scrim
+    }
+
     // ============================================================ home menu
 
     fun showHomeMenu(rawX: Float, rawY: Float) {

@@ -85,6 +85,41 @@ object OeaFaultShield {
     fun addListener(listener: (OeaFaultRecord) -> Unit) { listeners += listener }
     fun removeListener(listener: (OeaFaultRecord) -> Unit) { listeners -= listener }
 
+    /**
+     * A screen that wants to present faults itself while it is in front (Home does,
+     * because it can offer a "Details" button straight into the fault log).
+     *
+     * Returning true means "I showed it"; the shield then stays quiet. This exists
+     * because containing a fault *silently* was the worst of both worlds: the user
+     * saw something misbehave and had no way to find out what. Every contained fault
+     * is now either shown by a screen or announced, never only written to a file.
+     */
+    @Volatile private var alertPresenter: ((OeaFaultRecord) -> Boolean)? = null
+
+    fun setAlertPresenter(presenter: ((OeaFaultRecord) -> Boolean)?) { alertPresenter = presenter }
+
+    /** Announces a contained fault that no screen took responsibility for. */
+    private fun announce(record: OeaFaultRecord) {
+        val app = appContext ?: return
+        val now = System.currentTimeMillis()
+        val last = lastAlert
+        // At most one announcement every few seconds: a fault loop must not turn
+        // into a toast loop, which is its own kind of unusable launcher.
+        if (now - last.at < 12_000L && last.subsystem == record.subsystem) return
+        lastAlert = last.copy(at = now, subsystem = record.subsystem)
+        runCatching {
+            android.widget.Toast.makeText(
+                app,
+                "OEA contained a problem in ${record.subsystemLabel()}. Settings › Stability has the details.",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    private data class AlertMark(val at: Long = 0L, val subsystem: String = "")
+
+    @Volatile private var lastAlert = AlertMark()
+
     // ------------------------------------------------------------------ install
 
     fun install(app: Application) {
@@ -267,7 +302,11 @@ object OeaFaultShield {
     }
 
     private fun publish(record: OeaFaultRecord) {
-        main.post { listeners.toList().forEach { runCatching { it(record) } } }
+        main.post {
+            listeners.toList().forEach { runCatching { it(record) } }
+            val shown = runCatching { alertPresenter?.invoke(record) == true }.getOrDefault(false)
+            if (!shown) runCatching { announce(record) }
+        }
     }
 
     // ------------------------------------------------------------------ helpers

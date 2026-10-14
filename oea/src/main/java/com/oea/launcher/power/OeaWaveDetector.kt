@@ -29,12 +29,31 @@ class OeaWaveDetector(
     private val pocketMs = 1_800L
     private val doubleWindowMs = 1_600L
     private val cooldownMs = 2_500L
+    /** Cover long enough to mean "hand over the screen", not "wave past it". */
+    private val longCoverMs = 1_250L
+    /** How long after such a cover the deciding wave may come. */
+    private val armWindowMs = 1_400L
+    private var armedAt = -1L
 
     private var coveredAt = -1L
     private var lastWaveAt = -1L
     private var lastTriggerAt = -1L
+    private var offTriggerAt = -1L
     /** True while the sensor was already covered when listening began (e.g. in a pocket). */
     private var startedCovered = false
+
+    /**
+     * What a reading should do next. The screen-on and screen-off gestures are two
+     * different patterns, decided here and nowhere else:
+     *
+     * - [ON] — a wave (one, or two inside the double window) with the screen off.
+     * - [OFF] — a *long* cover followed by an uncover and then a second wave right
+     *   after it. The long cover is what keeps this pattern out of the way of the
+     *   wake gesture: a deliberate hand-over-the-screen is not something that
+     *   happens by accident, and a normal wave is too short to qualify.
+     * - [NONE] — anything else, including the first wave of a pair.
+     */
+    enum class Result { NONE, ON, OFF }
 
     /** Call when listening starts (screen turned off) with the current state, if known. */
     fun reset(nowMs: Long, coveredNow: Boolean) {
@@ -43,35 +62,58 @@ class OeaWaveDetector(
         lastWaveAt = -1L
     }
 
-    /** Feeds one reading; returns true when the gesture is complete and the screen should wake. */
-    fun onReading(covered: Boolean, nowMs: Long): Boolean {
-        if (lastTriggerAt >= 0 && nowMs - lastTriggerAt < cooldownMs) {
-            if (!covered) coveredAt = -1L else if (coveredAt < 0) coveredAt = nowMs
-            return false
-        }
+    /**
+     * Feeds one reading and reports which gesture, if any, it completed.
+     *
+     * [screenOffBound] tells the detector whether the screen-off pattern has an
+     * action at all: when it does not, a long cover is simply ignored (exactly as
+     * before), so the wake gesture behaves identically for users who never touch
+     * the screen-off setting.
+     */
+    fun onReading(covered: Boolean, nowMs: Long, screenOffBound: Boolean = false): Result {
+        val cooling = lastTriggerAt >= 0 && nowMs - lastTriggerAt < cooldownMs
+        val offCooling = offTriggerAt >= 0 && nowMs - offTriggerAt < cooldownMs
         if (covered) {
             if (coveredAt < 0) coveredAt = nowMs
-            return false
+            return Result.NONE
         }
-        // Uncovered: was that a wave?
+        // Uncovered: which pattern was that?
         val start = coveredAt
         coveredAt = -1L
-        if (start < 0) return false
+        if (start < 0) return Result.NONE
         val held = nowMs - start
         if (startedCovered) {
-            // Coming out of a pocket or bag: the first uncover is not a gesture.
+            // Coming out of a pocket or bag: the first uncover is never a gesture.
             startedCovered = false
-            return false
+            return Result.NONE
         }
-        if (pocketGuard && held >= pocketMs) return false
-        if (held < minCoverMs || held > maxCoverMs) return false
+        if (screenOffBound && held >= longCoverMs) {
+            // A long cover arms the screen-off gesture. The wave that follows it
+            // decides; on its own a long cover does nothing.
+            if (offCooling) return Result.NONE
+            armedAt = nowMs
+            return Result.NONE
+        }
+        if (pocketGuard && held >= pocketMs) return Result.NONE
+        if (held < minCoverMs || held > maxCoverMs) return Result.NONE
+        if (armedAt >= 0 && screenOffBound && nowMs - armedAt <= armWindowMs) {
+            // The second wave of the off pattern. It is consumed here and never
+            // reaches the wake logic, so one pattern cannot run both actions.
+            armedAt = -1L
+            offTriggerAt = nowMs
+            return Result.OFF
+        }
+        if (cooling) return Result.NONE
         if (requireTwoWaves) {
             val previous = lastWaveAt
             lastWaveAt = nowMs
-            if (previous < 0 || nowMs - previous > doubleWindowMs) return false
+            if (previous < 0 || nowMs - previous > doubleWindowMs) return Result.NONE
         }
         lastWaveAt = -1L
         lastTriggerAt = nowMs
-        return true
+        return Result.ON
     }
+
+    /** True while a long cover has been seen and the deciding wave is still awaited. */
+    val armedForScreenOff: Boolean get() = armedAt >= 0
 }

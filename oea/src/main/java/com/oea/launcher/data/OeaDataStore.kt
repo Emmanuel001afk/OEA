@@ -193,6 +193,30 @@ class OeaDataStore private constructor(context: Context) {
     fun islandPeek() = prefs.getBoolean(KEY_ISLAND_PEEK, true)
     fun setIslandPeek(v: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_PEEK, v).apply() }
 
+    /**
+     * How long an automatically expanded island stays open. The old behaviour had
+     * no timeout at all, which is how a live activity could sit over an app until
+     * the user tapped it away.
+     */
+    fun islandAutoCollapseMs() = prefs.getInt(KEY_ISLAND_AUTO_COLLAPSE, 9_000).coerceIn(2_000, 60_000)
+    fun setIslandAutoCollapseMs(v: Int) { prefs.edit().putInt(KEY_ISLAND_AUTO_COLLAPSE, v.coerceIn(2_000, 60_000)).apply() }
+
+    /**
+     * While the user is inside another app, expansions stay compact: the island
+     * answers "what was that" without covering the app's own content.
+     */
+    fun islandCompactOverApps() = prefs.getBoolean(KEY_ISLAND_COMPACT_OVER_APPS, true)
+    fun setIslandCompactOverApps(v: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_COMPACT_OVER_APPS, v).apply() }
+
+    /**
+     * Whether the camera-style island is allowed to draw over other apps at all.
+     * On phones that place the front camera in the middle of the status bar, a
+     * black capsule around it is intrusive rather than helpful, and it is always
+     * optional because it cannot be anything else.
+     */
+    fun islandCameraOverApps() = prefs.getBoolean(KEY_ISLAND_CAMERA_OVER_APPS, true)
+    fun setIslandCameraOverApps(v: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_CAMERA_OVER_APPS, v).apply() }
+
     /** Camera and microphone in-use dots inside the island. */
     fun islandPrivacyDots() = prefs.getBoolean(KEY_ISLAND_PRIVACY, true)
     fun setIslandPrivacyDots(v: Boolean) { prefs.edit().putBoolean(KEY_ISLAND_PRIVACY, v).apply() }
@@ -231,6 +255,18 @@ class OeaDataStore private constructor(context: Context) {
     /** What a wave in front of the proximity sensor does: "wake", "lock", "power_menu", "low" or "none". */
     fun waveAction() = prefs.getString(KEY_WAVE_ACTION, "wake") ?: "wake"
     fun setWaveAction(v: String) { prefs.edit().putString(KEY_WAVE_ACTION, v).apply() }
+
+    /**
+     * Screen-off gesture: a wave does nothing while the screen is off. It has its
+     * own binding so a screen-off wave can never run the screen-on action (or the
+     * other way round) — the two are different gestures with different patterns.
+     */
+    fun waveOffAction() = prefs.getString(KEY_WAVE_OFF_ACTION, "none") ?: "none"
+    fun setWaveOffAction(v: String) { prefs.edit().putString(KEY_WAVE_OFF_ACTION, v).apply() }
+
+    /** A second wave right after a long cover: off, then on, then off again. */
+    fun waveTwiceOffAction() = prefs.getString(KEY_WAVE_TWICE_OFF, "none") ?: "none"
+    fun setWaveTwiceOffAction(v: String) { prefs.edit().putString(KEY_WAVE_TWICE_OFF, v).apply() }
 
     // ---------------------------------------------------------- launcher mode
 
@@ -437,6 +473,9 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_SEARCH_WALLPAPER = "search_wallpaper_visible"
         private const val KEY_WALLPAPER_BLUR = "wallpaper_blur"
         private const val KEY_ISLAND_PEEK = "island_peek"
+        private const val KEY_ISLAND_AUTO_COLLAPSE = "island_auto_collapse_ms"
+        private const val KEY_ISLAND_COMPACT_OVER_APPS = "island_compact_over_apps"
+        private const val KEY_ISLAND_CAMERA_OVER_APPS = "island_camera_over_apps"
         private const val KEY_ISLAND_PRIVACY = "island_privacy_dots"
         const val GLASS_CLASSIC = "classic"
         const val GLASS_LIQUID = "liquid"
@@ -452,6 +491,8 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_TWO_FINGER = "gesture_two_finger"
         private const val KEY_EMPTY_LONG_PRESS = "gesture_empty_long_press"
         private const val KEY_WAVE_ACTION = "gesture_wave_action"
+        private const val KEY_WAVE_OFF_ACTION = "gesture_wave_off_action"
+        private const val KEY_WAVE_TWICE_OFF = "gesture_wave_twice_off_action"
         private const val KEY_LAUNCHER_MODE = "launcher_mode"
         private const val KEY_MODE_CHOSEN = "launcher_mode_chosen"
         private const val KEY_WALLPAPER_SOURCE = "wallpaper_source"

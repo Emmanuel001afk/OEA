@@ -753,6 +753,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     fun onHostResumed() {
         resumed = true
+        // While Home is in front, Home is the screen that reports contained faults
+        // (the shield stays quiet for anyone else).
+        com.oea.launcher.fault.OeaFaultShield.setAlertPresenter { record -> onFaultForHome(record); true }
         if (closeDrawerOnPause && drawerOpen) closeDrawer(animate = false)
         closeDrawerOnPause = false
         val fresh = OeaTheme.resolve(context)
@@ -861,6 +864,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     fun onHostPaused() {
         resumed = false
+        com.oea.launcher.fault.OeaFaultShield.setAlertPresenter(null)
         menus.dismissPopups()
         closeWidgetResize()
         collapseIslands()
@@ -1634,8 +1638,75 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         menus.refreshOpenFolder()
     }
 
+    /**
+     * Home presents contained faults itself rather than letting them pass in
+     * silence: a bar at the top names what failed and offers the log.
+     *
+     * This is the answer to "something misbehaved and I have no idea what it was":
+     * the fault was always recorded, it was never *shown*. The bar replaces the
+     * default Home banner for a few seconds and then gives the space back.
+     */
+    private val faultBar = Runnable {
+        val record = lastFault
+        if (record == null || !resumed) return@Runnable
+        bannerHost.removeAllViews()
+        bannerHost.visibility = VISIBLE
+        val bar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(9), dp(8), dp(9))
+            background = kit.rounded(palette.glassStrong, 22, OeaTheme.alpha(palette.warning, 0x66), 1)
+        }
+        bar.addView(ImageView(context).apply { setImageDrawable(kit.icon(R.drawable.oic_warning_fill, palette.warning)) },
+            LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(10) })
+        bar.addView(TextView(context).apply {
+            text = "OEA contained a problem in ${record.subsystemLabel()}"
+            textSize = 13f
+            typeface = OeaType.medium
+            maxLines = 2
+            setTextColor(palette.homeText)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        bar.addView(kit.button("Details", palette.accent, palette.onAccent) {
+            openSystemTool("stability")
+            dismissFaultBar()
+        }.apply { setPadding(dp(14), dp(6), dp(14), dp(6)) }, LinearLayout.LayoutParams(-2, -2))
+        bar.addView(ImageView(context).apply {
+            setImageDrawable(kit.icon(R.drawable.oic_close, palette.homeTextSecondary))
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            setOnClickListener { dismissFaultBar() }
+        }, LinearLayout.LayoutParams(dp(38), dp(38)))
+        bannerHost.addView(bar, LayoutParams(-1, -2).apply { leftMargin = dp(14); rightMargin = dp(14); topMargin = dp(2); bottomMargin = dp(6) })
+        main.removeCallbacks(faultBarHide)
+        main.postDelayed(faultBarHide, 9_000L)
+    }
+
+    private val faultBarHide = Runnable { dismissFaultBar() }
+
+    private fun dismissFaultBar() {
+        main.removeCallbacks(faultBar)
+        main.removeCallbacks(faultBarHide)
+        lastFault = null
+        renderBanner()
+    }
+
+    private var lastFault: com.oea.launcher.fault.OeaFaultRecord? = null
+
+    /** Called on the main thread for every contained fault while Home is in front. */
+    private fun onFaultForHome(record: com.oea.launcher.fault.OeaFaultRecord) {
+        if (!resumed) return
+        lastFault = record
+        main.removeCallbacks(faultBar)
+        // Give a fault that arrives during start-up a moment: Home's own surface
+        // must be up before a bar is placed on it.
+        main.postDelayed(faultBar, 400L)
+    }
+
     private fun renderBanner() {
         bannerHost.removeAllViews()
+        if (lastFault != null && resumed) {
+            faultBar.run()
+            return
+        }
         if (com.oea.launcher.fault.OeaFaultShield.safeMode) {
             bannerHost.visibility = VISIBLE
             bannerHost.addView(safeModeCard(), LayoutParams(-1, -2).apply { leftMargin = dp(14); rightMargin = dp(14); topMargin = dp(2); bottomMargin = dp(6) })
@@ -1896,8 +1967,27 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * Quick controls, shown *inside* Home.
+     *
+     * This used to launch an activity, which on a phone where Android refused the
+     * background start (or where the activity itself faulted) looked exactly like
+     * "quick controls threw me out of the launcher". A sheet drawn in Home's own
+     * overlay cannot do that: the launcher stays in front, and the panel is one
+     * more view that can be dismissed by tapping anywhere else.
+     *
+     * The activity still exists for the Quick Settings tile and for Settings; it
+     * builds the same sheet, so there is no second copy of the behaviour.
+     */
     private fun openQuickControls() {
-        if (!startSafely(Intent(context, com.oea.launcher.power.OeaQuickControlsActivity::class.java))) toast("Quick controls could not be opened")
+        val anchor = Rect(0, height - dp(160), width, height - dp(80))
+        val card = menus.panel(widthDp = 320) { host ->
+            host.addView(
+                com.oea.launcher.power.OeaQuickControls.sheet(context, palette) { menus.dismissPopups() },
+                LinearLayout.LayoutParams(-1, -2),
+            )
+        }
+        menus.showPanel(anchor, card) { menus.dismissPopups() }
     }
 
     // ================================================================= drawer

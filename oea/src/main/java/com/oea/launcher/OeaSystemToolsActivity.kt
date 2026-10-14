@@ -265,14 +265,7 @@ open class OeaSystemToolsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (pendingIslandOverlayEnable) {
-            pendingIslandOverlayEnable = false
-            if (OeaPrivileges.canOverlay(this)) {
-                dataStore.setIslandOnOtherApps(true)
-                OeaDynamicIslandOverlayService.sync(this)
-                toast("Dynamic Island will appear over other apps.")
-            } else {
-                toast("Allow OEA to display over other apps to enable this option.")
-            }
+            finishIslandOverlayRequest(cameFromResult = false)
         } else if (dataStore.islandOnOtherApps()) {
             // Keep persisted UI state honest if the user revoked overlay access
             // from Android Settings while OEA was in the background.
@@ -1044,16 +1037,7 @@ open class OeaSystemToolsActivity : Activity() {
     @Deprecated("Activity results are routed manually for this simple flow")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == REQUEST_ISLAND_OVERLAY) {
-            if (OeaPrivileges.canOverlay(this)) {
-                dataStore.setIslandOnOtherApps(true)
-                OeaDynamicIslandOverlayService.sync(this)
-                toast("Dynamic Island will appear over other apps.")
-            } else {
-                dataStore.setIslandOnOtherApps(false)
-                toast("Overlay permission was not granted.")
-            }
-            pendingIslandOverlayEnable = false
-            if (current == "notifications") rerender()
+            finishIslandOverlayRequest(cameFromResult = true)
             return
         }
         @Suppress("DEPRECATION")
@@ -1277,8 +1261,49 @@ open class OeaSystemToolsActivity : Activity() {
                 rerender()
             }
         }
-        if (power.waveToWake(this) && proximity != null) {
-            val status = kit.text("Test it: cover and uncover the sensor near the front camera.", 13f, palette.textSecondary).apply {
+        // ---- the screen-off gesture, bound on its own row
+        val offBound = dataStore.waveOffAction() != "none"
+        kit.switchRow(group, R.drawable.oic_lock, "Turn the screen off by gesture",
+            "Hold a hand over the screen, uncover it, then wave once within a second and a half",
+            offBound) { on ->
+            dataStore.setWaveOffAction(if (on) "lock" else "none")
+            power.syncWakeService(this)
+            rerender()
+        }
+        if (offBound) {
+            kit.row(group, R.drawable.oic_touch_app, "Screen-off gesture action",
+                "Its own binding: the wave gesture above can never run this, and this can never wake the screen",
+                value = labelFor(dataStore.waveOffAction(), mapOf("lock" to "Lock the screen"))) {
+                kit.choose(
+                    "What should the screen-off gesture do?",
+                    "Only actions that make sense with the screen off are listed.",
+                    listOf("Lock the screen", "Nothing"),
+                    if (dataStore.waveOffAction() == "lock") 0 else 1,
+                ) { pick ->
+                    dataStore.setWaveOffAction(if (pick == 0) "lock" else "none")
+                    power.syncWakeService(this)
+                    rerender()
+                }
+            }
+            if (!OeaAssistant.isConnected() && !power.deviceAdminCanLock(this)) {
+                kit.note(box, "Locking by gesture needs OEA Assistant (the lock behaves like the power key) or OEA's Device admin. Without one of the two, the gesture will report that it cannot lock instead of appearing to do nothing.")
+            }
+        }
+        // ---- what this phone can actually do, checked live
+        kit.sectionTitle(box, "What this phone provides")
+        val caps = kit.group(box)
+        kit.row(caps, R.drawable.oic_visibility_off, "Proximity sensor",
+            if (proximity != null) "Available (${proximity.name}) — drives both wave gestures" else "Not exposed by this phone, so no wave gesture can work here",
+            chevron = false)
+        kit.row(caps, R.drawable.oic_phone_android, "Pick-up sensor",
+            if (lift != null) "Available (${lift.name})" else "Not exposed: lift to wake stays switched off",
+            chevron = false)
+        kit.row(caps, R.drawable.oic_battery_charging_full, "Screen-off listening",
+            if (power.wakeFeaturesOn(this)) "On — the wake service is registered while the screen is off" else "Off — switch on a gesture above",
+            chevron = false)
+
+        if (proximity != null && (power.waveToWake(this) || offBound)) {
+            val status = kit.text("Test it: cover and uncover the sensor near the front camera, or hold a hand over it and wave.", 13f, palette.textSecondary).apply {
                 setPadding(dp(18), dp(10), dp(18), dp(14))
                 setLineSpacing(dp(2).toFloat(), 1f)
             }
@@ -1341,6 +1366,46 @@ open class OeaSystemToolsActivity : Activity() {
         present(page)
     }
 
+    /**
+     * The live sensor test: it runs the *same* detector the wake service runs, so
+     * what the user sees here is exactly what will happen with the screen off.
+     *
+     * It reports the two patterns separately, because they are two gestures: a
+     * normal wave (wake) and "hold a hand over the screen, uncover, wave again"
+     * (the screen-off gesture). Both are counted, so the row can say which gesture
+     * the phone actually recognised instead of only "no gesture yet".
+     */
+    /**
+     * The single path every overlay request ends in — the toggle, the return from
+     * Android Settings, and the re-check on resume.
+     *
+     * Android's own "Display over other apps" switch on some phones (and
+     * AppOps-based firmware) answers "allowed" to the check while draw-over
+     * still fails, which is exactly the "it is on but nothing happens" report.
+     * The state is therefore verified against the real draw path as well, and
+     * whatever the answer is, the user is told it and the setting matches.
+     */
+    private fun finishIslandOverlayRequest(cameFromResult: Boolean) {
+        pendingIslandOverlayEnable = false
+        val granted = OeaPrivileges.canOverlay(this)
+        val verified = granted && OeaDynamicIslandOverlayService.verifyOverlay(this)
+        if (verified) {
+            dataStore.setIslandOnOtherApps(true)
+            OeaDynamicIslandOverlayService.sync(this)
+            if (cameFromResult) toast("Dynamic Island will appear over other apps.")
+        } else {
+            dataStore.setIslandOnOtherApps(false)
+            OeaDynamicIslandOverlayService.sync(this)
+            toast(
+                when {
+                    !granted -> "Android did not grant Display over other apps, so the island stays on Home only."
+                    else -> "Android reports the permission, but drawing over apps was refused. Try restarting OEA; if it persists, the phone's firmware is blocking it and the island stays on Home only."
+                },
+            )
+        }
+        if (current == "notifications" || current == "overview") rerender()
+    }
+
     private fun startWaveTest(sensor: android.hardware.Sensor, status: TextView) {
         stopWaveTest()
         val sm = getSystemService(android.hardware.SensorManager::class.java) ?: return
@@ -1348,14 +1413,23 @@ open class OeaSystemToolsActivity : Activity() {
         val detector = com.oea.launcher.power.OeaWaveDetector(power.sensitivity(this), power.requireTwoWaves(this), power.pocketGuard(this))
         detector.reset(android.os.SystemClock.elapsedRealtime(), false)
         var waves = 0
+        var offWaves = 0
         val listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(event: android.hardware.SensorEvent) {
                 val distance = event.values.firstOrNull() ?: return
                 val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
-                if (detector.onReading(covered, android.os.SystemClock.elapsedRealtime())) waves++
-                status.text = (if (covered) "Sensor covered" else "Sensor clear") +
-                    (if (waves > 0) " • detected $waves wake gesture" + (if (waves == 1) "" else "s") + " ✓" else " • no wake gesture yet")
-                status.setTextColor(if (waves > 0) palette.success else palette.textSecondary)
+                when (detector.onReading(covered, android.os.SystemClock.elapsedRealtime(), screenOffBound = true)) {
+                    com.oea.launcher.power.OeaWaveDetector.Result.ON -> waves++
+                    com.oea.launcher.power.OeaWaveDetector.Result.OFF -> offWaves++
+                    else -> Unit
+                }
+                val parts = mutableListOf(if (covered) "Sensor covered" else "Sensor clear")
+                if (waves > 0) parts += "wave ×$waves ✓"
+                if (offWaves > 0) parts += "hold-and-wave ×$offWaves ✓"
+                if (detector.armedForScreenOff) parts += "hold seen — now wave"
+                if (waves == 0 && offWaves == 0) parts += "no gesture yet"
+                status.text = parts.joinToString(" • ")
+                status.setTextColor(if (waves > 0 || offWaves > 0) palette.success else palette.textSecondary)
             }
             override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
         }
@@ -1453,14 +1527,21 @@ open class OeaSystemToolsActivity : Activity() {
                     rerender()
                 } else {
                     pendingIslandOverlayEnable = true
-                    runCatching {
+                    // Prefer the per-app screen, and fall back to the global list
+                    // (some firmware has no per-app entry) and to OEA's own
+                    // request screen — three routes, so "it just didn't work" is
+                    // never the end of it.
+                    val opened = runCatching {
                         startActivityForResult(
                             Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
                             REQUEST_ISLAND_OVERLAY,
                         )
-                    }.onFailure {
+                    }.isSuccess || runCatching {
+                        startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION), REQUEST_ISLAND_OVERLAY)
+                    }.isSuccess
+                    if (!opened && !OeaPrivileges.requestOverlay(this, REQUEST_ISLAND_OVERLAY)) {
                         pendingIslandOverlayEnable = false
-                        toast("Open Android Settings › Display over other apps for OEA.")
+                        toast("OEA could not open Android's Display over other apps screen. Android Settings › Apps › OEA › Display over other apps grants it by hand.")
                         rerender()
                     }
                 }
@@ -1493,6 +1574,19 @@ open class OeaSystemToolsActivity : Activity() {
             kit.switchRow(islandGroup, R.drawable.oic_open_in_full, "Expand for new activity",
                 "Opens briefly for a new message, a new song, a charger or a game event, and stays open while a call is ringing. Tap to close; it won't reopen for the same thing.",
                 dataStore.islandPeek()) { dataStore.setIslandPeek(it) }
+            if (dataStore.islandPeek()) {
+                kit.stepperRow(islandGroup, R.drawable.oic_timer, "Auto-collapse after",
+                    "How long an automatic expansion stays open, in seconds",
+                    (dataStore.islandAutoCollapseMs() / 1000).toInt().coerceIn(2, 60), 2, 60, { "$it s" }) {
+                    dataStore.setIslandAutoCollapseMs(it * 1000)
+                }
+                kit.switchRow(islandGroup, R.drawable.oic_visibility_off, "Keep it small over other apps",
+                    "While you are in another app, an expansion stays compact (title and one action) instead of covering content, and collapses by itself when you touch outside it.",
+                    dataStore.islandCompactOverApps()) {
+                    dataStore.setIslandCompactOverApps(it)
+                    OeaDynamicIslandOverlayService.sync(this)
+                }
+            }
             kit.switchRow(islandGroup, R.drawable.oic_mic, "Camera & microphone dots",
                 "Green and orange dots inside the island while any app uses the camera or microphone. Android 12+ shows its own indicator, so the island only shows dots on top of an activity it already shows; on older Android it can show them on their own.",
                 dataStore.islandPrivacyDots()) { dataStore.setIslandPrivacyDots(it) }

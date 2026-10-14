@@ -157,6 +157,29 @@ object OeaPrivileges {
 
     fun canOverlay(context: Context): Boolean = runCatching { Settings.canDrawOverlays(context) }.getOrDefault(false)
 
+    /**
+     * Opens Android's "Display over other apps" screen for OEA, trying the three
+     * shapes that exist in the wild: the per-app toggle, the global list, and the
+     * AppOps-backed activity some firmware uses instead. Returns false when none of
+     * them can be opened, so the caller can explain the manual route rather than
+     * leaving the user on a screen that never appeared.
+     */
+    fun requestOverlay(context: Context, requestCode: Int): Boolean {
+        val perApp = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+        val list = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+        val appOps = Intent("com.android.settings.action.APP_OPS_DRAW_OVER_OTHER_APPS")
+        return listOf(perApp, list, appOps).any { intent ->
+            runCatching {
+                if (context is android.app.Activity) {
+                    context.startActivityForResult(intent, requestCode)
+                } else {
+                    context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                true
+            }.getOrDefault(false)
+        }
+    }
+
     fun canReadNotifications(context: Context): Boolean = runCatching {
         val enabled = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners").orEmpty()
         enabled.split(':').any { it.isNotBlank() && it.contains(context.packageName) }

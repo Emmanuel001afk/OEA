@@ -53,7 +53,14 @@ object OeaPower {
         syncWakeService(context)
     }
 
-    fun wakeFeaturesOn(context: Context) = waveToWake(context) || (liftToWake(context) && liftSensor(context) != null)
+    /**
+     * True when the wake service has anything at all to do: a wake gesture, or the
+     * screen-off gesture, which needs the same sensor while the screen is off.
+     */
+    fun wakeFeaturesOn(context: Context): Boolean {
+        if (waveToWake(context) || (liftToWake(context) && liftSensor(context) != null)) return true
+        return com.oea.launcher.data.OeaDataStore.get(context).waveOffAction() != "none"
+    }
 
     // ------------------------------------------------------------- sensors
 
