@@ -129,7 +129,9 @@ object OeaGuard {
         return ThreadFactory { r ->
             Thread({
                 Process.setThreadPriority(priority)
-                run(source, r)
+                // The pool hands us a Runnable; run it inside the guard so a
+                // failing task is reported like any other OEA fault.
+                run(source) { r.run() }
             }, "$prefix-${id.incrementAndGet()}").apply {
                 isDaemon = true
                 setUncaughtExceptionHandler { t, e -> OeaGuard.report("$source:${t.name}", e, fatal = true) }

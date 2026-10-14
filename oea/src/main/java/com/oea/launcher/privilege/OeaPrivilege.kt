@@ -55,6 +55,9 @@ enum class Privilege(val title: String, val summary: String) {
     NOTIFICATIONS("Notifications", "Android's runtime permission dialog."),
 
     CONTACTS("Contacts", "Android's runtime permission dialog."),
+
+    /** Camera: the island's camera view and any capture OEA itself offers. */
+    CAMERA("Camera", "Android's runtime permission dialog."),
 }
 
 /** Whether a privilege is in effect. [PENDING] means granted but not yet live. */

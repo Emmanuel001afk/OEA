@@ -277,15 +277,17 @@ class RtcLink internal constructor(
             }
         }
 
-        override fun onMessage(buffer: DataChannel.Buffer) = OeaGuard.run("rtc-message") {
-            val data = buffer.data
-            if (data.remaining() < 1) return
-            val bytes = ByteArray(data.remaining())
-            data.get(bytes)
-            lastHeardMs = System.currentTimeMillis()
-            when (bytes[0].toInt()) {
-                KIND_DATA -> listener.onLinkMessage(this@RtcLink, if (isReliable) Channel.RELIABLE else Channel.UNRELIABLE, bytes.copyOfRange(1, bytes.size))
-                KIND_CONTROL -> onExec { onControl(bytes) }
+        override fun onMessage(buffer: DataChannel.Buffer) {
+            OeaGuard.run("rtc-message") {
+                val data = buffer.data
+                if (data.remaining() < 1) return
+                val bytes = ByteArray(data.remaining())
+                data.get(bytes)
+                lastHeardMs = System.currentTimeMillis()
+                when (bytes[0].toInt()) {
+                    KIND_DATA -> listener.onLinkMessage(this@RtcLink, if (isReliable) Channel.RELIABLE else Channel.UNRELIABLE, bytes.copyOfRange(1, bytes.size))
+                    KIND_CONTROL -> onExec { onControl(bytes) }
+                }
             }
         }
     }

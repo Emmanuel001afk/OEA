@@ -41,8 +41,6 @@ object OeaShell {
     /** Result of one shell command. */
     data class Output(val ok: Boolean, val text: String, val exit: Int) {
         val failed get() = !ok
-        operator fun component1() = ok
-        operator fun component2() = text
     }
 
     /** True when a su binary answers on this device. Probed once per process. */
@@ -109,7 +107,7 @@ object OeaShell {
      * Android sometimes applies an appops or secure-settings change a moment
      * after the command returns, so one immediate read is not proof.
      */
-    fun applyAndVerify(command: String, check: () -> Boolean, attempts: Int = 4, pauseMs: Long = 220L): Boolean {
+    fun applyAndVerify(command: String, attempts: Int = 4, pauseMs: Long = 220L, check: () -> Boolean): Boolean {
         val result = run(command)
         if (result.failed && !check()) {
             lastError = result.text

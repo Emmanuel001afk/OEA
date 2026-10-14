@@ -81,7 +81,7 @@ object OeaPrivileges {
     @Volatile private var cached: Map<Privilege, Grant> = emptyMap()
     @Volatile private var cachedAt = 0L
     @Volatile private var observer: ContentObserver? = null
-    @Volatile private var appOpsWatcher: Any? = null
+    @Volatile private var appOpsWatcher: AppOpsManager.OnOpChangedListener? = null
 
     /** Notified when a privilege changed, on the main thread. */
     fun addListener(listener: () -> Unit) { listeners += listener }
@@ -215,7 +215,10 @@ object OeaPrivileges {
     /** Whether Android itself reports the service as enabled for this user. */
     fun accessibilityServiceBound(context: Context): Boolean = runCatching {
         val manager = context.getSystemService(AccessibilityManager::class.java) ?: return false
-        manager.enabledAccessibilityServiceList.any { it.packageName == context.packageName }
+        // getEnabledAccessibilityServiceList(-1) asks for every feedback type;
+        // each service reports the package that hosts it.
+        manager.getEnabledAccessibilityServiceList(-1)
+            .any { it.resolveInfo?.serviceInfo?.packageName == context.packageName }
     }.getOrDefault(false)
 
     /**
@@ -507,9 +510,9 @@ object OeaPrivileges {
         synchronized(lock) {
             observer?.let { runCatching { context.contentResolver.unregisterContentObserver(it) } }
             observer = null
-            val watcher = appOpsWatcher as? AppOpsManager.OnOpChangedListener
-            if (watcher != null && Build.VERSION.SDK_INT >= 30) {
-                runCatching { context.getSystemService(AppOpsManager::class.java)?.removeOnOpChangedListener(watcher) }
+            val watcher = appOpsWatcher
+            if (watcher != null) {
+                runCatching { context.getSystemService(AppOpsManager::class.java)?.stopWatchingMode(watcher) }
             }
             appOpsWatcher = null
         }
@@ -531,7 +534,10 @@ object OeaPrivileges {
             if (op == AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW || op == AppOpsManager.OPSTR_GET_USAGE_STATS) changedExternally(context)
         }
         OeaGuard.run("privileges:watch-appops") {
-            ops.addOnOpChangedListener(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, context.packageName, listener)
+            // startWatchingMode covers every supported Android version; the
+            // newer addOnOpChangedListener only exists from Android 11.
+            @Suppress("DEPRECATION")
+            ops.startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, context.packageName, listener)
             appOpsWatcher = listener
         }
     }
