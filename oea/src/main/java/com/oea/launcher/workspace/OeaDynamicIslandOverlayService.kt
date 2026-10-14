@@ -139,25 +139,28 @@ class OeaDynamicIslandOverlayService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        com.oea.launcher.fault.OeaFaultShield.guard("island-overlay:command") {
-            if (intent?.action == ACTION_STOP) {
-                overlayActive = false
-                store.setIslandOnOtherApps(false)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            if (!canRun()) {
-                overlayActive = false
-                disableOverlayIfPermissionRevoked()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            if (intent?.action == ACTION_REFRESH) refreshIslands()
-            return START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        com.oea.launcher.fault.OeaFaultShield.value("island-overlay:command", START_NOT_STICKY) {
+            command(intent)
         }
+
+    private fun command(intent: Intent?): Int {
+        if (intent?.action == ACTION_STOP) {
+            overlayActive = false
+            store.setIslandOnOtherApps(false)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (!canRun()) {
+            overlayActive = false
+            disableOverlayIfPermissionRevoked()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_REFRESH) refreshIslands()
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

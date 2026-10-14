@@ -126,6 +126,22 @@ object OeaWallpaperRenderer {
     /** A tiny preview for the picker, cheap enough to build while scrolling a list. */
     fun preview(scene: OeaWallpaper, width: Int, height: Int): Bitmap = render(scene, min(width, 360), min(height, 640))
 
+    /**
+     * A quadratic curve drawn as an exact cubic.
+     *
+     * Android's `quadraticBezierTo` is not part of every SDK the app compiles
+     * against, so the ridge is drawn with `cubicTo`, which has existed since
+     * API 1: a quadratic's cubic form puts its control points two thirds of the
+     * way from each end towards the quadratic control point.
+     */
+    private fun Path.quadCurve(fromX: Float, fromY: Float, cx: Float, cy: Float, toX: Float, toY: Float) {
+        cubicTo(
+            fromX + 2f / 3f * (cx - fromX), fromY + 2f / 3f * (cy - fromY),
+            toX + 2f / 3f * (cx - toX), toY + 2f / 3f * (cy - toY),
+            toX, toY,
+        )
+    }
+
     // ------------------------------------------------------------------ scenes
 
     private fun mountains(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random, dawn: Boolean) {
@@ -174,7 +190,7 @@ object OeaWallpaperRenderer {
         val slope = Path().apply {
             moveTo(0f, h.toFloat())
             lineTo(0f, h * 0.86f)
-            quadraticBezierTo(w * 0.35f, h * 0.8f, w.toFloat(), h * 0.9f)
+            quadCurve(0f, h * 0.86f, w * 0.35f, h * 0.8f, w.toFloat(), h * 0.9f)
             lineTo(w.toFloat(), h.toFloat())
             close()
         }
