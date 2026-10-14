@@ -2828,9 +2828,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 menus.showAssistantNeeded("Quick Settings")
             }
             action == "wallpaper" -> openSystemTool("wallpaper")
-            action == "themes" -> runCatching<Unit> {
-                startActivity(Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
+            // Home is a View, so the launch goes through the same guarded helper
+            // every other OEA launch uses (it falls back to the application context).
+            action == "themes" -> startSafely(
+                Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
             action == "settings" -> openSystemTool("")
             // Stability screen: rebuild in place, or restart Home's window.
             action == "rebuild" -> {
