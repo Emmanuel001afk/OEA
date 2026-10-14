@@ -39,7 +39,9 @@ object OeaNotesApp {
         .sortedWith(compareByDescending<Note> { it.pinned }.thenBy { it.text.lowercase() })
 
     internal fun encode(notes: List<Note>): String = notes.joinToString(ROW) { note ->
-        note.text.replace(FIELD, ' ').replace(ROW, ' ') + FIELD + if (note.pinned) "1" else "0"
+        // The separators are stripped out of the text so a note can hold anything
+        // the user types without corrupting the store.
+        note.text.replace(FIELD, " ").replace(ROW, " ") + FIELD + if (note.pinned) "1" else "0"
     }
 
     fun build(host: Activity, palette: OeaPalette): View {
@@ -142,17 +144,17 @@ object OeaNotesApp {
                     column,
                     "No notes yet. A note is a line of text — an address, a plate number, a shopping list — and it is here the next time you open the launcher.",
                 )
-                return@refresh
-            }
-            val pinned = notes.filter { it.pinned }
-            if (pinned.isNotEmpty()) {
-                kit.sectionTitle(column, "Pinned")
-                rows(pinned)
-            }
-            val rest = notes.filterNot { it.pinned }
-            if (rest.isNotEmpty()) {
-                kit.sectionTitle(column, if (pinned.isEmpty()) "Notes" else "Everything else")
-                rows(rest)
+            } else {
+                val pinned = notes.filter { it.pinned }
+                if (pinned.isNotEmpty()) {
+                    kit.sectionTitle(column, "Pinned")
+                    rows(pinned)
+                }
+                val rest = notes.filterNot { it.pinned }
+                if (rest.isNotEmpty()) {
+                    kit.sectionTitle(column, if (pinned.isEmpty()) "Notes" else "Everything else")
+                    rows(rest)
+                }
             }
         }
         refresh()

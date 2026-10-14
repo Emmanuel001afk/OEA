@@ -769,7 +769,7 @@ class OeaDynamicIslandView(
         //    single most intrusive thing a launcher can draw, and it is avoidable.
         var effective = duration
         if (overlayWindow && duration > 0L) {
-            effective = minOf(duration, store.islandAutoCollapseMs())
+            effective = minOf(duration, store.islandAutoCollapseMs().toLong())
         }
         if (effective > 0L) {
             peekUntil = SystemClock.uptimeMillis() + effective

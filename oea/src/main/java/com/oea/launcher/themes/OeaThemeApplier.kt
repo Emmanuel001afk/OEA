@@ -101,7 +101,7 @@ object OeaThemeApplier {
                 // simply have failed and left the lock screen untouched.
                 is OeaImageRef.Generated -> {
                     val bitmap = OeaThemeImages.renderForWallpaper(context, ref, size.first, size.second) ?: return@runCatching false
-                    val ok = wm.setBitmap(bitmap, null, true, which)
+                    val ok = wm.setBitmap(bitmap, null, true, which) != 0
                     runCatching { bitmap.recycle() }
                     ok
                 }

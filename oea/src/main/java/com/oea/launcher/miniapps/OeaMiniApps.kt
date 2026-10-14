@@ -106,7 +106,7 @@ object OeaMiniApps {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
             isClickable = true
             background = kit.ripple(kit.rounded(kit.palette.card, 20), 20)
-            padding = kit.dp(12)
+            setPadding(kit.dp(12), kit.dp(12), kit.dp(12), kit.dp(12))
             setOnClickListener { onClick() }
         }
         column.addView(kit.iconBadge(app.icon, kit.palette.accentSoft, kit.palette.onAccentSoft, 44))

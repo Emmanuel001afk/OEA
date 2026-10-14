@@ -270,8 +270,13 @@ object OeaAccessDoctor {
             android.provider.Settings.Secure.getString(app.contentResolver, "enabled_accessibility_services").orEmpty()
         }.getOrDefault("")
         val ours = assistantComponent(app)
-        val keep = existing.split(':').map { it.trim() }.filter { it.isNotEmpty() && it != ours }
-        return (keep + ours).joinToString(":")
+        // Android stores these as component strings ("pkg/.Service" or the long
+        // form), so the comparison has to be done on both spellings.
+        val short = ours.flattenToShortString()
+        val long = ours.flattenToString()
+        val keep = existing.split(':').map { it.trim() }
+            .filter { it.isNotEmpty() && it != short && it != long }
+        return (keep + short).joinToString(":")
     }
 
     /** What the doctor fixes by itself, in one pass. */
