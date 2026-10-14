@@ -1129,11 +1129,15 @@ class OeaDynamicIslandView(
             card.measure(widthSpec, heightSpec)
             val width = if (visible) card.measuredWidth.coerceIn(1, screenWidth) else 1
             val height = if (visible) card.measuredHeight.coerceIn(1, screenHeight) else 1
-            val offsetX = if (isCamera) dp(store.islandCameraOffsetX()) else 0
+            val offsetX = if (isCamera) dp(if (cameraDragging) cameraDragX else store.islandCameraOffsetX()) else 0
             val cameraCenter = cutout?.centerX() ?: screenWidth / 2
             val centerX = ((if (isCamera) cameraCenter else screenWidth / 2) + offsetX).coerceIn(0, screenWidth)
             val x = if (visible) (centerX - width / 2).coerceIn(0, (screenWidth - width).coerceAtLeast(0)) else 0
-            val top = if (isCamera) cameraPillTop(screenHeight, height) else cardTop + extraTop + dp(4)
+            val top = if (isCamera) {
+                val yOffset = if (cameraDragging) cameraDragY else store.islandCameraOffsetY()
+                (maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(yOffset))
+                    .coerceIn(0, (screenHeight - height).coerceAtLeast(0))
+            } else cardTop + extraTop + dp(4)
             val y = if (visible) top.coerceIn(0, (screenHeight - height).coerceAtLeast(0)) else 0
             val key = "$width:$height:$x:$y:$visible"
             if (key == lastOverlayGeometryKey) return@post
