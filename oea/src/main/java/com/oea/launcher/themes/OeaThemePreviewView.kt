@@ -41,6 +41,16 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
     var cornerDp = 18f
         set(value) { field = value; invalidate() }
 
+    /**
+     * Shows [ref] as soon as possible.
+     *
+     * The full preview is decoded off the main thread, but a tile must never be
+     * a blank rectangle while that happens — that is exactly how the wallpaper
+     * grid used to look plain. So a *small* copy is decoded synchronously first
+     * (a bounded `inSampleSize` decode: a fraction of an already-cached
+     * thumbnail, a millisecond or two of work) and the sharp version replaces it
+     * the moment the loader finishes.
+     */
     fun setImage(ref: OeaImageRef?) {
         if (ref == null) {
             requested = null
@@ -48,22 +58,25 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
             invalidate()
             return
         }
-        if (requested == ref.key && bitmap != null) return
+        if (requested == ref.key && bitmap != null && (bitmap?.width ?: 0) >= FULL_W) return
         requested = ref.key
+        val app = context.applicationContext
         val cached = OeaThemeImages.cached(ref)
         if (cached != null) {
             bitmap = cached
             invalidate()
             return
         }
-        bitmap = null
+        // Quick synchronous pass so the very first frame already shows the picture.
+        bitmap = runCatching {
+            OeaThemeImages.cached(ref, QUICK_W) ?: OeaThemeImages.thumbnail(app, ref, QUICK_W, QUICK_H)
+        }.getOrNull()
         invalidate()
         val key = ref.key
-        val app = context.applicationContext
         loader.execute {
-            val loaded = OeaThemeImages.thumbnail(app, ref)
+            val loaded = OeaThemeImages.thumbnail(app, ref, FULL_W, FULL_H)
             main.post {
-                if (requested == key) {
+                if (requested == key && loaded != null) {
                     bitmap = loaded
                     invalidate()
                 }
@@ -108,7 +121,17 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         val image = bitmap
         val t = theme
         if (image == null || image.isRecycled) {
-            paint.shader = LinearGradient(0f, 0f, 0f, h, t?.surfaceTint ?: Color.rgb(20, 24, 32), Color.rgb(8, 10, 14), Shader.TileMode.CLAMP)
+            // Nothing decoded yet: show the theme's mood, never a flat rectangle.
+            // A pale surface tint over a pale page is what made these tiles look
+            // white, so the placeholder is the tint pulled towards the accent and
+            // darkened towards the bottom, which reads as a picture still coming.
+            val tint = t?.surfaceTint ?: Color.rgb(20, 24, 32)
+            val mood = OeaTheme.blend(tint, accent(), 0.34f)
+            paint.shader = LinearGradient(
+                0f, 0f, w * 0.35f, h,
+                OeaTheme.blend(mood, Color.WHITE, 0.10f), OeaTheme.blend(mood, Color.BLACK, 0.55f),
+                Shader.TileMode.CLAMP,
+            )
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
             return
@@ -272,5 +295,13 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
     companion object {
         private val main = Handler(Looper.getMainLooper())
         private val loader = Executors.newFixedThreadPool(2) { task -> Thread(task, "OeaThemePreview").apply { isDaemon = true } }
+
+        /** The first, synchronous pass: small enough to decode on the main thread. */
+        private const val QUICK_W = 90
+        private const val QUICK_H = 196
+
+        /** The sharp pass, decoded off the main thread. */
+        private const val FULL_W = 360
+        private const val FULL_H = 780
     }
 }

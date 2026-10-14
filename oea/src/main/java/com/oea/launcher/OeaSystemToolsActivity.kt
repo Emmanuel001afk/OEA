@@ -36,6 +36,8 @@ import com.oea.launcher.applock.OeaAppLockStore
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.callblocker.OeaCallBlockerActivity
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.perf.OeaLowMode
+import com.oea.launcher.power.OeaPower
 import com.oea.launcher.fault.OeaFaultLog
 import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.freezer.OeaFreezerActivity
@@ -633,41 +635,63 @@ open class OeaSystemToolsActivity : Activity() {
      * says exactly what a mode will set, so nothing here is a surprise, and a
      * theme's own colours are never overwritten by the preview.
      */
+    /**
+     * The mode picker: the one screen that sets the whole look at once.
+     *
+     * Each entry says exactly what it changes — surfaces, motion, icons and the
+     * scene — and what it does *not* touch, because a mode that silently moved the
+     * user's wallpaper would be a bad surprise. Everything a mode sets stays
+     * editable in Appearance afterwards, and the chosen mode is remembered.
+     */
     private fun showModes() {
         val page = page("Launcher mode", "One choice that sets the whole look")
         val box = page.content
         val current = com.oea.launcher.ui.OeaModes.current(this)
-        kit.note(box, "A mode sets surfaces, motion, icon shape and wallpaper together. Everything stays adjustable in Appearance afterwards.")
+        kit.note(box, "A mode sets the surfaces, the page motion, the icon shape and the scene behind your icons together. Nothing else changes: same apps, same folders, same layout. Android's wallpaper is only touched by the modes that say so.")
 
-        val list = kit.group(box)
         com.oea.launcher.ui.OeaMode.entries.forEach { mode ->
+            val spec = com.oea.launcher.ui.OeaModes.spec(mode)
             val inUse = mode == current
-            val row = LinearLayout(this).apply {
+            val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), dp(14), dp(16), dp(14))
+                background = kit.rounded(
+                    if (inUse) OeaTheme.blend(palette.card, palette.accent, 0.14f) else palette.card,
+                    24,
+                    if (inUse) OeaTheme.alpha(palette.accent, 0x55) else palette.stroke,
+                    1,
+                )
                 isClickable = true
                 setOnClickListener { applyMode(mode) }
             }
             val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            head.addView(kit.text(mode.label, 16f, if (inUse) palette.accent else palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+            head.addView(kit.text(mode.label, 17f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+            head.addView(modePreview(spec), LinearLayout.LayoutParams(dp(78), dp(42)).apply { rightMargin = dp(10) })
             if (inUse) head.addView(kit.text("In use", 12f, palette.accent, OeaType.medium))
-            row.addView(head)
-            row.addView(kit.text(mode.tagline, 13f, palette.textSecondary).apply { setPadding(0, dp(3), 0, 0) })
-            row.addView(kit.text(mode.detail, 12.5f, palette.textSecondary).apply {
-                setPadding(0, dp(6), 0, 0)
+            card.addView(head)
+            card.addView(kit.text(mode.tagline, 13.5f, palette.accent, OeaType.medium).apply { setPadding(0, dp(4), 0, 0) })
+            card.addView(kit.text(mode.detail, 12.5f, palette.textSecondary).apply {
+                setPadding(0, dp(5), 0, 0)
                 setLineSpacing(dp(2).toFloat(), 1f)
             })
-            if (mode.isLive) {
-                row.addView(kit.text("Drawn by Home · Android's wallpaper is not changed", 11.5f, palette.accent, OeaType.medium).apply { setPadding(0, dp(6), 0, 0) })
+            val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(9), 0, 0) }
+            modeChips(spec).forEach { chip ->
+                chips.addView(kit.text(chip, 11f, palette.textSecondary, OeaType.medium).apply {
+                    setPadding(dp(9), dp(3), dp(9), dp(3))
+                    background = kit.rounded(palette.cardHigh, 20, palette.stroke, 1)
+                }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(6) })
             }
-            list.addView(row)
-            list.addView(View(this).apply { setBackgroundColor(palette.stroke) }, LinearLayout.LayoutParams(-1, maxOf(1, dp(1) / 2)).apply { leftMargin = dp(16); rightMargin = dp(16) })
+            card.addView(chips)
+            if (mode.isLive) {
+                card.addView(kit.text("Live scene drawn by Home · Android's wallpaper untouched", 11.5f, palette.accent).apply { setPadding(0, dp(8), 0, 0) })
+            }
+            box.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         }
 
-        kit.sectionTitle(box, "Details")
+        kit.sectionTitle(box, "The scene behind your icons")
         val details = kit.group(box)
-        kit.row(details, R.drawable.oic_wallpaper, "Wallpaper for this mode", wallpaperSourceSummary()) { navigate("wallpaper") }
-        kit.switchRow(details, R.drawable.oic_contrast, "Theme follows the scene", "The accent comes from the mode's own artwork", com.oea.launcher.wallpaper.OeaWallpaperStore.themeFollowsScene(this)) {
+        kit.row(details, R.drawable.oic_wallpaper, "Wallpaper source", wallpaperSourceSummary()) { navigate("wallpaper") }
+        kit.switchRow(details, R.drawable.oic_contrast, "Theme follows the scene", "The accent and Home's text colour are taken from the artwork", com.oea.launcher.wallpaper.OeaWallpaperStore.themeFollowsScene(this)) {
             com.oea.launcher.wallpaper.OeaWallpaperStore.setThemeFollowsScene(this, it)
             com.oea.launcher.ui.OeaTheme.invalidate()
             rerender()
@@ -675,8 +699,34 @@ open class OeaSystemToolsActivity : Activity() {
         kit.stepperRow(details, R.drawable.oic_gesture, "Parallax", "How far layered scenes move with your pages", dataStore.parallaxStrength() / 10, 0, 10, { "${it * 10}%" }) {
             dataStore.setParallaxStrength(it * 10)
         }
-        kit.note(box, "Tide, Depth and Ink are OEA's own: Home draws them live, so nothing is written to Android's wallpaper and the lock screen keeps whatever you set there.")
+        kit.note(box, "Tide, Depth and Ink are OEA's own: Home draws them itself, so nothing is written to Android's wallpaper and the lock screen keeps whatever you set there.")
         present(page)
+    }
+
+    /** A tiny strip of what a mode looks like: the surface, its accent, its scene. */
+    private fun modePreview(spec: com.oea.launcher.ui.ModeSpec): View {
+        val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val accent = spec.scene?.let { com.oea.launcher.wallpaper.OeaLiveScenes.accent(it, !palette.dark) } ?: palette.accent
+        val scene = spec.scene?.let { com.oea.launcher.wallpaper.OeaLiveScenes.accent(it, true) } ?: palette.cardHigh
+        listOf(palette.glass, accent, scene).forEachIndexed { index, colour ->
+            strip.addView(View(this).apply {
+                background = kit.rounded(colour, 8, OeaTheme.alpha(palette.stroke, 0x66), 1)
+            }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { if (index < 2) rightMargin = dp(3) })
+        }
+        return strip
+    }
+
+    /** Plain-language chips: what this mode changes. */
+    private fun modeChips(spec: com.oea.launcher.ui.ModeSpec): List<String> {
+        val chips = mutableListOf<String>()
+        when (spec.glass) {
+            OeaDataStore.GLASS_LIQUID -> chips += "Liquid glass"
+            OeaDataStore.GLASS_CLASSIC -> chips += "Classic surfaces"
+        }
+        spec.effect?.let { chips += "Motion: $it" }
+        spec.iconShape?.let { shape -> chips += "Icons: ${shape.replaceFirstChar { letter -> letter.uppercase() }}" }
+        if (spec.wallpaperSource == OeaDataStore.WALLPAPER_OEA) chips += "Drawn by Home"
+        return chips
     }
 
     private fun applyMode(mode: com.oea.launcher.ui.OeaMode) {
@@ -695,30 +745,41 @@ open class OeaSystemToolsActivity : Activity() {
      * LOW mode's screen. Every row states what the mode actually does on *this*
      * phone, including which layers are unavailable without device owner or root.
      */
+    /**
+     * LOW mode's own screen.
+     *
+     * It states what the mode actually does on *this* phone, and separates the
+     * parts that always work from the parts that need a role the phone may not have
+     * granted, so the user never has to guess which of the two they are looking at.
+     */
     private fun showLowMode() {
         val page = page("LOW mode", "OEA's own power saving")
         val box = page.content
-        val low = com.oea.launcher.perf.OeaLowMode
-        val active = low.active(this)
-        val battery = low.battery(this)
+        val active = OeaLowMode.active(this)
+        val (percent, charging) = OeaLowMode.battery(this)
 
         if (active) {
-            kit.banner(box, R.drawable.oic_battery_charging_full, "LOW mode is on", low.summary(this).replaceFirstChar { it.uppercase() } + ". Home is running light.", OeaKit.Tone.INFO, "Turn off") {
-                low.setEnabled(this, false)
+            kit.banner(box, R.drawable.oic_battery_charging_full, "LOW mode is on",
+                OeaLowMode.summary(this).replaceFirstChar { letter -> letter.uppercase() } + ". Home is running light.", OeaKit.Tone.INFO, "Turn off") {
+                OeaLowMode.setEnabled(this, false)
                 rerender()
             }
         } else {
-            kit.banner(box, R.drawable.oic_battery_full, "LOW mode is off",
-                if (battery.first >= 0) "${battery.first}% battery${if (battery.second) " · charging" else ""}." else "Battery level is not readable on this phone.", OeaKit.Tone.NEUTRAL)
+            val body = when {
+                percent in 0..100 && charging -> "$percent% and charging. OEA will not switch itself on while the phone is plugged in."
+                percent in 0..100 -> "$percent% battery."
+                else -> "The battery level is not readable on this phone, so only the manual switch applies."
+            }
+            kit.banner(box, R.drawable.oic_battery_full, "LOW mode is off", body, OeaKit.Tone.INFO)
         }
 
-        kit.sectionTitle(box, "How it works")
-        kit.note(box, "LOW mode makes OEA itself cheap: no live wallpaper animation, no page motion, no At a Glance or live activities, no system-wide island overlay, no Game Boost sessions, and the wave and lift sensors are released. Android's own battery saver is a separate switch and OEA does not pretend to control other apps.")
+        kit.sectionTitle(box, "What it turns off")
+        kit.note(box, "OEA's own costs, and only OEA's: the live scene under your icons stops animating, pages stop moving, At a Glance and the islands hide, the system-wide island overlay service stops, Game Boost sessions end and stay off, and the wave and lift sensors are released. No app is killed and nothing of yours is changed, so everything comes back exactly as it was the moment LOW mode ends.")
 
         kit.sectionTitle(box, "Switching")
         val switching = kit.group(box)
         kit.switchRow(switching, R.drawable.oic_battery_charging_full, "LOW mode", "Turn it on now", active) {
-            low.setEnabled(this, it)
+            OeaLowMode.setEnabled(this, it)
             rerender()
         }
         kit.switchRow(switching, R.drawable.oic_battery_full, "Turn on by itself", "When the battery gets low, without asking", dataStore.lowModeAuto()) {
@@ -731,16 +792,18 @@ open class OeaSystemToolsActivity : Activity() {
         kit.stepperRow(switching, R.drawable.oic_refresh, "Turn off at", "Or as soon as the phone is charging", dataStore.lowModeExit() / 5, 2, 16, { "${it * 5}%" }) {
             dataStore.setLowModeExit(it * 5)
         }
+        kit.note(box, "One that switched itself on also switches itself off when the battery recovers or the phone is plugged in. One you turned on by hand stays on until you turn it off.")
 
         kit.sectionTitle(box, "Going further")
         val deep = kit.group(box)
-        val backend = com.oea.launcher.applock.OeaAppFreezer.backend(this)
-        if (backend == com.oea.launcher.applock.OeaAppFreezer.Backend.NONE) {
-            kit.row(deep, R.drawable.oic_info, "Suspend apps", "Needs device owner or root; without one, OEA only lightens itself", chevron = false)
+        val backend = OeaAppFreezer.backend(this)
+        if (backend == OeaAppFreezer.Backend.NONE) {
+            kit.row(deep, R.drawable.oic_info, "Suspend chosen apps", "Not available here: it needs device owner or root, and OEA will not pretend otherwise", chevron = false)
         } else {
-            kit.switchRow(deep, R.drawable.oic_block, "Suspend chosen apps", "Stops the apps you pick from running while LOW mode is on (${backend.name.lowercase().replace('_', ' ')})", dataStore.lowModeSuspendApps()) {
+            kit.switchRow(deep, R.drawable.oic_block, "Suspend chosen apps",
+                "Stops the apps you pick while LOW mode is on (${backend.name.lowercase().replace('_', ' ')})", dataStore.lowModeSuspendApps()) {
                 dataStore.setLowModeSuspendApps(it)
-                low.apply(this)
+                OeaLowMode.apply(this)
                 rerender()
             }
             kit.row(deep, R.drawable.oic_apps, "Apps to suspend", "${dataStore.lowModeAppList().size} chosen") { chooseLowModeApps() }
@@ -748,29 +811,23 @@ open class OeaSystemToolsActivity : Activity() {
         present(page)
     }
 
+    /** Pick the apps LOW mode suspends; only reachable with a backend that can. */
     private fun chooseLowModeApps() {
         val apps = requireApps() ?: return
         val chosen = dataStore.lowModeAppList()
         val names = apps.sortedBy { it.label.lowercase() }
-        val labels = names.map { (if (chosen.contains(it.packageName)) "✓ " else "") + it.label }
-        kit.sheet("Apps to suspend", "Only with device owner or root; OEA verifies every change") { panel, dialog ->
+        kit.sheet("Apps to suspend", "Tap to add or remove; OEA verifies every change with Android") { panel, dialog ->
             names.forEach { app ->
-                kit.row(
-                    panel,
-                    0,
-                    (if (chosen.contains(app.packageName)) "✓ " else "") + app.label,
-                    null,
-                    chevron = false,
-                ) {
+                val selected = chosen.contains(app.packageName)
+                kit.row(panel, 0, (if (selected) "✓ " else "") + app.label, null, chevron = false) {
                     val next = dataStore.lowModeAppList().toMutableSet()
                     if (!next.add(app.packageName)) next.remove(app.packageName)
                     dataStore.setLowModeAppList(next)
-                    com.oea.launcher.perf.OeaLowMode.apply(this)
                     dialog.dismiss()
                     chooseLowModeApps()
                 }
             }
-            kit.note(panel, "Suspending an app hides it from the launcher until LOW mode ends; Android confirms each change or OEA reports that it failed.")
+            kit.note(panel, "Suspended apps are hidden from OEA until LOW mode ends, exactly like the Freezer's own suspensions.")
         }
     }
 
@@ -885,12 +942,13 @@ open class OeaSystemToolsActivity : Activity() {
      */
     private fun pickLiveScene(id: String) {
         val label = com.oea.launcher.wallpaper.OeaLiveScenes.label(id)
+        val host = this
         kit.sheet(label, "Drawn by Home, frame by frame") { panel, dialog ->
             panel.addView(kit.hscroll(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 val home = kit.primaryButton("Draw on Home", R.drawable.oic_wallpaper) {
                     dialog.dismiss()
-                    com.oea.launcher.wallpaper.OeaHomeScene.setLive(this, id)
+                    com.oea.launcher.wallpaper.OeaHomeScene.setLive(host, id)
                     dataStore.setWallpaperSource(OeaDataStore.WALLPAPER_OEA)
                     toast("$label is drawn by Home; Android's wallpaper is untouched")
                     rerender()

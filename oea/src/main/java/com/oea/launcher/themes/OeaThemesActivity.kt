@@ -2,6 +2,7 @@ package com.oea.launcher.themes
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -205,6 +206,10 @@ class OeaThemesActivity : Activity() {
         if (mine.isEmpty()) kit.note(box, "Make a theme from your own pictures: the same picture for Home and lock, or a different one for each.")
         addThemeGrid(box, mine, applied?.id, withCreate = true)
 
+        kit.sectionTitle(box, "OEA scenes")
+        kit.note(box, "OEA's own artwork. Live scenes are drawn by Home itself, so Android's wallpaper — and your lock screen — stay exactly as they are.")
+        addSceneGrid(box)
+
         kit.sectionTitle(box, "Wallpapers")
         kit.note(box, "Preview any picture on Home or the lock screen, then apply it on its own or use it in a theme.")
         addWallpaperGrid(box)
@@ -215,6 +220,178 @@ class OeaThemesActivity : Activity() {
                 .onFailure { toast("No wallpaper picker is available.") }
         }
         present(page)
+    }
+
+    /**
+     * OEA's scenes: the live ones Home draws itself (Tide, Depth, Ink, Aurora) and
+     * the still ones it can hand to Android. Every tile shows the real artwork, a
+     * live one drawn as a frame of itself, so nothing here is a coloured square.
+     */
+    private fun addSceneGrid(parent: LinearLayout) {
+        val liveInUse = com.oea.launcher.wallpaper.OeaHomeScene.live(this)
+        val drawsForHome = data.wallpaperSource() == com.oea.launcher.data.OeaDataStore.WALLPAPER_OEA
+        val stillInUse = com.oea.launcher.wallpaper.OeaWallpaperStore.scene(this)
+        val tiles = mutableListOf<View>()
+        com.oea.launcher.wallpaper.OeaLiveScenes.ids.forEach { id ->
+            tiles += sceneTile(
+                title = com.oea.launcher.wallpaper.OeaLiveScenes.label(id),
+                subtitle = "Live",
+                inUse = liveInUse == id,
+                accent = com.oea.launcher.wallpaper.OeaLiveScenes.accent(id, true),
+                render = { com.oea.launcher.wallpaper.OeaLiveScenes.still(id, dp(76), dp(160)) },
+                onClick = {
+                    sceneSheet(
+                        title = com.oea.launcher.wallpaper.OeaLiveScenes.label(id),
+                        subtitle = com.oea.launcher.wallpaper.OeaLiveScenes.blurb(id),
+                        scene = null,
+                        liveId = id,
+                    )
+                },
+            )
+        }
+        com.oea.launcher.wallpaper.OeaWallpaper.entries.forEach { scene ->
+            tiles += sceneTile(
+                title = scene.label,
+                subtitle = "Still",
+                inUse = !drawsForHome && stillInUse == scene,
+                accent = scene.accent,
+                render = { com.oea.launcher.wallpaper.OeaWallpaperRenderer.preview(scene, dp(76), dp(160)) },
+                onClick = { sceneSheet(scene.label, scene.blurb, scene = scene, liveId = null) },
+            )
+        }
+        tiles.chunked(3).forEach { chunk ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            chunk.forEachIndexed { index, cell ->
+                row.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    leftMargin = if (index == 0) 0 else dp(5)
+                    rightMargin = if (index == chunk.lastIndex) 0 else dp(5)
+                })
+            }
+            repeat(3 - chunk.size) { row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { leftMargin = dp(5) }) }
+            parent.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        }
+    }
+
+    /**
+     * One scene tile. [render] is called on the main thread with a small size and
+     * draws whatever artwork the scene has — the renderers bound their own size, so
+     * a tile is a few milliseconds.
+     */
+    private fun sceneTile(
+        title: String,
+        subtitle: String,
+        inUse: Boolean,
+        accent: Int,
+        render: () -> Bitmap,
+        onClick: () -> Unit,
+    ): View {
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true
+            contentDescription = title
+            foreground = kit.ripple(null, 16)
+            setOnClickListener { onClick() }
+        }
+        val frame = FrameLayout(this)
+        val image = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            runCatching { setImageBitmap(render()) }
+            background = kit.rounded(OeaTheme.alpha(accent, 0x55), 14)
+        }
+        frame.addView(image, FrameLayout.LayoutParams(-1, dp(132)))
+        if (inUse) {
+            frame.addView(kit.text("In use", 10.5f, Color.WHITE, OeaType.medium).apply {
+                setPadding(dp(7), dp(2), dp(7), dp(2))
+                background = kit.rounded(OeaTheme.alpha(accent, 0xE6), 10)
+            }, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), dp(6), 0) })
+        }
+        tile.addView(frame, LinearLayout.LayoutParams(-1, dp(132)).apply { topMargin = dp(2) })
+        tile.addView(kit.text(title, 13f, palette.text, OeaType.medium).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(5), 0, 0)
+        })
+        tile.addView(kit.text(subtitle, 11.5f, palette.textSecondary))
+        return tile
+    }
+
+    /**
+     * What a scene can do: Home can draw it (nothing is written to Android, and a
+     * live scene keeps moving), or it can be handed to Android for Home, the lock
+     * screen, or both. The two choices are explained rather than assumed, because
+     * they leave the phone in genuinely different states.
+     */
+    private fun sceneSheet(title: String, subtitle: String, scene: com.oea.launcher.wallpaper.OeaWallpaper?, liveId: String?) {
+        // The strip below is built inside a LinearLayout receiver, where "this" is
+        // the layout: the Activity is captured first so the buttons still act on it.
+        val host = this
+        kit.sheet(title, subtitle) { panel, dialog ->
+            val scroll = kit.hscroll(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(kit.primaryButton("Draw on Home", R.drawable.oic_wallpaper) {
+                    dialog.dismiss()
+                    val chosen = liveId ?: scene?.id
+                    if (chosen != null) com.oea.launcher.wallpaper.OeaHomeScene.setLive(host, chosen)
+                    host.toast("$title is drawn by Home; Android's wallpaper is untouched")
+                    host.rerender()
+                }, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
+                if (scene != null) {
+                    com.oea.launcher.wallpaper.OeaWallpaperStore.Target.entries.forEach { target ->
+                        addView(kit.tonalButton("Apply to ${target.label}", R.drawable.oic_wallpaper) {
+                            dialog.dismiss()
+                            host.applyScene(scene, target)
+                        }, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
+                    }
+                } else if (liveId != null) {
+                    com.oea.launcher.wallpaper.OeaWallpaperStore.Target.entries.forEach { target ->
+                        addView(kit.tonalButton("Freeze to ${target.label}", R.drawable.oic_refresh) {
+                            dialog.dismiss()
+                            host.freezeScene(liveId, target)
+                        }, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
+                    }
+                }
+            })
+            panel.addView(scroll)
+            kit.note(panel, if (liveId != null)
+                "Drawn by Home, the scene keeps moving and follows your pages. Frozen, one frame is handed to Android, so it also shows on the lock screen."
+            else
+                "Drawn by Home, the scene sits under your icons and Android's wallpaper is left alone. Applied to Android, it becomes the real wallpaper of the place you choose.")
+        }
+    }
+
+    private fun applyScene(scene: com.oea.launcher.wallpaper.OeaWallpaper, target: com.oea.launcher.wallpaper.OeaWallpaperStore.Target) {
+        toast("Applying ${scene.label}…")
+        com.oea.launcher.wallpaper.OeaWallpaperStore.apply(this, scene, target) { result ->
+            if (!isFinishing) {
+                toast(result.message)
+                if (result is com.oea.launcher.wallpaper.OeaWallpaperStore.Result.Applied) rerender()
+            }
+        }
+    }
+
+    /** Renders one frame of a live scene and gives it to Android. */
+    private fun freezeScene(id: String, target: com.oea.launcher.wallpaper.OeaWallpaperStore.Target) {
+        toast("Rendering the scene…")
+        val app = this
+        val metrics = resources.displayMetrics
+        Thread {
+            val frame = runCatching {
+                com.oea.launcher.wallpaper.OeaLiveScenes.still(id, metrics.widthPixels, metrics.heightPixels)
+            }.getOrNull()
+            runOnUiThread {
+                if (isFinishing || frame == null) {
+                    frame?.recycle()
+                    if (!isFinishing) toast("The scene could not be rendered on this device")
+                    return@runOnUiThread
+                }
+                com.oea.launcher.wallpaper.OeaWallpaperStore.applyBitmap(app, frame, target) { result ->
+                    runCatching { frame.recycle() }
+                    if (isFinishing) return@applyBitmap
+                    toast(result.message)
+                    if (result is com.oea.launcher.wallpaper.OeaWallpaperStore.Result.Applied) rerender()
+                }
+            }
+        }.apply { isDaemon = true }.start()
     }
 
     private fun addThemeGrid(parent: LinearLayout, themes: List<OeaThemeSpec>, appliedId: String?, withCreate: Boolean) {
