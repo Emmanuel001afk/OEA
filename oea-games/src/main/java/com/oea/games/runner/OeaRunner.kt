@@ -627,7 +627,7 @@ class OeaRunner : OeaGame() {
     private fun rigFor(color: Int, ghost: Boolean): CharRig =
         if (ghost) ghostRigs.getOrPut(color) {
             val m = RunnerArt.ghostMaterial(color)
-            CharRig(m, m, m, m, m, ghost = true)
+            CharRig(m, m, m, m, m, ghost = true, accent = m)
         } else charRigs.getOrPut(color) {
             CharRig(
                 body = RunnerArt.bodyMaterial(color),
@@ -635,6 +635,7 @@ class OeaRunner : OeaGame() {
                 skin = com.oea.engine.graphics.Material(color = 0xFFE8B78C.toInt(), specular = 0.35f, shininess = 30f, rim = 0.25f),
                 shoes = com.oea.engine.graphics.Material(color = 0xFFF5F5F5.toInt(), specular = 0.35f),
                 hair = com.oea.engine.graphics.Material(color = 0xFF3A2418.toInt(), specular = 0.4f, shininess = 48f),
+                accent = com.oea.engine.graphics.Material(color = com.oea.engine.math.Colors.lerp(color, 0xFF10141A.toInt(), 0.25f), specular = 0.4f),
             )
         }
 

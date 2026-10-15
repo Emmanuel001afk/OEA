@@ -32,6 +32,8 @@ class CharRig(
     val shoes: Material,
     val hair: Material? = null,
     val ghost: Boolean = false,
+    /** Second body colour: glove cuffs at the wrists and a boot cuff above the shoe. */
+    val accent: Material? = null,
 ) {
 
     /**
@@ -50,6 +52,8 @@ class CharRig(
         /** Arms hold a weapon/aim forward, pitched by [aimPitch]. */
         var aimHold = false
         var aimPitch = 0f
+        /** Head-only turn within [-0.9, 0.9]: soldiers glance before bodies catch up. */
+        var headYaw = 0f
         /** Extra parts: joint spheres, belly blend, shoulder pads, hair cap. */
         var detail = true
     }
@@ -100,11 +104,28 @@ class CharRig(
         sph(r, skin, wx(leanX * 0.85f, neckZ), neckY, wz(leanX * 0.85f, neckZ), 0.10f * s)
         val headZ = torsoZ(0.86f, 0.07f)
         val headY = torso(0.86f, 0.07f)
-        sph(r, skin, wx(leanX, headZ), headY, wz(leanX, headZ), 0.185f * s)
+        val hdYaw = yaw + p.headYaw
+        val hca = cos(hdYaw - yaw); val hsa = sin(hdYaw - yaw)
+        // The head swings around the neck: swing the centre a touch too, so a
+        // glance does not shear the skull off the spine.
+        val hswing = hsa * 0.05f * s
+        sph(r, skin, wx(leanX + hswing, headZ), headY, wz(leanX + hswing, headZ), 0.185f * s)
+        if (p.detail) {
+            for (side in intArrayOf(-1, 1)) {
+                val ex = leanX + hswing + side * 0.185f * s * (hca)
+                val ez = headZ - side * 0.185f * s * (hsa)
+                sphx(r, skin, wx(ex, ez), headY - 0.01f * s, wz(ex, ez), 0.042f * s, 0.055f * s, 0.032f * s, hdYaw)
+            }
+        }
         val hairM = hair
         if (hairM != null) {
             val capZ = headZ - 0.03f * s
             sph(r, hairM, wx(leanX, capZ), headY + 0.035f * s, wz(leanX, capZ), 0.175f * s)
+        }
+
+        // Waist seam: a flattened band hides the pant/shirt colour switch.
+        if (accent != null && p.detail) {
+            sphx(r, accent!!, wx(leanX * 0.5f, torsoZ(0.14f, 0.02f)), torso(0.14f, 0.02f), wz(leanX * 0.5f, torsoZ(0.14f, 0.02f)), 0.27f * s, 0.09f * s, 0.24f * s, yaw)
         }
 
         // Legs: thigh -> knee -> shin -> ankle -> foot. Run cycle: hips swing in
@@ -141,6 +162,11 @@ class CharRig(
             val ftY = max(anY - 0.02f * s, y + 0.075f * s)
             val ftZ = anZ + 0.10f * s
             sphx(r, shoes, wx(knX, ftZ), ftY, wz(knX, ftZ), 0.105f * s, 0.075f * s, 0.20f * s, yaw)
+            val acM2 = accent
+            if (p.detail && acM2 != null) {
+                val cuY = anY - 0.045f * s
+                sph(r, acM2, wx(knX, anZ + 0.015f * s), max(cuY, y + 0.11f * s), wz(knX, anZ + 0.015f * s), 0.095f * s)
+            }
         }
 
         // Arms: shoulders live on the chest and swing opposite the legs; aiming
@@ -180,6 +206,16 @@ class CharRig(
                 sph(r, skin, hawX, haY, hawZ, 0.088f * s)
                 // Shoulder pads hide the joint seam.
                 sph(r, body, shwX, shY, shwZ, 0.095f * s)
+            }
+            // Palm: a squashed ellipsoid reaching past the wrist, gloves cuff.
+            val plY = haY - 0.10f * s * fa2
+            val plZ = haZ + 0.10f * s * fa1
+            sphx(r, skin, wx(shX, plZ), plY, wz(shX, plZ), 0.052f * s, 0.088f * s, 0.062f * s, yaw)
+            val acM = accent
+            if (p.detail && acM != null) {
+                val cuY = haY - 0.015f * s * fa2
+                val cuZ = haZ + 0.015f * s * fa1
+                sph(r, acM, wx(shX, cuZ), cuY, wz(shX, cuZ), 0.078f * s)
             }
         }
     }
