@@ -99,6 +99,7 @@ object OeaCalendarApp {
         var viewMode = runCatching { ViewMode.valueOf(prefs(host).getString(KEY_VIEW, "MONTH") ?: "MONTH") }.getOrDefault(ViewMode.MONTH)
         var searchQuery = ""
         var filterCategory: String? = null
+        var refresh: () -> Unit = {}
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val monthText = kit.text("", 20f, palette.text, OeaType.medium)
@@ -150,7 +151,6 @@ object OeaCalendarApp {
             }
         }
 
-        var refresh: () -> Unit = {}
         refresh = {
             renderViewBar()
             renderFilterBar()

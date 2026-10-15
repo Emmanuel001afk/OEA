@@ -124,6 +124,9 @@ object OeaMessagingApp {
     fun build(host: Activity, palette: OeaPalette): View {
         val kit = OeaKit(host, palette)
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        var currentTab = "all"
+        var searchQuery = ""
+        var refresh: () -> Unit = {}
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(kit.text("OEA Messaging", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
@@ -170,10 +173,6 @@ object OeaMessagingApp {
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         column.addView(content)
 
-        var currentTab = "all"
-        var searchQuery = ""
-
-        var refresh: () -> Unit = {}
         refresh = {
             tabBar.removeAllViews()
             listOf("all" to "All", "unread" to "Unread", "archived" to "Archived", "blocked" to "Blocked", "spam" to "Spam").forEach { (id, label) ->

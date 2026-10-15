@@ -232,10 +232,10 @@ object OeaCameraApp {
         zoomRow.addView(kit.text("Zoom", 12f, palette.textSecondary), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(8) })
         val zoomBar = SeekBar(host).apply { max = 700; progress = ((zoom - 1f) * 100).toInt() }
         zoomBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    zoom = 1f + p / 100f
-                    p.edit().putFloat(KEY_ZOOM, zoom).apply()
+                    zoom = 1f + progress / 100f
+                    prefs(host).edit().putFloat(KEY_ZOOM, zoom).apply()
                     cameraHelper?.setZoom(zoom)
                 }
             }

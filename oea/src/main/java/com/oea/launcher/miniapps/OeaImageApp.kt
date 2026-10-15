@@ -166,6 +166,7 @@ object OeaImageApp {
         var gridCols = prefs(host).getInt(KEY_GRID_COLS, 3).coerceIn(2, 5)
         var loadedOffset = 0
         var hasMore = true
+        var refresh: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> }
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(kit.text("EMAGE", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
@@ -369,7 +370,6 @@ object OeaImageApp {
             }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
         }
 
-        var refresh: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> }
         refresh = { force, loadMore, _ ->
             if (force) {
                 images.clear()

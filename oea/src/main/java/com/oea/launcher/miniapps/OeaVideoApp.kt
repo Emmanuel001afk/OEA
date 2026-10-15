@@ -165,6 +165,7 @@ object OeaVideoApp {
         var gridMode = prefs(host).getBoolean(KEY_GRID, false)
         var loadedOffset = 0
         var hasMore = true
+        var refresh: (Boolean, Boolean) -> Unit = { _, _ -> }
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(kit.text("VIP • Video Instant Player", 20f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
@@ -341,10 +342,9 @@ object OeaVideoApp {
             }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(12) })
         }
 
-        var refresh: (Boolean, Boolean) -> Unit = { _, _ -> }
         refresh = { force, loadMore ->
             if (force) { videos.clear(); loadedOffset = 0; hasMore = true }
-            if (!loadMore) listHost.removeAllViews().also { listHost.addView(kit.text("Loading videos…", 13f, palette.textSecondary)) }
+            if (!loadMore) listHost.removeAllViews().also { listHost.addView(kit.text("Loading videos...", 13f, palette.textSecondary)) }
             io.execute {
                 val batch = if (loadMore) queryVideos(host, loadedOffset, 200) else queryVideos(host, 0, 300)
                 host.runOnUiThread {
