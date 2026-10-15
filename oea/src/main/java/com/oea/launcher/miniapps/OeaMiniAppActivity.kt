@@ -92,15 +92,15 @@ class OeaMiniAppActivity : Activity() {
                 setImageResource(R.drawable.oea_logo)
                 layoutParams = LinearLayout.LayoutParams(kit.dp(40), kit.dp(40))
                 contentDescription = "OEA"
-            } else null,
-        )
+            } else null
+)
         if (app == null) {
             page.content.addView(OeaKitHost.sectionTitle(kit, "On this phone"))
             OeaMiniApps.grid(kit, page.content) { chosen -> show(chosen.id) }
             kit.note(
                 page.content,
-                "Each mini-app is part of OEA itself: no store, no download, and a problem inside one is contained so the launcher keeps running.",
-            )
+                "Each mini-app is part of OEA itself: no store, no download, and a problem inside one is contained so the launcher keeps running."
+)
         } else {
             val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             body.addView(OeaMiniApps.build(this, app.id, kit), LinearLayout.LayoutParams(-1, -2))

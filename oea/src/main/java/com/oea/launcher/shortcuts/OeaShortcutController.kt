@@ -27,8 +27,8 @@ class OeaShortcutController(private val context: Context) {
             .setQueryFlags(
                 LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
                     LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED,
-            )
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+)
         if (!className.isNullOrBlank()) query.setActivity(ComponentName(packageName, className))
         val all = runCatching { apps.getShortcuts(query, Process.myUserHandle()) }.getOrNull().orEmpty()
         val forActivity = all.filter { it.isEnabled && (it.isDynamic || it.isDeclaredInManifest) }
@@ -43,8 +43,8 @@ class OeaShortcutController(private val context: Context) {
     private fun shortcutsForPackageOnly(packageName: String): List<ShortcutInfo> {
         val apps = launcherApps ?: return emptyList()
         val query = LauncherApps.ShortcutQuery().setPackage(packageName).setQueryFlags(
-            LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST,
-        )
+            LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST
+)
         return runCatching { apps.getShortcuts(query, Process.myUserHandle()) }.getOrNull().orEmpty()
             .filter { it.isEnabled }
             .sortedWith(compareBy<ShortcutInfo>({ if (it.isDeclaredInManifest) 0 else 1 }, { it.rank }))
@@ -60,8 +60,8 @@ class OeaShortcutController(private val context: Context) {
             .setQueryFlags(
                 LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
                     LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
-                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED,
-            )
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+)
         return runCatching { apps.getShortcuts(query, Process.myUserHandle()) }.getOrNull()?.firstOrNull()
     }
 

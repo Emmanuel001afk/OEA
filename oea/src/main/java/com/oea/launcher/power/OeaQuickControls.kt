@@ -70,8 +70,8 @@ object OeaQuickControls {
         }
         sheet.addView(
             View(context).apply { background = kit.rounded(OeaTheme.alpha(palette.textSecondary, 0x66), 3) },
-            LinearLayout.LayoutParams(dp(36), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(10) },
-        )
+            LinearLayout.LayoutParams(dp(36), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(10) }
+)
         val head = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(kit.text("Quick controls", 20f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         head.addView(kit.circleIconButton(R.drawable.oic_close, "Close", palette.cardHigh, palette.text) { onClose() })
@@ -114,8 +114,8 @@ object OeaQuickControls {
             action(R.drawable.oic_volume_up, "Volume") { OeaPower.showVolumePanel(context) },
             action(R.drawable.oic_notifications, "Shade") {
                 if (!OeaSystemActions.expandNotifications(context)) toast("OEA Assistant is off, so notification shade cannot be opened")
-            },
-        ).forEachIndexed { index, view ->
+            }
+).forEachIndexed { index, view ->
             grid.addView(view, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) leftMargin = dp(8) })
         }
         sheet.addView(grid)
@@ -246,8 +246,8 @@ object OeaQuickControls {
                 val modes = listOf(
                     AudioManager.RINGER_MODE_NORMAL to "Sound",
                     AudioManager.RINGER_MODE_VIBRATE to "Vibrate",
-                    AudioManager.RINGER_MODE_SILENT to "Silent",
-                )
+                    AudioManager.RINGER_MODE_SILENT to "Silent"
+)
                 val current = modes.indexOfFirst { it.first == audio.ringerMode }.coerceAtLeast(0)
                 sheet.addView(kit.segmented(modes.map { it.second }, current) { index ->
                     if (!OeaPower.setRinger(context, modes[index].first)) {
@@ -363,8 +363,8 @@ object OeaQuickControls {
         label: String,
         stream: Int,
         audio: AudioManager,
-        onClose: () -> Unit,
-    ) {
+        onClose: () -> Unit
+) {
         val density = context.resources.displayMetrics.density
         fun dp(v: Int) = (v * density + 0.5f).toInt()
         val max = runCatching { audio.getStreamMaxVolume(stream) }.getOrDefault(0)

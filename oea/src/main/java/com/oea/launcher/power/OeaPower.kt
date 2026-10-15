@@ -168,8 +168,8 @@ object OeaPower {
         .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(context, OeaDeviceAdminReceiver::class.java))
         .putExtra(
             DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-            "Lets OEA lock the screen when your power button doesn't work and OEA Assistant is off. Android may ask for your PIN instead of your fingerprint after OEA locks the phone.",
-        )
+            "Lets OEA lock the screen when your power button doesn't work and OEA Assistant is off. Android may ask for your PIN instead of your fingerprint after OEA locks the phone."
+)
 
     /** Android's power menu (power off, restart, emergency). Needs OEA Assistant. */
     fun openPowerMenu(): Boolean = OeaAssistant.openPowerMenu()

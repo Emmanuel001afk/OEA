@@ -118,8 +118,8 @@ object OeaArtwork {
         "pine_night" to look(Color.rgb(8, 14, 10), Color.rgb(20, 40, 32), Color.rgb(120, 200, 160), Color.rgb(70, 150, 110)),
         "storm_night" to look(Color.rgb(10, 12, 18), Color.rgb(32, 40, 64), Color.rgb(140, 170, 220), Color.rgb(80, 110, 180)),
         "bloom_night" to look(Color.rgb(16, 8, 20), Color.rgb(64, 24, 64), Color.rgb(220, 140, 200), Color.rgb(180, 80, 160)),
-        "abyss_night" to look(Color.rgb(2, 6, 12), Color.rgb(6, 20, 40), Color.rgb(60, 160, 240), Color.rgb(30, 100, 180)),
-    )
+        "abyss_night" to look(Color.rgb(2, 6, 12), Color.rgb(6, 20, 40), Color.rgb(60, 160, 240), Color.rgb(30, 100, 180))
+)
 
     /** Every generated picture OEA can draw for a theme and wallpapers. */
     val ids: List<String> = listOf(
@@ -267,8 +267,8 @@ object OeaArtwork {
         paint.shader = LinearGradient(
             0f, 0f, w * 0.3f, h,
             intArrayOf(spec.top, OeaWallpaperRenderer.blend(spec.top, spec.bottom, 0.55f), spec.bottom),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
-        )
+            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
     }
@@ -277,8 +277,8 @@ object OeaArtwork {
         paint.shader = RadialGradient(
             x, y, radius,
             intArrayOf(OeaWallpaperRenderer.alpha(color, strength), OeaWallpaperRenderer.alpha(color, strength / 3), Color.TRANSPARENT),
-            floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP,
-        )
+            floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP
+)
         canvas.drawCircle(x, y, radius, paint)
         paint.shader = null
     }
@@ -290,8 +290,8 @@ object OeaArtwork {
         paint.shader = LinearGradient(
             shaftX, 0f, shaftX, h,
             intArrayOf(OeaWallpaperRenderer.alpha(spec.accent, 0x55), OeaWallpaperRenderer.alpha(spec.glow, 0x2A)),
-            floatArrayOf(0f, 1f), Shader.TileMode.CLAMP,
-        )
+            floatArrayOf(0f, 1f), Shader.TileMode.CLAMP
+)
         canvas.drawRect(shaftX - w * 0.1f, 0f, shaftX + w * 0.1f, h, paint)
         paint.shader = null
         // Columns: tall, flat-topped silhouettes, darker and wider towards the edges.
@@ -333,8 +333,8 @@ object OeaArtwork {
             }
             paint.color = OeaWallpaperRenderer.alpha(
                 OeaWallpaperRenderer.blend(spec.accent, spec.bottom, 0.4f),
-                0x1E + random.nextInt(0x1C),
-            )
+                0x1E + random.nextInt(0x1C)
+)
             canvas.drawPath(path, paint)
         }
         // A couple of long light streaks: what makes glass read as glass.
@@ -343,8 +343,8 @@ object OeaArtwork {
             paint.shader = LinearGradient(
                 startX, 0f, startX + w * 0.5f, h,
                 intArrayOf(Color.TRANSPARENT, OeaWallpaperRenderer.alpha(spec.accent, 0x3C), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-            )
+                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+)
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
         }
@@ -363,8 +363,8 @@ object OeaArtwork {
                 cx + cos(angle) * distance, cy + sin(angle) * distance,
                 w * (0.3f + random.nextFloat() * 0.2f),
                 if (i % 2 == 0) spec.accent else spec.glow,
-                0x3A,
-            )
+                0x3A
+)
         }
         glow(canvas, paint, cx, cy, w * 0.34f, spec.glow, 0x5A)
         paint.color = OeaWallpaperRenderer.alpha(OeaWallpaperRenderer.blend(spec.accent, Color.WHITE, 0.4f), 0x66)
@@ -400,8 +400,8 @@ object OeaArtwork {
             paint.shader = LinearGradient(
                 -w * 0.1f, 0f, w * 1.1f, 0f,
                 intArrayOf(Color.TRANSPARENT, OeaWallpaperRenderer.alpha(if (i % 2 == 0) spec.accent else spec.glow, 0x44), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-            )
+                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+)
             canvas.drawPath(path, paint)
             paint.shader = null
         }
@@ -417,8 +417,8 @@ object OeaArtwork {
             val ratio = 0.2f + random.nextFloat() * 0.5f
             paint.color = OeaWallpaperRenderer.alpha(
                 OeaWallpaperRenderer.blend(spec.top, spec.accent, ratio),
-                0x1A + random.nextInt(0x1C),
-            )
+                0x1A + random.nextInt(0x1C)
+)
             canvas.drawRect(0f, top, w, top + height, paint)
         }
         // One bright band: a horizon line or a seam of light.
@@ -426,8 +426,8 @@ object OeaArtwork {
         paint.shader = LinearGradient(
             0f, seam - h * 0.02f, 0f, seam + h * 0.02f,
             intArrayOf(Color.TRANSPARENT, OeaWallpaperRenderer.alpha(spec.accent, 0x66), Color.TRANSPARENT),
-            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-        )
+            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, seam - h * 0.02f, w, seam + h * 0.02f, paint)
         paint.shader = null
         grain(canvas, paint, w, h, spec, random, if (spec.dark) 0x14 else 0x18)
@@ -452,8 +452,8 @@ object OeaArtwork {
             }
             paint.color = OeaWallpaperRenderer.alpha(
                 OeaWallpaperRenderer.blend(spec.bottom, spec.accent, 0.1f + layer * 0.06f),
-                if (spec.dark) 0x2E else 0x30,
-            )
+                if (spec.dark) 0x2E else 0x30
+)
             canvas.drawPath(path, paint)
         }
         grain(canvas, paint, w, h, spec, random, 0x12)
@@ -496,15 +496,15 @@ object OeaArtwork {
         paint.shader = RadialGradient(
             w * 0.5f, h * 0.45f, max(w, h) * 0.72f,
             intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, OeaWallpaperRenderer.alpha(Color.BLACK, if (spec.dark) 0xB4 else 0x58)),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
-        )
+            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
         paint.shader = LinearGradient(
             0f, h * 0.18f, 0f, h * 0.72f,
             intArrayOf(Color.TRANSPARENT, OeaWallpaperRenderer.alpha(Color.BLACK, if (spec.dark) 0x3A else 0x22), Color.TRANSPARENT),
-            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-        )
+            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, h * 0.18f, w, h * 0.72f, paint)
         paint.shader = null
     }

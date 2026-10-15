@@ -111,8 +111,8 @@ object OeaFaultShield {
             android.widget.Toast.makeText(
                 app,
                 "OEA contained a problem in ${record.subsystemLabel()}. Settings › Stability has the details.",
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
+                android.widget.Toast.LENGTH_LONG
+).show()
         }
     }
 
@@ -199,8 +199,8 @@ object OeaFaultShield {
             action = FaultAction.CONTAIN,
             reason = "handled with a fallback",
             repeats = 1,
-            process = processName(),
-        )
+            process = processName()
+)
         OeaFaultLog.record(record)
         publish(record)
     }
@@ -246,8 +246,8 @@ object OeaFaultShield {
         error: Throwable,
         fatal: Boolean,
         contained: Boolean,
-        thread: Thread = Thread.currentThread(),
-    ): FaultAction {
+        thread: Thread = Thread.currentThread()
+): FaultAction {
         val seen = countRecent(subsystem)
         val input = FaultInput(
             kind = kind,
@@ -258,8 +258,8 @@ object OeaFaultShield {
             stackOverflow = OeaFaultPolicy.isStackOverflow(error),
             alreadyInSafeMode = safeMode,
             homeRendered = homeRendered,
-            onOeaScreen = frontScreen != null,
-        )
+            onOeaScreen = frontScreen != null
+)
         var decision = OeaFaultPolicy.decide(input)
         // A fault the caller already handled never escalates; recovery is optional.
         if (contained && decision.action == FaultAction.ESCALATE) {
@@ -416,8 +416,8 @@ object OeaFaultShield {
             frames = frames,
             action = if (stallRecords.get() >= 3) FaultAction.SAFE_MODE else FaultAction.CONTAIN,
             reason = if (stallRecords.get() >= 3) "repeated stalls; optional subsystems will be skipped" else "recorded for diagnosis",
-            repeats = stallRecords.get(),
-        )
+            repeats = stallRecords.get()
+)
         OeaFaultLog.record(record)
         publish(record)
         if (stallRecords.get() >= 3) act(FaultAction.SAFE_MODE)

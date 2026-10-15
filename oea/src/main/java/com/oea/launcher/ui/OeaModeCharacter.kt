@@ -46,8 +46,8 @@ object OeaModeCharacter {
         /** Extra elevation for icons and cards (Depth reads as height). */
         val lift: Int = 0,
         /** Milliseconds of settle time for a page; lower is crisper. */
-        val settle: Long = 220L,
-    )
+        val settle: Long = 220L
+)
 
     val CLASSIC = P(pageEffect = "classic", parallax = 0.45f, settle = 220L)
     val LIQUID = P(pageEffect = "liquid", parallax = 0.6f, trail = 1f, caustics = true, settle = 240L)
@@ -107,8 +107,8 @@ object OeaModeCharacter {
             paint.shader = LinearGradient(
                 0f, 0f, w * 0.4f, h,
                 intArrayOf(Color.argb(0x0E, 120, 96, 64), Color.argb(0x05, 120, 96, 64), Color.argb(0x12, 60, 52, 40)),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-            )
+                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+)
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
             if (seed != width * 31 + height) build(w, h)
@@ -129,9 +129,9 @@ object OeaModeCharacter {
                         random.nextFloat() * w,
                         random.nextFloat() * h,
                         0.6f + random.nextFloat() * 1.4f,
-                        4f + random.nextFloat() * 9f,
-                    ),
-                )
+                        4f + random.nextFloat() * 9f
+)
+)
             }
         }
     }
@@ -190,8 +190,8 @@ object OeaModeCharacter {
             paint.shader = android.graphics.RadialGradient(
                 x, y, radius,
                 intArrayOf(Color.argb(alpha, 24, 22, 20), Color.argb(alpha / 3, 24, 22, 20), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP,
-            )
+                floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP
+)
             canvas.drawCircle(x, y, radius, paint)
             paint.shader = null
         }

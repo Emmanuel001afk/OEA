@@ -105,8 +105,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         val width = min(dp(widthDp), overlay.width - dp(24)).coerceAtLeast(dp(160))
         card.measure(
             View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(overlay.height, View.MeasureSpec.AT_MOST),
-        )
+            View.MeasureSpec.makeMeasureSpec(overlay.height, View.MeasureSpec.AT_MOST)
+)
         val loc = IntArray(2)
         overlay.getLocationOnScreen(loc)
         val cardH = card.measuredHeight
@@ -315,8 +315,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             actionGrid(card, listOf(
                 Action(R.drawable.oic_open_in_new, "Open") { w.launchShortcut(item, tile) },
                 Action(R.drawable.oic_close, "Remove") { w.removeHomeItem(ref) },
-                Action(R.drawable.oic_info, "App info") { w.openAppInfo(item.packageName) },
-            ))
+                Action(R.drawable.oic_info, "App info") { w.openAppInfo(item.packageName) }
+))
         }
     }
 
@@ -343,8 +343,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         val overlay = w.overlay
         card.measure(
             View.MeasureSpec.makeMeasureSpec(min(dp(widthDp), overlay.width - dp(24)).coerceAtLeast(dp(160)), View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(overlay.height, View.MeasureSpec.AT_MOST),
-        )
+            View.MeasureSpec.makeMeasureSpec(overlay.height, View.MeasureSpec.AT_MOST)
+)
         return card
     }
 
@@ -720,8 +720,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                     k.primaryButton("Open now") {
                         dialog.dismiss()
                         w.launchPair(OeaWorkspaceStore.Folder("tmp", "", 0, 0, listOf(w.appKey(app), w.appKey(other)), OeaWorkspaceStore.KIND_PAIR))
-                    },
-                ))
+                    }
+))
             }
         }
     }
@@ -738,8 +738,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                     k.primaryButton("Developer options") {
                         dialog.dismiss()
                         if (!OeaMultitaskLauncher.openDeveloperOptions(context)) w.toast("Turn on Developer options first: Settings › About phone › tap Build number 7 times")
-                    },
-                ))
+                    }
+))
             }
             return
         }
@@ -805,8 +805,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                 k.primaryButton("Turn on") {
                     dialog.dismiss()
                     OeaAssistant.openSetup(context)
-                },
-            ))
+                }
+))
         }
     }
 
@@ -822,8 +822,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                     OeaAppFreezer.setHibernated(context, listOf(app.packageName), false)
                     w.refreshBadges()
                     w.launchApp(app, null)
-                },
-            ))
+                }
+))
         }
     }
 
@@ -883,8 +883,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                 k.primaryButton(if (enabledButDisconnected) "Open settings" else "Turn on") {
                     dialog.dismiss()
                     OeaAssistant.openSetup(context)
-                },
-            ))
+                }
+))
         }
     }
 
@@ -894,8 +894,8 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         val k = activityKit() ?: return
         fun usageGranted() = runCatching {
             context.getSystemService(AppOpsManager::class.java).checkOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName,
-            ) == AppOpsManager.MODE_ALLOWED
+                AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName
+) == AppOpsManager.MODE_ALLOWED
         }.getOrDefault(false)
         val notificationsOn = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
             ?.contains(context.packageName) == true

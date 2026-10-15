@@ -85,8 +85,8 @@ class OeaThemeStore private constructor(context: Context) {
             iconShape = o.optString("shape", "system"),
             dockStyle = o.optString("dock", "glass"),
             pageEffect = o.optString("effect", "classic"),
-            builtIn = false,
-        )
+            builtIn = false
+)
     }
 
     // ------------------------------------------------------- wallpapers

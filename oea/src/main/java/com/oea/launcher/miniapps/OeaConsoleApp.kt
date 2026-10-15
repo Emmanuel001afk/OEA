@@ -2,6 +2,7 @@ package com.oea.launcher.miniapps
 
 import android.app.Activity
 import android.app.ActivityManager
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -492,7 +493,7 @@ object OeaConsoleApp {
             val ag = kit.group(panel)
             kit.row(ag, R.drawable.oic_cleaning_services, "Trim memory", "Releases icon and preview caches") {
                 try {
-                    (host.application as? com.oea.launcher.OeaApplication)?.onTrimMemory(ActivityManager.TRIM_MEMORY_MODERATE)
+                    (host.application as? com.oea.launcher.OeaApplication)?.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_MODERATE)
                     android.widget.Toast.makeText(host, "Memory trimmed", android.widget.Toast.LENGTH_SHORT).show()
                 } catch (_: Throwable) {}
             }
@@ -1030,7 +1031,7 @@ Examples:
 
             "performance" -> when (parts.getOrNull(1)?.lowercase()) {
                 "trim" -> {
-                    try { (ctx.applicationContext as? com.oea.launcher.OeaApplication)?.onTrimMemory(ActivityManager.TRIM_MEMORY_MODERATE); "Memory trimmed" } catch (e: Throwable) { "Failed: ${e.message}" }
+                    try { (ctx.applicationContext as? com.oea.launcher.OeaApplication)?.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_MODERATE); "Memory trimmed" } catch (e: Throwable) { "Failed: ${e.message}" }
                 }
                 "gc" -> { System.gc(); "GC requested" }
                 else -> "Usage: performance trim|gc"

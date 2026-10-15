@@ -278,14 +278,14 @@ class OeaWakeService : Service() {
         val open = PendingIntent.getActivity(
             this, 0,
             Intent(this, OeaSystemToolsActivity::class.java).putExtra(OeaSystemToolsActivity.EXTRA_SCREEN, "power").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this)
         val what = listOfNotNull(
             if (OeaPower.waveToWake(this)) "wave" else null,
             if (OeaPower.liftToWake(this) && OeaPower.liftSensor(this) != null) "lift" else null,
-            if (OeaDataStore.get(this).waveOffAction() != "none") "hold-and-wave" else null,
-        ).joinToString(" or ").ifEmpty { "nothing" }
+            if (OeaDataStore.get(this).waveOffAction() != "none") "hold-and-wave" else null
+).joinToString(" or ").ifEmpty { "nothing" }
         return builder
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
             .setContentTitle("Wake gestures are on")
@@ -311,14 +311,14 @@ class OeaWakeService : Service() {
                 @Suppress("DEPRECATION")
                 val lock = app.getSystemService(PowerManager::class.java)?.newWakeLock(
                     PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
-                    "OEA:wake",
-                )
+                    "OEA:wake"
+)
                 lock?.acquire(3_000L)
             }.onFailure { Log.w(TAG, "Wake lock was refused", it) }
             runCatching {
                 app.startActivity(Intent(app, OeaWakeActivity::class.java).addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS,
-                ))
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+))
             }.onFailure { Log.w(TAG, "Wake activity could not start", it) }
         }
     }

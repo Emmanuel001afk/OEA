@@ -186,8 +186,8 @@ internal class OeaHiddenAppsSpace(private val w: OeaWorkspace) {
         addView(kit.text(
             if (nothingHidden) "Hide apps to keep them off Home, the drawer and search. They stay installed and open from here."
             else "Try a different name.",
-            13.5f, palette.textSecondary,
-        ).apply {
+            13.5f, palette.textSecondary
+).apply {
             gravity = Gravity.CENTER
             setPadding(dp(24), dp(6), dp(24), 0)
         })

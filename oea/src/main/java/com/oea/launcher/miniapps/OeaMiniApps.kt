@@ -33,47 +33,47 @@ object OeaMiniApps {
         val blurb: String,
         val icon: Int,
         /** Builds the mini-app's view. [host] is the activity showing it. */
-        val build: (host: Activity, palette: OeaPalette) -> View,
-    )
+        val build: (host: Activity, palette: OeaPalette) -> View
+)
 
     val all: List<App> = listOf(
         App(
-            "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.oic_schedule,
-        ) { host, palette -> OeaClockApp.build(host, palette) },
+            "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.oic_schedule
+) { host, palette -> OeaClockApp.build(host, palette) },
         App(
-            "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.oic_schedule,
-        ) { host, palette -> OeaCalendarApp.build(host, palette) },
+            "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.oic_schedule
+) { host, palette -> OeaCalendarApp.build(host, palette) },
         App(
-            "emage", "OEA Image", "EMAGE • Browse, albums, downloads, previews and organization", R.drawable.oic_photo_library,
-        ) { host, palette -> OeaImageApp.build(host, palette) },
+            "emage", "OEA Image", "EMAGE • Browse, albums, downloads, previews and organization", R.drawable.oic_photo_library
+) { host, palette -> OeaImageApp.build(host, palette) },
         App(
-            "vip", "OEA VIP", "Video Instant Player • Smooth playback, rotation, seeking", R.drawable.oic_play_arrow,
-        ) { host, palette -> OeaVideoApp.build(host, palette) },
+            "vip", "OEA VIP", "Video Instant Player • Smooth playback, rotation, seeking", R.drawable.oic_play_arrow
+) { host, palette -> OeaVideoApp.build(host, palette) },
         App(
-            "weather", "OEA Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.oic_thermostat,
-        ) { host, palette -> OeaWeatherApp.build(host, palette) },
+            "weather", "OEA Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.oic_thermostat
+) { host, palette -> OeaWeatherApp.build(host, palette) },
         App(
-            "calculator", "OEA Calculator", "Full calculator with scientific, history and tape", R.drawable.oic_calculate,
-        ) { host, palette -> OeaCalculatorApp.build(host, palette) },
+            "calculator", "OEA Calculator", "Full calculator with scientific, history and tape", R.drawable.oic_calculate
+) { host, palette -> OeaCalculatorApp.build(host, palette) },
         App(
-            "messaging", "OEA Messaging", "SMS messaging with proper permissions and roles", R.drawable.oic_edit,
-        ) { host, palette -> OeaMessagingApp.build(host, palette) },
+            "messaging", "OEA Messaging", "SMS messaging with proper permissions and roles", R.drawable.oic_edit
+) { host, palette -> OeaMessagingApp.build(host, palette) },
         App(
-            "notes", "OEA Notes", "Notes, private notes, voice notes, search and organization", R.drawable.oic_edit,
-        ) { host, palette -> OeaNotesApp.build(host, palette) },
+            "notes", "OEA Notes", "Notes, private notes, voice notes, search and organization", R.drawable.oic_edit
+) { host, palette -> OeaNotesApp.build(host, palette) },
         App(
-            "camera", "OEA Camera", "Camera with preview, flash, timer and capture controls", R.drawable.oic_photo_library,
-        ) { host, palette -> OeaCameraApp.build(host, palette) },
+            "camera", "OEA Camera", "Camera with preview, flash, timer and capture controls", R.drawable.oic_photo_library
+) { host, palette -> OeaCameraApp.build(host, palette) },
         App(
-            "console", "OEA Console", "Central utility: diagnostics, device info, security, command system", R.drawable.oic_developer_mode,
-        ) { host, palette -> OeaConsoleApp.build(host, palette) },
+            "console", "OEA Console", "Central utility: diagnostics, device info, security, command system", R.drawable.oic_developer_mode
+) { host, palette -> OeaConsoleApp.build(host, palette) },
         App(
-            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.oic_photo_library,
-        ) { host, palette -> OeaGalleryApp.build(host, palette) },
+            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.oic_photo_library
+) { host, palette -> OeaGalleryApp.build(host, palette) },
         App(
-            "voice", "OEA Voice", "Launcher's own speech recognizer — competes with Google, offline + launcher commands", R.drawable.oic_mic,
-        ) { host, palette -> OeaVoiceApp.build(host, palette) },
-    )
+            "voice", "OEA Voice", "Launcher's own speech recognizer — competes with Google, offline + launcher commands", R.drawable.oic_mic
+) { host, palette -> OeaVoiceApp.build(host, palette) }
+)
 
     fun byId(id: String?): App? = all.firstOrNull { it.id == id }
 
@@ -98,11 +98,11 @@ object OeaMiniApps {
                         runCatching {
                             host.startActivity(
                                 Intent(host, com.oea.launcher.OeaSystemToolsActivity::class.java)
-                                    .putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "stability"),
-                            )
+                                    .putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "stability")
+)
                         }
-                    },
-                )
+                    }
+)
                 card
             }
             .also { built ->
@@ -137,16 +137,16 @@ object OeaMiniApps {
             kit.text(app.label, 14f, kit.palette.text, OeaType.medium).apply {
                 setPadding(0, kit.dp(8), 0, 0)
                 gravity = android.view.Gravity.CENTER
-            },
-        )
+            }
+)
         column.addView(
             kit.text(app.blurb, 11.5f, kit.palette.textTertiary).apply {
                 setPadding(0, kit.dp(2), 0, 0)
                 gravity = android.view.Gravity.CENTER
                 maxLines = 3
                 setLineSpacing(kit.dpf(2f), 1f)
-            },
-        )
+            }
+)
         return column
     }
 
@@ -159,8 +159,8 @@ object OeaMiniApps {
                     LinearLayout.LayoutParams(0, -2, 1f).apply {
                         leftMargin = if (index == 0) 0 else kit.dp(5)
                         rightMargin = if (index == chunk.lastIndex) 0 else kit.dp(5)
-                    },
-                )
+                    }
+)
             }
             repeat(3 - chunk.size) {
                 row.addView(View(kit.context), LinearLayout.LayoutParams(0, 1, 1f).apply { leftMargin = kit.dp(5) })

@@ -314,11 +314,11 @@ class OeaGamesActivity : Activity(), SessionListener {
                     val s = OeaEngine.settings
                     val players = if (mode == PlayMode.SAME_DEVICE) listOf(
                         LocalPlayer(s.playerName, s.playerColor),
-                        LocalPlayer(p2?.text?.toString()?.trim()?.ifBlank { null } ?: "Player 2", EngineSettings.PLAYER_COLORS.first { it != s.playerColor }),
-                    ) else listOf(LocalPlayer(s.playerName, s.playerColor))
+                        LocalPlayer(p2?.text?.toString()?.trim()?.ifBlank { null } ?: "Player 2", EngineSettings.PLAYER_COLORS.first { it != s.playerColor })
+) else listOf(LocalPlayer(s.playerName, s.playerColor))
                     launchGame(d, mode, values, players)
-                },
-            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(8) })
+                }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(8) })
         }
     }
 
@@ -399,8 +399,8 @@ class OeaGamesActivity : Activity(), SessionListener {
             R.drawable.oic_warning_fill,
             "${d.title} stopped more than once",
             "OEA kept everything else intact. These are the fixes that usually work, from the least to the most drastic.",
-            OeaKit.Tone.WARNING,
-        )
+            OeaKit.Tone.WARNING
+)
         val group = kit.group(box)
         kit.row(group, R.drawable.oic_tune, "Lower the graphics quality", "Renders smaller so the phone's memory and GPU keep up") {
             val tier = OeaGameRescue.lowerQuality()
@@ -562,8 +562,8 @@ class OeaGamesActivity : Activity(), SessionListener {
             panel.addView(kit.buttonRow(
                 kit.quietButton("Paste") { clipboardText()?.let { replyField.setText(it); submit(it) } ?: toast("The clipboard is empty.") },
                 kit.quietButton("Scan QR") { scanQr("Scan the reply QR") { replyField.setText(it); submit(it) } },
-                kit.primaryButton("Connect") { submit(replyField.text.toString()) },
-            ))
+                kit.primaryButton("Connect") { submit(replyField.text.toString()) }
+))
             fun refresh() {
                 status.text = buildString {
                     append(invite.status.label)
@@ -619,8 +619,8 @@ class OeaGamesActivity : Activity(), SessionListener {
         box.addView(kit.buttonRow(
             kit.quietButton("Paste") { clipboardText()?.let { field.setText(it); join(id, it) } ?: toast("The clipboard is empty.") },
             kit.quietButton("Scan QR") { scanQr("Scan the invite QR") { field.setText(it); join(id, it) } },
-            kit.primaryButton("Join") { join(id, field.text.toString()) },
-        ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(6) })
+            kit.primaryButton("Join") { join(id, field.text.toString()) }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(6) })
         box.addView(kit.quietButton("Scan from a screenshot") { pickImage { text -> if (text == null) toast("No OEA code found in that picture.") else { field.setText(text); join(id, text) } } },
             LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
         kit.note(box, "How it works: your friend shares an invite, you paste or scan it here and get a reply code to send back. When they enter it, the phones connect directly — on the same Wi-Fi, across mobile networks with IPv6, or through your own STUN/TURN server.")

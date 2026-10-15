@@ -323,8 +323,8 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
         "productivity" to "Productivity",
         "news" to "News",
         "maps" to "Travel",
-        "frozen" to "Frozen",
-    )
+        "frozen" to "Frozen"
+)
 
     private fun buildChips() {
         chips.removeAllViews()

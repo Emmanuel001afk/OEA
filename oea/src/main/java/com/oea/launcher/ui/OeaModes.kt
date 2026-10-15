@@ -203,7 +203,7 @@ data class ModeSpec(
     val badgeStyle: String? = null,
     val glanceStyle: String? = null,
     val drawerCategories: Boolean? = null,
-    val haptics: Boolean? = null,
+    val haptics: Boolean? = null
 )
 
 object OeaModes {

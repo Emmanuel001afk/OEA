@@ -20,8 +20,8 @@ object OeaMultitaskLauncher {
     data class Result(
         val success: Boolean,
         val message: String,
-        val freeformAdvertised: Boolean = false,
-    )
+        val freeformAdvertised: Boolean = false
+)
 
     /**
      * Freeform needs either the system feature or Developer options →
@@ -76,8 +76,8 @@ object OeaMultitaskLauncher {
             Result(
                 false,
                 "Android rejected the floating-window request: ${error.message ?: error.javaClass.simpleName}",
-                freeformAdvertised,
-            )
+                freeformAdvertised
+)
         }
     }
 

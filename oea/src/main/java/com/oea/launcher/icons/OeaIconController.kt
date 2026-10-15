@@ -60,8 +60,8 @@ class OeaIconController(private val context: Context) {
             "com.novalauncher.THEME",
             "com.anddoes.launcher.THEME",
             "com.teslacoilsw.launcher.THEME",
-            "com.dlto.atom.launcher.THEME",
-        )
+            "com.dlto.atom.launcher.THEME"
+)
         actions.forEach { action ->
             runCatching {
                 packageManager.queryIntentActivities(Intent(action), PackageManager.MATCH_ALL)
@@ -296,8 +296,8 @@ class OeaIconController(private val context: Context) {
         val inset = (s * 0.06f).toInt().coerceAtLeast(2)
         val fullBleed = listOf(
             probe.getPixel(inset, inset), probe.getPixel(s - 1 - inset, inset),
-            probe.getPixel(inset, s - 1 - inset), probe.getPixel(s - 1 - inset, s - 1 - inset),
-        ).all { Color.alpha(it) > 230 }
+            probe.getPixel(inset, s - 1 - inset), probe.getPixel(s - 1 - inset, s - 1 - inset)
+).all { Color.alpha(it) > 230 }
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         if (fullBleed) {
             paint.shader = BitmapShader(probe, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
@@ -400,8 +400,8 @@ class OeaIconController(private val context: Context) {
         private val rawFromPack = ConcurrentHashMap<String, Boolean>()
         private val packMappings = ConcurrentHashMap<String, Map<String, String>>()
         private val rendered = object : LruCache<String, Bitmap>(
-            (Runtime.getRuntime().maxMemory() / 7).coerceAtMost(56L * 1024 * 1024).toInt(),
-        ) {
+            (Runtime.getRuntime().maxMemory() / 7).coerceAtMost(56L * 1024 * 1024).toInt()
+) {
             override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
         }
 

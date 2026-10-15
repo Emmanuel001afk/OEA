@@ -23,7 +23,7 @@ data class OeaSearchAction(
     val intent: Intent?,
     val iconRes: Int = R.drawable.oic_search,
     val copyText: String? = null,
-    val kind: Kind = Kind.WEB,
+    val kind: Kind = Kind.WEB
 ) {
     enum class Kind { CALCULATOR, SETTING, CONTACT, WEB }
 }
@@ -78,8 +78,8 @@ class OeaSearchController(private val context: Context) {
         SettingEntry("NFC", Settings.ACTION_NFC_SETTINGS, listOf("nfc", "tap to pay", "contactless"), R.drawable.oic_settings),
         SettingEntry("Developer options", Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS, listOf("developer", "usb debugging", "freeform"), R.drawable.oic_developer_mode),
         SettingEntry("Wallpaper", Intent.ACTION_SET_WALLPAPER, listOf("wallpaper", "background"), R.drawable.oic_wallpaper),
-        SettingEntry("Android settings", Settings.ACTION_SETTINGS, listOf("settings", "system", "phone settings"), R.drawable.oic_settings),
-    )
+        SettingEntry("Android settings", Settings.ACTION_SETTINGS, listOf("settings", "system", "phone settings"), R.drawable.oic_settings)
+)
 
     fun actions(query: String): List<OeaSearchAction> {
         val q = query.trim()
@@ -115,8 +115,8 @@ class OeaSearchController(private val context: Context) {
             context.contentResolver.query(
                 uri,
                 arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.DISPLAY_NAME_PRIMARY, ContactsContract.Contacts.HAS_PHONE_NUMBER),
-                null, null, ContactsContract.Contacts.SORT_KEY_PRIMARY,
-            )?.use { cursor ->
+                null, null, ContactsContract.Contacts.SORT_KEY_PRIMARY
+)?.use { cursor ->
                 while (cursor.moveToNext() && out.size < 4) {
                     val id = cursor.getLong(0)
                     val name = cursor.getString(1) ?: continue
@@ -124,8 +124,8 @@ class OeaSearchController(private val context: Context) {
                     val contactUri = ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, id)
                     out += OeaSearchAction(
                         name, if (hasPhone) "Contact • tap to open" else "Contact",
-                        Intent(Intent.ACTION_VIEW, contactUri), R.drawable.oic_person, kind = OeaSearchAction.Kind.CONTACT,
-                    )
+                        Intent(Intent.ACTION_VIEW, contactUri), R.drawable.oic_person, kind = OeaSearchAction.Kind.CONTACT
+)
                 }
             }
         }

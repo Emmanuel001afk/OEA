@@ -193,8 +193,8 @@ object OeaAppFreezer {
     private fun suBinaryPresent(): Boolean = runCatching {
         val known = listOf(
             "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su", "/system/sbin/su",
-            "/vendor/bin/su", "/data/local/xbin/su", "/data/local/bin/su", "/debug_ramdisk/su",
-        )
+            "/vendor/bin/su", "/data/local/xbin/su", "/data/local/bin/su", "/debug_ramdisk/su"
+)
         known.any { java.io.File(it).exists() } ||
             System.getenv("PATH").orEmpty().split(':').any { it.isNotBlank() && java.io.File(it, "su").exists() }
     }.getOrDefault(false)

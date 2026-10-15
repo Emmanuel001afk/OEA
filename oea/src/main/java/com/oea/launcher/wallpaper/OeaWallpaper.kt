@@ -26,347 +26,347 @@ enum class OeaWallpaper(
     val blurb: String,
     val accent: Int,
     val light: Boolean,
-    val forLock: Boolean = false,
+    val forLock: Boolean = false
 ) {
     // Original 10
     MOUNTAIN_DAWN(
         "mountain_dawn", "Mountain dawn",
         "Layered ridges under a sunrise; OEA's default look.",
-        Color.rgb(255, 168, 96), light = false,
-    ),
+        Color.rgb(255, 168, 96), light = false
+),
     FOREST_RIVER(
         "forest_river", "Forest river",
         "Pines along a slow river, cool green and teal.",
-        Color.rgb(96, 200, 168), light = false,
-    ),
+        Color.rgb(96, 200, 168), light = false
+),
     DESERT_COAST(
         "desert_coast", "Desert coast",
         "Warm dunes meeting a flat sea at dusk.",
-        Color.rgb(255, 140, 104), light = false,
-    ),
+        Color.rgb(255, 140, 104), light = false
+),
     DUSK_CITY(
         "dusk_city", "Dusk city",
         "A skyline at blue hour with lit windows.",
-        Color.rgb(160, 140, 255), light = false,
-    ),
+        Color.rgb(160, 140, 255), light = false
+),
     AURORA(
         "aurora", "Aurora",
         "Ribbons of colour over a cold, quiet sky.",
-        Color.rgb(120, 220, 200), light = false,
-    ),
+        Color.rgb(120, 220, 200), light = false
+),
     NIGHT_SKY(
         "night_sky", "Night sky",
         "Deep space with a soft nebula; the calmest dark option.",
-        Color.rgb(138, 180, 248), light = false,
-    ),
+        Color.rgb(138, 180, 248), light = false
+),
     OCEAN(
         "ocean", "Ocean",
         "Rolling blue bands with light glinting off the water.",
-        Color.rgb(90, 190, 255), light = false,
-    ),
+        Color.rgb(90, 190, 255), light = false
+),
     TERRAZZO(
         "terrazzo", "Terrazzo",
         "Pale stone flecked with colour; bright and text-friendly.",
-        Color.rgb(196, 120, 60), light = true,
-    ),
+        Color.rgb(196, 120, 60), light = true
+),
     LINEN(
         "linen", "Linen",
         "A warm, quiet solid with a soft vignette.",
-        Color.rgb(150, 110, 70), light = true,
-    ),
+        Color.rgb(150, 110, 70), light = true
+),
     MESH_AMOLED(
         "mesh_amoled", "Deep mesh",
         "Near-black with faint colour clouds; made for OLED.",
-        Color.rgb(120, 160, 255), light = false,
-    ),
+        Color.rgb(120, 160, 255), light = false
+),
 
     // Second set 8 via artwork
     CANYON_EMBER(
         "canyon_ember", "Canyon ember",
         "Rock columns with a shaft of warm light between them.",
-        Color.rgb(255, 150, 90), light = false,
-    ),
+        Color.rgb(255, 150, 90), light = false
+),
     GLASS_DUSK(
         "glass_dusk", "Glass dusk",
         "Frosted panels and long light streaks in violet.",
-        Color.rgb(186, 160, 255), light = false,
-    ),
+        Color.rgb(186, 160, 255), light = false
+),
     ORCHID_BLOOM(
         "orchid_bloom", "Orchid bloom",
         "Soft petals of magenta light opening from a bright core.",
-        Color.rgb(255, 150, 214), light = false,
-    ),
+        Color.rgb(255, 150, 214), light = false
+),
     RIBBON_SEA(
         "ribbon_sea", "Ribbon sea",
         "Teal ribbons sweeping across a deep current.",
-        Color.rgb(120, 236, 220), light = false,
-    ),
+        Color.rgb(120, 236, 220), light = false
+),
     STRATA_SAND(
         "strata_sand", "Strata sand",
         "Warm stone bands with a bright seam; bright and readable.",
-        Color.rgb(150, 104, 58), light = true,
-    ),
+        Color.rgb(150, 104, 58), light = true
+),
     MIST_VALLEY(
         "mist_valley", "Mist valley",
         "Layers of morning fog over a green horizon glow.",
-        Color.rgb(178, 220, 200), light = false,
-    ),
+        Color.rgb(178, 220, 200), light = false
+),
     ORBIT_DAWN(
         "orbit_dawn", "Orbit dawn",
         "Warm rings around a low sun, drawn as clean lines.",
-        Color.rgb(255, 196, 140), light = false,
-    ),
+        Color.rgb(255, 196, 140), light = false
+),
     SLATE_LINES(
         "slate_lines", "Slate lines",
         "Cool graphite bands; the quietest dark option.",
-        Color.rgb(150, 170, 196), light = false,
-    ),
+        Color.rgb(150, 170, 196), light = false
+),
 
     // Expanded 12 new distinct home wallpapers
     CRIMSON_TIDE(
         "crimson_tide", "Crimson tide",
         "Deep red waves with soft glow, bold and dramatic.",
-        Color.rgb(255, 90, 120), light = false,
-    ),
+        Color.rgb(255, 90, 120), light = false
+),
     EMERALD_DEPTH(
         "emerald_depth", "Emerald depth",
         "Rich emerald layers with depth and mist.",
-        Color.rgb(80, 220, 160), light = false,
-    ),
+        Color.rgb(80, 220, 160), light = false
+),
     SAPPHIRE_DRIFT(
         "sapphire_drift", "Sapphire drift",
         "Cool sapphire drift with gentle gradients.",
-        Color.rgb(100, 160, 255), light = false,
-    ),
+        Color.rgb(100, 160, 255), light = false
+),
     AMBER_HAZE(
         "amber_haze", "Amber haze",
         "Warm amber haze with soft light.",
-        Color.rgb(255, 200, 80), light = false,
-    ),
+        Color.rgb(255, 200, 80), light = false
+),
     VIOLET_STORM(
         "violet_storm", "Violet storm",
         "Electric violet storm with light streaks.",
-        Color.rgb(180, 120, 255), light = false,
-    ),
+        Color.rgb(180, 120, 255), light = false
+),
     TEAL_LAGOON(
         "teal_lagoon", "Teal lagoon",
         "Calm teal lagoon with clear water.",
-        Color.rgb(90, 230, 220), light = false,
-    ),
+        Color.rgb(90, 230, 220), light = false
+),
     SUNSET_RIDGE(
         "sunset_ridge", "Sunset ridge",
         "Sunset over ridges with warm glow.",
-        Color.rgb(255, 180, 100), light = false,
-    ),
+        Color.rgb(255, 180, 100), light = false
+),
     FROSTED_PINE(
         "frosted_pine", "Frosted pine",
         "Frosted pine forest with cold mist.",
-        Color.rgb(140, 210, 190), light = false,
-    ),
+        Color.rgb(140, 210, 190), light = false
+),
     DESERT_MIRAGE(
         "desert_mirage", "Desert mirage",
         "Bright desert mirage, readable and warm.",
-        Color.rgb(220, 180, 100), light = true,
-    ),
+        Color.rgb(220, 180, 100), light = true
+),
     MIDNIGHT_BLOOM(
         "midnight_bloom", "Midnight bloom",
         "Midnight bloom with violet petals.",
-        Color.rgb(200, 140, 255), light = false,
-    ),
+        Color.rgb(200, 140, 255), light = false
+),
     OCEAN_ABYSS(
         "ocean_abyss", "Ocean abyss",
         "Deep ocean abyss with blue glow.",
-        Color.rgb(70, 180, 255), light = false,
-    ),
+        Color.rgb(70, 180, 255), light = false
+),
     PAPER_LIGHT(
         "paper_light", "Paper light",
         "Light paper texture, minimal and calm.",
-        Color.rgb(120, 110, 90), light = true,
-    ),
+        Color.rgb(120, 110, 90), light = true
+),
 
     // Mass expansion — 16 new distinct home wallpapers for peak beauty
     NEON_PULSE(
         "neon_pulse", "Neon pulse",
         "Pulsing neon lines with dark centre, vibrant and energetic.",
-        Color.rgb(255, 80, 200), light = false,
-    ),
+        Color.rgb(255, 80, 200), light = false
+),
     ARCTIC_AURORA(
         "arctic_aurora", "Arctic aurora",
         "Arctic aurora with ice glow and star field.",
-        Color.rgb(120, 240, 255), light = false,
-    ),
+        Color.rgb(120, 240, 255), light = false
+),
     VOLCANIC_GLOW(
         "volcanic_glow", "Volcanic glow",
         "Volcanic glow with ember and ash, dramatic.",
-        Color.rgb(255, 120, 40), light = false,
-    ),
+        Color.rgb(255, 120, 40), light = false
+),
     CYBER_GRID(
         "cyber_grid", "Cyber grid",
         "Cyberpunk grid with perspective and neon.",
-        Color.rgb(100, 255, 180), light = false,
-    ),
+        Color.rgb(100, 255, 180), light = false
+),
     LUSH_JUNGLE(
         "lush_jungle", "Lush jungle",
         "Lush jungle canopy with light shafts.",
-        Color.rgb(80, 200, 120), light = false,
-    ),
+        Color.rgb(80, 200, 120), light = false
+),
     STARLIGHT_DESERT(
         "starlight_desert", "Starlight desert",
         "Desert under starlight, calm and vast.",
-        Color.rgb(180, 160, 255), light = false,
-    ),
+        Color.rgb(180, 160, 255), light = false
+),
     CORAL_REEF(
         "coral_reef", "Coral reef",
         "Underwater coral reef with sun rays.",
-        Color.rgb(255, 140, 180), light = false,
-    ),
+        Color.rgb(255, 140, 180), light = false
+),
     MONSOON_CLOUD(
         "monsoon_cloud", "Monsoon cloud",
         "Dramatic monsoon clouds with light breaks.",
-        Color.rgb(140, 180, 220), light = false,
-    ),
+        Color.rgb(140, 180, 220), light = false
+),
     GOLDEN_HOUR(
         "golden_hour", "Golden hour",
         "Golden hour light over fields, warm and bright.",
-        Color.rgb(255, 210, 80), light = true,
-    ),
+        Color.rgb(255, 210, 80), light = true
+),
     FROSTED_LAKE(
         "frosted_lake", "Frosted lake",
         "Frozen lake with frost and distant pines.",
-        Color.rgb(180, 220, 240), light = true,
-    ),
+        Color.rgb(180, 220, 240), light = true
+),
     OBSIDIAN_MIRROR(
         "obsidian_mirror", "Obsidian mirror",
         "Black obsidian mirror with faint reflections, OLED.",
-        Color.rgb(200, 200, 210), light = false,
-    ),
+        Color.rgb(200, 200, 210), light = false
+),
     PRISM_SHARD(
         "prism_shard", "Prism shard",
         "Prism shards with rainbow refractions.",
-        Color.rgb(180, 140, 255), light = false,
-    ),
+        Color.rgb(180, 140, 255), light = false
+),
     TUNDRA_DAWN(
         "tundra_dawn", "Tundra dawn",
         "Tundra at dawn with soft pink sky.",
-        Color.rgb(255, 180, 200), light = false,
-    ),
+        Color.rgb(255, 180, 200), light = false
+),
     MAGMA_FLOW(
         "magma_flow", "Magma flow",
         "Flowing magma with cooling crust, intense.",
-        Color.rgb(255, 100, 60), light = false,
-    ),
+        Color.rgb(255, 100, 60), light = false
+),
     ZEN_GARDEN(
         "zen_garden", "Zen garden",
         "Minimal zen garden with raked sand and stone, calm.",
-        Color.rgb(160, 150, 130), light = true,
-    ),
+        Color.rgb(160, 150, 130), light = true
+),
     NEBULA_CORE(
         "nebula_core", "Nebula core",
         "Nebula core with star formation, cosmic.",
-        Color.rgb(200, 120, 255), light = false,
-    ),
+        Color.rgb(200, 120, 255), light = false
+),
 
     // Lock screen wallpapers - original 6 + expanded 8 = 14 + 6 new = 20
     LOCK_MIDNIGHT(
         "lock_midnight", "Midnight",
         "Deep blue rings around a single star of light.",
-        Color.rgb(132, 172, 255), light = false, forLock = true,
-    ),
+        Color.rgb(132, 172, 255), light = false, forLock = true
+),
     LOCK_EMBER(
         "lock_ember", "Ember",
         "A low, warm glow between dark rock, made for night reading.",
-        Color.rgb(255, 140, 80), light = false, forLock = true,
-    ),
+        Color.rgb(255, 140, 80), light = false, forLock = true
+),
     LOCK_FROST(
         "lock_frost", "Frost",
         "Pale cold fog with a soft horizon; bright and legible.",
-        Color.rgb(96, 126, 158), light = true, forLock = true,
-    ),
+        Color.rgb(96, 126, 158), light = true, forLock = true
+),
     LOCK_VIOLET(
         "lock_violet", "Violet haze",
         "Violet glass panes and one long streak of light.",
-        Color.rgb(200, 170, 255), light = false, forLock = true,
-    ),
+        Color.rgb(200, 170, 255), light = false, forLock = true
+),
     LOCK_NOIR(
         "lock_noir", "Noir",
         "Near-black graphite with a thin seam of light.",
-        Color.rgb(196, 202, 212), light = false, forLock = true,
-    ),
+        Color.rgb(196, 202, 212), light = false, forLock = true
+),
     LOCK_HALO(
         "lock_halo", "Halo",
         "A cool halo of light above the clock, clear where it matters.",
-        Color.rgb(170, 236, 255), light = false, forLock = true,
-    ),
+        Color.rgb(170, 236, 255), light = false, forLock = true
+),
     LOCK_CRIMSON(
         "lock_crimson", "Crimson lock",
         "Deep crimson with soft glow, calm centre for clock.",
-        Color.rgb(255, 100, 130), light = false, forLock = true,
-    ),
+        Color.rgb(255, 100, 130), light = false, forLock = true
+),
     LOCK_TEAL(
         "lock_teal", "Teal lock",
         "Teal mist with clear centre.",
-        Color.rgb(100, 220, 210), light = false, forLock = true,
-    ),
+        Color.rgb(100, 220, 210), light = false, forLock = true
+),
     LOCK_SAND(
         "lock_sand", "Sand lock",
         "Warm sand bands, bright and legible for lock.",
-        Color.rgb(140, 110, 70), light = true, forLock = true,
-    ),
+        Color.rgb(140, 110, 70), light = true, forLock = true
+),
     LOCK_FOREST(
         "lock_forest", "Forest lock",
         "Dark forest with calm centre.",
-        Color.rgb(120, 200, 160), light = false, forLock = true,
-    ),
+        Color.rgb(120, 200, 160), light = false, forLock = true
+),
     LOCK_ORBIT(
         "lock_orbit", "Orbit lock",
         "Rings around core, quiet middle for clock.",
-        Color.rgb(160, 140, 255), light = false, forLock = true,
-    ),
+        Color.rgb(160, 140, 255), light = false, forLock = true
+),
     LOCK_SLATE(
         "lock_slate", "Slate lock",
         "Cool slate bands, quietest dark lock option.",
-        Color.rgb(160, 180, 200), light = false, forLock = true,
-    ),
+        Color.rgb(160, 180, 200), light = false, forLock = true
+),
     LOCK_AMBER(
         "lock_amber", "Amber lock",
         "Warm amber glow for night reading.",
-        Color.rgb(255, 190, 80), light = false, forLock = true,
-    ),
+        Color.rgb(255, 190, 80), light = false, forLock = true
+),
     LOCK_OCEAN(
         "lock_ocean", "Ocean lock",
         "Deep ocean lock with blue glow.",
-        Color.rgb(90, 190, 255), light = false, forLock = true,
-    ),
+        Color.rgb(90, 190, 255), light = false, forLock = true
+),
     LOCK_NEON(
         "lock_neon", "Neon lock",
         "Neon pulse with clear centre for clock.",
-        Color.rgb(255, 80, 200), light = false, forLock = true,
-    ),
+        Color.rgb(255, 80, 200), light = false, forLock = true
+),
     LOCK_ARCTIC(
         "lock_arctic", "Arctic lock",
         "Arctic aurora lock, calm centre.",
-        Color.rgb(120, 240, 255), light = false, forLock = true,
-    ),
+        Color.rgb(120, 240, 255), light = false, forLock = true
+),
     LOCK_VOLCANIC(
         "lock_volcanic", "Volcanic lock",
         "Volcanic glow lock, dark with ember.",
-        Color.rgb(255, 120, 40), light = false, forLock = true,
-    ),
+        Color.rgb(255, 120, 40), light = false, forLock = true
+),
     LOCK_ZEN(
         "lock_zen", "Zen lock",
         "Zen garden lock, minimal and bright.",
-        Color.rgb(160, 150, 130), light = true, forLock = true,
-    ),
+        Color.rgb(160, 150, 130), light = true, forLock = true
+),
     LOCK_OBSIDIAN(
         "lock_obsidian", "Obsidian lock",
         "Obsidian mirror lock, OLED friendly.",
-        Color.rgb(200, 200, 210), light = false, forLock = true,
-    ),
+        Color.rgb(200, 200, 210), light = false, forLock = true
+),
     LOCK_PRISM(
         "lock_prism", "Prism lock",
         "Prism shard lock with rainbow.",
-        Color.rgb(180, 140, 255), light = false, forLock = true,
-    );
+        Color.rgb(180, 140, 255), light = false, forLock = true
+);
 
     companion object {
         fun byId(id: String?): OeaWallpaper? = entries.firstOrNull { it.id == id }
@@ -410,8 +410,8 @@ object OeaWallpaperRenderer {
         cubicTo(
             fromX + 2f / 3f * (cx - fromX), fromY + 2f / 3f * (cy - fromY),
             toX + 2f / 3f * (cx - toX), toY + 2f / 3f * (cy - toY),
-            toX, toY,
-        )
+            toX, toY
+)
     }
 
     private fun mountains(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random, dawn: Boolean) {

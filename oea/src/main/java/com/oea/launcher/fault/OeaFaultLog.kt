@@ -24,7 +24,7 @@ data class OeaFaultRecord(
     val frames: List<String>,
     val action: FaultAction,
     val reason: String,
-    val repeats: Int,
+    val repeats: Int
 ) {
     /** One-line summary for a list row. */
     fun title(): String = "${subsystemLabel()} • $errorClass"
@@ -52,8 +52,8 @@ data class OeaFaultRecord(
         clean(frames.joinToString(" <- ")),
         action.name,
         clean(reason),
-        repeats.toString(),
-    ).joinToString("\t")
+        repeats.toString()
+).joinToString("\t")
 
     companion object {
         private const val FIELDS = 11
@@ -68,8 +68,8 @@ data class OeaFaultRecord(
             action: FaultAction,
             reason: String,
             repeats: Int,
-            process: String,
-        ): OeaFaultRecord = OeaFaultRecord(
+            process: String
+): OeaFaultRecord = OeaFaultRecord(
             at = System.currentTimeMillis(),
             process = process,
             thread = thread.name,
@@ -80,8 +80,8 @@ data class OeaFaultRecord(
             frames = trace(error),
             action = action,
             reason = reason,
-            repeats = repeats,
-        )
+            repeats = repeats
+)
 
         /** The caller's own frames, which is where the fault actually happened. */
         fun callerFrames(skip: Int = 3): List<String> {
@@ -126,8 +126,8 @@ data class OeaFaultRecord(
                     frames = if (parts[7].isBlank()) emptyList() else parts[7].split(" <- "),
                     action = FaultAction.valueOf(parts[8]),
                     reason = parts[9],
-                    repeats = parts[10].toIntOrNull() ?: 1,
-                )
+                    repeats = parts[10].toIntOrNull() ?: 1
+)
             }.getOrNull()
         }
     }

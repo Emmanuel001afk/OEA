@@ -79,8 +79,8 @@ class OeaLauncherActivity : Activity() {
             OeaFaultShield.noteHomeRendered()
             if (Build.VERSION.SDK_INT >= 33) {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
-                ) { home?.handleBack() }
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
+) { home?.handleBack() }
             }
             consumeHomeAction(intent)
         } catch (error: Throwable) {
@@ -148,8 +148,8 @@ class OeaLauncherActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         val handled = home != null && OeaFaultShield.value(
             "home:activity-result",
-            false,
-        ) { home?.handleActivityResult(requestCode, resultCode, data) == true }
+            false
+) { home?.handleActivityResult(requestCode, resultCode, data) == true }
         if (handled) return
         super.onActivityResult(requestCode, resultCode, data)
     }

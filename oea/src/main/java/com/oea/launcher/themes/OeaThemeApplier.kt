@@ -25,8 +25,8 @@ object OeaThemeApplier {
         val wallpapers: Boolean = true,
         val colors: Boolean = true,
         val style: Boolean = true,
-        val target: Target = Target.BOTH,
-    )
+        val target: Target = Target.BOTH
+)
 
     data class Result(val homeOk: Boolean?, val lockOk: Boolean?, val message: String)
 

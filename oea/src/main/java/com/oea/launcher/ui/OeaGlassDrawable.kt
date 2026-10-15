@@ -49,7 +49,7 @@ class OeaGlassDrawable(
     private val radius: Float,
     private val density: Float,
     private val tint: Int = 0,
-    private val rimAlpha: Int = 0xB0,
+    private val rimAlpha: Int = 0xB0
 ) : Drawable() {
     private val body = Paint(Paint.ANTI_ALIAS_FLAG)
     private val lens = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -139,10 +139,10 @@ class OeaGlassDrawable(
                 Color.TRANSPARENT,
                 OeaTheme.alpha(OeaTheme.blend(fill, Color.WHITE, 0.5f), 0x1E),
                 OeaTheme.alpha(tintOrAccent(), 0x14),
-                Color.TRANSPARENT,
-            ),
-            floatArrayOf(0f, 0.4f, 0.6f, 1f), Shader.TileMode.CLAMP,
-        )
+                Color.TRANSPARENT
+),
+            floatArrayOf(0f, 0.4f, 0.6f, 1f), Shader.TileMode.CLAMP
+)
         canvas.drawRoundRect(rect, radiusWithBend(h), radiusWithBend(h), sheen)
         sheen.shader = null
     }
@@ -170,8 +170,8 @@ class OeaGlassDrawable(
             0f, top, 0f, bottom,
             intArrayOf(lighter, fill, deeper),
             floatArrayOf(0f, 0.52f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
 
         // 2. Specular: an off-centre blob that grows with pressure and slides with
         //    [specular].
@@ -182,8 +182,8 @@ class OeaGlassDrawable(
             maxOf(w, h) * (0.52f + 0.16f * pressed),
             intArrayOf(Color.argb(strong, 255, 255, 255), Color.argb(0, 255, 255, 255)),
             floatArrayOf(0f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
 
         // 3. Lensing: dark just inside the top edge, bright just inside the
         //    bottom, so the pane reads as thick.
@@ -193,11 +193,11 @@ class OeaGlassDrawable(
             intArrayOf(
                 Color.argb((0x38 + 0x28 * (1f - pressed)).toInt(), 0, 0, 0),
                 Color.argb(0, 0, 0, 0),
-                Color.argb(0x1E, 255, 255, 255),
-            ),
+                Color.argb(0x1E, 255, 255, 255)
+),
             floatArrayOf(0f, 0.45f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
 
         // 4. Rim: bright on top, dimmer at the bottom, a hair tighter while
         //    pressed; the outer hairline sits outside it.
@@ -207,26 +207,26 @@ class OeaGlassDrawable(
             intArrayOf(
                 Color.argb(rimAlpha, 255, 255, 255),
                 Color.argb(rimAlpha / 4, 255, 255, 255),
-                Color.argb(rimAlpha / 3, 255, 255, 255),
-            ),
+                Color.argb(rimAlpha / 3, 255, 255, 255)
+),
             floatArrayOf(0f, 0.55f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         outer.strokeWidth = maxOf(1f, density * 0.8f)
         outer.shader = LinearGradient(
             0f, top, 0f, bottom,
             intArrayOf(Color.argb(0x2E, 0, 0, 0), Color.argb(0x14, 0, 0, 0)),
             floatArrayOf(0f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
 
         // Accent bleed along the bottom edge, so the pane picks up the scene.
         glow.shader = if (tint != 0) LinearGradient(
             0f, bottom - h * 0.45f, 0f, bottom,
             Color.argb(0, Color.red(tint), Color.green(tint), Color.blue(tint)),
             Color.argb(0x30, Color.red(tint), Color.green(tint), Color.blue(tint)),
-            Shader.TileMode.CLAMP,
-        ) else null
+            Shader.TileMode.CLAMP
+) else null
     }
 
     override fun draw(canvas: Canvas) {
@@ -352,8 +352,8 @@ class OeaGlassDrawable(
 
         private fun noiseShader(): Shader {
             val tile = noiseTile ?: buildNoise() ?: return LinearGradient(
-                0f, 0f, 0f, 1f, Color.TRANSPARENT, Color.TRANSPARENT, Shader.TileMode.CLAMP,
-            )
+                0f, 0f, 0f, 1f, Color.TRANSPARENT, Color.TRANSPARENT, Shader.TileMode.CLAMP
+)
             return BitmapShader(tile, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
         }
 

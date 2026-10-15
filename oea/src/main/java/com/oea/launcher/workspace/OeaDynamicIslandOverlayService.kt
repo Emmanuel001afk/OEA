@@ -243,8 +243,8 @@ class OeaDynamicIslandOverlayService : Service() {
             1,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             flags,
-            android.graphics.PixelFormat.TRANSLUCENT,
-        ).apply { gravity = Gravity.TOP or Gravity.START }
+            android.graphics.PixelFormat.TRANSLUCENT
+).apply { gravity = Gravity.TOP or Gravity.START }
         return runCatching {
             windowManager.addView(island, params)
             island.requestApplyInsets()
@@ -292,8 +292,8 @@ class OeaDynamicIslandOverlayService : Service() {
         height: Int,
         x: Int,
         y: Int,
-        visible: Boolean,
-    ) {
+        visible: Boolean
+) {
         if (!com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)) {
             overlayActive = false
             disableOverlayIfPermissionRevoked()
@@ -311,8 +311,8 @@ class OeaDynamicIslandOverlayService : Service() {
             1,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-            android.graphics.PixelFormat.TRANSLUCENT,
-        )).apply {
+            android.graphics.PixelFormat.TRANSLUCENT
+)).apply {
             this.width = if (visible) width.coerceAtLeast(1) else 1
             this.height = if (visible) height.coerceAtLeast(1) else 1
             gravity = Gravity.TOP or Gravity.START
@@ -412,8 +412,8 @@ class OeaDynamicIslandOverlayService : Service() {
             this,
             0,
             Intent(this, OeaDynamicIslandOverlayService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
         return androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
             .setContentTitle("OEA Dynamic Island is active")
@@ -430,8 +430,8 @@ class OeaDynamicIslandOverlayService : Service() {
             this,
             0,
             Intent(this, OeaDynamicIslandOverlayService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
         return androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
             .setContentTitle("OEA Dynamic Island")
@@ -473,8 +473,8 @@ class OeaDynamicIslandOverlayService : Service() {
                 1, 1,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                android.graphics.PixelFormat.TRANSLUCENT,
-            ).apply {
+                android.graphics.PixelFormat.TRANSLUCENT
+).apply {
                 gravity = Gravity.TOP or Gravity.START
                 x = 0
                 y = 0

@@ -623,8 +623,8 @@ open class OeaInCallActivity : Activity() {
             CallAudioState.ROUTE_EARPIECE to "Phone",
             CallAudioState.ROUTE_SPEAKER to "Speaker",
             CallAudioState.ROUTE_BLUETOOTH to "Bluetooth",
-            CallAudioState.ROUTE_WIRED_HEADSET to "Wired headset",
-        ).filter { OeaCallState.hasRoute(it.first) }
+            CallAudioState.ROUTE_WIRED_HEADSET to "Wired headset"
+).filter { OeaCallState.hasRoute(it.first) }
         if (options.size <= 2) {
             if (!OeaCallState.toggleSpeaker()) toast("Speaker isn't available right now.")
             return
@@ -817,8 +817,8 @@ open class OeaInCallActivity : Activity() {
     private fun rippleOval(color: Int) = android.graphics.drawable.RippleDrawable(
         android.content.res.ColorStateList.valueOf(0x33FFFFFF),
         GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) },
-        null,
-    )
+        null
+)
 
     private fun circle(icon: Int, color: Int, size: Int, description: String, tint: Int = Color.WHITE, onClick: () -> Unit): View =
         FrameLayout(this).apply {
@@ -863,8 +863,8 @@ open class OeaInCallActivity : Activity() {
         gravity = Gravity.CENTER
         setPadding(dp(16), 0, dp(18), 0)
         background = android.graphics.drawable.RippleDrawable(
-            android.content.res.ColorStateList.valueOf(0x33FFFFFF), rounded(0x26FFFFFF, 20), null,
-        )
+            android.content.res.ColorStateList.valueOf(0x33FFFFFF), rounded(0x26FFFFFF, 20), null
+)
         compoundDrawablePadding = dp(8)
         getDrawable(icon)?.mutate()?.apply {
             setTint(Color.WHITE)
@@ -881,8 +881,8 @@ open class OeaInCallActivity : Activity() {
         gravity = Gravity.CENTER
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         background = android.graphics.drawable.RippleDrawable(
-            android.content.res.ColorStateList.valueOf(0x33FFFFFF), rounded(bg, 26), null,
-        )
+            android.content.res.ColorStateList.valueOf(0x33FFFFFF), rounded(bg, 26), null
+)
         isClickable = true
         setOnClickListener { onClick() }
     }

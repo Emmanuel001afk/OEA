@@ -522,8 +522,8 @@ class OeaPhoneActivity : Activity() {
         val details = arrayOf(
             "Full screen • over your wallpaper",
             "Popup window • a card over the app you're using",
-            "Compact floating card • a small card at the top; keep using your phone",
-        )
+            "Compact floating card • a small card at the top; keep using your phone"
+)
         val keys = arrayOf("fullscreen", "popup", "compact")
         val current = phonePrefs.getString("call_ui_mode", "fullscreen") ?: "fullscreen"
         AlertDialog.Builder(this)
@@ -632,8 +632,8 @@ class OeaPhoneActivity : Activity() {
             CallLog.Calls.TYPE,
             CallLog.Calls.DATE,
             CallLog.Calls.DURATION,
-            CallLog.Calls.CACHED_NAME,
-        )
+            CallLog.Calls.CACHED_NAME
+)
         var count = 0
         runCatching {
             contentResolver.query(CallLog.Calls.CONTENT_URI, projection, null, null, CallLog.Calls.DATE + " DESC")?.use { cursor ->
@@ -656,8 +656,8 @@ class OeaPhoneActivity : Activity() {
                         subtitle,
                         "Call",
                         action = { placeCall(phone) },
-                        rowClick = { showCallDetails(entry) },
-                    )
+                        rowClick = { showCallDetails(entry) }
+)
                 }
             }
         }.onFailure { addEmptyState("Could not read call history on this device.") }
@@ -787,8 +787,8 @@ class OeaPhoneActivity : Activity() {
             contentResolver.query(
                 ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
                 arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
-                null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC",
-            )?.use { cursor ->
+                null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
+)?.use { cursor ->
                 while (cursor.moveToNext() && rows.size < 500) {
                     rows += ContactRow(cursor.getLong(0), cursor.getString(1).orEmpty().ifBlank { "Unknown contact" }, cursor.getString(2).orEmpty())
                 }
@@ -807,8 +807,8 @@ class OeaPhoneActivity : Activity() {
                     arrayOf(CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION),
                     null,
                     null,
-                    CallLog.Calls.DATE + " DESC",
-                )?.use { cursor ->
+                    CallLog.Calls.DATE + " DESC"
+)?.use { cursor ->
                     buildList {
                         while (cursor.moveToNext() && size < 5) {
                             val type = callTypeLabel(cursor.getInt(0))
@@ -914,8 +914,8 @@ class OeaPhoneActivity : Activity() {
         subtitle: String,
         actionLabel: String,
         action: () -> Unit,
-        rowClick: (() -> Unit)? = null,
-    ) {
+        rowClick: (() -> Unit)? = null
+) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL

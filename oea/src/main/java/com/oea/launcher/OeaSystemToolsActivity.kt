@@ -147,8 +147,8 @@ open class OeaSystemToolsActivity : Activity() {
                             appsLoadError = error.message ?: error.javaClass.simpleName
                             appsLoadFailed = true
                             android.util.Log.w("OeaSystemToolsActivity", "Could not load app catalogue", error)
-                        },
-                    )
+                        }
+)
                     if (!isFinishing) rerender()
                 }
             }
@@ -218,8 +218,8 @@ open class OeaSystemToolsActivity : Activity() {
                                 usageStatsLoadError = error.message ?: error.javaClass.simpleName
                                 usageStatsLoadFailed = true
                                 android.util.Log.w("OeaSystemToolsActivity", "Could not load usage history", error)
-                            },
-                        )
+                            }
+)
                         if (!isFinishing && current == "overview") rerender()
                     }
                 }
@@ -523,8 +523,8 @@ open class OeaSystemToolsActivity : Activity() {
             dataStore.setGlassStyle(it)
         }
         choiceRow(group, R.drawable.oic_view_carousel, "Page transition", listOf(
-            "classic" to "Classic", "liquid" to "Liquid", "cube" to "Cube", "stack" to "Stack", "zoom" to "Zoom", "fade" to "Fade", "none" to "None",
-        ), dataStore.pageEffect()) { dataStore.setPageEffect(it) }
+            "classic" to "Classic", "liquid" to "Liquid", "cube" to "Cube", "stack" to "Stack", "zoom" to "Zoom", "fade" to "Fade", "none" to "None"
+), dataStore.pageEffect()) { dataStore.setPageEffect(it) }
         choiceRow(group, R.drawable.oic_animation, "Animation speed", listOf("0" to "Relaxed", "1" to "Standard", "2" to "Fast"), dataStore.animationSpeed().toString()) {
             dataStore.setAnimationSpeed(it.toInt())
         }
@@ -662,8 +662,8 @@ open class OeaSystemToolsActivity : Activity() {
                     if (inUse) OeaTheme.blend(palette.card, palette.accent, 0.14f) else palette.card,
                     24,
                     if (inUse) OeaTheme.alpha(palette.accent, 0x55) else palette.stroke,
-                    1,
-                )
+                    1
+)
                 isClickable = true
                 setOnClickListener { applyMode(mode) }
             }
@@ -850,8 +850,8 @@ open class OeaSystemToolsActivity : Activity() {
         choiceRow(source, R.drawable.oic_wallpaper, "Wallpaper source",
             listOf(
                 OeaDataStore.WALLPAPER_SYSTEM to "Android's wallpaper",
-                OeaDataStore.WALLPAPER_OEA to "Drawn by Home (OEA only)",
-            ),
+                OeaDataStore.WALLPAPER_OEA to "Drawn by Home (OEA only)"
+),
             dataStore.wallpaperSource()) {
             dataStore.setWallpaperSource(it)
             rerender()
@@ -873,8 +873,8 @@ open class OeaSystemToolsActivity : Activity() {
             val preview = ImageView(this)
             runCatching {
                 preview.setImageBitmap(
-                    com.oea.launcher.wallpaper.OeaLiveScenes.still(id, dp(54), dp(90)),
-                )
+                    com.oea.launcher.wallpaper.OeaLiveScenes.still(id, dp(54), dp(90))
+)
             }
             preview.scaleType = ImageView.ScaleType.CENTER_CROP
             preview.background = kit.rounded(Color.TRANSPARENT, 12, palette.stroke, 1)
@@ -1189,8 +1189,8 @@ open class OeaSystemToolsActivity : Activity() {
                     kit.confirm(
                         "That action is already used",
                         "${com.oea.launcher.gesture.OeaGestures.actionLabel(action)} is already bound to ${taken.joinToString { com.oea.launcher.gesture.OeaGestures.slots[it] ?: it }}. Two gestures would then do the same thing; give that one a different action first.",
-                        "OK",
-                    ) { rerender() }
+                        "OK"
+) { rerender() }
                 }
             }
         }
@@ -1302,8 +1302,8 @@ open class OeaSystemToolsActivity : Activity() {
                     "What should the screen-off gesture do?",
                     "Only actions that make sense with the screen off are listed.",
                     listOf("Lock the screen", "Nothing"),
-                    if (dataStore.waveOffAction() == "lock") 0 else 1,
-                ) { pick ->
+                    if (dataStore.waveOffAction() == "lock") 0 else 1
+) { pick ->
                     dataStore.setWaveOffAction(if (pick == 0) "lock" else "none")
                     power.syncWakeService(this)
                     rerender()
@@ -1424,8 +1424,8 @@ open class OeaSystemToolsActivity : Activity() {
                 when {
                     !granted -> "Android did not grant Display over other apps, so the island stays on Home only."
                     else -> "Android reports the permission, but drawing over apps was refused. Try restarting OEA; if it persists, the phone's firmware is blocking it and the island stays on Home only."
-                },
-            )
+                }
+)
         }
         if (current == "notifications" || current == "overview") rerender()
     }
@@ -1468,8 +1468,8 @@ open class OeaSystemToolsActivity : Activity() {
                 runCatching {
                     sbm.requestAddTileService(
                         android.content.ComponentName(this, cls), label,
-                        android.graphics.drawable.Icon.createWithResource(this, icon), mainExecutor,
-                    ) { result ->
+                        android.graphics.drawable.Icon.createWithResource(this, icon), mainExecutor
+) { result ->
                         toast(when (result) {
                             android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "$label tile added to Quick Settings."
                             android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "The $label tile is already in Quick Settings."
@@ -1513,8 +1513,8 @@ open class OeaSystemToolsActivity : Activity() {
             R.drawable.oic_music_note,
             "Show Dynamic Island",
             "Show active calls, charging, media and compatible notification activities on OEA Home, with an optional system-wide overlay below.",
-            dataStore.dynamicIslandEnabled(),
-        ) {
+            dataStore.dynamicIslandEnabled()
+) {
             dataStore.setDynamicIslandEnabled(it)
             OeaDynamicIslandOverlayService.sync(this)
             rerender()
@@ -1523,8 +1523,8 @@ open class OeaSystemToolsActivity : Activity() {
             val styles = listOf(
                 OeaDataStore.ISLAND_CARD to "Card under the status bar",
                 OeaDataStore.ISLAND_CAMERA to "Island around the camera",
-                OeaDataStore.ISLAND_BOTH to "Both",
-            )
+                OeaDataStore.ISLAND_BOTH to "Both"
+)
             choiceRow(islandGroup, R.drawable.oic_view_agenda, "Style", styles, dataStore.islandStyle()) {
                 dataStore.setIslandStyle(it)
             }
@@ -1538,8 +1538,8 @@ open class OeaSystemToolsActivity : Activity() {
                 R.drawable.oic_apps,
                 "Show over other apps",
                 "Optional system-wide island. Android requires Display over other apps access and keeps an OEA foreground-service notice; its notification action appears when notifications are allowed.",
-                dataStore.islandOnOtherApps(),
-            ) { enabled ->
+                dataStore.islandOnOtherApps()
+) { enabled ->
                 if (!enabled) {
                     pendingIslandOverlayEnable = false
                     dataStore.setIslandOnOtherApps(false)
@@ -1558,8 +1558,8 @@ open class OeaSystemToolsActivity : Activity() {
                     val opened = runCatching {
                         startActivityForResult(
                             Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
-                            REQUEST_ISLAND_OVERLAY,
-                        )
+                            REQUEST_ISLAND_OVERLAY
+)
                     }.isSuccess || runCatching {
                         startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION), REQUEST_ISLAND_OVERLAY)
                     }.isSuccess
@@ -1647,8 +1647,8 @@ open class OeaSystemToolsActivity : Activity() {
             choices,
             dataStore.islandSelectedApps(),
             { it.packageName },
-            confirmLabel = "Save",
-        ) { chosen ->
+            confirmLabel = "Save"
+) { chosen ->
             dataStore.setIslandSelectedApps(chosen)
             OeaDynamicIslandOverlayService.sync(this)
             rerender()
@@ -1707,8 +1707,8 @@ open class OeaSystemToolsActivity : Activity() {
                 kit.primaryButton("Done") {
                     savePosition(positionX, positionY)
                     sheet.dismiss()
-                },
-            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+                }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         }
     }
 
@@ -1719,8 +1719,8 @@ open class OeaSystemToolsActivity : Activity() {
         kit.pickApps(
             if (camera) "Camera island apps" else "Card apps",
             if (camera) "Live activities from these apps appear in the island around the camera." else "Live activities from these apps appear in the card under the status bar.",
-            choices, selected, { it.packageName }, confirmLabel = "Save",
-        ) { chosen ->
+            choices, selected, { it.packageName }, confirmLabel = "Save"
+) { chosen ->
             if (camera) dataStore.setIslandCameraApps(chosen) else dataStore.setIslandCardApps(chosen)
             rerender()
         }
@@ -1889,8 +1889,8 @@ open class OeaSystemToolsActivity : Activity() {
             setPadding(dp(18), dp(16), dp(18), dp(16))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(OeaTheme.blend(palette.card, ice, if (palette.dark) 0.26f else 0.14f), palette.card),
-            ).apply {
+                intArrayOf(OeaTheme.blend(palette.card, ice, if (palette.dark) 0.26f else 0.14f), palette.card)
+).apply {
                 cornerRadius = dp(26).toFloat()
                 setStroke(maxOf(1, dp(1)), OeaTheme.alpha(ice, 0x44))
             }
@@ -1905,8 +1905,8 @@ open class OeaSystemToolsActivity : Activity() {
         hero.addView(kit.text(
             if (systemMode) "Android suspends frozen apps: they can't open, run in the background or notify until you unfreeze them."
             else "Frozen apps are blocked in OEA and force-stopped, so they stay asleep: no background work, alarms or notifications.",
-            13f, palette.textSecondary,
-        ).apply { setLineSpacing(dp(2).toFloat(), 1f); setPadding(0, dp(4), 0, 0) })
+            13f, palette.textSecondary
+).apply { setLineSpacing(dp(2).toFloat(), 1f); setPadding(0, dp(4), 0, 0) })
         if (!systemMode && !assistantGranted) {
             // Only when OEA Assistant has genuinely never been switched on.
             hero.addView(kit.button("Turn on OEA Assistant", ice, if (palette.dark) Color.rgb(6, 22, 34) else Color.WHITE, R.drawable.oic_accessibility_new) {
@@ -2260,8 +2260,8 @@ open class OeaSystemToolsActivity : Activity() {
             listOf(
                 "all" to "All ${matching.size}",
                 "frozen" to "Frozen $frozenMatching",
-                "active" to "Not frozen ${matching.size - frozenMatching}",
-            ).forEach { (mode, label) ->
+                "active" to "Not frozen ${matching.size - frozenMatching}"
+).forEach { (mode, label) ->
                 filters.addView(kit.chip(label, mode == freezerFilter) {
                     freezerFilter = mode
                     renderApps()
@@ -2324,8 +2324,8 @@ open class OeaSystemToolsActivity : Activity() {
                 OeaAppInfo(
                     packageName = info.packageName,
                     className = "",
-                    label = runCatching { info.loadLabel(packageManager).toString() }.getOrDefault(info.packageName),
-                )
+                    label = runCatching { info.loadLabel(packageManager).toString() }.getOrDefault(info.packageName)
+)
             }
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
@@ -2358,8 +2358,8 @@ open class OeaSystemToolsActivity : Activity() {
         val page = page("Overview", "OEA app overview • Recent-use history, not Android’s live task stack. Open apps, use floating windows, or pair apps for split screen.")
         val box = page.content
         val usageAccess = getSystemService(AppOpsManager::class.java).checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName,
-        ) == AppOpsManager.MODE_ALLOWED
+            AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName
+) == AppOpsManager.MODE_ALLOWED
         if (!usageAccess) {
             kit.banner(box, R.drawable.oic_insights, "Enable recent-app history", "Allow OEA Usage access so this overview can order apps by recent use.", OeaKit.Tone.INFO, "Allow") {
                 refreshOverviewOnResume = true
@@ -2646,8 +2646,8 @@ open class OeaSystemToolsActivity : Activity() {
                                 if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
                             }
                         }
-                    },
-                ))
+                    }
+))
             }
         }
     }
@@ -2676,8 +2676,8 @@ open class OeaSystemToolsActivity : Activity() {
             if (healthy) "Nothing has gone wrong this session" else "${faults.size + engineFaults.values.sum()} contained problem${if (faults.size + engineFaults.values.sum() == 1) "" else "s"}",
             if (healthy) "OEA has not had to recover from anything. Games, widgets and services are all behaving."
             else "Each one below was handled without losing your Home screen, apps or layout.",
-            if (healthy) OeaKit.Tone.SUCCESS else OeaKit.Tone.WARNING,
-        )
+            if (healthy) OeaKit.Tone.SUCCESS else OeaKit.Tone.WARNING
+)
 
         kit.sectionTitle(box, "Home protection")
         var group = kit.group(box)
@@ -2686,8 +2686,8 @@ open class OeaSystemToolsActivity : Activity() {
             R.drawable.oic_shield,
             "Safe mode",
             "Start Home without widgets, At a Glance and live activities. Use it to find out which optional part is causing trouble.",
-            OeaFaultShield.safeMode,
-        ) { enabled ->
+            OeaFaultShield.safeMode
+) { enabled ->
             OeaFaultShield.setSafeMode(enabled, this)
             toast(if (enabled) "Safe mode is on: Home keeps your icons, dock and folders only." else "Safe mode is off. Rebuilding Home…")
             homeAction("rebuild")
@@ -2732,11 +2732,11 @@ open class OeaSystemToolsActivity : Activity() {
                                 runCatching {
                                     startActivity(Intent.createChooser(
                                         Intent(Intent.ACTION_SEND).setType("text/plain")
-                                            .putExtra(Intent.EXTRA_TEXT, fault.body()), "Share diagnosis",
-                                    ))
+                                            .putExtra(Intent.EXTRA_TEXT, fault.body()), "Share diagnosis"
+))
                                 }.onFailure { toast("Nothing can share text on this phone.") }
-                            },
-                        ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                            }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
                     }
                 }
             }
@@ -2865,8 +2865,8 @@ open class OeaSystemToolsActivity : Activity() {
         }
         kit.note(
             box,
-            "Nothing here is required. A permission that stays off only limits the feature that uses it: every one of them falls back to OEA's own Home surface, so the launcher keeps working.",
-        )
+            "Nothing here is required. A permission that stays off only limits the feature that uses it: every one of them falls back to OEA's own Home surface, so the launcher keeps working."
+)
         present(page)
         check()
     }
@@ -2899,8 +2899,8 @@ open class OeaSystemToolsActivity : Activity() {
                     toast("Working…")
                     OeaPrivileges.repairAll(this) { summary -> toast(summary.describe()); rerender() }
                 }
-            } else null,
-        )
+            } else null
+)
 
         kit.sectionTitle(box, "What each one unlocks")
         val features = kit.group(box)
@@ -2968,8 +2968,8 @@ open class OeaSystemToolsActivity : Activity() {
                 kit.quietButton("Close") { },
                 kit.primaryButton(if (capability.isReady) "Settings" else "Open the page", R.drawable.oic_settings) {
                     if (capability.isReady) navigate("access") else requestPrivilege(capability.requires, capability.granted)
-                },
-            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         }
     }
 

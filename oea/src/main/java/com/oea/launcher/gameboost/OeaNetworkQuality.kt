@@ -20,7 +20,7 @@ import java.util.Locale
 internal data class OeaNetworkQuality(
     val level: String,
     val link: String,
-    val color: Int,
+    val color: Int
 )
 
 internal class OeaNetworkQualityReader(context: Context) {
@@ -193,8 +193,8 @@ internal class OeaGameStatusStripView(context: Context) : View(context) {
         height: Float,
         label: String,
         text: String,
-        valueColor: Int,
-    ) {
+        valueColor: Int
+) {
         val pad = dpf(8f)
         val captionBaseline = height * 0.40f
         val valueBaseline = height * 0.78f

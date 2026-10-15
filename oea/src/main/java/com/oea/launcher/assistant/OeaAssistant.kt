@@ -82,8 +82,8 @@ object OeaAssistant {
     fun forceStop(
         packages: List<String>,
         returnTo: Intent?,
-        callback: ((stopped: List<String>, failed: List<String>) -> Unit)? = null,
-    ): Boolean = OeaAssistantService.instance?.startForceStop(packages, returnTo, callback) == true
+        callback: ((stopped: List<String>, failed: List<String>) -> Unit)? = null
+): Boolean = OeaAssistantService.instance?.startForceStop(packages, returnTo, callback) == true
 
     enum class ForceStopStart {
         /** OEA Assistant is running and the force-stop has begun. */
@@ -99,8 +99,8 @@ object OeaAssistant {
     private class PendingForceStop(
         val packages: List<String>,
         val returnTo: Intent?,
-        val callback: ((stopped: List<String>, failed: List<String>) -> Unit)?,
-    )
+        val callback: ((stopped: List<String>, failed: List<String>) -> Unit)?
+)
 
     private var pending: PendingForceStop? = null
     private val expirePending = Runnable {
@@ -124,8 +124,8 @@ object OeaAssistant {
         context: Context,
         packages: List<String>,
         returnTo: Intent?,
-        callback: ((stopped: List<String>, failed: List<String>) -> Unit)? = null,
-    ): ForceStopStart {
+        callback: ((stopped: List<String>, failed: List<String>) -> Unit)? = null
+): ForceStopStart {
         if (isConnected()) {
             if (pending != null) return ForceStopStart.BUSY
             return if (forceStop(packages, returnTo, callback)) ForceStopStart.STARTED else ForceStopStart.BUSY
@@ -177,8 +177,8 @@ object OeaAssistant {
         val flags = if (context is Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK
         runCatching {
             context.startActivity(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")).addFlags(flags),
-            )
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")).addFlags(flags)
+)
         }
     }
 }

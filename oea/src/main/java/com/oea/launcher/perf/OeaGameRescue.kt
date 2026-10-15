@@ -30,15 +30,15 @@ object OeaGameRescue {
         val icon: Int,
         /** True when the action needs a fresh game process (i.e. a retry). */
         val restart: Boolean,
-        val run: () -> Unit,
-    )
+        val run: () -> Unit
+)
 
     /** The standalone APKs OEA can hand a game over to — full process isolation. */
     private val standalonePackages = mapOf(
         "arena" to "com.oea.arena",
         "chess" to "com.oea.chess",
-        "runner" to "com.oea.runner",
-    )
+        "runner" to "com.oea.runner"
+)
 
     fun options(context: Context, gameId: String, error: Throwable?): List<Option> {
         val signal = error.summary()
@@ -47,20 +47,20 @@ object OeaGameRescue {
         if (signal.callsIsland) {
             out += Option(
                 "Hide the island in games", R.drawable.oic_layers, restart = true,
-                run = { OeaEngine.settings.islandInGames = false },
-            )
+                run = { OeaEngine.settings.islandInGames = false }
+)
         }
         if (signal.memory || signal.graphics) {
             out += Option(
                 "Lower game quality", R.drawable.oic_tune, restart = true,
-                run = { lowerQuality() },
-            )
+                run = { lowerQuality() }
+)
         }
         if (signal.early || signal.corrupt) {
             out += Option(
                 "Reset this game's data", R.drawable.oic_delete, restart = true,
-                run = { clearSaveData(context, gameId) },
-            )
+                run = { clearSaveData(context, gameId) }
+)
         }
         if (signal.frameFault) {
             // The device stopped responding while the game ran: ask for less work
@@ -72,8 +72,8 @@ object OeaGameRescue {
                     val target = OeaEngine.settings.fpsTarget
                     OeaEngine.settings.fpsTarget = min(target.takeIf { it > 0 } ?: 120, 60)
                     OeaEngine.settings.adaptiveResolution = true
-                },
-            )
+                }
+)
         }
         val standalone = standalonePackages[gameId]
         if (standalone != null && launchable(context, standalone)) {
@@ -82,8 +82,8 @@ object OeaGameRescue {
                 run = {
                     context.packageManager.getLaunchIntentForPackage(standalone)
                         ?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                },
-            )
+                }
+)
         }
         // Always available, always safe: the generic path down.
         if (out.isEmpty()) {
@@ -161,8 +161,8 @@ object OeaGameRescue {
         val early: Boolean,
         val corrupt: Boolean,
         val callsIsland: Boolean,
-        val frameFault: Boolean,
-    )
+        val frameFault: Boolean
+)
 
     private fun Throwable?.summary(): Signal {
         val error = this
@@ -186,8 +186,8 @@ object OeaGameRescue {
             corrupt = "json" in text || "serializ" in text || "eof" in text || "notmarked" in text ||
                 "indexoutofbounds" in text || ("nullpointer" in text && crashedEarly),
             callsIsland = "island" in text || "liveactivity" in text || "overlay" in text,
-            frameFault = "nativecrash" in text || "sigsegv" in text || "abort" in text || "watchdog" in text || "unrespons" in text,
-        )
+            frameFault = "nativecrash" in text || "sigsegv" in text || "abort" in text || "watchdog" in text || "unrespons" in text
+)
     }
 
 }

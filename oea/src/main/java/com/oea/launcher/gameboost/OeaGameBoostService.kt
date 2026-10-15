@@ -370,8 +370,8 @@ class OeaGameBoostService : Service() {
             registerScreenReceiver()
             diagnostic(
                 android.util.Log.INFO,
-                "service ready overlay=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} enabled=${OeaGameBoostStore.enabled(this)}",
-            )
+                "service ready overlay=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} enabled=${OeaGameBoostStore.enabled(this)}"
+)
         }
     }
 
@@ -595,12 +595,12 @@ class OeaGameBoostService : Service() {
     private fun sessionNotification(game: String?): android.app.Notification {
         val open = android.app.PendingIntent.getActivity(
             this, 0, Intent(this, OeaGameBoostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
-        )
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+)
         val end = android.app.PendingIntent.getService(
             this, 1, Intent(this, OeaGameBoostService::class.java).setAction(OeaGameBoost.ACTION_END_SESSION),
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
-        )
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+)
         val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL) else {
             @Suppress("DEPRECATION") android.app.Notification.Builder(this)
         }
@@ -672,8 +672,8 @@ class OeaGameBoostService : Service() {
     private fun isHomePackage(packageName: String): Boolean {
         val homes = homePackagesCache ?: runCatching {
             packageManager.queryIntentActivities(
-                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0,
-            ).mapNotNull { it.activityInfo?.packageName }.toSet()
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0
+).mapNotNull { it.activityInfo?.packageName }.toSet()
         }.getOrDefault(emptySet()).also { homePackagesCache = it }
         return packageName in homes || packageName == this.packageName
     }
@@ -1271,8 +1271,8 @@ class OeaGameBoostService : Service() {
             networkQualityReader.read(),
             if (level in 0..100) "$level%" else "—",
             charging,
-            OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true),
-        )
+            OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true)
+)
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
         updateBoostButton(boost)
@@ -1992,7 +1992,7 @@ class OeaGameBoostService : Service() {
         val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL) else {
             @Suppress("DEPRECATION") android.app.Notification.Builder(this)
         }
-        return builder.setSmallIcon(R.drawable.ic_oea_launcher_monochrome).setContentTitle("Game Boost").setContentText("Session starting").setOngoing(true).build()
+        return builder.setSmallIcon(com.oea.launcher.R.drawable.ic_oea_launcher_monochrome).setContentTitle("Game Boost").setContentText("Session starting").setOngoing(true).build()
     }
 
     private fun isUsageAccessGranted() = runCatching {
@@ -2054,8 +2054,8 @@ class OeaGameBoostService : Service() {
             "com.android.vending",
             "com.samsung.android.game.gametools",
             "com.samsung.android.game.gamehome",
-            "com.samsung.android.game.gos",
-        )
+            "com.samsung.android.game.gos"
+)
     }
 }
 object OeaGameBoostStore {

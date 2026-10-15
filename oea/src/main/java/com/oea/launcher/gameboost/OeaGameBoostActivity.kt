@@ -191,8 +191,8 @@ class OeaGameBoostActivity : Activity() {
             scrimBottom = Color.TRANSPARENT,
             danger = Color.rgb(255, 110, 120),
             success = Color.rgb(80, 225, 160),
-            warning = Color.rgb(255, 196, 100),
-        )
+            warning = Color.rgb(255, 196, 100)
+)
     }
 
     private fun prefs() = OeaGameBoostStore.prefs(this)
@@ -228,8 +228,8 @@ class OeaGameBoostActivity : Activity() {
 
     private fun usageGranted(): Boolean = runCatching {
         getSystemService(AppOpsManager::class.java).checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName,
-        ) == AppOpsManager.MODE_ALLOWED
+            AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName
+) == AppOpsManager.MODE_ALLOWED
     }.getOrDefault(false)
 
     private fun selectedGames(): List<OeaAppInfo> {
@@ -248,8 +248,8 @@ class OeaGameBoostActivity : Activity() {
             setPadding(dp(20), dp(20), dp(20), dp(22))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(OeaTheme.blend(palette.card, palette.accent, if (enabled) 0.34f else 0.12f), palette.card, Color.rgb(10, 13, 22)),
-            ).apply {
+                intArrayOf(OeaTheme.blend(palette.card, palette.accent, if (enabled) 0.34f else 0.12f), palette.card, Color.rgb(10, 13, 22))
+).apply {
                 cornerRadius = dp(30).toFloat()
                 setStroke(dp(1), OeaTheme.alpha(palette.accent, if (enabled) 0x66 else 0x22))
             }
@@ -436,8 +436,8 @@ class OeaGameBoostActivity : Activity() {
         kit.pickApps(
             if (manual) "Add games & apps" else "Select games",
             if (manual) "Automatic detection stays on." else "Only Android-recognized games are listed.",
-            choices, before, { it.packageName }, confirmLabel = "Save",
-        ) { chosen ->
+            choices, before, { it.packageName }, confirmLabel = "Save"
+) { chosen ->
             choices.forEach { app ->
                 if (app.packageName in chosen) OeaGameBoostStore.restoreGame(this, app.packageName)
                 else if (app.packageName in before) OeaGameBoostStore.removeGame(this, app.packageName)
@@ -609,9 +609,9 @@ class OeaGameBoostActivity : Activity() {
             0,
             listOf(
                 "Follows game windows as they open and close. No polling and no Usage access.",
-                "Checked every two seconds only while a game session runs, plus once when you leave Home.",
-            ),
-        ) { pick ->
+                "Checked every two seconds only while a game session runs, plus once when you leave Home."
+)
+) { pick ->
             if (pick == 0) OeaAssistant.openSetup(this) else openUsageAccess()
         }
     }

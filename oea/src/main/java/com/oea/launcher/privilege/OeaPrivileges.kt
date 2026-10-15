@@ -289,8 +289,8 @@ object OeaPrivileges {
                     else -> feature.fallback
                 },
                 effect = if (grant == Grant.GRANTED) "Full" else feature.effect,
-                selfGrantable = selfGrantable(context, feature.needs),
-            )
+                selfGrantable = selfGrantable(context, feature.needs)
+)
         }
         return rows
     }

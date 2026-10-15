@@ -410,8 +410,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         chevron: Boolean = true,
         iconBg: Int = palette.accentSoft,
         iconTint: Int = palette.onAccentSoft,
-        onClick: (() -> Unit)? = null,
-    ): LinearLayout {
+        onClick: (() -> Unit)? = null
+): LinearLayout {
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -463,8 +463,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         title: String,
         subtitle: String?,
         checked: Boolean,
-        onChange: (Boolean) -> Unit,
-    ): OeaToggle {
+        onChange: (Boolean) -> Unit
+): OeaToggle {
         val toggle = toggle(checked, onChange)
         val row = row(group, iconRes, title, subtitle, trailing = toggle, chevron = false) { toggle.toggle(fromUser = true) }
         row.contentDescription = title
@@ -654,8 +654,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             panel.addView(buttonRow(
                 quietButton(negative) { dialog.dismiss() },
                 button(positive, if (destructive) palette.danger else palette.accent,
-                    if (destructive) Color.WHITE else palette.onAccent) { dialog.dismiss(); onConfirm() },
-            ))
+                    if (destructive) Color.WHITE else palette.onAccent) { dialog.dismiss(); onConfirm() }
+))
         }
     }
 
@@ -709,8 +709,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             }
             panel.addView(buttonRow(
                 quietButton("Cancel") { hideKeyboard(input); dialog.dismiss() },
-                primaryButton(confirmLabel) { submit() },
-            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                primaryButton(confirmLabel) { submit() }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
             input.post {
                 input.requestFocus()
                 context.getSystemService(InputMethodManager::class.java)?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
@@ -735,8 +735,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         multi: Boolean = true,
         max: Int = Int.MAX_VALUE,
         confirmLabel: String = "Save",
-        onDone: (Set<String>) -> Unit,
-    ) {
+        onDone: (Set<String>) -> Unit
+) {
         val chosen = LinkedHashSet(selected)
         sheet(title, subtitle) { panel, dialog ->
             val search = field("Search apps").apply {
@@ -825,8 +825,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             if (multi) {
                 panel.addView(buttonRow(
                     quietButton("Cancel") { dialog.dismiss() },
-                    primaryButton(confirmLabel) { dialog.dismiss(); onDone(chosen.toSet()) },
-                ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+                    primaryButton(confirmLabel) { dialog.dismiss(); onDone(chosen.toSet()) }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             }
         }
     }

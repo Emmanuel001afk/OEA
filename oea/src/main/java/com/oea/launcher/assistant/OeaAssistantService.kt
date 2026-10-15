@@ -52,8 +52,8 @@ class OeaAssistantService : AccessibilityService() {
         val stopLabels: List<String>,
         val confirmLabels: List<String>,
         val returnTo: Intent?,
-        val callback: ((stopped: List<String>, failed: List<String>) -> Unit)?,
-    ) {
+        val callback: ((stopped: List<String>, failed: List<String>) -> Unit)?
+) {
         val stopped = mutableListOf<String>()
         val failed = mutableListOf<String>()
         var current: String? = null
@@ -228,8 +228,8 @@ class OeaAssistantService : AccessibilityService() {
     fun startForceStop(
         packages: List<String>,
         returnTo: Intent?,
-        callback: ((stopped: List<String>, failed: List<String>) -> Unit)?,
-    ): Boolean {
+        callback: ((stopped: List<String>, failed: List<String>) -> Unit)?
+): Boolean {
         if (job != null) return false
         val targets = packages.filter { it.isNotBlank() && it != packageName }.distinct()
         if (targets.isEmpty()) return false
@@ -241,8 +241,8 @@ class OeaAssistantService : AccessibilityService() {
             stopLabels = labels(settings, listOf("force_stop"), listOf("Force stop", "Force Stop", "Force close", "Stop")),
             confirmLabels = labels(settings, listOf("dlg_ok", "okay"), listOf("OK", "Ok", "Force stop", "Force Stop", "Stop")),
             returnTo = returnTo,
-            callback = callback,
-        )
+            callback = callback
+)
         applyEventMask(active = true)
         showProgressOverlay()
         nextPackage()
@@ -265,8 +265,8 @@ class OeaAssistantService : AccessibilityService() {
             .addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_NO_HISTORY or
-                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS,
-            )
+                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+)
         if (runCatching { startActivity(details) }.isFailure) {
             active.failed += pkg
             handler.post { nextPackage() }
@@ -441,8 +441,8 @@ class OeaAssistantService : AccessibilityService() {
         val badge = FrameLayout(this).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF0E4C8F.toInt(), 0xFF3FD5F5.toInt()),
-            ).apply { shape = GradientDrawable.OVAL }
+                intArrayOf(0xFF0E4C8F.toInt(), 0xFF3FD5F5.toInt())
+).apply { shape = GradientDrawable.OVAL }
             elevation = dp(8).toFloat()
         }
         val flake = ImageView(this).apply {
@@ -486,8 +486,8 @@ class OeaAssistantService : AccessibilityService() {
         val bar = View(this).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xFF3FA9F5.toInt(), 0xFF7BE7FF.toInt()),
-            ).apply { cornerRadius = dp(3).toFloat() }
+                intArrayOf(0xFF3FA9F5.toInt(), 0xFF7BE7FF.toInt())
+).apply { cornerRadius = dp(3).toFloat() }
         }
         track.addView(bar, FrameLayout.LayoutParams(0, -1))
         column.addView(track, LinearLayout.LayoutParams(dp(220), dp(6)).apply { topMargin = dp(22) })
@@ -529,8 +529,8 @@ class OeaAssistantService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
+            PixelFormat.TRANSLUCENT
+).apply {
             gravity = Gravity.TOP or Gravity.START
             if (Build.VERSION.SDK_INT >= 28) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES

@@ -358,14 +358,14 @@ object OeaCalculatorApp {
             var first = true
             var lastYValid = false
             for (px in 0 until width step 2) {
-                val xVal = (px - w/2f - offsetX) / scale
+                val xVal = ((px - w/2f - offsetX) / scale).toDouble()
                 val yVal = evaluateFunction(function, xVal)
                 if (yVal == null || yVal.isNaN() || yVal.isInfinite() || abs(yVal) > 1000) {
                     first = true
                     lastYValid = false
                     continue
                 }
-                val py = h/2f + offsetY - yVal * scale
+                val py = h/2f + offsetY - yVal.toFloat() * scale
                 if (first) { path.moveTo(px.toFloat(), py); first = false } else path.lineTo(px.toFloat(), py)
                 lastYValid = true
             }

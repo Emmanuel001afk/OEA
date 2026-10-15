@@ -73,8 +73,8 @@ object OeaGestures {
         Triple("settings", "OEA Settings", "Opens OEA settings."),
         Triple("flashlight", "Flashlight", "Toggles flashlight via CameraManager."),
         Triple("camera", "Open camera", "Opens OEA Camera or system camera."),
-        Triple("screenshot", "Screenshot", "Takes screenshot via Game Boost capture where available."),
-    )
+        Triple("screenshot", "Screenshot", "Takes screenshot via Game Boost capture where available.")
+)
 
     fun actionLabel(id: String): String = actions.firstOrNull { it.first == id }?.second ?: id
     fun actionDetail(id: String): String = actions.firstOrNull { it.first == id }?.third ?: ""
@@ -127,8 +127,8 @@ object OeaGestures {
         context: Context,
         gesture: String,
         actionOverride: String? = null,
-        homeAction: ((String) -> Boolean)? = null,
-    ): Boolean {
+        homeAction: ((String) -> Boolean)? = null
+): Boolean {
         val action = actionOverride ?: action(context, gesture)
         if (action == "none") return false
         val now = SystemClock.elapsedRealtime()
@@ -182,8 +182,8 @@ object OeaGestures {
                 .setAction(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
                 .putExtra(OeaLauncherActivity.EXTRA_HOME_ACTION, action)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+)
         true
     }.getOrDefault(false)
 

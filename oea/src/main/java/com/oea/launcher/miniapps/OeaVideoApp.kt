@@ -481,8 +481,10 @@ object OeaVideoApp {
             listOf(0.25f to "0.25x", 0.5f to "0.5x", 1f to "1x", 1.25f to "1.25x", 1.5f to "1.5x", 2f to "2x", 3f to "3x").forEach { (speed, label) ->
                 speedRow.addView(kit.chip(label, speed == 1f) {
                     try {
-                        if (Build.VERSION.SDK_INT >= 23) {
-                            videoView.setPlaybackParams(videoView.playbackParams.setSpeed(speed))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val params = videoView.playbackParams
+                            params.speed = speed
+                            videoView.playbackParams = params
                         }
                     } catch (_: Throwable) {}
                 }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })

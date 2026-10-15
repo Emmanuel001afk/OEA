@@ -44,8 +44,8 @@ object OeaScreenFailure {
         palette: OeaPalette?,
         retryLabel: String?,
         onRetry: (() -> Unit)?,
-        onClose: (() -> Unit)? = null,
-    ) {
+        onClose: (() -> Unit)? = null
+) {
         OeaFaultShield.note(screen, error)
         val built = runCatching {
             activity.setContentView(build(activity, screen, error, palette, retryLabel, onRetry, onClose))
@@ -60,8 +60,8 @@ object OeaScreenFailure {
         palette: OeaPalette?,
         retryLabel: String?,
         onRetry: (() -> Unit)?,
-        onClose: (() -> Unit)?,
-    ): View {
+        onClose: (() -> Unit)?
+): View {
         val dark = palette?.dark ?: true
         val backgroundColor = palette?.background ?: Color.rgb(12, 15, 21)
         val textColor = palette?.text ?: Color.WHITE
