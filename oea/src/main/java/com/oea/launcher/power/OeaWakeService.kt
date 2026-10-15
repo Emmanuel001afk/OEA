@@ -99,10 +99,6 @@ class OeaWakeService : Service() {
         instance = this
         running = true
         sensorManager = getSystemService(SensorManager::class.java)
-        // Android 14+ requires startForeground within ~10s after startForegroundService().
-        // If our normal notification fails to build, we must still call startForeground
-        // with a minimal fallback before stopping, otherwise the system throws
-        // ForegroundServiceDidNotStartInTimeException.
         var promoted = false
         try {
             val notif = try { notification() } catch (e: Throwable) {
@@ -117,7 +113,6 @@ class OeaWakeService : Service() {
             promoted = true
         } catch (e: Throwable) {
             Log.w(TAG, "Wake service could not enter the foreground", e)
-            // Last resort: try a bare notification so we satisfy the FGS contract, then stop.
             try {
                 val fallback = fallbackNotification()
                 if (Build.VERSION.SDK_INT >= 34) {
@@ -131,9 +126,6 @@ class OeaWakeService : Service() {
             }
         }
         if (!promoted) {
-            // We never managed to promote; stop quickly to avoid FGS timeout crash.
-            // On Android 14+, if startForeground was never called, the system will
-            // still throw, but we have tried our best; mark not running.
             running = false
             instance = null
             stopSelf()
@@ -152,21 +144,28 @@ class OeaWakeService : Service() {
         reloadSettings()
     }
 
-    private fun fallbackNotification(): android.app.Notification {
-        val manager = getSystemService(android.app.NotificationManager::class.java)
+    private fun fallbackNotification(): Notification {
+        val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             runCatching {
-                manager?.createNotificationChannel(android.app.NotificationChannel(CHANNEL, \"Wake gestures\", android.app.NotificationManager.IMPORTANCE_MIN).apply {
-                    description = \"Keeps OEA's wake gestures available.\"\n                    setShowBadge(false)
-                })
+                manager?.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL,
+                        "Wake gestures",
+                        NotificationManager.IMPORTANCE_MIN
+                    ).apply {
+                        description = "Keeps OEA's wake gestures available."
+                        setShowBadge(false)
+                    }
+                )
             }
         }
-        val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL)
-        else @Suppress(\"DEPRECATION\") android.app.Notification.Builder(this)
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL)
+        else @Suppress("DEPRECATION") Notification.Builder(this)
         return builder
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
-            .setContentTitle(\"OEA wake gestures\")
-            .setContentText(\"Sensors active while screen is off\")
+            .setContentTitle("OEA wake gestures")
+            .setContentText("Sensors active while screen is off")
             .setOngoing(true)
             .setShowWhen(false)
             .build()
@@ -192,16 +191,11 @@ class OeaWakeService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** Settings changed: rebuild the detector; keep listening only if the screen is off. */
     fun reloadSettings() {
         if (!OeaPower.wakeFeaturesOn(this)) {
             stopSelf()
             return
         }
-        // The screen-off gesture needs the proximity sensor even if no wake
-        // gesture is bound to it; without it the service has nothing to listen for.
-        // Proximity also serves as the pocket guard for lift to wake, and is the
-        // only sensor the screen-off gesture needs.
         val offGestureBound = OeaDataStore.get(this).waveOffAction() != "none"
         val needProximity = offGestureBound || OeaPower.waveToWake(this) || (OeaPower.liftToWake(this) && OeaPower.pocketGuard(this))
         proximity = if (needProximity) OeaPower.proximitySensor(this) else null
@@ -243,21 +237,13 @@ class OeaWakeService : Service() {
         lift?.let { sensor -> if (sensor.reportingMode == Sensor.REPORTING_MODE_ONE_SHOT) runCatching { sm.cancelTriggerSensor(liftTrigger, sensor) } }
     }
 
-    /** Lift gestures are ignored while the proximity sensor is covered (pocket or bag). */
     private fun pocketCovered(): Boolean = OeaPower.pocketGuard(this) && lastCovered
 
-    /** Never fight the system's own proximity handling during calls. */
     private fun inCall(): Boolean {
         val mode = runCatching { getSystemService(AudioManager::class.java)?.mode }.getOrNull() ?: return false
         return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_RINGTONE
     }
 
-    /**
-     * A wave (or a lift) was recognised. "wake" is the original behaviour; the
-     * others are bound in Settings › Gestures, and every one of them is checked
-     * against the current gesture setting so two gestures can never share an
-     * action by accident.
-     */
     private fun wake(reason: String) {
         val action = if (reason == "lift") "wake" else OeaDataStore.get(this).waveAction()
         Log.i(TAG, "Gesture recognised ($reason) -> $action")
@@ -270,12 +256,6 @@ class OeaWakeService : Service() {
         }
     }
 
-    /**
-     * The screen-off gesture fired. It runs the binding for the *screen-off* slot
-     * only, so it can never bump into the wake wave — and it is the one place in
-     * OEA that turns the screen off by gesture, which needs either OEA Assistant
-     * (the lock action) or device admin.
-     */
     private fun offGesture() {
         val store = OeaDataStore.get(this)
         val action = store.waveOffAction()
@@ -325,12 +305,6 @@ class OeaWakeService : Service() {
         @Volatile var instance: OeaWakeService? = null
             private set
 
-        /**
-         * Turns the screen on. Android 14+ honours a wake-up wake lock only for
-         * apps allowed to "Turn screen on"; OEA also briefly starts a
-         * show-when-locked activity that requests the screen, which Android
-         * allows while OEA Assistant or "Display over other apps" is granted.
-         */
         fun wakeScreen(context: Context) {
             val app = context.applicationContext
             runCatching {
