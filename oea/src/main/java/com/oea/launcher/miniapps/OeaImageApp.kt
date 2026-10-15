@@ -173,11 +173,11 @@ object OeaImageApp {
         header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
             kit.prompt("Search images", "Name, album or date", "Search", searchQuery) { q ->
                 searchQuery = q.trim()
-                refresh()
+                refresh(false, false, false)
                 null
             }
         }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })
-        header.addView(kit.circleIconButton(R.drawable.oic_refresh, "Refresh", palette.cardHigh, palette.text) { refresh(force = true) })
+        header.addView(kit.circleIconButton(R.drawable.oic_refresh, "Refresh", palette.cardHigh, palette.text) { refresh(true, false, false) })
         column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
 
         val tabBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
@@ -189,7 +189,7 @@ object OeaImageApp {
         val grid = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         column.addView(grid)
 
-        val loadMoreBtn = kit.tonalButton("Load more images", R.drawable.oic_refresh) { refresh(loadMore = true) }
+        val loadMoreBtn = kit.tonalButton("Load more images", R.drawable.oic_refresh) { refresh(false, true, false) }
 
         fun renderTabs() {
             tabBar.removeAllViews()
@@ -205,7 +205,7 @@ object OeaImageApp {
                 tabBar.addView(kit.chip(label, id == currentTab) {
                     currentTab = id
                     currentBucket = null
-                    refresh()
+                    refresh(false, false, false)
                 }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
             }
         }
@@ -267,11 +267,11 @@ object OeaImageApp {
                     row.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
                     row.setOnClickListener {
                         when {
-                            label.startsWith("All") -> { currentTab = "all"; refresh() }
-                            label.startsWith("Favorites") -> { currentTab = "favorites"; refresh() }
-                            label.startsWith("Screenshots") -> { currentTab = "screenshots"; refresh() }
-                            label.startsWith("Downloads") -> { currentTab = "downloads"; refresh() }
-                            else -> { currentBucket = null; currentTab = "all"; refresh() }
+                            label.startsWith("All") -> { currentTab = "all"; refresh(false, false, false) }
+                            label.startsWith("Favorites") -> { currentTab = "favorites"; refresh(false, false, false) }
+                            label.startsWith("Screenshots") -> { currentTab = "screenshots"; refresh(false, false, false) }
+                            label.startsWith("Downloads") -> { currentTab = "downloads"; refresh(false, false, false) }
+                            else -> { currentBucket = null; currentTab = "all"; refresh(false, false, false) }
                         }
                     }
                     grid.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
@@ -292,7 +292,7 @@ object OeaImageApp {
                     textCol.addView(kit.text("${items.size} images • ${items.firstOrNull()?.relativePath?.ifBlank { bucketName } ?: bucketName}", 12f, palette.textSecondary).apply { maxLines = 1 })
                     row.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
                     row.addView(kit.text("${items.size}", 13f, palette.accent, OeaType.medium))
-                    row.setOnClickListener { currentBucket = bucketName; currentTab = "all"; refresh() }
+                    row.setOnClickListener { currentBucket = bucketName; currentTab = "all"; refresh(false, false, false) }
                     grid.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
                     io.execute {
                         val thumb = try { host.contentResolver.loadThumbnail(items.first().uri, android.util.Size(200, 200), null) } catch (_: Throwable) { null }
@@ -322,7 +322,7 @@ object OeaImageApp {
                         clipToOutline = true
                         setOnClickListener { openViewer(host, kit, item) }
                         setOnLongClickListener {
-                            showItemActions(host, kit, item) { refresh() }
+                            showItemActions(host, kit, item) { refresh(false, false, false) }
                             true
                         }
                     }

@@ -170,9 +170,9 @@ object OeaVideoApp {
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(kit.text("VIP • Video Instant Player", 20f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
-            kit.prompt("Search videos", "Name, album", "Search", searchQuery) { q -> searchQuery = q.trim(); refresh(); null }
+            kit.prompt("Search videos", "Name, album", "Search", searchQuery) { q -> searchQuery = q.trim(); refresh(false, false); null }
         }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })
-        header.addView(kit.circleIconButton(R.drawable.oic_refresh, "Refresh", palette.cardHigh, palette.text) { refresh(force = true) })
+        header.addView(kit.circleIconButton(R.drawable.oic_refresh, "Refresh", palette.cardHigh, palette.text) { refresh(true, false) })
         column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
         kit.note(column, "OEA's own video player: albums from all folders (including external apps), playlists, history, favorites, PIP, speed, loop, brightness/volume gestures. Benchmarked against VLC for controls and orientation handling.")
 
@@ -196,7 +196,7 @@ object OeaVideoApp {
                 "downloads" to "Downloads",
                 "large" to "Large"
             ).forEach { (id, label) ->
-                tabBar.addView(kit.chip(label, id == currentTab) { currentTab = id; currentBucket = null; refresh() }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+                tabBar.addView(kit.chip(label, id == currentTab) { currentTab = id; currentBucket = null; refresh(false, false) }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
             }
         }
 
@@ -299,7 +299,7 @@ object OeaVideoApp {
                 row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
                 row.setOnClickListener { openPlayer(host, kit, v) }
                 row.setOnLongClickListener {
-                    showVideoActions(host, kit, v) { refresh() }
+                    showVideoActions(host, kit, v) { refresh(false, false) }
                     true
                 }
                 group.addView(row)
@@ -309,7 +309,7 @@ object OeaVideoApp {
             }
 
             if (hasMore && currentTab == "all" && currentBucket == null && searchQuery.isBlank()) {
-                listHost.addView(kit.tonalButton("Load more videos", R.drawable.oic_refresh) { refresh(loadMore = true) }, LinearLayout.LayoutParams(-1, kit.dp(44)).apply { topMargin = kit.dp(8) })
+                listHost.addView(kit.tonalButton("Load more videos", R.drawable.oic_refresh) { refresh(false, true) }, LinearLayout.LayoutParams(-1, kit.dp(44)).apply { topMargin = kit.dp(8) })
             }
 
             // Playlists
@@ -336,7 +336,7 @@ object OeaVideoApp {
                     val pls = decodePlaylists(prefs(host).getString(KEY_PLAYLISTS, "")).toMutableMap()
                     pls[name.trim()] = emptyList()
                     prefs(host).edit().putString(KEY_PLAYLISTS, encodePlaylists(pls)).apply()
-                    refresh()
+                    refresh(false, false)
                     null
                 }
             }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(12) })
