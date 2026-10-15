@@ -16,7 +16,7 @@ class OeaGestureController(
     private val onSwipeLeft: () -> Unit = {},
     private val onSwipeRight: () -> Unit = {},
     private val triggerDistanceDp: Float = 56f,
-    private val consumeTouchEvents: Boolean = true,
+    private val consumeTouchEvents: Boolean = true
 ) : GestureDetector.SimpleOnGestureListener(), View.OnTouchListener {
 
     private val detector = GestureDetector(view.context, this)
@@ -28,8 +28,8 @@ class OeaGestureController(
         e1: MotionEvent?,
         e2: MotionEvent,
         velocityX: Float,
-        velocityY: Float,
-    ): Boolean {
+        velocityY: Float
+): Boolean {
         if (e1 == null) return false
         val dx = e2.x - e1.x
         val dy = e2.y - e1.y

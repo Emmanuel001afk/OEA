@@ -51,8 +51,8 @@ object OeaAccessDoctor {
         /** What to do next. */
         val advice: String,
         /** The shell command that grants this, when there is one. */
-        val command: String? = null,
-    ) {
+        val command: String? = null
+) {
         val isReady: Boolean get() = state == State.WORKING
     }
 
@@ -73,8 +73,8 @@ object OeaAccessDoctor {
                     Finding(
                         privilege, State.UNAVAILABLE,
                         "OEA could not check this on this device (${it.javaClass.simpleName}).",
-                        "Nothing is broken: the feature falls back to its own Home surface.",
-                    )
+                        "Nothing is broken: the feature falls back to its own Home surface."
+)
                 }
             findings += finding
         }
@@ -104,8 +104,8 @@ object OeaAccessDoctor {
                         privilege, State.STALE,
                         "Android says the permission is granted, but drawing over apps was refused.",
                         "Switch Display over other apps off and on again for OEA, then press Verify. On some firmware the AppOps entry is the one that matters.",
-                        command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"),
-                    )
+                        command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow")
+)
                     root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it now.", "Tap Fix.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
                     owner -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA is the device owner and can grant it now.", "Tap Fix.")
                     else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Apps › OEA › Display over other apps.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
@@ -123,8 +123,8 @@ object OeaAccessDoctor {
                         privilege, State.STALE,
                         "OEA Assistant is switched on in Android's list but Android never bound it.",
                         "Turn OEA Assistant off and on again in Android Settings › Accessibility. If it stays greyed out, restart the phone once — Android binds accessibility services at boot.",
-                        command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}"),
-                    )
+                        command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}")
+)
                     root -> Finding(privilege, State.OEA_CAN_FIX, "Not enabled; OEA has root and can enable its own service.", "Tap Fix.", command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}"))
                     owner -> Finding(privilege, State.OEA_CAN_FIX, "Not enabled; OEA is the device owner and can enable it.", "Tap Fix.")
                     else -> Finding(privilege, State.NEEDS_TAP, "Not enabled.", "Turn on OEA Assistant in Android Settings › Accessibility › Installed apps.", command = "settings put secure enabled_accessibility_services ${assistantList(app)}")
@@ -197,8 +197,8 @@ object OeaAccessDoctor {
                 Finding(
                     privilege, State.UNAVAILABLE,
                     "OEA is not the device owner. Android only allows this on a phone that has been reset, or with one command from a computer.",
-                    "Not needed: every feature works through its owner-granted route or its Home fallback. The command exists for anyone who wants the strongest setup: adb shell dpm set-device-owner ${app.packageName}/${'$'}DEVICE_OWNER_RECEIVER",
-                )
+                    "Not needed: every feature works through its owner-granted route or its Home fallback. The command exists for anyone who wants the strongest setup: adb shell dpm set-device-owner ${app.packageName}/${'$'}DEVICE_OWNER_RECEIVER"
+)
             }
 
             Privilege.ROOT -> if (root) {

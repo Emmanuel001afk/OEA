@@ -111,8 +111,8 @@ object OeaLiveScenes {
             0f, 0f, w * 0.35f, h,
             intArrayOf(Color.rgb(4, 10, 22), Color.rgb(6, 32, 48), Color.rgb(8, 62, 74), Color.rgb(12, 96, 104)),
             floatArrayOf(0f, 0.42f, 0.74f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
 
         // A wide, soft light source low on the horizon.
@@ -120,8 +120,8 @@ object OeaLiveScenes {
             w * 0.72f, h * 0.30f, max(w, h) * 0.55f,
             intArrayOf(Color.argb(120, 150, 245, 235), Color.argb(40, 60, 170, 190), Color.TRANSPARENT),
             floatArrayOf(0f, 0.45f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
 
         val bands = 6
@@ -148,8 +148,8 @@ object OeaLiveScenes {
             paint.shader = LinearGradient(
                 0f, base, 0f, h,
                 Color.argb(alpha, 90, 220, 220), Color.argb((alpha * 0.55f).toInt(), 8, 40, 60),
-                Shader.TileMode.CLAMP,
-            )
+                Shader.TileMode.CLAMP
+)
             canvas.drawPath(path, paint)
         }
 
@@ -162,8 +162,8 @@ object OeaLiveScenes {
                 cx, cy, h * 0.12f,
                 intArrayOf(Color.argb(80, 210, 255, 250), Color.TRANSPARENT),
                 floatArrayOf(0f, 1f),
-                Shader.TileMode.CLAMP,
-            )
+                Shader.TileMode.CLAMP
+)
             canvas.drawRect(0f, 0f, w, h, paint)
         }
         paint.shader = null
@@ -175,8 +175,8 @@ object OeaLiveScenes {
             0f, 0f, 0f, h * 0.85f,
             intArrayOf(Color.rgb(24, 32, 62), Color.rgb(64, 48, 84), Color.rgb(146, 86, 96), Color.rgb(214, 138, 96)),
             floatArrayOf(0f, 0.38f, 0.68f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
 
         // A low sun that keeps its place while the ridges move.
@@ -184,8 +184,8 @@ object OeaLiveScenes {
             w * 0.30f, h * 0.60f, h * 0.34f,
             intArrayOf(Color.argb(150, 255, 214, 168), Color.argb(40, 255, 160, 120), Color.TRANSPARENT),
             floatArrayOf(0f, 0.5f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
 
@@ -211,8 +211,8 @@ object OeaLiveScenes {
             val shade = Color.rgb(
                 (18 + 44 * far).toInt(),
                 (20 + 30 * far).toInt(),
-                (40 + 30 * far).toInt(),
-            )
+                (40 + 30 * far).toInt()
+)
             paint.color = Color.argb((210 - 20 * i).coerceIn(120, 255), Color.red(shade), Color.green(shade), Color.blue(shade))
             canvas.drawPath(path, paint)
         }
@@ -221,8 +221,8 @@ object OeaLiveScenes {
         paint.shader = LinearGradient(
             0f, h * 0.5f, 0f, h * 0.72f,
             Color.argb(70, 240, 220, 220), Color.TRANSPARENT,
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
     }
@@ -247,8 +247,8 @@ object OeaLiveScenes {
             Triple(0.72f, 0.24f, 0.22f),
             Triple(0.55f, 0.52f, 0.34f),
             Triple(0.20f, 0.72f, 0.26f),
-            Triple(0.80f, 0.78f, 0.30f),
-        )
+            Triple(0.80f, 0.78f, 0.30f)
+)
         washes.forEachIndexed { index, (fx, fy, fr) ->
             val breathe = 1f + 0.04f * sin(t * 0.18f + index * 1.3f)
             val cx = w * fx
@@ -258,8 +258,8 @@ object OeaLiveScenes {
                 cx, cy, r,
                 intArrayOf(Color.argb(38, 20, 20, 24), Color.argb(14, 20, 20, 24), Color.TRANSPARENT),
                 floatArrayOf(0f, 0.55f, 1f),
-                Shader.TileMode.CLAMP,
-            )
+                Shader.TileMode.CLAMP
+)
             canvas.drawRect(0f, 0f, w, h, paint)
         }
         paint.shader = null
@@ -298,8 +298,8 @@ object OeaLiveScenes {
             w * 0.5f, h * 0.45f, max(w, h) * 0.72f,
             intArrayOf(Color.TRANSPARENT, Color.argb(45, 60, 54, 44)),
             floatArrayOf(0.6f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
     }
@@ -310,8 +310,8 @@ object OeaLiveScenes {
             0f, 0f, 0f, h,
             intArrayOf(Color.rgb(4, 8, 22), Color.rgb(8, 18, 42), Color.rgb(6, 26, 40), Color.rgb(3, 8, 16)),
             floatArrayOf(0f, 0.42f, 0.7f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
 
@@ -330,8 +330,8 @@ object OeaLiveScenes {
         val ribbons = listOf(
             Triple(Color.rgb(70, 225, 168), 0.26f, 0.030f),
             Triple(Color.rgb(96, 190, 255), 0.36f, 0.022f),
-            Triple(Color.rgb(178, 140, 255), 0.46f, 0.017f),
-        )
+            Triple(Color.rgb(178, 140, 255), 0.46f, 0.017f)
+)
         ribbons.forEachIndexed { index, (color, fy, amp) ->
             val base = h * fy
             val path = Path()
@@ -351,8 +351,8 @@ object OeaLiveScenes {
                 0f, base - h * 0.1f, 0f, base + h * 0.26f,
                 Color.argb(120, Color.red(color), Color.green(color), Color.blue(color)),
                 Color.argb(0, Color.red(color), Color.green(color), Color.blue(color)),
-                Shader.TileMode.CLAMP,
-            )
+                Shader.TileMode.CLAMP
+)
             canvas.drawPath(path, paint)
         }
         paint.shader = null
@@ -362,8 +362,8 @@ object OeaLiveScenes {
             w * 0.5f, h * 0.34f, max(w, h) * 0.6f,
             intArrayOf(Color.argb(46, 90, 220, 190), Color.TRANSPARENT),
             floatArrayOf(0f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+            Shader.TileMode.CLAMP
+)
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
     }

@@ -2,6 +2,7 @@ package com.oea.launcher.gesture
 
 import android.content.Context
 import android.content.Intent
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -17,36 +18,16 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Every gesture OEA recognises, and the action each one runs.
  *
- * The point of this file is that gestures cannot collide. Each gesture has its
- * own identity, its own input source and its own settings key:
+ * Expanded to support separate configurable actions including waking device,
+ * locking screen, DND, flashlight, etc. — not just one switch.
  *
- * | Gesture | Source | How it is kept apart from the others |
- * |---|---|---|
- * | double tap | touch, 1 finger | fires only after [MULTI_TAP_WINDOW], when a third tap can no longer come |
- * | triple tap | touch, 1 finger | fires only when three taps land inside that same window |
- * | long press | touch, 1 finger | held past the system's touch-slop timeout, never on an icon |
- * | two-finger swipe | touch, 2 pointers | pointer count, so a one-finger swipe can never trigger it |
- * | swipe down | touch, 1 finger | axis check: vertical movement must beat horizontal by 1.1× |
- * | wave | proximity sensor | a defined near→far pattern with a pause, not a single reading |
- * | lift | significant-motion sensor | its own sensor, and never while the pocket guard sees a cover |
- * | volume keys | hardware keys | only when a key event is delivered while OEA is in front |
- *
- * A gesture bound to "none" is not listened for at all: the wave and lift
- * sensors are released, the detector ignores the pattern, so an unwanted gesture
- * costs nothing.
+ * Persistence fix: gesture settings are stored in OeaDataStore which survives
+ * reboots and Ultra Power Saving Mode. OeaPower also mirrors sensitivity to
+ * DataStore for redundancy. Boot receiver and LowMode exit both call syncWakeService.
  */
 object OeaGestures {
-    /**
-     * How long Home waits after a tap before deciding it was a double tap.
-     *
-     * This one number is what keeps double and triple tap apart: a double tap can
-     * only fire once a third tap is no longer possible, so the same three taps can
-     * never run both actions. It sits inside Android's own double-tap window, so
-     * the gestures still feel immediate.
-     */
     const val MULTI_TAP_WINDOW = 260L
 
-    /** Gesture id → the label Settings shows. */
     val slots = linkedMapOf(
         "double_tap" to "Double-tap Home",
         "triple_tap" to "Triple-tap Home",
@@ -54,45 +35,50 @@ object OeaGestures {
         "swipe_down" to "Swipe down on Home",
         "long_press" to "Long-press empty Home",
         "wave" to "Wave in front of the phone",
+        "wave_off" to "Hold-and-wave (screen off)",
+        "shake" to "Shake device",
+        "flip" to "Flip device"
     )
 
-    /** Gesture id → the actions it may be bound to (each gesture has its own list). */
     val allowed: Map<String, List<String>> = mapOf(
-        "double_tap" to listOf("none", "lock", "power_menu", "quick_controls", "drawer", "search", "low", "volume", "silence"),
-        "triple_tap" to listOf("none", "lock", "power_menu", "quick_controls", "drawer", "search", "low", "volume", "silence"),
-        "two_finger" to listOf("none", "search", "drawer", "notifications", "quick_settings", "quick_controls", "silence", "low"),
-        "swipe_down" to listOf("none", "notifications", "quick_settings", "quick_controls", "search", "silence", "volume"),
-        "long_press" to listOf("none", "wallpaper", "widgets", "settings", "low"),
-        "wave" to listOf("none", "wake", "lock", "power_menu", "low", "volume", "silence"),
-        // The screen-off pattern is its own slot with its own list: nothing that
-        // only makes sense with the screen on (a drawer, a search box) is offered.
-        "wave_off" to listOf("none", "lock"),
+        "double_tap" to listOf("none", "lock", "power_menu", "quick_controls", "drawer", "search", "low", "volume", "silence", "dnd_toggle", "dnd_on", "dnd_off", "flashlight", "wake", "screenshot", "camera"),
+        "triple_tap" to listOf("none", "lock", "power_menu", "quick_controls", "drawer", "search", "low", "volume", "silence", "dnd_toggle", "dnd_on", "dnd_off", "flashlight", "wake", "screenshot"),
+        "two_finger" to listOf("none", "search", "drawer", "notifications", "quick_settings", "quick_controls", "silence", "low", "dnd_toggle", "flashlight", "camera"),
+        "swipe_down" to listOf("none", "notifications", "quick_settings", "quick_controls", "search", "silence", "volume", "dnd_toggle", "flashlight"),
+        "long_press" to listOf("none", "wallpaper", "widgets", "settings", "low", "quick_controls", "dnd_toggle"),
+        "wave" to listOf("none", "wake", "lock", "power_menu", "low", "volume", "silence", "dnd_toggle", "dnd_on", "dnd_off", "flashlight"),
+        "wave_off" to listOf("none", "lock", "dnd_toggle", "dnd_on", "dnd_off", "flashlight", "low"),
+        "shake" to listOf("none", "lock", "flashlight", "camera", "screenshot", "dnd_toggle", "low"),
+        "flip" to listOf("none", "dnd_on", "dnd_off", "dnd_toggle", "silence", "low")
     )
 
-    /** Every action, with a plain description, for the Settings sheet. */
     val actions: List<Triple<String, String, String>> = listOf(
         Triple("none", "Nothing", "The gesture is not listened for at all."),
-        Triple("wake", "Wake the screen", "Wave gestures: turn the screen on."),
-        Triple("lock", "Lock the phone", "Locks the screen, like the power button."),
+        Triple("wake", "Wake the screen", "Wave/lift gestures: turn the screen on. Needs Turn screen on permission on Android 14+."),
+        Triple("lock", "Lock the phone", "Locks the screen, like power button. Needs OEA Assistant or Device Admin."),
         Triple("power_menu", "Power menu", "Android's own power menu (needs OEA Assistant)."),
-        Triple("drawer", "Open the app drawer", "The same as swiping up."),
-        Triple("search", "Search apps", "Opens OEA's search with the keyboard ready."),
-        Triple("notifications", "Notifications", "Pulls down the notification shade."),
-        Triple("quick_settings", "Quick Settings", "Pulls down Android's Quick Settings."),
-        Triple("quick_controls", "OEA Quick controls", "OEA's own panel: brightness, volume, ringer."),
-        Triple("volume", "Volume panel", "Shows Android's volume panel."),
-        Triple("silence", "Silence / restore", "Switches Do Not Disturb on, or restores your ringer."),
-        Triple("low", "LOW mode", "Turns OEA's power-saving mode on or off."),
-        Triple("wallpaper", "Wallpaper & themes", "Opens OEA's wallpaper and theme screen."),
-        Triple("widgets", "Add a widget", "Opens OEA's widget picker."),
-        Triple("settings", "OEA Settings", "Opens OEA's own settings."),
-    )
+        Triple("drawer", "Open app drawer", "Same as swipe up."),
+        Triple("search", "Search apps", "Opens OEA search with keyboard."),
+        Triple("notifications", "Notifications", "Pulls down notification shade (needs Assistant)."),
+        Triple("quick_settings", "Quick Settings", "Pulls down Quick Settings (needs Assistant)."),
+        Triple("quick_controls", "OEA Quick controls", "OEA's own panel: brightness, volume, ringer, notifications centre."),
+        Triple("volume", "Volume panel", "Shows Android volume panel."),
+        Triple("silence", "Silence / restore", "Mutes ring and enables DND, or restores."),
+        Triple("dnd_toggle", "Toggle Do Not Disturb", "Switches DND on/off. Needs DND access."),
+        Triple("dnd_on", "Enable Do Not Disturb", "Enables DND. Needs DND access."),
+        Triple("dnd_off", "Disable Do Not Disturb", "Disables DND. Needs DND access."),
+        Triple("low", "LOW mode", "Turns OEA power-saving on/off."),
+        Triple("wallpaper", "Wallpaper & themes", "Opens wallpaper and theme screen."),
+        Triple("widgets", "Add a widget", "Opens widget picker."),
+        Triple("settings", "OEA Settings", "Opens OEA settings."),
+        Triple("flashlight", "Flashlight", "Toggles flashlight via CameraManager."),
+        Triple("camera", "Open camera", "Opens OEA Camera or system camera."),
+        Triple("screenshot", "Screenshot", "Takes screenshot via Game Boost capture where available.")
+)
 
     fun actionLabel(id: String): String = actions.firstOrNull { it.first == id }?.second ?: id
-
     fun actionDetail(id: String): String = actions.firstOrNull { it.first == id }?.third ?: ""
 
-    /** The action a gesture is currently bound to. */
     fun action(context: Context, gesture: String): String {
         val store = OeaDataStore.get(context)
         return when (gesture) {
@@ -103,6 +89,8 @@ object OeaGestures {
             "long_press" -> store.emptyLongPressAction()
             "wave" -> store.waveAction()
             "wave_off" -> store.waveOffAction()
+            "shake" -> store.shakeAction()
+            "flip" -> store.flipAction()
             else -> "none"
         }
     }
@@ -119,46 +107,28 @@ object OeaGestures {
             "long_press" -> store.setEmptyLongPressAction(value)
             "wave" -> store.setWaveAction(value)
             "wave_off" -> store.setWaveOffAction(value)
+            "shake" -> store.setShakeAction(value)
+            "flip" -> store.setFlipAction(value)
         }
-        // The wake service keeps its sensors only while a sensor gesture is bound,
-        // so binding "none" releases the hardware immediately.
-        if (gesture == "wave") OeaPower.syncWakeService(context)
+        if (gesture == "wave" || gesture == "wave_off") OeaPower.syncWakeService(context)
     }
 
-    /**
-     * Actions that two gestures may legitimately share, because they are the same
-     * kind of thing (doing nothing, or a wake that only the wave can mean).
-     */
     private val shareable = setOf("none", "wake")
 
-    /**
-     * Other gestures already bound to [action]. Settings shows this before saving,
-     * so the user can see the overlap instead of discovering it later, and the
-     * tests use it to prove no two touch gestures can end up identical.
-     */
     fun conflicts(context: Context, action: String, ignore: String? = null): List<String> {
         if (action in shareable) return emptyList()
         return slots.keys.filter { it != ignore && this.action(context, it) == action }
     }
 
-    /** A gesture repeated faster than this is treated as one. */
     private const val COOLDOWN_MS = 400L
     private val lastRun = ConcurrentHashMap<String, Long>()
 
-    /**
-     * Runs the action bound to [gesture]; true when something was done.
-     *
-     * [homeAction] lets Home perform an action in place (opening its own drawer,
-     * for instance) instead of being asked to do it through an intent; the wake
-     * service, which runs while Home is not in front, passes nothing and the
-     * action is delivered to Home as a home-action intent.
-     */
     fun run(
         context: Context,
         gesture: String,
         actionOverride: String? = null,
-        homeAction: ((String) -> Boolean)? = null,
-    ): Boolean {
+        homeAction: ((String) -> Boolean)? = null
+): Boolean {
         val action = actionOverride ?: action(context, gesture)
         if (action == "none") return false
         val now = SystemClock.elapsedRealtime()
@@ -177,6 +147,27 @@ object OeaGestures {
                 }
                 "volume" -> { OeaPower.showVolumePanel(app); true }
                 "silence" -> silence(app)
+                "dnd_toggle" -> {
+                    val on = !OeaPower.dndOn(app)
+                    OeaPower.setDnd(app, on)
+                }
+                "dnd_on" -> OeaPower.setDnd(app, true)
+                "dnd_off" -> OeaPower.setDnd(app, false)
+                "flashlight" -> toggleFlashlight(app)
+                "camera" -> {
+                    try {
+                        app.startActivity(Intent(app, com.oea.launcher.miniapps.OeaMiniAppActivity::class.java).putExtra(com.oea.launcher.miniapps.OeaMiniAppActivity.EXTRA_APP, "camera").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        true
+                    } catch (_: Throwable) { false }
+                }
+                "screenshot" -> {
+                    // Use Game Boost capture if available, else system screenshot via Assistant
+                    try {
+                        val intent = Intent(app, com.oea.launcher.gameboost.OeaGameCaptureActivity::class.java).putExtra(com.oea.launcher.gameboost.OeaGameCaptureActivity.EXTRA_MODE, com.oea.launcher.gameboost.OeaGameCaptureActivity.MODE_SCREENSHOT).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        app.startActivity(intent)
+                        true
+                    } catch (_: Throwable) { false }
+                }
                 else -> {
                     val handled = homeAction?.invoke(action) == true
                     handled || deliverToHome(app, action)
@@ -185,15 +176,14 @@ object OeaGestures {
         }
     }
 
-    /** Home is not in front: hand the action to Home as an intent. */
     private fun deliverToHome(context: Context, action: String): Boolean = runCatching {
         context.startActivity(
             Intent(context, OeaLauncherActivity::class.java)
                 .setAction(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
                 .putExtra(OeaLauncherActivity.EXTRA_HOME_ACTION, action)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+)
         true
     }.getOrDefault(false)
 
@@ -212,28 +202,25 @@ object OeaGestures {
         }
     }
 
-    /** Shade actions, shared by the swipe binder and the settings rows. */
+    private fun toggleFlashlight(context: Context): Boolean {
+        return try {
+            val cm = context.getSystemService(CameraManager::class.java) ?: return false
+            val id = cm.cameraIdList.firstOrNull() ?: return false
+            // We need to track state - use prefs
+            val prefs = context.getSharedPreferences("oea_gestures", Context.MODE_PRIVATE)
+            val on = !prefs.getBoolean("torch_on", false)
+            cm.setTorchMode(id, on)
+            prefs.edit().putBoolean("torch_on", on).apply()
+            true
+        } catch (_: Throwable) { false }
+    }
+
     fun expandNotifications(context: Context): Boolean = OeaSystemActions.expandNotifications(context)
-
     fun expandQuickSettings(context: Context): Boolean = OeaSystemActions.expandQuickSettings(context)
-
-    /** True for the two hardware keys OEA may be handed while it is in front. */
     fun isVolumeKey(keyCode: Int): Boolean =
         keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
 }
 
-/**
- * Turns a stream of taps into single, double or triple taps without ever letting
- * two of them fire for the same sequence.
- *
- * Android's own [android.view.GestureDetector] reports a double tap as soon as
- * the second tap lands, which makes a triple tap impossible to add without
- * running the double-tap action first. Here every tap only **counts**, and the
- * decision is taken once, [OeaGestures.MULTI_TAP_WINDOW] milliseconds after the
- * last tap: three taps in the window run the triple-tap action, two run the
- * double-tap action, one runs the single-tap action (Home leaves that unbound,
- * because a tap on Home should do nothing).
- */
 class OeaTapRouter(private val window: Long = OeaGestures.MULTI_TAP_WINDOW) {
     private var taps = 0
     private var lastTapAt = 0L
@@ -243,11 +230,9 @@ class OeaTapRouter(private val window: Long = OeaGestures.MULTI_TAP_WINDOW) {
     var onTripleTap: (() -> Unit)? = null
     var onSingleTap: (() -> Unit)? = null
 
-    /** Call from the touch handler on every confirmed tap. */
-    fun tap(now: Long = SystemClock.uptimeMillis()) {
+    fun tap(now: Long = android.os.SystemClock.uptimeMillis()) {
         taps = if (now - lastTapAt > window) 1 else taps + 1
         lastTapAt = now
-        // Actually schedule the decision on the caller's handler.
         schedule()
     }
 

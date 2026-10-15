@@ -15,7 +15,7 @@ enum class OeaFeature(
     val preferred: Surface,
     val pending: Surface,
     val fallback: Surface,
-    val effect: String,
+    val effect: String
 ) {
     /** Live activity (Dynamic Island) above other apps; inside Home it needs nothing. */
     ISLAND_OVER_APPS(
@@ -24,8 +24,8 @@ enum class OeaFeature(
         Surface.OVERLAY,
         Surface.HOME,
         Surface.HOME,
-        "the island stays inside Home and inside games instead of floating over every app",
-    ),
+        "the island stays inside Home and inside games instead of floating over every app"
+),
 
     /** Notification content: dots on icons, Now Playing, actionable cards. */
     NOTIFICATION_CONTENT(
@@ -34,8 +34,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.NONE,
-        "charging and OEA's own calls still show; other apps' notification content stays hidden",
-    ),
+        "charging and OEA's own calls still show; other apps' notification content stays hidden"
+),
 
     /** Game Boost's draggable RAM/network panel above the game. */
     GAME_BOOST_PANEL(
@@ -44,8 +44,8 @@ enum class OeaFeature(
         Surface.OVERLAY,
         Surface.OVERLAY,
         Surface.NOTIFICATION,
-        "the panel moves into Game Boost and a notification with the same actions",
-    ),
+        "the panel moves into Game Boost and a notification with the same actions"
+),
 
     /** Knowing which game is in front, for boost, islands and usage ranking. */
     FOREGROUND_GAME(
@@ -54,8 +54,8 @@ enum class OeaFeature(
         Surface.OVERLAY,
         Surface.OVERLAY,
         Surface.HOME,
-        "Game Boost follows apps you launch from OEA Home instead of every game",
-    ),
+        "Game Boost follows apps you launch from OEA Home instead of every game"
+),
 
     /** Lock screen from a Home gesture. */
     SCREEN_LOCK(
@@ -64,8 +64,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.NONE,
-        "double-tap to lock is unavailable; the gesture can be set to something else",
-    ),
+        "double-tap to lock is unavailable; the gesture can be set to something else"
+),
 
     /** System Recents and split-screen toggles. */
     SYSTEM_SHELF(
@@ -74,8 +74,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.HOME,
-        "notifications and quick settings still open through Android's own status bar",
-    ),
+        "notifications and quick settings still open through Android's own status bar"
+),
 
     /** Force-stopping an app for the no-root App Freezer. */
     FORCE_STOP(
@@ -84,8 +84,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.HOME,
-        "apps stay hibernated inside OEA, which already blocks launching them",
-    ),
+        "apps stay hibernated inside OEA, which already blocks launching them"
+),
 
     /** Real Android-level freezing of another app. */
     APP_FREEZE(
@@ -94,8 +94,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.HOME,
-        "OEA Freeze (hibernate inside OEA plus force-stop) is used instead of Android suspension",
-    ),
+        "OEA Freeze (hibernate inside OEA plus force-stop) is used instead of Android suspension"
+),
 
     /** Silent, self-directed permission grants without touching Settings. */
     SELF_GRANT(
@@ -104,8 +104,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.HOME,
-        "each permission is switched on from Android's own settings page with one tap",
-    ),
+        "each permission is switched on from Android's own settings page with one tap"
+),
 
     /** Keeping OEA's services alive on aggressive OEM battery managers. */
     BACKGROUND_LIFE(
@@ -114,8 +114,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.HOME,
-        "OEA restarts its services when Home resumes, which covers most OEM kills",
-    ),
+        "OEA restarts its services when Home resumes, which covers most OEM kills"
+),
 
     /** Answering and ending calls from the island or a Home card. */
     CALL_CONTROL(
@@ -124,8 +124,8 @@ enum class OeaFeature(
         Surface.CALL,
         Surface.CALL,
         Surface.NOTIFICATION,
-        "incoming calls use the system dialer's notification; OEA's own call screens still open",
-    ),
+        "incoming calls use the system dialer's notification; OEA's own call screens still open"
+),
 
     /** Screening/blocking calls by rule. */
     CALL_BLOCKING(
@@ -134,8 +134,8 @@ enum class OeaFeature(
         Surface.CALL,
         Surface.CALL,
         Surface.NONE,
-        "saved rules stay in OEA but Android will not hand over the call before it rings",
-    ),
+        "saved rules stay in OEA but Android will not hand over the call before it rings"
+),
 
     /** Ranking apps by how often they are used. */
     USAGE_RANKING(
@@ -144,8 +144,8 @@ enum class OeaFeature(
         Surface.HOME,
         Surface.HOME,
         Surface.HOME,
-        "OEA ranks by its own launch history instead of Android's full usage stats",
-    ),
+        "OEA ranks by its own launch history instead of Android's full usage stats"
+),
 
     /** Silencing notifications while a game runs. */
     SILENCE_GAMES(
@@ -154,6 +154,6 @@ enum class OeaFeature(
         Surface.NOTIFICATION,
         Surface.NOTIFICATION,
         Surface.NONE,
-        "Game Boost keeps its other controls; Do Not Disturb stays a manual switch",
-    ),
+        "Game Boost keeps its other controls; Do Not Disturb stays a manual switch"
+),
 }

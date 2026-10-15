@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#CC1A1F2B"
+    android:padding="12dp">
+    <TextView
+        android:id="@+id/calendar_month"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="October 2026"
+        android:textSize="14sp"
+        android:textColor="#FFFFFF"
+        android:fontFamily="sans-serif-medium"/>
+    <TextView
+        android:id="@+id/calendar_events"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="3 events today"
+        android:textSize="12sp"
+        android:textColor="#B8C0CF"
+        android:layout_marginTop="4dp"/>
+    <TextView
+        android:id="@+id/calendar_next"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="• 09:00 Team meeting"
+        android:textSize="12sp"
+        android:textColor="#FFFFFF"
+        android:layout_marginTop="8dp"/>
+</LinearLayout>

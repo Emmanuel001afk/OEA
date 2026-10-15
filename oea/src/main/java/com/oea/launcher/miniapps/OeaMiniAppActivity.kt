@@ -29,21 +29,50 @@ class OeaMiniAppActivity : Activity() {
         super.onCreate(savedInstanceState)
         palette = OeaTheme.resolve(this)
         kit = OeaKit(this, palette)
-        screenId = intent.getStringExtra(EXTRA_APP)
+        screenId = intent.getStringExtra(EXTRA_APP) ?: resolveAliasId()
         render()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        screenId = intent.getStringExtra(EXTRA_APP)
+        screenId = intent.getStringExtra(EXTRA_APP) ?: resolveAliasId()
         render()
+    }
+
+    private fun resolveAliasId(): String? {
+        return try {
+            val pm = packageManager
+            val info = pm.getActivityInfo(componentName, android.content.pm.PackageManager.GET_META_DATA)
+            info.metaData?.getString("oea.miniapp.id")
+        } catch (_: Throwable) { null }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (requestCode == 4001 && resultCode == RESULT_OK) {
+            val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            val text = results?.firstOrNull()?.trim()
+            if (!text.isNullOrBlank()) {
+                try {
+                    val p = getSharedPreferences("oea_notes_v2", MODE_PRIVATE)
+                    val existing = p.getString("notes", "") ?: ""
+                    val id = System.currentTimeMillis()
+                    val encoded = if (existing.isBlank()) "" else existing + "\u001E"
+                    val newRow = listOf(id.toString(), text.replace("\u001F", " ").replace("\u001E", " "), "0", "voice", System.currentTimeMillis().toString(), "0").joinToString("\u001F")
+                    p.edit().putString("notes", encoded + newRow).apply()
+                    android.widget.Toast.makeText(this, "Voice note saved", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (_: Throwable) {
+                    intent.putExtra("voice_result", text)
+                }
+                render()
+                return
+            }
+        }
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onResume() {
         super.onResume()
-        // Mini-apps show OEA's own pictures; a palette change must not leave a
-        // stale-looking page behind.
         val fresh = OeaTheme.resolve(this)
         if (fresh != palette) {
             palette = fresh
@@ -63,15 +92,15 @@ class OeaMiniAppActivity : Activity() {
                 setImageResource(R.drawable.oea_logo)
                 layoutParams = LinearLayout.LayoutParams(kit.dp(40), kit.dp(40))
                 contentDescription = "OEA"
-            } else null,
-        )
+            } else null
+)
         if (app == null) {
             page.content.addView(OeaKitHost.sectionTitle(kit, "On this phone"))
             OeaMiniApps.grid(kit, page.content) { chosen -> show(chosen.id) }
             kit.note(
                 page.content,
-                "Each mini-app is part of OEA itself: no store, no download, and a problem inside one is contained so the launcher keeps running.",
-            )
+                "Each mini-app is part of OEA itself: no store, no download, and a problem inside one is contained so the launcher keeps running."
+)
         } else {
             val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             body.addView(OeaMiniApps.build(this, app.id, kit), LinearLayout.LayoutParams(-1, -2))

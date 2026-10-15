@@ -137,8 +137,8 @@ class OeaGameActivity : Activity(), HostUi {
             palette = OeaGamesTheme.palette(),
             retryLabel = "Play again",
             onRetry = { restartGame() },
-            onClose = { finish() },
-        )
+            onClose = { finish() }
+)
         addRescueOptions(error)
         toast("$gameTitle stopped; Home and the rest of OEA are unaffected.")
     }
@@ -327,8 +327,8 @@ class OeaGameActivity : Activity(), HostUi {
             val dialog = kit.sheet(title, message) { panel, d ->
                 panel.addView(kit.buttonRow(
                     kit.quietButton(negative) { answered = true; d.dismiss(); onResult(false) },
-                    kit.primaryButton(positive) { answered = true; d.dismiss(); onResult(true) },
-                ))
+                    kit.primaryButton(positive) { answered = true; d.dismiss(); onResult(true) }
+))
             }
             dialog.setOnDismissListener { if (!answered) onResult(false) }
         }.let { if (!it && !answered) onResult(false) }
@@ -382,8 +382,8 @@ object OeaGameLauncher {
             mode = last.mode,
             options = last.options,
             seed = System.nanoTime(),
-            localPlayers = last.players,
-        )
+            localPlayers = last.players
+)
         pending = gameId to launch
         return launch
     }

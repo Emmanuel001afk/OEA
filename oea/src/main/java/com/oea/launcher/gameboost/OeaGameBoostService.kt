@@ -337,18 +337,32 @@ class OeaGameBoostService : Service() {
             OeaGameBoost.attach(this)
             screenInteractive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive }.getOrNull() ?: true
             createChannel()
-            // startForegroundService() requires this promptly. A refused promotion
-            // (Android's background-start limits) must never crash OEA: the
-            // service stops and the next game launch from OEA starts it again.
-            val promoted = runCatching {
-                val notification = sessionNotification(null)
+            var promoted = false
+            try {
+                val notification = try { sessionNotification(null) } catch (e: Throwable) {
+                    android.util.Log.w("OeaGameBoost", "Notification build failed", e)
+                    fallbackNotification()
+                }
                 if (Build.VERSION.SDK_INT >= 29) {
                     startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
-            }.onFailure { diagnostic(android.util.Log.WARN, "Game Boost could not enter the foreground: ${it.javaClass.simpleName}:${it.message}") }
-                .isSuccess
+                promoted = true
+            } catch (e: Throwable) {
+                diagnostic(android.util.Log.WARN, "Game Boost could not enter the foreground: ${e.javaClass.simpleName}:${e.message}")
+                try {
+                    val fallback = fallbackNotification()
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        startForeground(NOTIFICATION_ID, fallback, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
+                    } else {
+                        startForeground(NOTIFICATION_ID, fallback)
+                    }
+                    promoted = true
+                } catch (e2: Throwable) {
+                    android.util.Log.e("OeaGameBoost", "Fallback promotion failed", e2)
+                }
+            }
             if (!promoted) {
                 stopSelf()
                 return@guard
@@ -356,8 +370,8 @@ class OeaGameBoostService : Service() {
             registerScreenReceiver()
             diagnostic(
                 android.util.Log.INFO,
-                "service ready overlay=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} enabled=${OeaGameBoostStore.enabled(this)}",
-            )
+                "service ready overlay=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} enabled=${OeaGameBoostStore.enabled(this)}"
+)
         }
     }
 
@@ -581,12 +595,12 @@ class OeaGameBoostService : Service() {
     private fun sessionNotification(game: String?): android.app.Notification {
         val open = android.app.PendingIntent.getActivity(
             this, 0, Intent(this, OeaGameBoostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
-        )
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+)
         val end = android.app.PendingIntent.getService(
             this, 1, Intent(this, OeaGameBoostService::class.java).setAction(OeaGameBoost.ACTION_END_SESSION),
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
-        )
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+)
         val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL) else {
             @Suppress("DEPRECATION") android.app.Notification.Builder(this)
         }
@@ -658,8 +672,8 @@ class OeaGameBoostService : Service() {
     private fun isHomePackage(packageName: String): Boolean {
         val homes = homePackagesCache ?: runCatching {
             packageManager.queryIntentActivities(
-                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0,
-            ).mapNotNull { it.activityInfo?.packageName }.toSet()
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0
+).mapNotNull { it.activityInfo?.packageName }.toSet()
         }.getOrDefault(emptySet()).also { homePackagesCache = it }
         return packageName in homes || packageName == this.packageName
     }
@@ -1257,8 +1271,8 @@ class OeaGameBoostService : Service() {
             networkQualityReader.read(),
             if (level in 0..100) "$level%" else "—",
             charging,
-            OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true),
-        )
+            OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true)
+)
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)
         updateBoostButton(boost)
@@ -1973,6 +1987,14 @@ class OeaGameBoostService : Service() {
         latest
     }.getOrNull()
 
+    private fun fallbackNotification(): android.app.Notification {
+        createChannel()
+        val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL) else {
+            @Suppress("DEPRECATION") android.app.Notification.Builder(this)
+        }
+        return builder.setSmallIcon(com.oea.launcher.R.drawable.ic_oea_launcher_monochrome).setContentTitle("Game Boost").setContentText("Session starting").setOngoing(true).build()
+    }
+
     private fun isUsageAccessGranted() = runCatching {
         val appOps = getSystemService(AppOpsManager::class.java)
         appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName) == AppOpsManager.MODE_ALLOWED
@@ -2032,8 +2054,8 @@ class OeaGameBoostService : Service() {
             "com.android.vending",
             "com.samsung.android.game.gametools",
             "com.samsung.android.game.gamehome",
-            "com.samsung.android.game.gos",
-        )
+            "com.samsung.android.game.gos"
+)
     }
 }
 object OeaGameBoostStore {

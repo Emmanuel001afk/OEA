@@ -67,14 +67,14 @@ class OeaThemesActivity : Activity() {
         var shape: String,
         var dock: String,
         var effect: String,
-        val existing: Boolean,
-    ) {
+        val existing: Boolean
+) {
         fun toSpec(): OeaThemeSpec? {
             val homeRef = home ?: return null
             return OeaThemeSpec(
                 id, name.trim().ifBlank { "My theme" }, "Your own theme", homeRef, if (sameLock) homeRef else (lock ?: homeRef),
-                accentDark, accentLight, tint, mode, glass, shape, dock, effect, builtIn = false,
-            )
+                accentDark, accentLight, tint, mode, glass, shape, dock, effect, builtIn = false
+)
         }
     }
 
@@ -135,7 +135,7 @@ class OeaThemesActivity : Activity() {
             palette = OeaTheme.resolve(this)
             kit = OeaKit(this, palette)
             OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
-            window.decorView.setBackgroundColor(palette.background)
+            runCatching { window.decorView.setBackgroundColor(palette.background) }
             when {
                 screen.startsWith("theme:") -> showTheme(screen.removePrefix("theme:"))
                 screen.startsWith("wallpaper:") -> showWallpaper(screen.removePrefix("wallpaper:"))
@@ -254,10 +254,10 @@ class OeaThemesActivity : Activity() {
                         title = com.oea.launcher.wallpaper.OeaLiveScenes.label(id),
                         subtitle = com.oea.launcher.wallpaper.OeaLiveScenes.blurb(id),
                         scene = null,
-                        liveId = id,
-                    )
-                },
-            )
+                        liveId = id
+)
+                }
+)
         }
         tiles.chunked(3).forEach { chunk ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -283,8 +283,8 @@ class OeaThemesActivity : Activity() {
         inUse: Boolean,
         accent: Int,
         render: () -> Bitmap,
-        onClick: () -> Unit,
-    ): View {
+        onClick: () -> Unit
+): View {
         val tile = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             isClickable = true
@@ -521,8 +521,8 @@ class OeaThemesActivity : Activity() {
                 onClick = {
                     if (lockOnly) lockSceneSheet(scene)
                     else sceneSheet(scene.label, scene.blurb, scene = scene, liveId = null)
-                },
-            )
+                }
+)
         }
         tiles.chunked(3).forEach { chunk ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -573,8 +573,8 @@ class OeaThemesActivity : Activity() {
     private fun currentLookSpec(ref: OeaImageRef): OeaThemeSpec = OeaThemeSpec(
         "current", "Current", "", ref, ref,
         accentDark = palette.accent, accentLight = palette.accent, surfaceTint = palette.background,
-        mode = "system", glassStyle = data.glassStyle(), iconShape = data.iconShape(), dockStyle = data.dockStyle(), pageEffect = data.pageEffect(),
-    )
+        mode = "system", glassStyle = data.glassStyle(), iconShape = data.iconShape(), dockStyle = data.dockStyle(), pageEffect = data.pageEffect()
+)
 
     // ============================================================ theme detail
 
@@ -648,8 +648,8 @@ class OeaThemesActivity : Activity() {
                         if (store.lastAppliedId() == theme.id) store.setLastApplied("")
                         back()
                     }
-                },
-            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+                }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         } else {
             box.addView(kit.quietButton("Make my own version", R.drawable.oic_edit) { startEditor(null, theme) },
                 LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
@@ -823,8 +823,8 @@ class OeaThemesActivity : Activity() {
             shape = source?.iconShape ?: data.iconShape(),
             dock = source?.dockStyle ?: data.dockStyle(),
             effect = source?.pageEffect ?: data.pageEffect(),
-            existing = existing != null,
-        )
+            existing = existing != null
+)
         if (home != null && source == null) matchColors(home)
         navigate(SCREEN_EDITOR)
     }
@@ -884,8 +884,8 @@ class OeaThemesActivity : Activity() {
             Triple(Color.rgb(255, 178, 190), Color.rgb(176, 46, 84), Color.rgb(80, 36, 50)),
             Triple(Color.rgb(255, 198, 108), Color.rgb(140, 90, 0), Color.rgb(80, 60, 30)),
             Triple(Color.rgb(140, 214, 150), Color.rgb(35, 120, 55), Color.rgb(30, 64, 38)),
-            Triple(Color.rgb(215, 220, 228), Color.rgb(60, 67, 80), Color.rgb(35, 38, 44)),
-        )
+            Triple(Color.rgb(215, 220, 228), Color.rgb(60, 67, 80), Color.rgb(35, 38, 44))
+)
         val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         strip.addView(kit.chip("Match picture", d.autoColors, R.drawable.oic_auto_awesome) {
             d.autoColors = true

@@ -25,8 +25,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
         val folderId: String? = null,
         val kind: String = KIND_APP,
         val shortcutId: String? = null,
-        val label: String? = null,
-    ) {
+        val label: String? = null
+) {
         val isShortcut get() = kind == KIND_SHORTCUT
     }
 
@@ -37,8 +37,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
         val page: Int,
         val cell: Int,
         val members: List<String>,
-        val kind: String = KIND_FOLDER,
-    ) {
+        val kind: String = KIND_FOLDER
+) {
         val isPair get() = kind == KIND_PAIR
     }
 
@@ -100,8 +100,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
                     o.optInt("page", 0),
                     o.optInt("cell", 0),
                     if (m == null) emptyList() else (0 until m.length()).map(m::getString),
-                    o.optString("kind", KIND_FOLDER).ifBlank { KIND_FOLDER },
-                )
+                    o.optString("kind", KIND_FOLDER).ifBlank { KIND_FOLDER }
+)
             }
         }.getOrDefault(emptyList())
     }
@@ -120,8 +120,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
                     if (i.kind != KIND_APP) put("kind", i.kind)
                     i.shortcutId?.let { put("shortcut", it) }
                     i.label?.let { put("label", it) }
-                },
-            )
+                }
+)
         }
         prefs.edit().putString(KEY_ITEMS, a.toString()).apply()
     }
@@ -137,8 +137,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
                     put("cell", f.cell)
                     put("members", JSONArray(f.members))
                     if (f.kind != KIND_FOLDER) put("kind", f.kind)
-                },
-            )
+                }
+)
         }
         prefs.edit().putString(KEY_FOLDERS, a.toString()).apply()
     }
@@ -157,8 +157,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
         replaceItems(
             homeApps.mapIndexed { i, a ->
                 Item(key(a.first, a.second), a.first, a.second, i / size, i % size)
-            },
-        )
+            }
+)
         setDock(dockKeys)
         val usedPages = (homeApps.size + size - 1) / size
         setPages(maxOf(SEED_MIN_PAGES, usedPages))
@@ -205,8 +205,8 @@ class OeaWorkspaceStore private constructor(context: Context) {
                     o.optString("folder", "").takeIf(String::isNotBlank),
                     o.optString("kind", KIND_APP).ifBlank { KIND_APP },
                     o.optString("shortcut", "").takeIf(String::isNotBlank),
-                    o.optString("label", "").takeIf(String::isNotBlank),
-                )
+                    o.optString("label", "").takeIf(String::isNotBlank)
+)
             }
         }.getOrDefault(emptyList())
     }

@@ -49,8 +49,8 @@ object OeaGamesTheme {
             scrimBottom = Color.TRANSPARENT,
             danger = Color.rgb(255, 110, 120),
             success = Color.rgb(80, 225, 160),
-            warning = Color.rgb(255, 196, 100),
-        )
+            warning = Color.rgb(255, 196, 100)
+)
     }
 }
 

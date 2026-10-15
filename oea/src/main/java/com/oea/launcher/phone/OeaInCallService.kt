@@ -147,8 +147,8 @@ class OeaInCallService : InCallService() {
         val caller = callerName(call)
         val open = PendingIntent.getActivity(
             this, 1, OeaCallUi.intent(this),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
         val visibleNow = OeaCallUi.screenVisible
         val builder = NotificationCompat.Builder(this, if (ringing && !visibleNow) CHANNEL_INCOMING else CHANNEL_ONGOING)
             .setSmallIcon(R.drawable.oic_call)
@@ -159,8 +159,8 @@ class OeaInCallService : InCallService() {
                     Call.STATE_DIALING, Call.STATE_CONNECTING -> "Calling…"
                     Call.STATE_HOLDING -> "On hold"
                     else -> "Ongoing call"
-                },
-            )
+                }
+)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
             .setOnlyAlertOnce(!ringing)
@@ -175,8 +175,8 @@ class OeaInCallService : InCallService() {
             // does not let a broadcast from a notification action open an activity.
             val answer = PendingIntent.getActivity(
                 this, 3, OeaCallUi.intent(this).putExtra(OeaCallUi.EXTRA_ANSWER, true),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
             builder.addAction(R.drawable.oic_call, "Answer", answer)
         } else {
             builder.setPriority(NotificationCompat.PRIORITY_LOW)
@@ -193,8 +193,8 @@ class OeaInCallService : InCallService() {
 
     private fun actionIntent(action: String, requestCode: Int): PendingIntent = PendingIntent.getBroadcast(
         this, requestCode, Intent(this, OeaCallActionReceiver::class.java).setAction(action),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+)
 
     private fun cancelCallNotification() {
         runCatching { getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID) }

@@ -94,8 +94,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val folder: OeaWorkspaceStore.Folder? = null,
         val dockIndex: Int = -1,
         val memberOf: String? = null,
-        val source: Source,
-    )
+        val source: Source
+)
 
     internal val store = OeaDataStore.get(context)
     internal val ws = OeaWorkspaceStore.get(context)
@@ -226,8 +226,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val widgetId: Int = -1,
         val spanX: Int = 1,
         val spanY: Int = 1,
-        val sourceView: View? = tile,
-    ) {
+        val sourceView: View? = tile
+) {
         var page = -1
         var cell = -1
         var dockSlot = -1
@@ -527,8 +527,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setPadding(dp(18), 0, dp(8), 0)
             background = kit.ripple(
                 glass ?: kit.rounded(palette.glassStrong, 28, palette.glassStroke, 1),
-                28,
-            )
+                28
+)
             isClickable = true
             contentDescription = "Search"
             setOnClickListener { openDrawer(searchFocus = true) }
@@ -581,8 +581,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         cameraIsland.setPalette(palette)
         scrim.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(palette.scrimTop, Color.TRANSPARENT, Color.TRANSPARENT, palette.scrimBottom),
-        )
+            intArrayOf(palette.scrimTop, Color.TRANSPARENT, Color.TRANSPARENT, palette.scrimBottom)
+)
         indicator.color = palette.homeText
 
         // ---- the mode's character: its motion, its paper and its press feedback
@@ -763,8 +763,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 activity,
                 if (failed) "Home had a problem and could not be refreshed; your layout is saved."
                 else "Home recovered from a problem. Nothing was lost.",
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
+                android.widget.Toast.LENGTH_SHORT
+).show()
         }
     }
 
@@ -903,8 +903,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (dim > 0) {
             wallpaperBackdrop.addView(
                 View(context).apply { setBackgroundColor(android.graphics.Color.argb(dim * 255 / 100, 0, 0, 0)) },
-                LayoutParams(-1, -1),
-            )
+                LayoutParams(-1, -1)
+)
         }
     }
 
@@ -1174,8 +1174,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             Telephony.Sms.getDefaultSmsPackage(context)?.let { byPackage[it]?.firstOrNull() },
             appFor(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))),
             appFor(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)),
-            appFor(Intent(Intent.ACTION_VIEW).setType("image/*")),
-        ).forEach { dock += it }
+            appFor(Intent(Intent.ACTION_VIEW).setType("image/*"))
+).forEach { dock += it }
         val oeaApps = visible.filter { it.packageName == context.packageName && it !in dock }
         val rest = visible.filter { it !in dock && it !in oeaApps }
         rest.filter { it.packageName != context.packageName }.take(OeaWorkspaceStore.DOCK_SLOTS - dock.size).forEach { if (dock.size < OeaWorkspaceStore.DOCK_SLOTS) dock += it }
@@ -1183,8 +1183,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val essentials = listOfNotNull(
             byPackage["com.android.vending"]?.firstOrNull(),
             appFor(Intent(Settings.ACTION_SETTINGS)),
-            appFor(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)),
-        ).filter { it in remaining }.distinct()
+            appFor(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS))
+).filter { it in remaining }.distinct()
         val firstRow = (essentials + remaining.filter { it !in essentials }).take(if (oeaApps.size >= 2) cols - 1 else cols)
         val items = mutableListOf<OeaWorkspaceStore.Item>()
         val baseCell = (rows - 1) * cols
@@ -1366,6 +1366,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val cols = cols()
         val rows = rows()
         if (apps.isNotEmpty() && catalogueAuthoritative) pruneUninstalled()
+        pruneHiddenApps()
         var items = ws.items()
         var folders = ws.folders()
         // Legacy data: folder members were also stored as items carrying folderId.
@@ -1446,6 +1447,28 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (placedFolders != ws.folders()) ws.replaceFolders(placedFolders)
         ws.setPages(pages)
         ws.setLayoutGrid(cols, rows)
+    }
+
+    private fun pruneHiddenApps() {
+        if (apps.isEmpty()) return
+        val hiddenKeys = apps.filter { store.isHidden(it.packageName, it.className) }.map { appKey(it) }.toSet()
+        if (hiddenKeys.isEmpty()) return
+        val items = ws.items().filterNot { !it.isShortcut && it.id in hiddenKeys }
+        if (items.size != ws.items().size) ws.replaceItems(items)
+        val dock = ws.dock().filterNot { it in hiddenKeys }
+        if (dock.size != ws.dock().size) ws.setDock(dock)
+        val folders = ws.folders().mapNotNull { folder ->
+            val remaining = folder.members.filterNot { it in hiddenKeys }
+            when {
+                remaining.isEmpty() -> null
+                remaining.size < 2 && !folder.isPair -> null
+                remaining.size != folder.members.size -> folder.copy(members = remaining)
+                else -> folder
+            }
+        }
+        if (folders.size != ws.folders().size || folders.any { f -> f.members.size != ws.folders().firstOrNull { it.id == f.id }?.members?.size }) {
+            ws.replaceFolders(folders)
+        }
     }
 
     /**
@@ -1844,8 +1867,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME)) return rm.isRoleHeld(RoleManager.ROLE_HOME)
         }
         val info = context.packageManager.resolveActivity(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY,
-        )
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY
+)
         return info?.activityInfo?.packageName == context.packageName
     }
 
@@ -1910,8 +1933,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             context.startActivity(
                 Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(component)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED),
-                options,
-            )
+                options
+)
             true
         }.getOrDefault(false)
         if (launched) {
@@ -2047,8 +2070,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val card = menus.panel(widthDp = 320) { host ->
             host.addView(
                 com.oea.launcher.power.OeaQuickControls.sheet(context, palette) { menus.dismissPopups() },
-                LinearLayout.LayoutParams(-1, -2),
-            )
+                LinearLayout.LayoutParams(-1, -2)
+)
         }
         menus.showPanel(anchor, card) { menus.dismissPopups() }
     }
@@ -2430,8 +2453,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             Source.WIDGET, "widget:${frame.widgetId}", null, view, TileRef(source = Source.WIDGET),
             offsetX = (rawX - loc[0]).coerceIn(0f, bitmap.width.toFloat()),
             offsetY = (rawY - loc[1]).coerceIn(0f, bitmap.height.toFloat()),
-            widgetId = frame.widgetId, spanX = rect.spanX, spanY = rect.spanY, sourceView = frame,
-        )
+            widgetId = frame.widgetId, spanX = rect.spanX, spanY = rect.spanY, sourceView = frame
+)
         drag = state
         frame.alpha = 0.25f
         positionDragView(state, rawX, rawY)
@@ -2873,8 +2896,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         shortcutIconCache.remove(id)
         val item = OeaWorkspaceStore.Item(
             id, info.`package`, info.activity?.className ?: "", 0, 0,
-            kind = OeaWorkspaceStore.KIND_SHORTCUT, shortcutId = info.id, label = shortcuts.label(info),
-        )
+            kind = OeaWorkspaceStore.KIND_SHORTCUT, shortcutId = info.id, label = shortcuts.label(info)
+)
         if (addToHome(item)) toast("Shortcut added to Home")
     }
 
@@ -2984,8 +3007,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             // Home is a View, so the launch goes through the same guarded helper
             // every other OEA launch uses (it falls back to the application context).
             action == "themes" -> startSafely(
-                Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+                Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+)
             action == "settings" -> openSystemTool("")
             // Stability screen: rebuild in place, or restart Home's window.
             action == "rebuild" -> {
@@ -3415,13 +3438,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             "recent_launches", "last_command", "last_result", "onboarding_done", "default_home_banner_dismissed",
             "home_layout_locked", "haptics", "gesture_swipe_down", "gesture_double_tap", "recents_mode",
             "drawer_keyboard", "floating_window_size", "hidden_space_locked", "favorite_apps", "home_surface_enabled",
-            "wallpaper_uri", "theme_active_id", "wallpaper_blur",
-        )
+            "wallpaper_uri", "theme_active_id", "wallpaper_blur"
+)
         /** Settings that only change the app drawer and search. */
         private val DRAWER_KEYS = setOf(
             "drawer_mode", "sort_mode", "drawer_categories", "show_most_used", "drawer_wallpaper_background",
-            "search_wallpaper_visible", "hidden_apps",
-        )
+            "search_wallpaper_visible"
+)
         /** Settings that restyle Home's chrome (dock, search bar, glance, glass, page motion) without new pages. */
         private val CHROME_KEYS = setOf("dock_style", "search_bar_position", "glance_style", "glass_style", "page_effect", "low_mode_enabled")
         /** Breathing room between a widget and its cell edges. */

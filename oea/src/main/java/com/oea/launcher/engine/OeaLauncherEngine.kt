@@ -29,8 +29,8 @@ class OeaLauncherEngine(context: Context) {
         val loadingApps: Boolean = false,
         val appCount: Int = 0,
         val lastSuccessfulLoadMillis: Long? = null,
-        val lastError: String? = null,
-    )
+        val lastError: String? = null
+)
 
     private val appContext = context.applicationContext
     val model = OeaAppModel(appContext)
@@ -165,8 +165,8 @@ class OeaLauncherEngine(context: Context) {
                     _state.value = EngineState(
                         loadingApps = false,
                         appCount = lastBoundApps.size,
-                        lastSuccessfulLoadMillis = System.currentTimeMillis(),
-                    )
+                        lastSuccessfulLoadMillis = System.currentTimeMillis()
+)
                     workspace.setAppLoadStatus(null)
                     preloadIcons(apps)
                     persistCatalogue(apps)
@@ -174,8 +174,8 @@ class OeaLauncherEngine(context: Context) {
                     _state.value = EngineState(
                         loadingApps = false,
                         appCount = lastBoundApps.size,
-                        lastSuccessfulLoadMillis = System.currentTimeMillis(),
-                    )
+                        lastSuccessfulLoadMillis = System.currentTimeMillis()
+)
                     if (hasUsableWorkspace) {
                         // An empty reply is transient on many devices (profile
                         // switch, package install, direct-boot window). Keep the
@@ -196,12 +196,12 @@ class OeaLauncherEngine(context: Context) {
                     loadingApps = false,
                     appCount = lastBoundApps.size,
                     lastSuccessfulLoadMillis = _state.value.lastSuccessfulLoadMillis,
-                    lastError = message,
-                )
+                    lastError = message
+)
                 if (hasUsableWorkspace) workspace.setAppLoadStatus(null)
                 else workspace.setAppLoadStatus("Apps unavailable · tap to retry") { reloadAsync() }
-            },
-        )
+            }
+)
 
         if (reloadPending) {
             reloadPending = false
@@ -242,6 +242,11 @@ class OeaLauncherEngine(context: Context) {
     }
 
     fun launchApp(packageName: String, className: String) {
+        // Central freeze guard: block any OEA-initiated launch of frozen apps.
+        if (com.oea.launcher.applock.OeaAppFreezer.isFrozen(appContext, packageName)) {
+            Log.w(TAG, "Launch blocked for frozen $packageName")
+            return
+        }
         runCatching {
             appContext.startActivity(Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_LAUNCHER)

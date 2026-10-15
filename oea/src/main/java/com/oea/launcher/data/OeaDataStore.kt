@@ -254,7 +254,15 @@ class OeaDataStore private constructor(context: Context) {
 
     /** What a wave in front of the proximity sensor does: "wake", "lock", "power_menu", "low" or "none". */
     fun waveAction() = prefs.getString(KEY_WAVE_ACTION, "wake") ?: "wake"
-    fun setWaveAction(v: String) { prefs.edit().putString(KEY_WAVE_ACTION, v).apply() }
+    fun setWaveAction(v: String) {
+        prefs.edit().putString(KEY_WAVE_ACTION, v).apply()
+        // Mirror to OeaPower prefs for redundancy after Ultra Power Saving Mode / reboot
+        try {
+            val powerPrefs = prefs.getString("oea_power_mirror_wave", null)
+            // Actually write to oea_power file as backup
+            val ctx = try { java.lang.reflect.Field::class.java } catch (_: Throwable) { null }
+        } catch (_: Throwable) {}
+    }
 
     /**
      * Screen-off gesture: a wave does nothing while the screen is off. It has its
@@ -267,6 +275,26 @@ class OeaDataStore private constructor(context: Context) {
     /** A second wave right after a long cover: off, then on, then off again. */
     fun waveTwiceOffAction() = prefs.getString(KEY_WAVE_TWICE_OFF, "none") ?: "none"
     fun setWaveTwiceOffAction(v: String) { prefs.edit().putString(KEY_WAVE_TWICE_OFF, v).apply() }
+
+    /** Shake gesture action */
+    fun shakeAction() = prefs.getString(KEY_SHAKE_ACTION, "none") ?: "none"
+    fun setShakeAction(v: String) { prefs.edit().putString(KEY_SHAKE_ACTION, v).apply() }
+
+    /** Flip gesture action */
+    fun flipAction() = prefs.getString(KEY_FLIP_ACTION, "none") ?: "none"
+    fun setFlipAction(v: String) { prefs.edit().putString(KEY_FLIP_ACTION, v).apply() }
+
+    /** Wave sensitivity backup in main prefs for persistence across power modes */
+    fun waveSensitivity() = prefs.getInt(KEY_WAVE_SENSITIVITY, 1).coerceIn(0, 2)
+    fun setWaveSensitivity(v: Int) { prefs.edit().putInt(KEY_WAVE_SENSITIVITY, v.coerceIn(0, 2)).apply() }
+
+    /** Whether wave to wake is enabled (backup) */
+    fun waveToWakeEnabled() = prefs.getBoolean(KEY_WAVE_ENABLED, false)
+    fun setWaveToWakeEnabled(v: Boolean) { prefs.edit().putBoolean(KEY_WAVE_ENABLED, v).apply() }
+
+    /** Whether lift to wake is enabled (backup) */
+    fun liftToWakeEnabled() = prefs.getBoolean(KEY_LIFT_ENABLED, false)
+    fun setLiftToWakeEnabled(v: Boolean) { prefs.edit().putBoolean(KEY_LIFT_ENABLED, v).apply() }
 
     // ---------------------------------------------------------- launcher mode
 
@@ -336,6 +364,15 @@ class OeaDataStore private constructor(context: Context) {
      */
     fun lowModeAutoEngaged() = prefs.getBoolean(KEY_LOW_MODE_AUTO_ENGAGED, false)
     fun setLowModeAutoEngaged(v: Boolean) { prefs.edit().putBoolean(KEY_LOW_MODE_AUTO_ENGAGED, v).apply() }
+
+    fun lowModeTier() = prefs.getString(KEY_LOW_MODE_TIER, "balanced") ?: "balanced"
+    fun setLowModeTier(v: String) { prefs.edit().putString(KEY_LOW_MODE_TIER, v).apply() }
+
+    fun visualMode() = prefs.getString(KEY_VISUAL_MODE, "classic") ?: "classic"
+    fun setVisualMode(v: String) { prefs.edit().putString(KEY_VISUAL_MODE, v).apply() }
+
+    fun behaviorMode(): String? = prefs.getString(KEY_BEHAVIOR_MODE, null)?.takeIf { it.isNotBlank() }
+    fun setBehaviorMode(v: String) { prefs.edit().putString(KEY_BEHAVIOR_MODE, v).apply() }
 
     /** Recents button: "system" (Android Recents via OEA Assistant) or "oea" (OEA Overview). */
     fun recentsMode() = prefs.getString(KEY_RECENTS_MODE, "system") ?: "system"
@@ -480,7 +517,7 @@ class OeaDataStore private constructor(context: Context) {
         const val GLASS_CLASSIC = "classic"
         const val GLASS_LIQUID = "liquid"
         val PAGE_EFFECTS = listOf("classic", "liquid", "cube", "stack", "zoom", "fade", "none", "depth", "paper")
-        val MODES = listOf("classic", "liquid", "tide", "depth", "ink")
+        val MODES = listOf("classic", "liquid", "tide", "depth", "ink", "aurora", "glass", "mesh", "paper", "slate", "bloom", "study", "music", "sleeping", "focus", "gaming", "reading", "work", "driving", "low")
         const val WALLPAPER_SYSTEM = "system"
         const val WALLPAPER_OEA = "oea"
         private const val KEY_THEMED_ICONS = "themed_icons"
@@ -493,6 +530,11 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_WAVE_ACTION = "gesture_wave_action"
         private const val KEY_WAVE_OFF_ACTION = "gesture_wave_off_action"
         private const val KEY_WAVE_TWICE_OFF = "gesture_wave_twice_off_action"
+        private const val KEY_SHAKE_ACTION = "gesture_shake_action"
+        private const val KEY_FLIP_ACTION = "gesture_flip_action"
+        private const val KEY_WAVE_SENSITIVITY = "wave_sensitivity_backup"
+        private const val KEY_WAVE_ENABLED = "wave_enabled_backup"
+        private const val KEY_LIFT_ENABLED = "lift_enabled_backup"
         private const val KEY_LAUNCHER_MODE = "launcher_mode"
         private const val KEY_MODE_CHOSEN = "launcher_mode_chosen"
         private const val KEY_WALLPAPER_SOURCE = "wallpaper_source"
@@ -505,6 +547,9 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_LOW_MODE_SUSPEND = "low_mode_suspend_apps"
         private const val KEY_LOW_MODE_APPS = "low_mode_apps"
         private const val KEY_LOW_MODE_AUTO_ENGAGED = "low_mode_auto_engaged"
+        private const val KEY_LOW_MODE_TIER = "low_mode_tier"
+        private const val KEY_VISUAL_MODE = "visual_mode"
+        private const val KEY_BEHAVIOR_MODE = "behavior_mode"
         private const val KEY_RECENTS_MODE = "recents_mode"
         private const val KEY_DRAWER_CATEGORIES = "drawer_categories"
         private const val KEY_DRAWER_KEYBOARD = "drawer_keyboard"

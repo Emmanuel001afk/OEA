@@ -43,7 +43,7 @@ data class OeaPalette(
     val scrimBottom: Int,
     val danger: Int,
     val success: Int,
-    val warning: Int,
+    val warning: Int
 ) {
     fun withAlpha(color: Int, alpha: Int): Int = OeaTheme.alpha(color, alpha)
 }
@@ -187,8 +187,8 @@ object OeaTheme {
             scrimBottom = if (wallpaperLight) alpha(Color.WHITE, 0x30) else alpha(Color.BLACK, 0x5C),
             danger = if (dark) Color.rgb(255, 128, 128) else Color.rgb(196, 40, 52),
             success = if (dark) Color.rgb(110, 220, 165) else Color.rgb(18, 128, 82),
-            warning = if (dark) Color.rgb(255, 196, 110) else Color.rgb(170, 96, 0),
-        )
+            warning = if (dark) Color.rgb(255, 196, 110) else Color.rgb(170, 96, 0)
+)
     }
 
     fun isSystemNight(context: Context): Boolean =
@@ -285,8 +285,8 @@ object OeaTheme {
             (Color.alpha(from) * inv + Color.alpha(to) * r).toInt(),
             (Color.red(from) * inv + Color.red(to) * r).toInt(),
             (Color.green(from) * inv + Color.green(to) * r).toInt(),
-            (Color.blue(from) * inv + Color.blue(to) * r).toInt(),
-        )
+            (Color.blue(from) * inv + Color.blue(to) * r).toInt()
+)
     }
 
     fun luminance(color: Int): Float {
@@ -331,7 +331,7 @@ object OeaTheme {
         return Color.rgb(
             ((r + m) * 255f).toInt().coerceIn(0, 255),
             ((g + m) * 255f).toInt().coerceIn(0, 255),
-            ((b + m) * 255f).toInt().coerceIn(0, 255),
-        )
+            ((b + m) * 255f).toInt().coerceIn(0, 255)
+)
     }
 }

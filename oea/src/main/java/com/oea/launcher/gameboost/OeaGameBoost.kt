@@ -64,8 +64,8 @@ object OeaGameBoost {
 
     fun usageAccess(context: Context): Boolean = runCatching {
         context.getSystemService(AppOpsManager::class.java).checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName,
-        ) == AppOpsManager.MODE_ALLOWED
+            AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName
+) == AppOpsManager.MODE_ALLOWED
     }.getOrDefault(false)
 
     /**

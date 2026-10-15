@@ -86,18 +86,49 @@ object OeaInsets {
             @Suppress("DEPRECATION")
             window.navigationBarColor = Color.TRANSPARENT
         }
+        // Ensure decor exists: peekDecorView avoids NPE, decorView installs it.
+        val decor = runCatching { window.peekDecorView() ?: window.decorView }.getOrNull()
         if (Build.VERSION.SDK_INT >= 30) {
             runCatching { window.setDecorFitsSystemWindows(false) }
-            applyBarAppearance(window, lightBars)
+            if (decor != null) {
+                applyBarAppearanceInternal(window, decor, lightBars)
+            } else {
+                runCatching {
+                    window.decorView.post {
+                        runCatching {
+                            val d = window.decorView
+                            applyBarAppearanceInternal(window, d, lightBars)
+                        }
+                    }
+                }
+            }
         } else {
             runCatching {
+                if (decor == null) return@runCatching
                 var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                     View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                 if (lightBars) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
                 @Suppress("DEPRECATION")
-                window.decorView.systemUiVisibility = flags
+                decor.systemUiVisibility = flags
             }
+        }
+    }
+
+    private fun applyBarAppearanceInternal(window: Window, decor: View, lightBars: Boolean) {
+        if (Build.VERSION.SDK_INT < 30) return
+        val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        val appearance = if (lightBars) mask else 0
+        val apply: (WindowInsetsController?) -> Unit = { controller ->
+            runCatching { controller?.setSystemBarsAppearance(appearance, mask) }
+        }
+        val controller = runCatching { decor.windowInsetsController }.getOrNull()
+            ?: runCatching { window.insetsController }.getOrNull()
+        if (controller != null) {
+            apply(controller)
+        } else {
+            runCatching { decor.post { apply(runCatching { decor.windowInsetsController }.getOrNull()) } }
         }
     }
 
@@ -110,23 +141,8 @@ object OeaInsets {
      */
     fun applyBarAppearance(window: Window, lightBars: Boolean) {
         if (Build.VERSION.SDK_INT < 30) return
-        val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-        val appearance = if (lightBars) mask else 0
-        val apply: (WindowInsetsController?) -> Unit = { controller ->
-            runCatching { controller?.setSystemBarsAppearance(appearance, mask) }
-        }
-        val decor = runCatching { window.decorView }.getOrNull()
-        if (decor == null) return
-        val controller = runCatching { decor.windowInsetsController }.getOrNull()
-            ?: runCatching { window.insetsController }.getOrNull()
-        if (controller != null) {
-            apply(controller)
-        } else {
-            // The window exists but its insets controller does not yet: try once
-            // more after the first layout pass.
-            runCatching { decor.post { apply(runCatching { decor.windowInsetsController }.getOrNull()) } }
-        }
+        val decor = runCatching { window.peekDecorView() ?: window.decorView }.getOrNull() ?: return
+        applyBarAppearanceInternal(window, decor, lightBars)
     }
 }
 
@@ -394,8 +410,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         chevron: Boolean = true,
         iconBg: Int = palette.accentSoft,
         iconTint: Int = palette.onAccentSoft,
-        onClick: (() -> Unit)? = null,
-    ): LinearLayout {
+        onClick: (() -> Unit)? = null
+): LinearLayout {
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -447,8 +463,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         title: String,
         subtitle: String?,
         checked: Boolean,
-        onChange: (Boolean) -> Unit,
-    ): OeaToggle {
+        onChange: (Boolean) -> Unit
+): OeaToggle {
         val toggle = toggle(checked, onChange)
         val row = row(group, iconRes, title, subtitle, trailing = toggle, chevron = false) { toggle.toggle(fromUser = true) }
         row.contentDescription = title
@@ -638,8 +654,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             panel.addView(buttonRow(
                 quietButton(negative) { dialog.dismiss() },
                 button(positive, if (destructive) palette.danger else palette.accent,
-                    if (destructive) Color.WHITE else palette.onAccent) { dialog.dismiss(); onConfirm() },
-            ))
+                    if (destructive) Color.WHITE else palette.onAccent) { dialog.dismiss(); onConfirm() }
+))
         }
     }
 
@@ -693,8 +709,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             }
             panel.addView(buttonRow(
                 quietButton("Cancel") { hideKeyboard(input); dialog.dismiss() },
-                primaryButton(confirmLabel) { submit() },
-            ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                primaryButton(confirmLabel) { submit() }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
             input.post {
                 input.requestFocus()
                 context.getSystemService(InputMethodManager::class.java)?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
@@ -719,8 +735,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         multi: Boolean = true,
         max: Int = Int.MAX_VALUE,
         confirmLabel: String = "Save",
-        onDone: (Set<String>) -> Unit,
-    ) {
+        onDone: (Set<String>) -> Unit
+) {
         val chosen = LinkedHashSet(selected)
         sheet(title, subtitle) { panel, dialog ->
             val search = field("Search apps").apply {
@@ -809,8 +825,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             if (multi) {
                 panel.addView(buttonRow(
                     quietButton("Cancel") { dialog.dismiss() },
-                    primaryButton(confirmLabel) { dialog.dismiss(); onDone(chosen.toSet()) },
-                ), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+                    primaryButton(confirmLabel) { dialog.dismiss(); onDone(chosen.toSet()) }
+), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             }
         }
     }

@@ -79,8 +79,8 @@ class OeaLauncherActivity : Activity() {
             OeaFaultShield.noteHomeRendered()
             if (Build.VERSION.SDK_INT >= 33) {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
-                ) { home?.handleBack() }
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
+) { home?.handleBack() }
             }
             consumeHomeAction(intent)
         } catch (error: Throwable) {
@@ -148,8 +148,8 @@ class OeaLauncherActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         val handled = home != null && OeaFaultShield.value(
             "home:activity-result",
-            false,
-        ) { home?.handleActivityResult(requestCode, resultCode, data) == true }
+            false
+) { home?.handleActivityResult(requestCode, resultCode, data) == true }
         if (handled) return
         super.onActivityResult(requestCode, resultCode, data)
     }
@@ -162,17 +162,14 @@ class OeaLauncherActivity : Activity() {
         if (controller != null) {
             OeaFaultShield.guard("home:resume") { controller.refresh() }
         } else {
-            // Android recreated the activity while Home was gone: build it again.
             buildHome()
         }
-        // Returning to Home ends a running game session at once. Home never
-        // starts Game Boost itself: sessions begin only when a game opens.
         OeaFaultShield.guard("home:boost-resume") { OeaGameBoost.onHomeResumed() }
-        // Home is in the foreground, so Android allows re-promoting the
-        // optional system-wide island if the system stopped it meanwhile.
         OeaFaultShield.guard("home:island-resume") { OeaDynamicIslandOverlayService.ensureRunning(this) }
-        // Wake gestures (faulty power key) resume after a reboot or process death.
-        OeaFaultShield.guard("home:wake-resume") { com.oea.launcher.power.OeaPower.syncWakeService(this) }
+        OeaFaultShield.guard("home:wake-resume") {
+            com.oea.launcher.power.OeaPower.restoreIfNeeded(this)
+            com.oea.launcher.power.OeaPower.syncWakeService(this)
+        }
     }
 
     override fun onStop() {

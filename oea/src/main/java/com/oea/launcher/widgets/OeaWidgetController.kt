@@ -95,8 +95,8 @@ class OeaWidgetController(private val context: Context) {
         val maxX: Int,
         val maxY: Int,
         val horizontal: Boolean,
-        val vertical: Boolean,
-    )
+        val vertical: Boolean
+)
 
     fun spanLimits(info: AppWidgetProviderInfo, cellWidthDp: Float, cellHeightDp: Float, cols: Int, rows: Int): SpanLimits {
         val minWidthPx = info.minResizeWidth.takeIf { it in 1..info.minWidth } ?: info.minWidth
@@ -115,8 +115,8 @@ class OeaWidgetController(private val context: Context) {
             maxX = maxX.coerceAtLeast(minX),
             maxY = maxY.coerceAtLeast(minY),
             horizontal = (info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL) != 0,
-            vertical = (info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL) != 0,
-        )
+            vertical = (info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL) != 0
+)
     }
 
     /** The size a newly added widget gets: the provider's target cells on Android 12+, else its min size. */
@@ -190,8 +190,8 @@ class OeaWidgetController(private val context: Context) {
         runCatching {
             activity.startActivityForResult(
                 Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
-                REQUEST_PICK_WIDGET,
-            )
+                REQUEST_PICK_WIDGET
+)
         }.onFailure { discardPending() }
     }
 

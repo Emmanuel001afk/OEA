@@ -412,8 +412,8 @@ class OeaCellLayout(context: Context) : ViewGroup(context) {
             val lp = child.layoutParams as? LayoutParams ?: LayoutParams(0, 0)
             child.measure(
                 MeasureSpec.makeMeasureSpec(cw * lp.spanX, MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(ch * lp.spanY, MeasureSpec.EXACTLY),
-            )
+                MeasureSpec.makeMeasureSpec(ch * lp.spanY, MeasureSpec.EXACTLY)
+)
         }
     }
 

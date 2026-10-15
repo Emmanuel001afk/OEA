@@ -60,8 +60,8 @@ class OeaPinRequestActivity : Activity() {
                         Toast.makeText(this, "The app withdrew this shortcut", Toast.LENGTH_SHORT).show()
                     }
                     dialog.dismiss()
-                },
-            ))
+                }
+))
         }
         dialog.setOnDismissListener { done() }
     }
@@ -88,8 +88,8 @@ class OeaPinRequestActivity : Activity() {
                         runCatching { startActivityForResult(widgets.bindIntent(id, info), REQUEST_BIND) }
                             .onFailure { widgets.deleteId(id); done() }
                     }
-                },
-            ))
+                }
+))
         }
         dialog.setOnDismissListener { done() }
     }

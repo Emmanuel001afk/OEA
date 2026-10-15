@@ -61,7 +61,7 @@ data class FaultInput(
     /** Home rendered successfully at least once this session. */
     val homeRendered: Boolean,
     /** The screen in front belongs to OEA (a game, the hub, Game Boost, …). */
-    val onOeaScreen: Boolean,
+    val onOeaScreen: Boolean
 ) {
     val isGame get() = subsystem.startsWith("game:") || subsystem.startsWith("oea-games") || subsystem.startsWith("engine")
     val isHome get() = subsystem == "home" || subsystem.startsWith("home:") || subsystem.startsWith("workspace")

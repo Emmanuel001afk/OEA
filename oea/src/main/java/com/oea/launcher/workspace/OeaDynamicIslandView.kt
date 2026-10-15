@@ -98,7 +98,7 @@ class OeaDynamicIslandView(
     /** Inside an OEA game: only calls, game events and (optionally) music are shown. */
     private val inGame: Boolean = false,
     /** Hosted in its own small application-overlay window for opt-in system-wide display. */
-    private val overlayWindow: Boolean = false,
+    private val overlayWindow: Boolean = false
 ) : FrameLayout(context) {
     enum class Surface { CARD, CAMERA }
 
@@ -118,8 +118,8 @@ class OeaDynamicIslandView(
         /** Album art for media sessions. */
         val art: Bitmap? = null,
         /** An incoming call that is still ringing: stays expanded until answered or declined. */
-        val ringing: Boolean = false,
-    ) {
+        val ringing: Boolean = false
+) {
         val gameGlyph: String get() = game?.activity?.glyph?.ifBlank { null } ?: gameEvent?.event?.glyph?.ifBlank { null } ?: game?.game?.glyph ?: gameEvent?.game?.glyph ?: "🎮"
     }
 
@@ -393,7 +393,11 @@ class OeaDynamicIslandView(
     fun reservedHeight(): Int = when {
         visibility != VISIBLE -> 0
         isCamera -> {
-            val cameraTop = maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+            val cameraTop = if (isLandscape()) {
+                (if (statusBarHeight > 0) statusBarHeight else dp(8)) + dp(3) + dp(store.islandCameraOffsetY())
+            } else {
+                maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+            }
             (cameraTop + dp(CAMERA_PILL_DP) + dp(8) - statusBarHeight).coerceAtLeast(0)
         }
         else -> lastCollapsedHeight.coerceAtLeast(0)
@@ -531,8 +535,8 @@ class OeaDynamicIslandView(
                 key = "charging",
                 kind = Kind.CHARGING,
                 title = if (full) "Battery full" else "Charging",
-                subtitle = "$batteryPercent% battery",
-            )
+                subtitle = "$batteryPercent% battery"
+)
         }
         // Android 12+ already shows its own camera/microphone indicator, so the
         // island only adds dots to an activity it is showing anyway. Older
@@ -549,8 +553,8 @@ class OeaDynamicIslandView(
                     OeaPrivacyMonitor.cameraInUse -> "Camera in use"
                     else -> "Microphone in use"
                 },
-                subtitle = "An app is using it right now",
-            )
+                subtitle = "An app is using it right now"
+)
         }
         return null
     }
@@ -573,8 +577,8 @@ class OeaDynamicIslandView(
             title = if (incoming) "Incoming call" else "Phone call",
             subtitle = subtitle,
             call = call,
-            ringing = incoming,
-        )
+            ringing = incoming
+)
     }
 
     private fun notificationPayload(sbn: StatusBarNotification): Payload? = runCatching {
@@ -601,14 +605,14 @@ class OeaDynamicIslandView(
             extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
             extras?.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString(),
             metadataTitle,
-            extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
-        ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty().ifBlank { appName }
+            extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty().ifBlank { appName }
         val subtitle = listOf(
             extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
             metadataArtist,
             extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString(),
-            extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString(),
-        ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty().takeIf { it != title }.orEmpty()
+            extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
+).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty().takeIf { it != title }.orEmpty()
         val icon = runCatching { notification.smallIcon?.loadDrawable(context)?.mutate() }.getOrNull()
         val art = if (media) runCatching {
             controller?.metadata?.let { meta ->
@@ -631,8 +635,8 @@ class OeaDynamicIslandView(
             notification = sbn,
             icon = icon,
             art = art,
-            ringing = ringing,
-        )
+            ringing = ringing
+)
     }.getOrNull()
 
     private fun render() {
@@ -1094,8 +1098,8 @@ class OeaDynamicIslandView(
         if (canTogglePlayback) {
             addIconAction(
                 if (playing) R.drawable.oic_pause else R.drawable.oic_play_arrow,
-                if (playing) "Pause" else "Play",
-            ) {
+                if (playing) "Pause" else "Play"
+) {
                 runCatching { if (playing) transport.pause() else transport.play() }
                 postDelayed({ render() }, 350L)
             }
@@ -1219,10 +1223,35 @@ class OeaDynamicIslandView(
         onExpandedChanged?.invoke(expanded)
     }
 
+    private fun isLandscape(): Boolean {
+        val metrics = resources.displayMetrics
+        return metrics.widthPixels > metrics.heightPixels
+    }
+
+    private fun currentScreenSize(): Pair<Int, Int> {
+        // Prefer WindowMetrics when available (accurate during rotation), fallback to displayMetrics.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            try {
+                val wm = context.getSystemService(android.view.WindowManager::class.java)
+                val bounds = wm?.currentWindowMetrics?.bounds
+                if (bounds != null && bounds.width() > 0 && bounds.height() > 0) {
+                    return bounds.width() to bounds.height()
+                }
+            } catch (_: Throwable) {}
+        }
+        val dm = resources.displayMetrics
+        return dm.widthPixels to dm.heightPixels
+    }
+
     /**
      * Positions the surface for its style and state. Both styles grow over
      * Home: the card keeps its collapsed slot reserved, the camera pill morphs
      * from the cutout into a wide card.
+     *
+     * Landscape stability fix: in landscape the top cutout is often on the side
+     * (or absent), and statusBarHeight can be 0 during rotation animation.
+     * We ignore the cutout's bottom in landscape and keep the pill at a stable
+     * top-center anchor, preventing the visible vibration/shake reported.
      */
     private fun applyLayout() {
         val params = card.layoutParams as? LayoutParams ?: return
@@ -1240,15 +1269,16 @@ class OeaDynamicIslandView(
             notifyOverlayGeometry()
             return
         }
-        // System UI owns status-bar touches. Anchor just below the greater of
-        // the status bar and the cutout's lower edge, then let the saved Y
-        // offset reposition the island for unusual camera layouts.
-        val screenWidth = resources.displayMetrics.widthPixels
-        val screenHeight = resources.displayMetrics.heightPixels
+        val (screenWidth, screenHeight) = currentScreenSize()
         val pillHeight = dp(CAMERA_PILL_DP)
         val cameraX = dp(store.islandCameraOffsetX())
         val pillTop = cameraPillTop(screenHeight, pillHeight)
-        val centerX = ((cutout?.centerX() ?: (screenWidth / 2)) + cameraX).coerceIn(0, screenWidth)
+        // In landscape, ignore cutout center (which may be on side or unstable) and stay centered.
+        val centerX = if (isLandscape()) {
+            (screenWidth / 2 + cameraX).coerceIn(0, screenWidth)
+        } else {
+            ((cutout?.centerX() ?: (screenWidth / 2)) + cameraX).coerceIn(0, screenWidth)
+        }
         if (expanded) {
             compactRow.visibility = GONE
             header.visibility = VISIBLE
@@ -1266,10 +1296,13 @@ class OeaDynamicIslandView(
             details.visibility = GONE
             compactTitle.maxWidth = (screenWidth * 0.48f).toInt()
             card.setPadding(dp(6), 0, dp(4), 0)
-            card.measure(
-                MeasureSpec.makeMeasureSpec(screenWidth - dp(32), MeasureSpec.AT_MOST),
-                MeasureSpec.makeMeasureSpec(pillHeight, MeasureSpec.EXACTLY),
-            )
+            // Avoid measuring during layout when width is unstable (rotation).
+            if (screenWidth > 0) {
+                card.measure(
+                    MeasureSpec.makeMeasureSpec(screenWidth - dp(32), MeasureSpec.AT_MOST),
+                    MeasureSpec.makeMeasureSpec(pillHeight, MeasureSpec.EXACTLY)
+)
+            }
             val width = card.measuredWidth.coerceIn(dp(112), (screenWidth - dp(32)).coerceAtLeast(dp(112)))
             params.width = width
             params.height = pillHeight
@@ -1287,7 +1320,12 @@ class OeaDynamicIslandView(
     }
 
     private fun cameraPillTop(screenHeight: Int, pillHeight: Int): Int {
-        val anchor = maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+        // Landscape: keep pill at stable top anchor, ignore cutout bottom which may be 0 or side-located.
+        val anchor = if (isLandscape()) {
+            (if (statusBarHeight > 0) statusBarHeight else dp(8)) + dp(3) + dp(store.islandCameraOffsetY())
+        } else {
+            maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+        }
         return anchor.coerceIn(0, (screenHeight - pillHeight).coerceAtLeast(0))
     }
 
@@ -1345,8 +1383,8 @@ class OeaDynamicIslandView(
                 fill = OeaTheme.alpha(OeaTheme.blend(Color.rgb(12, 14, 20), palette.accent, 0.06f), 0xE6),
                 radius = dp(28).toFloat(),
                 density = density,
-                tint = palette.accent,
-            )
+                tint = palette.accent
+)
         } else {
             val base = if (palette.dark) Color.rgb(10, 12, 17) else Color.rgb(20, 22, 28)
             card.background = GradientDrawable().apply {
@@ -1371,8 +1409,8 @@ class OeaDynamicIslandView(
 
     private fun capsuleWidth(): Int = minOf(
         (resources.displayMetrics.widthPixels - dp(36)).coerceAtLeast(dp(190)),
-        dp(420),
-    )
+        dp(420)
+)
 
     private fun roundedActionBackground(): Drawable = GradientDrawable().apply {
         setColor(0x22FFFFFF)

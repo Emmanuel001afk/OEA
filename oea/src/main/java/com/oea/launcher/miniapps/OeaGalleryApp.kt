@@ -43,8 +43,8 @@ object OeaGalleryApp {
         val subtitle: String,
         val badge: String?,
         val render: (width: Int, height: Int) -> Bitmap?,
-        val onOpen: () -> Unit,
-    )
+        val onOpen: () -> Unit
+)
 
     private val workers = Executors.newFixedThreadPool(2) { task ->
         Thread(task, "OeaGallery").apply { isDaemon = true }
@@ -62,8 +62,8 @@ object OeaGalleryApp {
             host, kit, column,
             title = "Live scenes",
             blurb = "Drawn by Home frame by frame, so Android's wallpaper and your lock screen are never touched.",
-            count = OeaLiveScenes.ids.size,
-        ) { add ->
+            count = OeaLiveScenes.ids.size
+) { add ->
             OeaLiveScenes.ids.forEach { id ->
                 val on = live == id && drawsForHome
                 add(item(
@@ -71,12 +71,12 @@ object OeaGalleryApp {
                     title = OeaLiveScenes.label(id),
                     subtitle = OeaLiveScenes.blurb(id),
                     badge = if (on) "On Home" else "Live",
-                    render = { w, h -> OeaLiveScenes.still(id, w, h) },
-                ) {
+                    render = { w, h -> OeaLiveScenes.still(id, w, h) }
+) {
                     viewer(
                         host, kit, OeaLiveScenes.label(id), OeaLiveScenes.blurb(id), null, id,
-                        render = { w, h -> OeaLiveScenes.still(id, w, h) },
-                    )
+                        render = { w, h -> OeaLiveScenes.still(id, w, h) }
+)
                 })
             }
         }
@@ -86,8 +86,8 @@ object OeaGalleryApp {
             host, kit, column,
             title = "Wallpapers",
             blurb = "Still pictures drawn for Home. Applying one hands Android the real wallpaper.",
-            count = OeaWallpaper.homeSet.size,
-        ) { add ->
+            count = OeaWallpaper.homeSet.size
+) { add ->
             OeaWallpaper.homeSet.forEach { scene ->
                 val on = state == scene && !drawsForHome
                 add(item(
@@ -95,8 +95,8 @@ object OeaGalleryApp {
                     title = scene.label,
                     subtitle = scene.blurb,
                     badge = if (on) "On Home" else "Wallpaper",
-                    render = { w, h -> OeaWallpaperRenderer.preview(scene, w, h) },
-                ) {
+                    render = { w, h -> OeaWallpaperRenderer.preview(scene, w, h) }
+) {
                     viewer(host, kit, scene.label, scene.blurb, scene, null, render = { w, h -> OeaWallpaperRenderer.preview(scene, w, h) })
                 })
             }
@@ -107,8 +107,8 @@ object OeaGalleryApp {
             host, kit, column,
             title = "Lock screen",
             blurb = "A set of its own, drawn with a calm middle band so the clock and notifications stay readable.",
-            count = OeaWallpaper.lockSet.size,
-        ) { add ->
+            count = OeaWallpaper.lockSet.size
+) { add ->
             OeaWallpaper.lockSet.forEach { scene ->
                 val onLock = OeaWallpaperStore.lastApplied(host) == scene.id &&
                     OeaWallpaperStore.lastTarget(host) == OeaWallpaperStore.Target.LOCK
@@ -117,8 +117,8 @@ object OeaGalleryApp {
                     title = scene.label,
                     subtitle = scene.blurb,
                     badge = if (onLock) "On lock" else "Lock screen",
-                    render = { w, h -> OeaWallpaperRenderer.preview(scene, w, h) },
-                ) {
+                    render = { w, h -> OeaWallpaperRenderer.preview(scene, w, h) }
+) {
                     viewer(host, kit, scene.label, scene.blurb, scene, null, render = { w, h -> OeaWallpaperRenderer.preview(scene, w, h) })
                 })
             }
@@ -130,27 +130,27 @@ object OeaGalleryApp {
             host, kit, column,
             title = "Your pictures",
             blurb = if (mine.isEmpty()) "Nothing here yet. Add a photo and it appears in this shelf, ready for Home, the lock screen or a theme." else "Pictures you added to OEA, kept in OEA's own storage.",
-            count = mine.size,
-        ) { add ->
+            count = mine.size
+) { add ->
             mine.forEach { ref ->
                 add(item(
                     host, kit,
                     title = "Your picture",
                     subtitle = ref.path.substringAfterLast('/'),
                     badge = "Yours",
-                    render = { w, h -> OeaThemeImages.thumbnail(host, ref, w, h) },
-                ) { viewer(host, kit, "Your picture", ref.path.substringAfterLast('/'), scene = null, liveId = null, image = ref, render = { w, h -> OeaThemeImages.thumbnail(host, ref, w, h) }) })
+                    render = { w, h -> OeaThemeImages.thumbnail(host, ref, w, h) }
+) { viewer(host, kit, "Your picture", ref.path.substringAfterLast('/'), scene = null, liveId = null, image = ref, render = { w, h -> OeaThemeImages.thumbnail(host, ref, w, h) }) })
             }
         }
 
         kit.note(
             column,
-            "Themes live in the Themes app: OEA draws each theme its own Home and lock-screen picture, and those are deliberately kept out of this gallery so the two never share one.",
-        )
+            "Themes live in the Themes app: OEA draws each theme its own Home and lock-screen picture, and those are deliberately kept out of this gallery so the two never share one."
+)
         if (live != null) {
             kit.row(
-                kit.group(column), R.drawable.oic_close, "Stop the live scene", "Home goes back to the still wallpaper behind it",
-            ) {
+                kit.group(column), R.drawable.oic_close, "Stop the live scene", "Home goes back to the still wallpaper behind it"
+) {
                 OeaHomeScene.clearLive(host)
                 host.recreate()
             }
@@ -167,25 +167,25 @@ object OeaGalleryApp {
         title: String,
         blurb: String,
         count: Int,
-        add: (add: (View) -> Unit) -> Unit,
-    ) {
+        add: (add: (View) -> Unit) -> Unit
+) {
         val heading = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         heading.addView(
             kit.text(title, 22f, kit.palette.text, OeaType.medium).apply {
                 setPadding(kit.dp(6), kit.dp(18), 0, 0)
-            },
-        )
+            }
+)
         heading.addView(
             kit.text("$count ${if (count == 1) "picture" else "pictures"}", 12f, kit.palette.accent, OeaType.medium).apply {
                 setPadding(kit.dp(6), kit.dp(2), 0, 0)
-            },
-        )
+            }
+)
         heading.addView(
             kit.text(blurb, 12.5f, kit.palette.textSecondary).apply {
                 setPadding(kit.dp(6), kit.dp(4), kit.dp(6), kit.dp(8))
                 setLineSpacing(kit.dpf(2f), 1f)
-            },
-        )
+            }
+)
         parent.addView(heading, LinearLayout.LayoutParams(-1, -2))
 
         val strip = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
@@ -222,8 +222,8 @@ object OeaGalleryApp {
         subtitle: String,
         badge: String?,
         render: (Int, Int) -> Bitmap?,
-        onOpen: () -> Unit,
-    ): View {
+        onOpen: () -> Unit
+): View {
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         val tile = FrameLayout(host).apply {
             isClickable = true
@@ -251,8 +251,8 @@ object OeaGalleryApp {
             kit.text(title, 12.5f, kit.palette.text, OeaType.medium).apply {
                 setPadding(kit.dp(2), kit.dp(6), 0, 0)
                 maxLines = 1
-            },
-        )
+            }
+)
         // The picture itself is rendered off the main thread: a shelf of ten
         // scenes must not block the frame that draws them.
         val width = kit.dp(112)
@@ -285,8 +285,8 @@ object OeaGalleryApp {
         scene: OeaWallpaper?,
         liveId: String?,
         image: OeaImageRef? = null,
-        render: (Int, Int) -> Bitmap?,
-    ) {
+        render: (Int, Int) -> Bitmap?
+) {
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         val preview = ImageView(host).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -348,8 +348,8 @@ object OeaGalleryApp {
                 kit.note(
                     panel,
                     if (scene.forLock) "This picture is part of the lock-screen set: its middle stays calm for the clock. Setting it on Home is allowed, but the sets are kept apart by design."
-                    else "Setting it on Home leaves the lock screen as it is; the lock set above is drawn for the clock area.",
-                )
+                    else "Setting it on Home leaves the lock screen as it is; the lock set above is drawn for the clock area."
+)
             }
         }
     }

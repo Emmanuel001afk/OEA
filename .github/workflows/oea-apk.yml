@@ -238,7 +238,30 @@ jobs:
             } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -60 | while IFS= read -r line; do
               printf '::error::%s\n' "${line//%/%25}"
             done
+            cat "$RUNNER_TEMP/gradle.log" | tail -n 200
             exit 1
+          fi
+      - name: Upload Gradle log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-log
+          path: ${{ runner.temp }}/gradle.log
+          retention-days: 2
+          if-no-files-found: warn
+      - name: Comment Gradle error on PR
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          LOG_TAIL=$(tail -n 300 "$RUNNER_TEMP/gradle.log" | sed 's/`//g' | head -c 60000)
+          PR=${{ github.event.pull_request.number }}
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --repo "${{ github.repository }}" --body "### Gradle build failed
+          \`\`\`
+          $LOG_TAIL
+          \`\`\`" || true
           fi
       - name: Run engine and game unit tests
         run: |

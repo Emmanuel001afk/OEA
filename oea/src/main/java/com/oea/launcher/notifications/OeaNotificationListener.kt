@@ -18,8 +18,8 @@ object OeaNotificationState {
     private data class Candidate(
         val notification: StatusBarNotification,
         val priority: Int,
-        val postedAt: Long,
-    )
+        val postedAt: Long
+)
 
     private val lock = Any()
     private val active = LinkedHashMap<String, StatusBarNotification>()
@@ -80,6 +80,10 @@ object OeaNotificationState {
         }
     }
 
+    fun snapshot(): List<StatusBarNotification> = synchronized(lock) {
+        active.values.sortedByDescending { it.postTime }.toList()
+    }
+
     /** Most recently active media notification used by the existing At a Glance controls. */
     fun media(): StatusBarNotification? = synchronized(lock) {
         active.values
@@ -115,8 +119,8 @@ object OeaNotificationState {
                 Notification.CATEGORY_NAVIGATION,
                 Notification.CATEGORY_SERVICE,
                 Notification.CATEGORY_STOPWATCH,
-                "timer",
-            )
+                "timer"
+)
             val priority = when {
                 call -> 5
                 media -> 4
@@ -129,8 +133,8 @@ object OeaNotificationState {
             // Keep live calls and media ahead of ordinary notifications. Among
             // ordinary activities, recency wins so a fresh message can replace
             // an older ongoing item without the user opening the older one.
-            compareBy<Candidate>({ it.priority >= 4 }, { it.priority == 5 }, { it.postedAt }, { it.priority }),
-        )?.notification
+            compareBy<Candidate>({ it.priority >= 4 }, { it.priority == 5 }, { it.postedAt }, { it.priority })
+)?.notification
     }
 
     fun addListener(listener: () -> Unit) {

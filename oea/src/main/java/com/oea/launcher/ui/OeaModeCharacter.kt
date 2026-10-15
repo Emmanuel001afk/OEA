@@ -46,20 +46,37 @@ object OeaModeCharacter {
         /** Extra elevation for icons and cards (Depth reads as height). */
         val lift: Int = 0,
         /** Milliseconds of settle time for a page; lower is crisper. */
-        val settle: Long = 220L,
-    )
+        val settle: Long = 220L
+)
 
-    val CLASSIC = P(pageEffect = "classic")
+    val CLASSIC = P(pageEffect = "classic", parallax = 0.45f, settle = 220L)
     val LIQUID = P(pageEffect = "liquid", parallax = 0.6f, trail = 1f, caustics = true, settle = 240L)
     val TIDE = P(pageEffect = "liquid", parallax = 0.95f, trail = 0.75f, caustics = true, settle = 300L)
     val DEPTH = P(pageEffect = "depth", parallax = 1f, trail = 0.35f, lift = 5, settle = 260L)
     val INK = P(pageEffect = "paper", parallax = 0.2f, ink = true, paper = true, settle = 190L)
+    // New modes with distinct visual character
+    val STUDY = P(pageEffect = "fade", parallax = 0.1f, trail = 0f, settle = 180L)
+    val MUSIC = P(pageEffect = "liquid", parallax = 0.7f, trail = 0.6f, caustics = true, lift = 3, settle = 280L)
+    val SLEEPING = P(pageEffect = "none", parallax = 0f, trail = 0f, settle = 150L)
+    val FOCUS = P(pageEffect = "none", parallax = 0f, trail = 0f, settle = 150L)
+    val GAMING = P(pageEffect = "zoom", parallax = 0.8f, trail = 0.5f, lift = 4, settle = 200L)
+    val READING = P(pageEffect = "paper", parallax = 0.05f, paper = true, settle = 180L)
+    val WORK = P(pageEffect = "stack", parallax = 0.3f, trail = 0.2f, settle = 220L)
+    val DRIVING = P(pageEffect = "none", parallax = 0f, lift = 2, settle = 180L)
 
     fun of(modeId: String?): P = when (modeId) {
         OeaMode.LIQUID.id -> LIQUID
         OeaMode.TIDE.id -> TIDE
         OeaMode.DEPTH.id -> DEPTH
         OeaMode.INK.id -> INK
+        OeaMode.STUDY.id -> STUDY
+        OeaMode.MUSIC.id -> MUSIC
+        OeaMode.SLEEPING.id -> SLEEPING
+        OeaMode.FOCUS.id -> FOCUS
+        OeaMode.GAMING.id -> GAMING
+        OeaMode.READING.id -> READING
+        OeaMode.WORK.id -> WORK
+        OeaMode.DRIVING.id -> DRIVING
         else -> CLASSIC
     }
 
@@ -90,8 +107,8 @@ object OeaModeCharacter {
             paint.shader = LinearGradient(
                 0f, 0f, w * 0.4f, h,
                 intArrayOf(Color.argb(0x0E, 120, 96, 64), Color.argb(0x05, 120, 96, 64), Color.argb(0x12, 60, 52, 40)),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-            )
+                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+)
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
             if (seed != width * 31 + height) build(w, h)
@@ -112,9 +129,9 @@ object OeaModeCharacter {
                         random.nextFloat() * w,
                         random.nextFloat() * h,
                         0.6f + random.nextFloat() * 1.4f,
-                        4f + random.nextFloat() * 9f,
-                    ),
-                )
+                        4f + random.nextFloat() * 9f
+)
+)
             }
         }
     }
@@ -173,8 +190,8 @@ object OeaModeCharacter {
             paint.shader = android.graphics.RadialGradient(
                 x, y, radius,
                 intArrayOf(Color.argb(alpha, 24, 22, 20), Color.argb(alpha / 3, 24, 22, 20), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP,
-            )
+                floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP
+)
             canvas.drawCircle(x, y, radius, paint)
             paint.shader = null
         }

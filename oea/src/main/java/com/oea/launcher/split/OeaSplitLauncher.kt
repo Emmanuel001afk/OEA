@@ -73,8 +73,8 @@ object OeaSplitLauncher {
         private val app: Context,
         private val first: Intent,
         private val second: Intent,
-        private val modern: Boolean,
-    ) {
+        private val modern: Boolean
+) {
         private val firstPackage = first.component?.packageName ?: first.`package`
         private val launchedAt = System.currentTimeMillis()
         private var recovered = false

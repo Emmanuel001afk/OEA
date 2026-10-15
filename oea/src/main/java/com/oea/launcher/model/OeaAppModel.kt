@@ -26,7 +26,7 @@ data class OeaAppInfo(
     val label: String,
     val category: Int = -1,
     val system: Boolean = false,
-    val stamp: Long = 0L,
+    val stamp: Long = 0L
 )
 
 /**
@@ -126,8 +126,8 @@ class OeaAppModel(private val context: Context) {
                 category = if (Build.VERSION.SDK_INT >= 26) appInfo.category else -1,
                 system = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
                     (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0,
-                stamp = apkStamp(appInfo),
-            )
+                stamp = apkStamp(appInfo)
+)
         }.getOrNull()
 
     /** The APK path changes on every install/update; its mtime covers in-place system updates. */

@@ -17,7 +17,7 @@ package com.oea.launcher.power
 class OeaWaveDetector(
     sensitivity: Int,
     private val requireTwoWaves: Boolean,
-    private val pocketGuard: Boolean,
+    private val pocketGuard: Boolean
 ) {
     /** Longest cover that still counts as a wave: gentle (low), normal, generous (high). */
     private val maxCoverMs: Long = when (sensitivity) {

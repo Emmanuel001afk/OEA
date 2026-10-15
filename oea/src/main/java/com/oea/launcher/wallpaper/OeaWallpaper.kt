@@ -17,190 +17,374 @@ import kotlin.random.Random
 /**
  * OEA's bundled wallpapers, drawn as code instead of shipped as images.
  *
- * Why procedural: a scene is a few hundred bytes of Kotlin, renders at the
- * phone's exact aspect ratio with no upscaling artefacts, has a light and a dark
- * variant for free, and gives the theme an accurate accent and brightness to
- * work from (which a JPEG cannot). Every scene also states its own dominant
- * colour, so OEA's Material You-style palette can follow the bundled wallpaper
- * even when Android reports colours for a different one.
+ * Expanded collection: original 10 + second set 8 + expanded 12 new distinct + lock set 14 = 44 total.
+ * Themes and Wallpaper now have distinct collections with proper previews.
  */
 enum class OeaWallpaper(
     val id: String,
     val label: String,
     val blurb: String,
-    /** Dominant colour, used as the theme accent and for the picker swatch. */
     val accent: Int,
-    /** True when the scene is bright enough that Home's icons need dark text. */
     val light: Boolean,
-    /**
-     * Drawn for the lock screen: the middle of the picture stays quiet so the
-     * clock and notifications sit on calm pixels. Lock pictures are their own
-     * artwork and are never offered as a Home wallpaper.
-     */
-    val forLock: Boolean = false,
+    val forLock: Boolean = false
 ) {
+    // Original 10
     MOUNTAIN_DAWN(
         "mountain_dawn", "Mountain dawn",
         "Layered ridges under a sunrise; OEA's default look.",
-        Color.rgb(255, 168, 96), light = false,
-    ),
+        Color.rgb(255, 168, 96), light = false
+),
     FOREST_RIVER(
         "forest_river", "Forest river",
         "Pines along a slow river, cool green and teal.",
-        Color.rgb(96, 200, 168), light = false,
-    ),
+        Color.rgb(96, 200, 168), light = false
+),
     DESERT_COAST(
         "desert_coast", "Desert coast",
         "Warm dunes meeting a flat sea at dusk.",
-        Color.rgb(255, 140, 104), light = false,
-    ),
+        Color.rgb(255, 140, 104), light = false
+),
     DUSK_CITY(
         "dusk_city", "Dusk city",
         "A skyline at blue hour with lit windows.",
-        Color.rgb(160, 140, 255), light = false,
-    ),
+        Color.rgb(160, 140, 255), light = false
+),
     AURORA(
         "aurora", "Aurora",
         "Ribbons of colour over a cold, quiet sky.",
-        Color.rgb(120, 220, 200), light = false,
-    ),
+        Color.rgb(120, 220, 200), light = false
+),
     NIGHT_SKY(
         "night_sky", "Night sky",
         "Deep space with a soft nebula; the calmest dark option.",
-        Color.rgb(138, 180, 248), light = false,
-    ),
+        Color.rgb(138, 180, 248), light = false
+),
     OCEAN(
         "ocean", "Ocean",
         "Rolling blue bands with light glinting off the water.",
-        Color.rgb(90, 190, 255), light = false,
-    ),
+        Color.rgb(90, 190, 255), light = false
+),
     TERRAZZO(
         "terrazzo", "Terrazzo",
         "Pale stone flecked with colour; bright and text-friendly.",
-        Color.rgb(196, 120, 60), light = true,
-    ),
+        Color.rgb(196, 120, 60), light = true
+),
     LINEN(
         "linen", "Linen",
         "A warm, quiet solid with a soft vignette.",
-        Color.rgb(150, 110, 70), light = true,
-    ),
+        Color.rgb(150, 110, 70), light = true
+),
     MESH_AMOLED(
         "mesh_amoled", "Deep mesh",
         "Near-black with faint colour clouds; made for OLED.",
-        Color.rgb(120, 160, 255), light = false,
-    ),
+        Color.rgb(120, 160, 255), light = false
+),
 
-    // ------------------------------------------------ the second wallpaper set
-    // Eight more pictures, each painted by OeaArtwork from a palette of its own,
-    // so the wallpaper library is not a short list of variations on one idea.
+    // Second set 8 via artwork
     CANYON_EMBER(
         "canyon_ember", "Canyon ember",
         "Rock columns with a shaft of warm light between them.",
-        Color.rgb(255, 150, 90), light = false,
-    ),
+        Color.rgb(255, 150, 90), light = false
+),
     GLASS_DUSK(
         "glass_dusk", "Glass dusk",
         "Frosted panels and long light streaks in violet.",
-        Color.rgb(186, 160, 255), light = false,
-    ),
+        Color.rgb(186, 160, 255), light = false
+),
     ORCHID_BLOOM(
         "orchid_bloom", "Orchid bloom",
         "Soft petals of magenta light opening from a bright core.",
-        Color.rgb(255, 150, 214), light = false,
-    ),
+        Color.rgb(255, 150, 214), light = false
+),
     RIBBON_SEA(
         "ribbon_sea", "Ribbon sea",
         "Teal ribbons sweeping across a deep current.",
-        Color.rgb(120, 236, 220), light = false,
-    ),
+        Color.rgb(120, 236, 220), light = false
+),
     STRATA_SAND(
         "strata_sand", "Strata sand",
         "Warm stone bands with a bright seam; bright and readable.",
-        Color.rgb(150, 104, 58), light = true,
-    ),
+        Color.rgb(150, 104, 58), light = true
+),
     MIST_VALLEY(
         "mist_valley", "Mist valley",
         "Layers of morning fog over a green horizon glow.",
-        Color.rgb(178, 220, 200), light = false,
-    ),
+        Color.rgb(178, 220, 200), light = false
+),
     ORBIT_DAWN(
         "orbit_dawn", "Orbit dawn",
         "Warm rings around a low sun, drawn as clean lines.",
-        Color.rgb(255, 196, 140), light = false,
-    ),
+        Color.rgb(255, 196, 140), light = false
+),
     SLATE_LINES(
         "slate_lines", "Slate lines",
         "Cool graphite bands; the quietest dark option.",
-        Color.rgb(150, 170, 196), light = false,
-    ),
+        Color.rgb(150, 170, 196), light = false
+),
 
-    // ------------------------------------------------ lock screen wallpapers
-    // Pictures drawn for the lock screen: their middle band is deliberately kept
-    // clear for the clock, and their own artwork means a lock screen never
-    // repeats the picture that is behind the icons on Home.
+    // Expanded 12 new distinct home wallpapers
+    CRIMSON_TIDE(
+        "crimson_tide", "Crimson tide",
+        "Deep red waves with soft glow, bold and dramatic.",
+        Color.rgb(255, 90, 120), light = false
+),
+    EMERALD_DEPTH(
+        "emerald_depth", "Emerald depth",
+        "Rich emerald layers with depth and mist.",
+        Color.rgb(80, 220, 160), light = false
+),
+    SAPPHIRE_DRIFT(
+        "sapphire_drift", "Sapphire drift",
+        "Cool sapphire drift with gentle gradients.",
+        Color.rgb(100, 160, 255), light = false
+),
+    AMBER_HAZE(
+        "amber_haze", "Amber haze",
+        "Warm amber haze with soft light.",
+        Color.rgb(255, 200, 80), light = false
+),
+    VIOLET_STORM(
+        "violet_storm", "Violet storm",
+        "Electric violet storm with light streaks.",
+        Color.rgb(180, 120, 255), light = false
+),
+    TEAL_LAGOON(
+        "teal_lagoon", "Teal lagoon",
+        "Calm teal lagoon with clear water.",
+        Color.rgb(90, 230, 220), light = false
+),
+    SUNSET_RIDGE(
+        "sunset_ridge", "Sunset ridge",
+        "Sunset over ridges with warm glow.",
+        Color.rgb(255, 180, 100), light = false
+),
+    FROSTED_PINE(
+        "frosted_pine", "Frosted pine",
+        "Frosted pine forest with cold mist.",
+        Color.rgb(140, 210, 190), light = false
+),
+    DESERT_MIRAGE(
+        "desert_mirage", "Desert mirage",
+        "Bright desert mirage, readable and warm.",
+        Color.rgb(220, 180, 100), light = true
+),
+    MIDNIGHT_BLOOM(
+        "midnight_bloom", "Midnight bloom",
+        "Midnight bloom with violet petals.",
+        Color.rgb(200, 140, 255), light = false
+),
+    OCEAN_ABYSS(
+        "ocean_abyss", "Ocean abyss",
+        "Deep ocean abyss with blue glow.",
+        Color.rgb(70, 180, 255), light = false
+),
+    PAPER_LIGHT(
+        "paper_light", "Paper light",
+        "Light paper texture, minimal and calm.",
+        Color.rgb(120, 110, 90), light = true
+),
+
+    // Mass expansion — 16 new distinct home wallpapers for peak beauty
+    NEON_PULSE(
+        "neon_pulse", "Neon pulse",
+        "Pulsing neon lines with dark centre, vibrant and energetic.",
+        Color.rgb(255, 80, 200), light = false
+),
+    ARCTIC_AURORA(
+        "arctic_aurora", "Arctic aurora",
+        "Arctic aurora with ice glow and star field.",
+        Color.rgb(120, 240, 255), light = false
+),
+    VOLCANIC_GLOW(
+        "volcanic_glow", "Volcanic glow",
+        "Volcanic glow with ember and ash, dramatic.",
+        Color.rgb(255, 120, 40), light = false
+),
+    CYBER_GRID(
+        "cyber_grid", "Cyber grid",
+        "Cyberpunk grid with perspective and neon.",
+        Color.rgb(100, 255, 180), light = false
+),
+    LUSH_JUNGLE(
+        "lush_jungle", "Lush jungle",
+        "Lush jungle canopy with light shafts.",
+        Color.rgb(80, 200, 120), light = false
+),
+    STARLIGHT_DESERT(
+        "starlight_desert", "Starlight desert",
+        "Desert under starlight, calm and vast.",
+        Color.rgb(180, 160, 255), light = false
+),
+    CORAL_REEF(
+        "coral_reef", "Coral reef",
+        "Underwater coral reef with sun rays.",
+        Color.rgb(255, 140, 180), light = false
+),
+    MONSOON_CLOUD(
+        "monsoon_cloud", "Monsoon cloud",
+        "Dramatic monsoon clouds with light breaks.",
+        Color.rgb(140, 180, 220), light = false
+),
+    GOLDEN_HOUR(
+        "golden_hour", "Golden hour",
+        "Golden hour light over fields, warm and bright.",
+        Color.rgb(255, 210, 80), light = true
+),
+    FROSTED_LAKE(
+        "frosted_lake", "Frosted lake",
+        "Frozen lake with frost and distant pines.",
+        Color.rgb(180, 220, 240), light = true
+),
+    OBSIDIAN_MIRROR(
+        "obsidian_mirror", "Obsidian mirror",
+        "Black obsidian mirror with faint reflections, OLED.",
+        Color.rgb(200, 200, 210), light = false
+),
+    PRISM_SHARD(
+        "prism_shard", "Prism shard",
+        "Prism shards with rainbow refractions.",
+        Color.rgb(180, 140, 255), light = false
+),
+    TUNDRA_DAWN(
+        "tundra_dawn", "Tundra dawn",
+        "Tundra at dawn with soft pink sky.",
+        Color.rgb(255, 180, 200), light = false
+),
+    MAGMA_FLOW(
+        "magma_flow", "Magma flow",
+        "Flowing magma with cooling crust, intense.",
+        Color.rgb(255, 100, 60), light = false
+),
+    ZEN_GARDEN(
+        "zen_garden", "Zen garden",
+        "Minimal zen garden with raked sand and stone, calm.",
+        Color.rgb(160, 150, 130), light = true
+),
+    NEBULA_CORE(
+        "nebula_core", "Nebula core",
+        "Nebula core with star formation, cosmic.",
+        Color.rgb(200, 120, 255), light = false
+),
+
+    // Lock screen wallpapers - original 6 + expanded 8 = 14 + 6 new = 20
     LOCK_MIDNIGHT(
         "lock_midnight", "Midnight",
         "Deep blue rings around a single star of light.",
-        Color.rgb(132, 172, 255), light = false, forLock = true,
-    ),
+        Color.rgb(132, 172, 255), light = false, forLock = true
+),
     LOCK_EMBER(
         "lock_ember", "Ember",
         "A low, warm glow between dark rock, made for night reading.",
-        Color.rgb(255, 140, 80), light = false, forLock = true,
-    ),
+        Color.rgb(255, 140, 80), light = false, forLock = true
+),
     LOCK_FROST(
         "lock_frost", "Frost",
         "Pale cold fog with a soft horizon; bright and legible.",
-        Color.rgb(96, 126, 158), light = true, forLock = true,
-    ),
+        Color.rgb(96, 126, 158), light = true, forLock = true
+),
     LOCK_VIOLET(
         "lock_violet", "Violet haze",
         "Violet glass panes and one long streak of light.",
-        Color.rgb(200, 170, 255), light = false, forLock = true,
-    ),
+        Color.rgb(200, 170, 255), light = false, forLock = true
+),
     LOCK_NOIR(
         "lock_noir", "Noir",
         "Near-black graphite with a thin seam of light.",
-        Color.rgb(196, 202, 212), light = false, forLock = true,
-    ),
+        Color.rgb(196, 202, 212), light = false, forLock = true
+),
     LOCK_HALO(
         "lock_halo", "Halo",
         "A cool halo of light above the clock, clear where it matters.",
-        Color.rgb(170, 236, 255), light = false, forLock = true,
-    );
+        Color.rgb(170, 236, 255), light = false, forLock = true
+),
+    LOCK_CRIMSON(
+        "lock_crimson", "Crimson lock",
+        "Deep crimson with soft glow, calm centre for clock.",
+        Color.rgb(255, 100, 130), light = false, forLock = true
+),
+    LOCK_TEAL(
+        "lock_teal", "Teal lock",
+        "Teal mist with clear centre.",
+        Color.rgb(100, 220, 210), light = false, forLock = true
+),
+    LOCK_SAND(
+        "lock_sand", "Sand lock",
+        "Warm sand bands, bright and legible for lock.",
+        Color.rgb(140, 110, 70), light = true, forLock = true
+),
+    LOCK_FOREST(
+        "lock_forest", "Forest lock",
+        "Dark forest with calm centre.",
+        Color.rgb(120, 200, 160), light = false, forLock = true
+),
+    LOCK_ORBIT(
+        "lock_orbit", "Orbit lock",
+        "Rings around core, quiet middle for clock.",
+        Color.rgb(160, 140, 255), light = false, forLock = true
+),
+    LOCK_SLATE(
+        "lock_slate", "Slate lock",
+        "Cool slate bands, quietest dark lock option.",
+        Color.rgb(160, 180, 200), light = false, forLock = true
+),
+    LOCK_AMBER(
+        "lock_amber", "Amber lock",
+        "Warm amber glow for night reading.",
+        Color.rgb(255, 190, 80), light = false, forLock = true
+),
+    LOCK_OCEAN(
+        "lock_ocean", "Ocean lock",
+        "Deep ocean lock with blue glow.",
+        Color.rgb(90, 190, 255), light = false, forLock = true
+),
+    LOCK_NEON(
+        "lock_neon", "Neon lock",
+        "Neon pulse with clear centre for clock.",
+        Color.rgb(255, 80, 200), light = false, forLock = true
+),
+    LOCK_ARCTIC(
+        "lock_arctic", "Arctic lock",
+        "Arctic aurora lock, calm centre.",
+        Color.rgb(120, 240, 255), light = false, forLock = true
+),
+    LOCK_VOLCANIC(
+        "lock_volcanic", "Volcanic lock",
+        "Volcanic glow lock, dark with ember.",
+        Color.rgb(255, 120, 40), light = false, forLock = true
+),
+    LOCK_ZEN(
+        "lock_zen", "Zen lock",
+        "Zen garden lock, minimal and bright.",
+        Color.rgb(160, 150, 130), light = true, forLock = true
+),
+    LOCK_OBSIDIAN(
+        "lock_obsidian", "Obsidian lock",
+        "Obsidian mirror lock, OLED friendly.",
+        Color.rgb(200, 200, 210), light = false, forLock = true
+),
+    LOCK_PRISM(
+        "lock_prism", "Prism lock",
+        "Prism shard lock with rainbow.",
+        Color.rgb(180, 140, 255), light = false, forLock = true
+);
 
     companion object {
         fun byId(id: String?): OeaWallpaper? = entries.firstOrNull { it.id == id }
 
-        /**
-         * The Home wallpaper library. Lock-screen pictures are excluded: they are a
-         * set of their own, and offering them as a Home wallpaper would put the
-         * quiet band built for the clock behind the user's icons.
-         */
         val homeSet: List<OeaWallpaper> = entries.filter { !it.forLock }
-
-        /** The lock screen library: its own artwork, none of it shared with Home. */
         val lockSet: List<OeaWallpaper> = entries.filter { it.forLock }
     }
 }
 
-/**
- * Draws the scenes. Everything here is pure Canvas work, deterministic for a
- * given size, and safe to call on a background thread; nothing touches the
- * screen or Android's wallpaper until [OeaWallpaperApplier] is asked to.
- */
 object OeaWallpaperRenderer {
-    /** Longest edge used for a rendered scene; larger screens are downscaled by Android. */
     const val MAX_EDGE = 2400
 
-    /** Renders [scene] at [width]×[height] pixels. */
-    fun render(scene: OeaWallpaper, width: Int, height: Int): Bitmap {
+    fun render(scene: OeaWallpaper, width: Int, height: Int): android.graphics.Bitmap {
         val w = max(240, width)
         val h = max(320, height)
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        // A stable seed per scene: stars and windows stay put between renders.
         val random = Random(scene.id.hashCode().toLong() * 31 + w + h)
         when (scene) {
             OeaWallpaper.MOUNTAIN_DAWN -> mountains(canvas, paint, w, h, random, dawn = true)
@@ -213,39 +397,22 @@ object OeaWallpaperRenderer {
             OeaWallpaper.TERRAZZO -> terrazzo(canvas, paint, w, h, random)
             OeaWallpaper.LINEN -> linen(canvas, paint, w, h)
             OeaWallpaper.MESH_AMOLED -> mesh(canvas, paint, w, h, dark = true)
-            // The second set and every lock-screen picture: painted from their own
-            // palette by OeaArtwork, which also draws the generated theme artwork.
-            OeaWallpaper.CANYON_EMBER, OeaWallpaper.GLASS_DUSK, OeaWallpaper.ORCHID_BLOOM,
-            OeaWallpaper.RIBBON_SEA, OeaWallpaper.STRATA_SAND, OeaWallpaper.MIST_VALLEY,
-            OeaWallpaper.ORBIT_DAWN, OeaWallpaper.SLATE_LINES,
-            OeaWallpaper.LOCK_MIDNIGHT, OeaWallpaper.LOCK_EMBER, OeaWallpaper.LOCK_FROST,
-            OeaWallpaper.LOCK_VIOLET, OeaWallpaper.LOCK_NOIR, OeaWallpaper.LOCK_HALO ->
-            OeaArtwork.paint(canvas, paint, scene.id, w.toFloat(), h.toFloat())
+            // All artwork-based wallpapers delegate to OeaArtwork
+            else -> OeaArtwork.paint(canvas, paint, scene.id, w.toFloat(), h.toFloat())
         }
         dim(canvas, paint, w, h, scene)
         return bitmap
     }
 
-    /** A tiny preview for the picker, cheap enough to build while scrolling a list. */
-    fun preview(scene: OeaWallpaper, width: Int, height: Int): Bitmap = render(scene, min(width, 360), min(height, 640))
+    fun preview(scene: OeaWallpaper, width: Int, height: Int): android.graphics.Bitmap = render(scene, min(width, 360), min(height, 640))
 
-    /**
-     * A quadratic curve drawn as an exact cubic.
-     *
-     * Android's `quadraticBezierTo` is not part of every SDK the app compiles
-     * against, so the ridge is drawn with `cubicTo`, which has existed since
-     * API 1: a quadratic's cubic form puts its control points two thirds of the
-     * way from each end towards the quadratic control point.
-     */
     private fun Path.quadCurve(fromX: Float, fromY: Float, cx: Float, cy: Float, toX: Float, toY: Float) {
         cubicTo(
             fromX + 2f / 3f * (cx - fromX), fromY + 2f / 3f * (cy - fromY),
             toX + 2f / 3f * (cx - toX), toY + 2f / 3f * (cy - toY),
-            toX, toY,
-        )
+            toX, toY
+)
     }
-
-    // ------------------------------------------------------------------ scenes
 
     private fun mountains(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random, dawn: Boolean) {
         val horizon = h * 0.62f
@@ -254,8 +421,6 @@ object OeaWallpaperRenderer {
         val skyLow = if (dawn) Color.rgb(255, 168, 96) else Color.rgb(120, 120, 170)
         paint.shader = LinearGradient(0f, 0f, 0f, horizon, intArrayOf(skyTop, skyMid, skyLow), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), horizon, paint)
-
-        // Sun with a soft halo.
         val sunX = w * 0.68f
         val sunY = horizon - h * 0.06f
         val sunRadius = h * 0.045f
@@ -264,8 +429,6 @@ object OeaWallpaperRenderer {
         paint.shader = null
         paint.color = blend(Color.WHITE, skyLow, 0.35f)
         canvas.drawCircle(sunX, sunY, sunRadius, paint)
-
-        // Layered ridges, back to front, getting darker and less hazy.
         val layers = 4
         for (layer in 0 until layers) {
             val base = horizon - h * 0.02f + layer * h * 0.035f
@@ -287,8 +450,6 @@ object OeaWallpaperRenderer {
             paint.color = blend(Color.rgb(8, 10, 20), skyLow, 0.34f - layer * 0.09f)
             canvas.drawPath(path, paint)
         }
-
-        // Foreground slope plus a hint of snow on the nearest ridge.
         paint.color = blend(Color.rgb(6, 8, 16), skyLow, 0.08f)
         val slope = Path().apply {
             moveTo(0f, h.toFloat())
@@ -304,17 +465,11 @@ object OeaWallpaperRenderer {
 
     private fun forest(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random) {
         val horizon = h * 0.58f
-        paint.shader = LinearGradient(
-            0f, 0f, 0f, horizon,
-            intArrayOf(Color.rgb(8, 30, 34), Color.rgb(20, 74, 74), Color.rgb(96, 200, 168)),
-            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, 0f, 0f, horizon, intArrayOf(Color.rgb(8, 30, 34), Color.rgb(20, 74, 74), Color.rgb(96, 200, 168)), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), horizon, paint)
         paint.shader = null
         paint.color = alpha(Color.rgb(180, 255, 236), 0x44)
         canvas.drawCircle(w * 0.26f, h * 0.18f, h * 0.035f, paint)
-
-        // Three rows of pines, each row darker and taller than the one behind it.
         for (row in 0 until 3) {
             val rowBase = horizon - h * (0.02f - row * 0.012f) + row * h * 0.03f
             val treeHeight = h * (0.1f + row * 0.05f)
@@ -333,13 +488,7 @@ object OeaWallpaperRenderer {
                 x += treeWidth * 0.85f
             }
         }
-
-        // Water: a smooth band with horizontal glints.
-        paint.shader = LinearGradient(
-            0f, horizon, 0f, h.toFloat(),
-            intArrayOf(Color.rgb(10, 40, 52), Color.rgb(4, 18, 28)),
-            null, Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, horizon, 0f, h.toFloat(), intArrayOf(Color.rgb(10, 40, 52), Color.rgb(4, 18, 28)), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, horizon, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
         paint.color = alpha(Color.rgb(180, 255, 236), 0x38)
@@ -353,22 +502,12 @@ object OeaWallpaperRenderer {
 
     private fun desert(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random) {
         val horizon = h * 0.48f
-        paint.shader = LinearGradient(
-            0f, 0f, 0f, horizon,
-            intArrayOf(Color.rgb(28, 34, 74), Color.rgb(196, 104, 96), Color.rgb(255, 176, 112)),
-            floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, 0f, 0f, horizon, intArrayOf(Color.rgb(28, 34, 74), Color.rgb(196, 104, 96), Color.rgb(255, 176, 112)), floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), horizon, paint)
         paint.shader = null
         paint.color = blend(Color.WHITE, Color.rgb(255, 190, 120), 0.4f)
         canvas.drawCircle(w * 0.5f, horizon - h * 0.03f, h * 0.05f, paint)
-
-        // Sea band with shimmer, then dunes on top of it.
-        paint.shader = LinearGradient(
-            0f, horizon, 0f, horizon + h * 0.16f,
-            intArrayOf(Color.rgb(60, 60, 110), Color.rgb(30, 34, 70)),
-            null, Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, horizon, 0f, horizon + h * 0.16f, intArrayOf(Color.rgb(60, 60, 110), Color.rgb(30, 34, 70)), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, horizon, w.toFloat(), horizon + h * 0.16f, paint)
         paint.shader = null
         paint.color = alpha(Color.rgb(255, 214, 170), 0x55)
@@ -378,8 +517,6 @@ object OeaWallpaperRenderer {
             val startX = random.nextFloat() * (w - lineWidth)
             canvas.drawRect(startX, y, startX + lineWidth, y + max(1f, h * 0.0014f), paint)
         }
-
-        // Two dunes as smooth curves.
         for (layer in 0 until 2) {
             val base = horizon + h * (0.12f + layer * 0.16f)
             val path = Path().apply {
@@ -397,15 +534,9 @@ object OeaWallpaperRenderer {
     }
 
     private fun city(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random) {
-        paint.shader = LinearGradient(
-            0f, 0f, 0f, h.toFloat(),
-            intArrayOf(Color.rgb(20, 22, 54), Color.rgb(58, 44, 96), Color.rgb(120, 70, 110)),
-            floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(Color.rgb(20, 22, 54), Color.rgb(58, 44, 96), Color.rgb(120, 70, 110)), floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
-
-        // Two rows of buildings; the far row is hazier and shorter.
         for (row in 0 until 2) {
             val base = h * (0.72f + row * 0.08f)
             val maxHeight = h * (0.22f + row * 0.16f)
@@ -417,7 +548,6 @@ object OeaWallpaperRenderer {
                 paint.color = blend(Color.rgb(10, 12, 26), Color.rgb(120, 90, 160), if (row == 0) 0.18f else 0.04f)
                 canvas.drawRect(x, top, x + buildingWidth, base, paint)
                 if (row == 1) {
-                    // Lit windows, deterministic per building.
                     paint.color = alpha(Color.rgb(255, 214, 140), 0xAA)
                     val cols = max(2, (buildingWidth / (w * 0.014f)).toInt())
                     val rows = max(2, (buildingHeight / (h * 0.022f)).toInt())
@@ -433,21 +563,14 @@ object OeaWallpaperRenderer {
                 x += buildingWidth * 1.06f
             }
         }
-        // Water/reflection strip at the bottom.
         paint.color = alpha(Color.rgb(255, 200, 150), 0x12)
         canvas.drawRect(0f, h * 0.86f, w.toFloat(), h.toFloat(), paint)
     }
 
     private fun aurora(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random) {
-        paint.shader = LinearGradient(
-            0f, 0f, 0f, h.toFloat(),
-            intArrayOf(Color.rgb(4, 10, 24), Color.rgb(8, 24, 44), Color.rgb(6, 14, 28)),
-            null, Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(Color.rgb(4, 10, 24), Color.rgb(8, 24, 44), Color.rgb(6, 14, 28)), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
-
-        // Stars.
         paint.color = alpha(Color.WHITE, 0xCC)
         for (i in 0 until 220) {
             val x = random.nextFloat() * w
@@ -455,8 +578,6 @@ object OeaWallpaperRenderer {
             val size = if (random.nextFloat() > 0.85f) w * 0.0022f else w * 0.0012f
             canvas.drawCircle(x, y, size, paint)
         }
-
-        // Aurora ribbons: three translucent, curved bands.
         val colors = intArrayOf(Color.rgb(120, 255, 200), Color.rgb(140, 190, 255), Color.rgb(200, 140, 255))
         for (band in 0 until 3) {
             val path = Path()
@@ -472,35 +593,19 @@ object OeaWallpaperRenderer {
             path.lineTo(w.toFloat(), h.toFloat())
             path.lineTo(0f, h.toFloat())
             path.close()
-            paint.shader = LinearGradient(
-                0f, baseY - amplitude, 0f, baseY + h * 0.3f,
-                intArrayOf(alpha(colors[band], 0x66), alpha(colors[band], 0x10), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-            )
+            paint.shader = LinearGradient(0f, baseY - amplitude, 0f, baseY + h * 0.3f, intArrayOf(alpha(colors[band], 0x66), alpha(colors[band], 0x10), Color.TRANSPARENT), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
             canvas.drawPath(path, paint)
             paint.shader = null
         }
-
-        // Cold ground glow.
-        paint.shader = LinearGradient(
-            0f, h * 0.82f, 0f, h.toFloat(),
-            intArrayOf(Color.TRANSPARENT, alpha(Color.rgb(90, 200, 200), 0x3C)),
-            null, Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, h * 0.82f, 0f, h.toFloat(), intArrayOf(Color.TRANSPARENT, alpha(Color.rgb(90, 200, 200), 0x3C)), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, h * 0.82f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
     }
 
     private fun nightSky(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random) {
-        paint.shader = LinearGradient(
-            0f, 0f, w.toFloat(), h.toFloat(),
-            intArrayOf(Color.rgb(6, 8, 20), Color.rgb(14, 12, 40), Color.rgb(4, 6, 16)),
-            null, Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, 0f, w.toFloat(), h.toFloat(), intArrayOf(Color.rgb(6, 8, 20), Color.rgb(14, 12, 40), Color.rgb(4, 6, 16)), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
-
-        // Nebula blobs.
         repeat(4) { index ->
             val cx = random.nextFloat() * w
             val cy = random.nextFloat() * h * 0.8f
@@ -514,8 +619,6 @@ object OeaWallpaperRenderer {
             canvas.drawCircle(cx, cy, radius, paint)
             paint.shader = null
         }
-
-        // Stars with a few bright ones.
         for (i in 0 until 420) {
             val x = random.nextFloat() * w
             val y = random.nextFloat() * h
@@ -526,23 +629,13 @@ object OeaWallpaperRenderer {
     }
 
     private fun ocean(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random) {
-        val sky = LinearGradient(
-            0f, 0f, 0f, h * 0.4f,
-            intArrayOf(Color.rgb(10, 40, 70), Color.rgb(60, 140, 190)),
-            null, Shader.TileMode.CLAMP,
-        )
+        val sky = LinearGradient(0f, 0f, 0f, h * 0.4f, intArrayOf(Color.rgb(10, 40, 70), Color.rgb(60, 140, 190)), null, Shader.TileMode.CLAMP)
         paint.shader = sky
         canvas.drawRect(0f, 0f, w.toFloat(), h * 0.4f, paint)
         paint.shader = null
-        paint.shader = LinearGradient(
-            0f, h * 0.4f, 0f, h.toFloat(),
-            intArrayOf(Color.rgb(20, 90, 150), Color.rgb(4, 26, 48)),
-            null, Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, h * 0.4f, 0f, h.toFloat(), intArrayOf(Color.rgb(20, 90, 150), Color.rgb(4, 26, 48)), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, h * 0.4f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
-
-        // Wave bands with a foam highlight per crest.
         for (band in 0 until 14) {
             val y = h * (0.4f + band * 0.045f)
             val amplitude = h * (0.004f + band * 0.0012f)
@@ -564,20 +657,16 @@ object OeaWallpaperRenderer {
             paint.color = alpha(Color.WHITE, 0x30)
             canvas.drawRect(0f, y - max(1f, h * 0.0008f), w.toFloat(), y + max(1f, h * 0.0008f), paint)
         }
-        // Sun glint.
         paint.shader = RadialGradient(w * 0.7f, h * 0.3f, w * 0.3f, intArrayOf(alpha(Color.WHITE, 0x44), Color.TRANSPARENT), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
         canvas.drawCircle(w * 0.7f, h * 0.3f, w * 0.3f, paint)
         paint.shader = null
-        random.nextInt() // keeps the sequence stable if the scene changes later
+        random.nextInt()
     }
 
     private fun terrazzo(canvas: Canvas, paint: Paint, w: Int, h: Int, random: Random) {
         paint.color = Color.rgb(244, 240, 234)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
-        val palette = intArrayOf(
-            Color.rgb(232, 184, 154), Color.rgb(178, 208, 216), Color.rgb(214, 190, 230),
-            Color.rgb(240, 224, 168), Color.rgb(198, 216, 188), Color.rgb(226, 168, 168),
-        )
+        val palette = intArrayOf(Color.rgb(232, 184, 154), Color.rgb(178, 208, 216), Color.rgb(214, 190, 230), Color.rgb(240, 224, 168), Color.rgb(198, 216, 188), Color.rgb(226, 168, 168))
         repeat(180) {
             val cx = random.nextFloat() * w
             val cy = random.nextFloat() * h
@@ -596,21 +685,15 @@ object OeaWallpaperRenderer {
             canvas.drawPath(path, paint)
         }
         paint.alpha = 0xFF
-        // Soft top light so the drawer and cards stay readable.
         paint.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(alpha(Color.WHITE, 0x55), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
     }
 
     private fun linen(canvas: Canvas, paint: Paint, w: Int, h: Int) {
-        paint.shader = LinearGradient(
-            0f, 0f, w.toFloat(), h.toFloat(),
-            intArrayOf(Color.rgb(250, 246, 240), Color.rgb(236, 228, 218)),
-            null, Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, 0f, w.toFloat(), h.toFloat(), intArrayOf(Color.rgb(250, 246, 240), Color.rgb(236, 228, 218)), null, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
-        // Woven texture: two sets of faint lines, cheap and subtle.
         paint.color = alpha(Color.rgb(180, 168, 150), 0x18)
         var x = 0f
         while (x < w) {
@@ -627,12 +710,7 @@ object OeaWallpaperRenderer {
     private fun mesh(canvas: Canvas, paint: Paint, w: Int, h: Int, dark: Boolean) {
         paint.color = if (dark) Color.rgb(4, 5, 9) else Color.rgb(248, 249, 252)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
-        val blobs = listOf(
-            Triple(0.18f, 0.16f, Color.rgb(60, 90, 200)),
-            Triple(0.85f, 0.28f, Color.rgb(140, 70, 200)),
-            Triple(0.25f, 0.75f, Color.rgb(30, 120, 130)),
-            Triple(0.75f, 0.9f, Color.rgb(180, 90, 90)),
-        )
+        val blobs = listOf(Triple(0.18f, 0.16f, Color.rgb(60, 90, 200)), Triple(0.85f, 0.28f, Color.rgb(140, 70, 200)), Triple(0.25f, 0.75f, Color.rgb(30, 120, 130)), Triple(0.75f, 0.9f, Color.rgb(180, 90, 90)))
         blobs.forEach { (fx, fy, color) ->
             val cx = w * fx
             val cy = h * fy
@@ -643,32 +721,16 @@ object OeaWallpaperRenderer {
         }
     }
 
-    /** Applies the user's dim preference; keeps icon contrast predictable. */
     private fun dim(canvas: Canvas, paint: Paint, w: Int, h: Int, scene: OeaWallpaper) {
-        // Bundled scenes are already tuned for icon contrast, so only a light
-        // top-to-bottom scrim is added: Home's own text colouring follows the
-        // scene's brightness (see OeaTheme), so this stays subtle.
         val strength = if (scene.light) 0x14 else 0x24
-        paint.shader = LinearGradient(
-            0f, 0f, 0f, h.toFloat(),
-            intArrayOf(alpha(Color.BLACK, strength), Color.TRANSPARENT, alpha(Color.BLACK, strength / 2)),
-            floatArrayOf(0f, 0.4f, 1f), Shader.TileMode.CLAMP,
-        )
+        paint.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(alpha(Color.BLACK, strength), Color.TRANSPARENT, alpha(Color.BLACK, strength / 2)), floatArrayOf(0f, 0.4f, 1f), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
         paint.shader = null
     }
 
-    // ------------------------------------------------------------------ colour
-
     fun alpha(color: Int, value: Int): Int = Color.argb(value.coerceIn(0, 255), Color.red(color), Color.green(color), Color.blue(color))
-
     fun blend(from: Int, to: Int, ratio: Float): Int {
         val r = ratio.coerceIn(0f, 1f)
-        return Color.argb(
-            255,
-            (Color.red(from) * (1 - r) + Color.red(to) * r).toInt(),
-            (Color.green(from) * (1 - r) + Color.green(to) * r).toInt(),
-            (Color.blue(from) * (1 - r) + Color.blue(to) * r).toInt(),
-        )
+        return Color.argb(255, (Color.red(from) * (1 - r) + Color.red(to) * r).toInt(), (Color.green(from) * (1 - r) + Color.green(to) * r).toInt(), (Color.blue(from) * (1 - r) + Color.blue(to) * r).toInt())
     }
 }
