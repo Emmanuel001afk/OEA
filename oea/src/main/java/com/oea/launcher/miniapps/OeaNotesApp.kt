@@ -213,7 +213,7 @@ object OeaNotesApp {
                         ))
                     }
                 }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(12) })
-                return@let
+                return@refresh
             }
 
             // Group by folder

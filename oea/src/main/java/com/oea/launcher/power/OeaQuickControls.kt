@@ -149,16 +149,17 @@ object OeaQuickControls {
                 }
             }
             runCatching {
+                var torchRowRef: LinearLayout? = null
                 val torchRow = kit.row(qsGroup, R.drawable.oic_contrast, "Flashlight", if (torchOn) "On" else "Tap to toggle") {
                     if (!toggleTorch()) toast("Flashlight not available on this device")
-                    // Update label
-                    (it as? LinearLayout)?.let { row ->
-                        // Find value view - best effort
+                    // Update label - best effort
+                    torchRowRef?.let { row ->
                         runCatching { row.getChildAt(2) as? android.widget.TextView }?.getOrNull()?.let { tv ->
                             tv.text = if (torchOn) "On" else "Off"
                         }
                     }
                 }
+                torchRowRef = torchRow
             }
             runCatching {
                 kit.row(qsGroup, R.drawable.oic_auto_awesome, "Auto-rotate", "Open display settings") {
