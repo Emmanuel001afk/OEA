@@ -29,15 +29,23 @@ class OeaMiniAppActivity : Activity() {
         super.onCreate(savedInstanceState)
         palette = OeaTheme.resolve(this)
         kit = OeaKit(this, palette)
-        screenId = intent.getStringExtra(EXTRA_APP)
+        screenId = intent.getStringExtra(EXTRA_APP) ?: resolveAliasId()
         render()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        screenId = intent.getStringExtra(EXTRA_APP)
+        screenId = intent.getStringExtra(EXTRA_APP) ?: resolveAliasId()
         render()
+    }
+
+    private fun resolveAliasId(): String? {
+        return try {
+            val pm = packageManager
+            val info = pm.getActivityInfo(componentName, android.content.pm.PackageManager.GET_META_DATA)
+            info.metaData?.getString("oea.miniapp.id")
+        } catch (_: Throwable) { null }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
