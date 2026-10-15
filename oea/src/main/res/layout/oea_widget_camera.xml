@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#CC1A1F2B"
+    android:padding="12dp">
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="OEA Camera"
+        android:textSize="12sp"
+        android:textColor="#78D9FF"
+        android:fontFamily="sans-serif-medium"/>
+    <TextView
+        android:id="@+id/notes_content"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pro controls • Tap to open"
+        android:textSize="13sp"
+        android:textColor="#FFFFFF"
+        android:layout_marginTop="8dp"
+        android:maxLines="4"/>
+</LinearLayout>

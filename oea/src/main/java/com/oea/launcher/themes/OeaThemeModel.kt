@@ -113,6 +113,13 @@ object OeaThemeCatalog {
     val STORM_LOCK = OeaImageRef.Generated("storm_night", "Storm night")
     val BLOOM_LOCK = OeaImageRef.Generated("bloom_night", "Bloom night")
     val ABYSS_LOCK = OeaImageRef.Generated("abyss_night", "Abyss night")
+    // New lock wallpapers
+    val NEON_LOCK_GEN = OeaImageRef.Generated("lock_neon", "Neon lock")
+    val ARCTIC_LOCK_GEN = OeaImageRef.Generated("lock_arctic", "Arctic lock")
+    val VOLCANIC_LOCK_GEN = OeaImageRef.Generated("lock_volcanic", "Volcanic lock")
+    val ZEN_LOCK_GEN = OeaImageRef.Generated("lock_zen", "Zen lock")
+    val OBSIDIAN_LOCK_GEN = OeaImageRef.Generated("lock_obsidian", "Obsidian lock")
+    val PRISM_LOCK_GEN = OeaImageRef.Generated("lock_prism", "Prism lock")
     // Wallpaper-art based for themes (distinct from wallpaper library usage)
     val CRIMSON_TIDE_HOME = OeaImageRef.Generated("crimson_tide", "Crimson tide")
     val EMERALD_HOME = OeaImageRef.Generated("emerald_depth", "Emerald depth")
@@ -126,6 +133,23 @@ object OeaThemeCatalog {
     val MIDNIGHT_BLOOM_HOME = OeaImageRef.Generated("midnight_bloom", "Midnight bloom")
     val OCEAN_ABYSS_HOME = OeaImageRef.Generated("ocean_abyss", "Ocean abyss")
     val PAPER_LIGHT_HOME = OeaImageRef.Generated("paper_light", "Paper light")
+    // Mass expansion 16 new homes for peak beauty
+    val NEON_PULSE_HOME = OeaImageRef.Generated("neon_pulse", "Neon pulse")
+    val ARCTIC_AURORA_HOME = OeaImageRef.Generated("arctic_aurora", "Arctic aurora")
+    val VOLCANIC_GLOW_HOME = OeaImageRef.Generated("volcanic_glow", "Volcanic glow")
+    val CYBER_GRID_HOME = OeaImageRef.Generated("cyber_grid", "Cyber grid")
+    val LUSH_JUNGLE_HOME = OeaImageRef.Generated("lush_jungle", "Lush jungle")
+    val STARLIGHT_DESERT_HOME = OeaImageRef.Generated("starlight_desert", "Starlight desert")
+    val CORAL_REEF_HOME = OeaImageRef.Generated("coral_reef", "Coral reef")
+    val MONSOON_CLOUD_HOME = OeaImageRef.Generated("monsoon_cloud", "Monsoon cloud")
+    val GOLDEN_HOUR_HOME = OeaImageRef.Generated("golden_hour", "Golden hour")
+    val FROSTED_LAKE_HOME = OeaImageRef.Generated("frosted_lake", "Frosted lake")
+    val OBSIDIAN_MIRROR_HOME = OeaImageRef.Generated("obsidian_mirror", "Obsidian mirror")
+    val PRISM_SHARD_HOME = OeaImageRef.Generated("prism_shard", "Prism shard")
+    val TUNDRA_DAWN_HOME = OeaImageRef.Generated("tundra_dawn", "Tundra dawn")
+    val MAGMA_FLOW_HOME = OeaImageRef.Generated("magma_flow", "Magma flow")
+    val ZEN_GARDEN_HOME = OeaImageRef.Generated("zen_garden", "Zen garden")
+    val NEBULA_CORE_HOME = OeaImageRef.Generated("nebula_core", "Nebula core")
 
     /** Every bundled picture, offered in the wallpaper library too. */
     val bundledImages: List<OeaImageRef.Bundled> = listOf(
@@ -137,9 +161,10 @@ object OeaThemeCatalog {
     fun bundled(name: String): OeaImageRef.Bundled? = bundledImages.firstOrNull { it.name == name }
 
     /**
-     * Twenty polished themes: original 10 + 10 new distinct coordinated looks.
+     * Thirty polished themes: original 10 + 10 + 10 new distinct coordinated looks.
      * Themes provide coordinated appearance: same image for home & lock or different,
-     * with colours matched. Wallpaper has its own distinct collection.
+     * with colours matched. Wallpaper has its own distinct collection (now 66 wallpapers).
+     * Proper previews with larger distinct collections, fixed transparent/white look.
      */
     val builtIns: List<OeaThemeSpec> = listOf(
         OeaThemeSpec(
@@ -242,6 +267,57 @@ object OeaThemeCatalog {
             "paper_light", "Paper Light", "Light paper, calm and readable", PAPER_LIGHT_HOME, SAND_LIGHT_LOCK,
             accentDark = Color.rgb(200, 190, 160), accentLight = Color.rgb(100, 90, 70), surfaceTint = Color.rgb(245, 240, 225),
             mode = "light", glassStyle = "classic", iconShape = "circle", dockStyle = "none", pageEffect = "paper",
+        ),
+        // Mass expansion 10 more distinct themes for peak — total 30
+        OeaThemeSpec(
+            "neon_pulse", "Neon Pulse", "Pulsing neon lines, vibrant energetic", NEON_PULSE_HOME, NEON_LOCK_GEN,
+            accentDark = Color.rgb(255, 100, 220), accentLight = Color.rgb(180, 30, 140), surfaceTint = Color.rgb(48, 12, 48),
+            mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "zoom",
+        ),
+        OeaThemeSpec(
+            "arctic_aurora", "Arctic Aurora", "Arctic aurora with ice glow", ARCTIC_AURORA_HOME, ARCTIC_LOCK_GEN,
+            accentDark = Color.rgb(120, 240, 255), accentLight = Color.rgb(0, 130, 160), surfaceTint = Color.rgb(12, 40, 56),
+            mode = "dark", glassStyle = "liquid", iconShape = "rounded", dockStyle = "glass", pageEffect = "liquid",
+        ),
+        OeaThemeSpec(
+            "volcanic_glow", "Volcanic Glow", "Volcanic glow with ember and ash", VOLCANIC_GLOW_HOME, VOLCANIC_LOCK_GEN,
+            accentDark = Color.rgb(255, 130, 60), accentLight = Color.rgb(180, 50, 20), surfaceTint = Color.rgb(64, 20, 12),
+            mode = "dark", glassStyle = "classic", iconShape = "rounded", dockStyle = "solid", pageEffect = "cube",
+        ),
+        OeaThemeSpec(
+            "cyber_grid", "Cyber Grid", "Cyberpunk grid with neon perspective", CYBER_GRID_HOME, OBSIDIAN_LOCK_GEN,
+            accentDark = Color.rgb(100, 255, 180), accentLight = Color.rgb(0, 160, 90), surfaceTint = Color.rgb(8, 32, 24),
+            mode = "dark", glassStyle = "liquid", iconShape = "square", dockStyle = "glass", pageEffect = "stack",
+        ),
+        OeaThemeSpec(
+            "lush_jungle", "Lush Jungle", "Jungle canopy with light shafts", LUSH_JUNGLE_HOME, PINE_LOCK,
+            accentDark = Color.rgb(100, 220, 140), accentLight = Color.rgb(20, 120, 60), surfaceTint = Color.rgb(16, 48, 24),
+            mode = "dark", glassStyle = "classic", iconShape = "circle", dockStyle = "glass", pageEffect = "fade",
+        ),
+        OeaThemeSpec(
+            "coral_reef", "Coral Reef", "Underwater coral reef with sun rays", CORAL_REEF_HOME, OCEAN_NIGHT_LOCK,
+            accentDark = Color.rgb(255, 150, 190), accentLight = Color.rgb(180, 50, 90), surfaceTint = Color.rgb(64, 24, 32),
+            mode = "system", glassStyle = "liquid", iconShape = "circle", dockStyle = "glass", pageEffect = "liquid",
+        ),
+        OeaThemeSpec(
+            "golden_hour", "Golden Hour", "Golden hour over fields, warm bright", GOLDEN_HOUR_HOME, ZEN_LOCK_GEN,
+            accentDark = Color.rgb(255, 215, 100), accentLight = Color.rgb(160, 100, 20), surfaceTint = Color.rgb(80, 50, 20),
+            mode = "light", glassStyle = "classic", iconShape = "rounded", dockStyle = "solid", pageEffect = "zoom",
+        ),
+        OeaThemeSpec(
+            "obsidian_mirror", "Obsidian Mirror", "Black obsidian mirror, OLED pure", OBSIDIAN_MIRROR_HOME, OBSIDIAN_LOCK_GEN,
+            accentDark = Color.rgb(210, 210, 220), accentLight = Color.rgb(80, 80, 90), surfaceTint = Color.rgb(10, 10, 14),
+            mode = "dark", glassStyle = "classic", iconShape = "square", dockStyle = "none", pageEffect = "none",
+        ),
+        OeaThemeSpec(
+            "prism_shard", "Prism Shard", "Prism shards with rainbow refractions", PRISM_SHARD_HOME, PRISM_LOCK_GEN,
+            accentDark = Color.rgb(190, 150, 255), accentLight = Color.rgb(90, 60, 180), surfaceTint = Color.rgb(32, 20, 56),
+            mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "depth",
+        ),
+        OeaThemeSpec(
+            "nebula_core", "Nebula Core", "Nebula core star formation, cosmic", NEBULA_CORE_HOME, ABYSS_LOCK,
+            accentDark = Color.rgb(210, 130, 255), accentLight = Color.rgb(100, 40, 180), surfaceTint = Color.rgb(32, 12, 48),
+            mode = "dark", glassStyle = "liquid", iconShape = "circle", dockStyle = "glass", pageEffect = "zoom",
         ),
     )
 

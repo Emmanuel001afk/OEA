@@ -64,7 +64,24 @@ object OeaArtwork {
         "midnight_bloom" to look(Color.rgb(12, 8, 24), Color.rgb(48, 24, 80), Color.rgb(200, 140, 255), Color.rgb(160, 100, 220)),
         "ocean_abyss" to look(Color.rgb(2, 10, 20), Color.rgb(8, 36, 72), Color.rgb(70, 180, 255), Color.rgb(40, 140, 220)),
         "paper_light" to look(Color.rgb(250, 248, 240), Color.rgb(220, 216, 200), Color.rgb(120, 110, 90), Color.rgb(200, 195, 180), dark = false),
-        // ---- wallpaper set: lock screen (original 6 + expanded 8)
+        // ---- mass expansion 16 new home wallpapers for peak beauty
+        "neon_pulse" to look(Color.rgb(12, 4, 20), Color.rgb(64, 12, 64), Color.rgb(255, 80, 200), Color.rgb(200, 40, 160)),
+        "arctic_aurora" to look(Color.rgb(6, 12, 20), Color.rgb(12, 40, 64), Color.rgb(120, 240, 255), Color.rgb(60, 200, 240)),
+        "volcanic_glow" to look(Color.rgb(24, 8, 4), Color.rgb(96, 24, 8), Color.rgb(255, 120, 40), Color.rgb(200, 60, 20)),
+        "cyber_grid" to look(Color.rgb(4, 12, 12), Color.rgb(8, 32, 24), Color.rgb(100, 255, 180), Color.rgb(60, 200, 140)),
+        "lush_jungle" to look(Color.rgb(8, 16, 8), Color.rgb(16, 48, 24), Color.rgb(80, 200, 120), Color.rgb(50, 160, 90)),
+        "starlight_desert" to look(Color.rgb(12, 10, 20), Color.rgb(32, 28, 56), Color.rgb(180, 160, 255), Color.rgb(120, 100, 200)),
+        "coral_reef" to look(Color.rgb(16, 8, 12), Color.rgb(64, 24, 32), Color.rgb(255, 140, 180), Color.rgb(200, 80, 120)),
+        "monsoon_cloud" to look(Color.rgb(16, 20, 24), Color.rgb(40, 56, 72), Color.rgb(140, 180, 220), Color.rgb(90, 130, 180)),
+        "golden_hour" to look(Color.rgb(255, 245, 220), Color.rgb(220, 180, 100), Color.rgb(160, 100, 20), Color.rgb(255, 210, 80), dark = false),
+        "frosted_lake" to look(Color.rgb(220, 235, 245), Color.rgb(160, 190, 210), Color.rgb(80, 120, 160), Color.rgb(200, 220, 240), dark = false),
+        "obsidian_mirror" to look(Color.rgb(2, 2, 4), Color.rgb(12, 12, 16), Color.rgb(200, 200, 210), Color.rgb(100, 100, 110)),
+        "prism_shard" to look(Color.rgb(12, 8, 20), Color.rgb(32, 20, 64), Color.rgb(180, 140, 255), Color.rgb(120, 80, 200)),
+        "tundra_dawn" to look(Color.rgb(24, 12, 16), Color.rgb(80, 40, 56), Color.rgb(255, 180, 200), Color.rgb(200, 120, 160)),
+        "magma_flow" to look(Color.rgb(20, 6, 4), Color.rgb(80, 20, 8), Color.rgb(255, 100, 60), Color.rgb(200, 60, 30)),
+        "zen_garden" to look(Color.rgb(245, 240, 230), Color.rgb(210, 200, 180), Color.rgb(130, 120, 100), Color.rgb(230, 220, 200), dark = false),
+        "nebula_core" to look(Color.rgb(8, 4, 16), Color.rgb(32, 12, 48), Color.rgb(200, 120, 255), Color.rgb(140, 60, 200)),
+        // ---- wallpaper set: lock screen (original 6 + expanded 8 + 6 new = 20)
         "lock_midnight" to look(Color.rgb(4, 6, 16), Color.rgb(14, 22, 54), Color.rgb(140, 178, 255), Color.rgb(70, 110, 220)),
         "lock_ember" to look(Color.rgb(12, 8, 10), Color.rgb(56, 22, 16), Color.rgb(255, 148, 84), Color.rgb(210, 90, 40)),
         "lock_frost" to look(Color.rgb(226, 234, 242), Color.rgb(168, 190, 210), Color.rgb(70, 100, 130), Color.rgb(255, 255, 255), dark = false),
@@ -79,6 +96,13 @@ object OeaArtwork {
         "lock_slate" to look(Color.rgb(10, 12, 16), Color.rgb(36, 42, 54), Color.rgb(160, 180, 200), Color.rgb(110, 130, 160)),
         "lock_amber" to look(Color.rgb(32, 20, 8), Color.rgb(96, 64, 16), Color.rgb(255, 190, 80), Color.rgb(200, 140, 40)),
         "lock_ocean" to look(Color.rgb(4, 12, 20), Color.rgb(12, 40, 64), Color.rgb(90, 190, 255), Color.rgb(50, 140, 220)),
+        // 6 new lock wallpapers
+        "lock_neon" to look(Color.rgb(12, 4, 20), Color.rgb(48, 12, 48), Color.rgb(255, 80, 200), Color.rgb(180, 40, 140)),
+        "lock_arctic" to look(Color.rgb(6, 12, 20), Color.rgb(12, 36, 56), Color.rgb(120, 240, 255), Color.rgb(60, 180, 220)),
+        "lock_volcanic" to look(Color.rgb(20, 6, 4), Color.rgb(72, 20, 8), Color.rgb(255, 120, 40), Color.rgb(180, 60, 20)),
+        "lock_zen" to look(Color.rgb(245, 240, 230), Color.rgb(210, 200, 180), Color.rgb(130, 120, 100), Color.rgb(230, 220, 200), dark = false),
+        "lock_obsidian" to look(Color.rgb(2, 2, 4), Color.rgb(12, 12, 16), Color.rgb(200, 200, 210), Color.rgb(90, 90, 100)),
+        "lock_prism" to look(Color.rgb(12, 8, 20), Color.rgb(32, 20, 56), Color.rgb(180, 140, 255), Color.rgb(110, 80, 180)),
         // ---- generated theme artwork (original 5 + expanded 10)
         "aurora_night" to look(Color.rgb(6, 16, 28), Color.rgb(14, 52, 62), Color.rgb(120, 240, 208), Color.rgb(60, 200, 190)),
         "glass_deep" to look(Color.rgb(6, 10, 26), Color.rgb(20, 40, 88), Color.rgb(150, 200, 255), Color.rgb(70, 130, 240)),
@@ -110,13 +134,18 @@ object OeaArtwork {
         "mist_valley", "orbit_dawn", "slate_lines",
         "crimson_tide", "emerald_depth", "sapphire_drift", "amber_haze",
         "violet_storm", "teal_lagoon", "sunset_ridge", "frosted_pine",
-        "desert_mirage", "midnight_bloom", "ocean_abyss", "paper_light"
+        "desert_mirage", "midnight_bloom", "ocean_abyss", "paper_light",
+        "neon_pulse", "arctic_aurora", "volcanic_glow", "cyber_grid",
+        "lush_jungle", "starlight_desert", "coral_reef", "monsoon_cloud",
+        "golden_hour", "frosted_lake", "obsidian_mirror", "prism_shard",
+        "tundra_dawn", "magma_flow", "zen_garden", "nebula_core"
     )
 
     /** Wallpaper lock set IDs */
     val lockArtIds = listOf(
         "lock_midnight", "lock_ember", "lock_frost", "lock_violet", "lock_noir", "lock_halo",
-        "lock_crimson", "lock_teal", "lock_sand", "lock_forest", "lock_orbit", "lock_slate", "lock_amber", "lock_ocean"
+        "lock_crimson", "lock_teal", "lock_sand", "lock_forest", "lock_orbit", "lock_slate", "lock_amber", "lock_ocean",
+        "lock_neon", "lock_arctic", "lock_volcanic", "lock_zen", "lock_obsidian", "lock_prism"
     )
 
     fun isKnown(id: String?): Boolean = id != null && LOOKS.containsKey(id)
@@ -171,6 +200,28 @@ object OeaArtwork {
         "lock_slate" -> "Slate lock"
         "lock_amber" -> "Amber lock"
         "lock_ocean" -> "Ocean lock"
+        "lock_neon" -> "Neon lock"
+        "lock_arctic" -> "Arctic lock"
+        "lock_volcanic" -> "Volcanic lock"
+        "lock_zen" -> "Zen lock"
+        "lock_obsidian" -> "Obsidian lock"
+        "lock_prism" -> "Prism lock"
+        "neon_pulse" -> "Neon pulse"
+        "arctic_aurora" -> "Arctic aurora"
+        "volcanic_glow" -> "Volcanic glow"
+        "cyber_grid" -> "Cyber grid"
+        "lush_jungle" -> "Lush jungle"
+        "starlight_desert" -> "Starlight desert"
+        "coral_reef" -> "Coral reef"
+        "monsoon_cloud" -> "Monsoon cloud"
+        "golden_hour" -> "Golden hour"
+        "frosted_lake" -> "Frosted lake"
+        "obsidian_mirror" -> "Obsidian mirror"
+        "prism_shard" -> "Prism shard"
+        "tundra_dawn" -> "Tundra dawn"
+        "magma_flow" -> "Magma flow"
+        "zen_garden" -> "Zen garden"
+        "nebula_core" -> "Nebula core"
         else -> id.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 

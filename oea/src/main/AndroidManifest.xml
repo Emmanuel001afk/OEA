@@ -531,5 +531,45 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/oea_widget_notes_info" />
         </receiver>
+        <receiver
+            android:name="com.oea.launcher.widgets.OeaImageWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/oea_widget_image_info" />
+        </receiver>
+        <receiver
+            android:name="com.oea.launcher.widgets.OeaVideoWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/oea_widget_video_info" />
+        </receiver>
+        <receiver
+            android:name="com.oea.launcher.widgets.OeaCalculatorWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/oea_widget_calculator_info" />
+        </receiver>
+        <receiver
+            android:name="com.oea.launcher.widgets.OeaCameraWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/oea_widget_camera_info" />
+        </receiver>
     </application>
 </manifest>

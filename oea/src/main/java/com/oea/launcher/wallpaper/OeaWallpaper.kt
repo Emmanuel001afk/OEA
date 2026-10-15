@@ -184,7 +184,89 @@ enum class OeaWallpaper(
         Color.rgb(120, 110, 90), light = true,
     ),
 
-    // Lock screen wallpapers - original 6 + expanded 8 = 14
+    // Mass expansion — 16 new distinct home wallpapers for peak beauty
+    NEON_PULSE(
+        "neon_pulse", "Neon pulse",
+        "Pulsing neon lines with dark centre, vibrant and energetic.",
+        Color.rgb(255, 80, 200), light = false,
+    ),
+    ARCTIC_AURORA(
+        "arctic_aurora", "Arctic aurora",
+        "Arctic aurora with ice glow and star field.",
+        Color.rgb(120, 240, 255), light = false,
+    ),
+    VOLCANIC_GLOW(
+        "volcanic_glow", "Volcanic glow",
+        "Volcanic glow with ember and ash, dramatic.",
+        Color.rgb(255, 120, 40), light = false,
+    ),
+    CYBER_GRID(
+        "cyber_grid", "Cyber grid",
+        "Cyberpunk grid with perspective and neon.",
+        Color.rgb(100, 255, 180), light = false,
+    ),
+    LUSH_JUNGLE(
+        "lush_jungle", "Lush jungle",
+        "Lush jungle canopy with light shafts.",
+        Color.rgb(80, 200, 120), light = false,
+    ),
+    STARLIGHT_DESERT(
+        "starlight_desert", "Starlight desert",
+        "Desert under starlight, calm and vast.",
+        Color.rgb(180, 160, 255), light = false,
+    ),
+    CORAL_REEF(
+        "coral_reef", "Coral reef",
+        "Underwater coral reef with sun rays.",
+        Color.rgb(255, 140, 180), light = false,
+    ),
+    MONSOON_CLOUD(
+        "monsoon_cloud", "Monsoon cloud",
+        "Dramatic monsoon clouds with light breaks.",
+        Color.rgb(140, 180, 220), light = false,
+    ),
+    GOLDEN_HOUR(
+        "golden_hour", "Golden hour",
+        "Golden hour light over fields, warm and bright.",
+        Color.rgb(255, 210, 80), light = true,
+    ),
+    FROSTED_LAKE(
+        "frosted_lake", "Frosted lake",
+        "Frozen lake with frost and distant pines.",
+        Color.rgb(180, 220, 240), light = true,
+    ),
+    OBSIDIAN_MIRROR(
+        "obsidian_mirror", "Obsidian mirror",
+        "Black obsidian mirror with faint reflections, OLED.",
+        Color.rgb(200, 200, 210), light = false,
+    ),
+    PRISM_SHARD(
+        "prism_shard", "Prism shard",
+        "Prism shards with rainbow refractions.",
+        Color.rgb(180, 140, 255), light = false,
+    ),
+    TUNDRA_DAWN(
+        "tundra_dawn", "Tundra dawn",
+        "Tundra at dawn with soft pink sky.",
+        Color.rgb(255, 180, 200), light = false,
+    ),
+    MAGMA_FLOW(
+        "magma_flow", "Magma flow",
+        "Flowing magma with cooling crust, intense.",
+        Color.rgb(255, 100, 60), light = false,
+    ),
+    ZEN_GARDEN(
+        "zen_garden", "Zen garden",
+        "Minimal zen garden with raked sand and stone, calm.",
+        Color.rgb(160, 150, 130), light = true,
+    ),
+    NEBULA_CORE(
+        "nebula_core", "Nebula core",
+        "Nebula core with star formation, cosmic.",
+        Color.rgb(200, 120, 255), light = false,
+    ),
+
+    // Lock screen wallpapers - original 6 + expanded 8 = 14 + 6 new = 20
     LOCK_MIDNIGHT(
         "lock_midnight", "Midnight",
         "Deep blue rings around a single star of light.",
@@ -254,6 +336,36 @@ enum class OeaWallpaper(
         "lock_ocean", "Ocean lock",
         "Deep ocean lock with blue glow.",
         Color.rgb(90, 190, 255), light = false, forLock = true,
+    ),
+    LOCK_NEON(
+        "lock_neon", "Neon lock",
+        "Neon pulse with clear centre for clock.",
+        Color.rgb(255, 80, 200), light = false, forLock = true,
+    ),
+    LOCK_ARCTIC(
+        "lock_arctic", "Arctic lock",
+        "Arctic aurora lock, calm centre.",
+        Color.rgb(120, 240, 255), light = false, forLock = true,
+    ),
+    LOCK_VOLCANIC(
+        "lock_volcanic", "Volcanic lock",
+        "Volcanic glow lock, dark with ember.",
+        Color.rgb(255, 120, 40), light = false, forLock = true,
+    ),
+    LOCK_ZEN(
+        "lock_zen", "Zen lock",
+        "Zen garden lock, minimal and bright.",
+        Color.rgb(160, 150, 130), light = true, forLock = true,
+    ),
+    LOCK_OBSIDIAN(
+        "lock_obsidian", "Obsidian lock",
+        "Obsidian mirror lock, OLED friendly.",
+        Color.rgb(200, 200, 210), light = false, forLock = true,
+    ),
+    LOCK_PRISM(
+        "lock_prism", "Prism lock",
+        "Prism shard lock with rainbow.",
+        Color.rgb(180, 140, 255), light = false, forLock = true,
     );
 
     companion object {

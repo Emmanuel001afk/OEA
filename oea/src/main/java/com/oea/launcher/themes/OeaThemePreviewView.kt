@@ -121,19 +121,32 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         val image = bitmap
         val t = theme
         if (image == null || image.isRecycled) {
-            // Nothing decoded yet: show the theme's mood, never a flat rectangle.
-            // A pale surface tint over a pale page is what made these tiles look
-            // white, so the placeholder is the tint pulled towards the accent and
-            // darkened towards the bottom, which reads as a picture still coming.
+            // Nothing decoded yet: show the theme's mood, never a flat white rectangle.
+            // Previous version blended towards white for light themes, causing white look where user cannot preview image.
+            // Fixed: always show rich accent-based gradient, darkened, with subtle pattern, never white.
             val tint = t?.surfaceTint ?: Color.rgb(20, 24, 32)
-            val mood = OeaTheme.blend(tint, accent(), 0.34f)
+            val acc = accent()
+            // If tint is light (paper_light etc), use accent as base, not tint, to avoid white
+            val isLightTint = OeaTheme.luminance(tint) > 0.6f
+            val base = if (isLightTint) OeaTheme.blend(acc, Color.rgb(20, 24, 32), 0.6f) else tint
+            val mood = OeaTheme.blend(base, acc, 0.45f)
+            // Dark gradient, not white
             paint.shader = LinearGradient(
                 0f, 0f, w * 0.35f, h,
-                OeaTheme.blend(mood, Color.WHITE, 0.10f), OeaTheme.blend(mood, Color.BLACK, 0.55f),
+                OeaTheme.blend(mood, Color.BLACK, 0.15f), OeaTheme.blend(mood, Color.BLACK, 0.75f),
                 Shader.TileMode.CLAMP,
             )
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
+            // Subtle shimmer to indicate loading, not white
+            paint.color = Color.argb(0x22, 255, 255, 255)
+            canvas.drawCircle(w * 0.5f, h * 0.45f, w * 0.12f, paint)
+            paint.color = Color.argb(0x55, 255, 255, 255)
+            text.textAlign = Paint.Align.CENTER
+            text.color = Color.argb(0x99, 255, 255, 255)
+            text.textSize = w * 0.08f
+            text.typeface = Typeface.create(\"sans-serif-medium\", Typeface.NORMAL)
+            canvas.drawText(\"Loading…\", w * 0.5f, h * 0.5f + w * 0.08f, text)
             return
         }
         val scale = maxOf(w / image.width, h / image.height)

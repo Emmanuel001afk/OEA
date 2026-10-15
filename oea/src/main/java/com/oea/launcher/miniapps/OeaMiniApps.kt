@@ -70,6 +70,9 @@ object OeaMiniApps {
         App(
             "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.oic_photo_library,
         ) { host, palette -> OeaGalleryApp.build(host, palette) },
+        App(
+            "voice", "OEA Voice", "Launcher's own speech recognizer — competes with Google, offline + launcher commands", R.drawable.oic_mic,
+        ) { host, palette -> OeaVoiceApp.build(host, palette) },
     )
 
     fun byId(id: String?): App? = all.firstOrNull { it.id == id }
