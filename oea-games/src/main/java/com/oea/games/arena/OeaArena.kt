@@ -179,11 +179,11 @@ class OeaArena : OeaGame() {
         sim = ArenaSim(seed, map, fast, skill)
         when (rules) {
             // Permanent night; the moon and your muzzle flash are the light.
-            "lights_out" -> { env.set(envNight); env.fogDensity = 0.014f; env.ambientIntensity = 0.42f }
+            "lights_out" -> { env.copyFrom(envNight); env.fogDensity = 0.014f; env.ambientIntensity = 0.42f }
             // A sick-green night with dense fog: zombies find you before you find them.
-            "haunted" -> { env.set(envNight); env.fogColor = 0xFF16241C.toInt(); env.fogDensity = 0.017f; env.skyAmbient = 0xFF2E4638.toInt() }
+            "haunted" -> { env.copyFrom(envNight); env.fogColor = 0xFF16241C.toInt(); env.fogDensity = 0.017f; env.skyAmbient = 0xFF2E4638.toInt() }
             // Day turns to night while wave after wave lands on the island.
-            "last_day" -> { env.set(envDay); sim.zone.enabled = false }
+            "last_day" -> { env.copyFrom(envDay); sim.zone.enabled = false }
         }
         if (rules == "last_day" || rules == "haunted" || rules == "lights_out") {
             // Survival crowds: more undead, and they just keep coming.
