@@ -127,6 +127,8 @@ internal interface ArenaEvents {
 
 /** Safe zone that shrinks in phases, damaging players outside. */
 internal class Zone(seed: Long, startRadius: Float, private val fast: Boolean) {
+    /** Survival modes turn the zone off: the whole island stays in play. */
+    var enabled = true
     private val rng = Rng(seed xor 0x2011E)
     var cx = 0f; var cz = 0f; var radius = startRadius
     var fromX = 0f; var fromZ = 0f; var fromR = startRadius
@@ -244,8 +246,8 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
             applyInput(p, dt)
             p.history.record((time * 1000f).toLong(), p.pos.x, p.pos.y, p.pos.z)
         }
-        if (zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
-        for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, zoneDamage = true)
+        if (zone.enabled && zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
+        if (zone.enabled) for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, zoneDamage = true)
         if (players.size > 1 && aliveCount <= 1 && !over) {
             over = true
             winner = players.values.firstOrNull { it.alive }

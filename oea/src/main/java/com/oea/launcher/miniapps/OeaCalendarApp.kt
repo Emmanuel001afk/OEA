@@ -101,6 +101,39 @@ object OeaCalendarApp {
         var filterCategory: String? = null
         var refresh: () -> Unit = {}
 
+        // Android calendar-role INSERT (another app hands over an event as
+        // extras; no provider permission needed on our side). Added once,
+        // then the intent is consumed so rebuilds don't duplicate it.
+        run {
+            val intent = host.intent
+            if (intent != null && intent.action == android.content.Intent.ACTION_INSERT &&
+                intent.type == "vnd.android.cursor.item/event"
+            ) {
+                val title = intent.getStringExtra("title") ?: ""
+                val begin = intent.getLongExtra(android.provider.CalendarContract.Events.DTSTART, -1L)
+                val end = intent.getLongExtra(android.provider.CalendarContract.Events.DTEND, -1L)
+                val location = intent.getStringExtra(android.provider.CalendarContract.Events.EVENT_LOCATION) ?: ""
+                val desc = intent.getStringExtra(android.provider.CalendarContract.Events.DESCRIPTION) ?: ""
+                val allDay = intent.getIntExtra(android.provider.CalendarContract.Events.ALL_DAY, 0) == 1
+                if (begin > 0L) {
+                    val calStart = Calendar.getInstance().apply { timeInMillis = begin }
+                    val calEnd = Calendar.getInstance().apply { timeInMillis = if (end > begin) end else begin + 3_600_000L }
+                    val time = if (allDay) "" else String.format(java.util.Locale.US, "%02d:%02d", calStart.get(Calendar.HOUR_OF_DAY), calStart.get(Calendar.MINUTE))
+                    val endTime = if (allDay) "" else String.format(java.util.Locale.US, "%02d:%02d", calEnd.get(Calendar.HOUR_OF_DAY), calEnd.get(Calendar.MINUTE))
+                    val events = decode(prefs(host).getString(KEY_EVENTS, "")).toMutableList()
+                    events += Event(
+                        System.currentTimeMillis(),
+                        calStart.get(Calendar.YEAR), calStart.get(Calendar.MONTH), calStart.get(Calendar.DAY_OF_MONTH),
+                        title, time, endTime, location, desc, "Event", 15, "None", allDay
+                    )
+                    prefs(host).edit().putString(KEY_EVENTS, encode(events)).apply()
+                    selectedCal = calStart
+                    currentCal = calStart
+                }
+                host.intent = null
+            }
+        }
+
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val monthText = kit.text("", 20f, palette.text, OeaType.medium)
         header.addView(monthText, LinearLayout.LayoutParams(0, -2, 1f))

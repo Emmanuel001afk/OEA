@@ -97,6 +97,9 @@ class OeaGameActivity : Activity(), HostUi {
         h.onFatalError = { error -> onGameFaulted(error) }
         setContentView(h.root)
         surfaceShown = true
+        // A game that reaches the screen gets its Game Boost session, even when
+        // it came back from Recents rather than through the hub.
+        runCatching { com.oea.launcher.gameboost.OeaGameBoost.onOeaGameOpened(applicationContext, gameId) }
         if (OeaEngine.settings.islandInGames) addIslands(h.overlay)
         // Android 16+ (target SDK 36) delivers Back only through this callback.
         if (Build.VERSION.SDK_INT >= 33) {

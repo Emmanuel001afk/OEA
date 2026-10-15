@@ -87,6 +87,36 @@ object OeaClockApp {
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         var refresh: () -> Unit = {}
         var currentTab = "alarms"
+
+        // Android clock-role intents (Set alarm / Set timer / Show alarms): act
+        // on them once, land on the right tab, then consume the intent so a
+        // rebuild (theme change, tab switch) never applies it twice.
+        host.intent?.let { intent ->
+            when (intent.action) {
+                "android.intent.action.SET_ALARM" -> {
+                    val hour = intent.getIntExtra("android.intent.extra.alarm.HOUR", -1)
+                    val minute = intent.getIntExtra("android.intent.extra.alarm.MINUTES", 0).coerceIn(0, 59)
+                    if (hour in 0..23) {
+                        val label = intent.getStringExtra("android.intent.extra.alarm.MESSAGE") ?: ""
+                        val days = intent.getIntegerArrayListExtra("android.intent.extra.alarm.DAYS")
+                        val daySet = days?.mapNotNull { calendarDayToOea(it) }?.toSet() ?: emptySet()
+                        val alarms = decodeAlarms(prefs(host).getString(KEY_ALARMS, "")).toMutableList()
+                        val alarm = Alarm(System.currentTimeMillis(), hour, minute, label, true, daySet, 10, "Default", true)
+                        alarms += alarm
+                        prefs(host).edit().putString(KEY_ALARMS, encodeAlarms(alarms)).apply()
+                        scheduleAlarm(host, alarm)
+                    }
+                }
+                "android.intent.action.SET_TIMER" -> {
+                    currentTab = "timer"
+                    parseIsoDuration(intent.getStringExtra("android.intent.extra.alarm.LENGTH"))?.let { ms ->
+                        presetTimerMs = ms
+                    }
+                }
+                // SHOW_ALARMS stays on the (default) alarms tab.
+            }
+            host.intent = null
+        }
         val is24h = prefs(host).getBoolean(KEY_24H, true)
 
         // Live clock header
@@ -133,7 +163,8 @@ object OeaClockApp {
         column.addView(content)
 
         // Timer state
-        var timerDurationMs = 5 * 60 * 1000L
+        var timerDurationMs = presetTimerMs ?: 5 * 60 * 1000L
+        presetTimerMs = null
         var timerRemainingMs = timerDurationMs
         var timerRunning = false
         var timerEndAt = 0L
@@ -575,6 +606,33 @@ object OeaClockApp {
             }
         } catch (_: Throwable) {}
     }
+    /** Pending duration for the timer tab, coming from an external Set-timer request. */
+    private var presetTimerMs: Long? = null
+
+    /** Map Calendar's day constants onto OEA's Mon..Sun (0..6) index set. */
+    private fun calendarDayToOea(calendarDay: Int): Int? = when (calendarDay) {
+        java.util.Calendar.MONDAY -> 0
+        java.util.Calendar.TUESDAY -> 1
+        java.util.Calendar.WEDNESDAY -> 2
+        java.util.Calendar.THURSDAY -> 3
+        java.util.Calendar.FRIDAY -> 4
+        java.util.Calendar.SATURDAY -> 5
+        java.util.Calendar.SUNDAY -> 6
+        else -> null
+    }
+
+    // Android passes Set-timer durations as ISO-8601, e.g. "PT1H30M" or "PT45S".
+    private fun parseIsoDuration(raw: String?): Long? {
+        if (raw.isNullOrBlank()) return null
+        val rx = Regex("P(?:T(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?)?")
+        val m = rx.matchEntire(raw.uppercase()) ?: return null
+        val h = m.groupValues.getOrNull(1)?.toLongOrNull() ?: 0L
+        val min = m.groupValues.getOrNull(2)?.toLongOrNull() ?: 0L
+        val sec = m.groupValues.getOrNull(3)?.toLongOrNull() ?: 0L
+        val total = (h * 3600L + min * 60L + sec) * 1000L
+        return if (total in 1L..86_400_000L) total else null
+    }
+
 }
 
 class OeaClockAlarmReceiver : android.content.BroadcastReceiver() {

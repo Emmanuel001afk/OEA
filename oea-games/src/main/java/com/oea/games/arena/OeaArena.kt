@@ -14,6 +14,7 @@ import com.oea.engine.core.MenuItem
 import com.oea.engine.core.OeaGame
 import com.oea.engine.core.PlayMode
 import com.oea.engine.graphics.Align
+import com.oea.engine.graphics.CharRig
 import com.oea.engine.graphics.Environment
 import com.oea.engine.graphics.Frame
 import com.oea.engine.graphics.Material
@@ -69,6 +70,7 @@ class OeaArena : OeaGame() {
         var kills = 0
         var walk = 0f
         var lastX = 0f; var lastZ = 0f
+        var speed01 = 0f
         val alive get() = flags and 1 != 0
     }
 
@@ -117,6 +119,16 @@ class OeaArena : OeaGame() {
     private val camera = PerspectiveCamera(70f)
     private val camPos = Vec3()
     private val env = Environment.day().apply { fogDensity = 0.0042f; shadowDistance = 42f; fogColor = 0xFFBFD6EE.toInt() }
+    private val envDay = Environment.day().apply { fogDensity = 0.0042f }
+    private val envNight = Environment.night().apply { fogDensity = 0.010f }
+    /** Shot Out rules: "br", "last_day", "lights_out" or "haunted". */
+    private var rules = "br"
+    private var waveTimer = 0f
+    private var waveNumber = 0
+    private var dayNightClock = 0f
+    private var lastDarkness = 0f
+    private var pendingExtraBots = 0
+    private fun isAuthorityNow(launch: com.oea.engine.core.GameLaunch) = net == null || net!!.isHost
     private val hit = RayHit()
     private val m = Mat4()
     private val tmp = Vec3()
@@ -162,8 +174,31 @@ class OeaArena : OeaGame() {
         val bots = (settings["bots"] ?: launch.option("bots", "9")).toIntOrNull() ?: 9
         val skill = when (settings["difficulty"] ?: launch.option("difficulty", "normal")) { "easy" -> 0.25f; "hard" -> 0.9f; else -> 0.55f }
         val fast = (settings["zone"] ?: launch.option("zone", "normal")) == "fast"
+        rules = settings["rules"] ?: launch.option("rules", "br")
         map = ArenaMap(seed)
         sim = ArenaSim(seed, map, fast, skill)
+        when (rules) {
+            // Permanent night; the moon and your muzzle flash are the light.
+            "lights_out" -> { env.set(envNight); env.fogDensity = 0.014f; env.ambientIntensity = 0.42f }
+            // A sick-green night with dense fog: zombies find you before you find them.
+            "haunted" -> { env.set(envNight); env.fogColor = 0xFF16241C.toInt(); env.fogDensity = 0.017f; env.skyAmbient = 0xFF2E4638.toInt() }
+            // Day turns to night while wave after wave lands on the island.
+            "last_day" -> { env.set(envDay); sim.zone.enabled = false }
+        }
+        if (rules == "last_day" || rules == "haunted" || rules == "lights_out") {
+            // Survival crowds: more undead, and they just keep coming.
+            if (isAuthorityNow(launch)) {
+                val extra = when (rules) {
+                    "haunted" -> 18
+                    "lights_out" -> 12
+                    else -> 9
+                }
+                // extra bots are added after the launch bots below
+                pendingExtraBots = extra
+            }
+            waveTimer = 35f
+            waveNumber = 0
+        }
         isAuthority = net == null || net!!.isHost
         localId = net?.localId ?: 0
         if (isAuthority) {
@@ -171,6 +206,8 @@ class OeaArena : OeaGame() {
             if (humans.isEmpty()) sim.addPlayer(0, ctx.settings.playerName, ctx.settings.playerColor, false)
             else humans.forEach { sim.addPlayer(it.id, it.name, it.color, false) }
             repeat(bots) { i -> sim.addPlayer(100 + i, BOT_NAMES[i % BOT_NAMES.size], EngineColors[(i + 2) % EngineColors.size], true) }
+            repeat(pendingExtraBots) { i -> sim.addPlayer(500 + i, BOT_NAMES[(i + 3) % BOT_NAMES.size], EngineColors[(i + 5) % EngineColors.size], true) }
+            pendingExtraBots = 0
             sim.events = simEvents
             sim.compensation = { p -> if (p.id == localId) 0L else (net?.rttTo(p.id)?.toLong() ?: 0L) / 2 + 110L }
             local = sim.players[localId]
@@ -256,6 +293,20 @@ class OeaArena : OeaGame() {
                 p.lastAck = cmd.seq
             }
             for (p in sim.players.values) prev.getOrPut(p.id) { FloatArray(3) }.let { it[0] = p.pos.x; it[1] = p.pos.y; it[2] = p.pos.z }
+            if (rules != "br" && !matchOver) {
+                waveTimer -= dt
+                if (waveTimer <= 0f) {
+                    waveNumber++
+                    val aliveBots = sim.players.values.count { it.bot != null && it.alive }
+                    val target = (9 + waveNumber * 2 + if (rules == "haunted") 6 else 0).coerceAtMost(28)
+                    if (aliveBots < target) {
+                        val spawn = (target - aliveBots).coerceAtMost(8)
+                        repeat(spawn) { k -> sim.addPlayer(1000 + waveNumber * 20 + k, BOT_NAMES[k % BOT_NAMES.size], EngineColors[(k + 4) % EngineColors.size], true) }
+                        if (spawn > 0) ctx.island.event("Wave $waveNumber is coming", "🌊", 2500)
+                    }
+                    waveTimer = 40f
+                }
+            }
             sim.step(dt)
             snapTimer -= dt
             if (net != null && snapTimer <= 0f) { snapTimer = 1f / 20f; sendSnapshot() }
@@ -587,12 +638,35 @@ class OeaArena : OeaGame() {
         while (dn.hasNext()) { val n = dn.next(); n[4] += dt; n[1] += dt * 0.8f; if (n[4] > 0.9f) dn.remove() }
         if (hitMarker > 0f) hitMarker -= dt else hitMarkerKill = false
         if (damageFrom > 0f) damageFrom -= dt
+        if (rules == "last_day") {
+            // 150 s day: day (0-60) -> dusk (60-75) -> night (75-135) -> dawn (135-150).
+            dayNightClock = (dayNightClock + dt) % 150f
+            val darkness = when {
+                dayNightClock < 60f -> 0f
+                dayNightClock < 75f -> (dayNightClock - 60f) / 15f
+                dayNightClock < 135f -> 1f
+                else -> 1f - (dayNightClock - 135f) / 15f
+            }
+            env.sunIntensity = MathX.lerp(envDay.sunIntensity, envNight.sunIntensity, darkness)
+            env.ambientIntensity = MathX.lerp(envDay.ambientIntensity, envNight.ambientIntensity, darkness)
+            env.fogDensity = MathX.lerp(envDay.fogDensity, envNight.fogDensity, darkness)
+            // The world flips its light over dusk/dawn; unseen numbers would stay stuck.
+            if (darkness > 0.5f && lastDarkness <= 0.5f) {
+                env.sunColor = envNight.sunColor; env.skyAmbient = envNight.skyAmbient; env.groundAmbient = envNight.groundAmbient
+                env.fogColor = envNight.fogColor; env.skyTop = envNight.skyTop; env.skyHorizon = envNight.skyHorizon; env.skyGround = envNight.skyGround
+            } else if (darkness < 0.5f && lastDarkness >= 0.5f) {
+                env.sunColor = envDay.sunColor; env.skyAmbient = envDay.skyAmbient; env.groundAmbient = envDay.groundAmbient
+                env.fogColor = 0xFFBFD6EE.toInt(); env.skyTop = envDay.skyTop; env.skyHorizon = envDay.skyHorizon; env.skyGround = envDay.skyGround
+            }
+            lastDarkness = darkness
+        }
         // Remote actors.
         val now = net?.now() ?: 0L
         for (a in actors.values) {
             if (a.id == localId) continue
             if (a.buffer.sample(now, a.view)) {
                 val moved = MathX.length(a.view[0] - a.lastX, a.view[2] - a.lastZ)
+                a.speed01 = MathX.clamp01(moved * 28f)
                 a.walk += moved * 2.2f
                 a.lastX = a.view[0]; a.lastZ = a.view[2]
             }
@@ -736,33 +810,37 @@ class OeaArena : OeaGame() {
                 val y = if (pr != null) MathX.lerp(pr[1], p.pos.y, alpha) else p.pos.y
                 val z = if (pr != null) MathX.lerp(pr[2], p.pos.z, alpha) else p.pos.z
                 val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or (if (p.parachute) 16 else 0)
-                drawSoldier(r, x, y, z, if (p.id == localId) lookYaw else p.yaw, p.pitch, p.color, flags, p.weapon, p.armor, p.helmet, p.ctrl.position.dstXZ(tmp.set(pr?.get(0) ?: x, 0f, pr?.get(2) ?: z)) * 0f + walkPhase(p))
+                drawSoldier(r, x, y, z, if (p.id == localId) lookYaw else p.yaw, p.pitch, p.color, flags, p.weapon, p.armor, p.helmet, p.ctrl.position.dstXZ(tmp.set(pr?.get(0) ?: x, 0f, pr?.get(2) ?: z)) * 0f + walkPhase(p), walkSpeeds[p.id] ?: 0f)
             }
         } else {
             val me = local
             if (me != null && !(me.alive && adsOn && me.weapon.zoom > 2f)) {
                 val (x, y, z) = viewTarget().takeIf { me.alive } ?: Triple(me.pos.x, me.pos.y, me.pos.z)
                 val flags = (if (me.alive) 1 else 0) or (if (crouchOn) 2 else 0) or (if (adsOn) 4 else 0) or (if (me.skydiving) 8 else 0) or (if (me.parachute) 16 else 0)
-                drawSoldier(r, x, y, z, lookYaw, lookPitch, me.color, flags, me.weapon, me.armor, me.helmet, walkPhase(me))
+                drawSoldier(r, x, y, z, lookYaw, lookPitch, me.color, flags, me.weapon, me.armor, me.helmet, walkPhase(me), walkSpeeds[me.id] ?: 0f)
             }
             for (a in actors.values) {
                 if (a.id == localId || a.buffer.isEmpty) continue
                 val v = a.view
-                drawSoldier(r, v[0], v[1], v[2], v[3], v[4], a.color, a.flags, Weapon.entries.getOrElse(a.weapon) { Weapon.PAN }, a.armor, a.helmet, a.walk)
+                drawSoldier(r, v[0], v[1], v[2], v[3], v[4], a.color, a.flags, Weapon.entries.getOrElse(a.weapon) { Weapon.PAN }, a.armor, a.helmet, a.walk, a.speed01)
             }
         }
-        // Zone wall.
-        val z = sim.zone
-        r.draw(Mesh.unitCylinder, zoneMat, z.cx, -20f, z.cz, 0f, 0f, 0f, z.radius * 2f, 140f, z.radius * 2f)
+        // Zone wall (absent in survival rules — there is no shrinking zone to show).
+        if (sim.zone.enabled) {
+            val z = sim.zone
+            r.draw(Mesh.unitCylinder, zoneMat, z.cx, -20f, z.cz, 0f, 0f, 0f, z.radius * 2f, 140f, z.radius * 2f)
+        }
         for (tr in tracers) r.drawLine(tr[0], tr[1], tr[2], tr[3], tr[4], tr[5], 0.025f, tracerMat, Colors.withAlpha(Colors.WHITE, 1f - tr[6] / 0.09f))
         r.particles(puffs)
         r.particles(sparks)
     }
 
     private val walkPhases = HashMap<Int, FloatArray>()
+    private val walkSpeeds = HashMap<Int, Float>()
     private fun walkPhase(p: ArenaPlayer): Float {
         val st = walkPhases.getOrPut(p.id) { floatArrayOf(p.pos.x, p.pos.z, 0f) }
         val moved = MathX.length(p.pos.x - st[0], p.pos.z - st[1])
+        walkSpeeds[p.id] = MathX.clamp01(moved * 28f)
         st[0] = p.pos.x; st[1] = p.pos.z
         st[2] += moved * 2.2f
         if (p.id == localId && moved > 0.04f && p.ctrl.grounded && (st[2] % MathX.PI_F) < moved * 2.2f) ctx.audio.play(sStep, 0.35f)
@@ -794,8 +872,16 @@ class OeaArena : OeaGame() {
 
     private fun shirt(color: Int) = shirts.getOrPut(color) { Material(color = color, specular = 0.25f, rim = 0.2f) }
 
+    /** One soldier rig per team colour; [rigPose] is reused for every draw. */
+    private val soldierRigs = HashMap<Int, CharRig>()
+    private val rigPose = CharRig.Pose()
+    private val boots = Material(color = 0xFF1B1E24.toInt(), specular = 0.3f)
+    private fun rigFor(color: Int) = soldierRigs.getOrPut(color) {
+        CharRig(body = shirt(color), pants = pants, skin = skin, shoes = boots)
+    }
+
     /** Blocky soldier: legs, torso (team colour), vest, head/helmet, arms holding the weapon, parachute. */
-    private fun drawSoldier(r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, pitch: Float, color: Int, flags: Int, weapon: Weapon, armor: Int, helmet: Int, walk: Float) {
+    private fun drawSoldier(r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, pitch: Float, color: Int, flags: Int, weapon: Weapon, armor: Int, helmet: Int, walk: Float, speed01: Float = 0f) {
         val alive = flags and 1 != 0
         val crouch = flags and 2 != 0
         val sky = flags and 8 != 0
@@ -807,10 +893,15 @@ class OeaArena : OeaGame() {
             return
         }
         if (sky && !chute) {
-            // Free fall: spread-eagle, horizontal.
-            r.draw(Mesh.unitCube, body, x, y + 0.5f, z, yaw, -1.3f, 0f, 0.5f, 0.6f, 0.3f)
-            r.draw(Mesh.unitCube, pants, x - sin(yaw) * 0.55f, y + 0.4f, z - cos(yaw) * 0.55f, yaw, -1.3f, 0f, 0.45f, 0.7f, 0.2f)
-            r.draw(Mesh.unitCube, skin, x + sin(yaw) * 0.42f, y + 0.6f, z + cos(yaw) * 0.42f, yaw, 0f, 0f, 0.26f, 0.26f, 0.26f)
+            // Free fall: the rig in its airborne pose, limbs out.
+            rigPose.phase = walk * 1.15f
+            rigPose.speed = 0f
+            rigPose.crouch = false
+            rigPose.airborne = true
+            rigPose.aimHold = false
+            rigPose.lean = 0f
+            rigPose.detail = false
+            rigFor(color).draw(r, x, y, z, yaw, rigPose)
             return
         }
         if (chute) {
@@ -818,35 +909,32 @@ class OeaArena : OeaGame() {
             r.drawLine(x - 0.2f, y + 1.6f, z, x - 2.2f, y + 4.2f, z, 0.012f, gunMat)
             r.drawLine(x + 0.2f, y + 1.6f, z, x + 2.2f, y + 4.2f, z, 0.012f, gunMat)
         }
+        // Soldier on the shared character rig: smooth limbs with real joints,
+        // arms raised onto the weapon, run cycle when moving.
+        rigPose.phase = walk * 1.15f
+        rigPose.speed = if (chute) 0f else speed01
+        rigPose.crouch = crouch
+        rigPose.airborne = chute
+        rigPose.aimHold = !chute
+        rigPose.aimPitch = MathX.clamp(pitch, -0.9f, 0.9f)
+        rigPose.lean = 0f
+        rigPose.detail = false
+        rigFor(color).draw(r, x, y, z, yaw, rigPose)
         val hip = y + (if (crouch) 0.55f else 0.9f)
-        val swing = if (chute) 0f else sin(walk) * 0.6f
+        val torsoY = hip + 0.36f
+        // Gear on top of the rig: plate carrier, helmet, weapon in the hands.
+        if (armor > 0) r.draw(Mesh.unitCube, vestMat, x, torsoY + 0.02f, z, yaw, 0f, 0f, 0.54f, 0.46f, 0.33f)
+        val headY = torsoY + 0.50f
+        if (helmet > 0) r.draw(Mesh.unitSphere, helmetMat, x, headY + 0.05f, z, yaw, 0f, 0f, 0.30f, 0.24f, 0.30f)
+        // The weapon itself, held level with the aim just off the chest.
         val fx = sin(yaw); val fz = cos(yaw)
         val rx = -fz; val rz = fx
-        for (side in intArrayOf(-1, 1)) {
-            val a = swing * side
-            val lx = x + rx * 0.13f * side; val lz = z + rz * 0.13f * side
-            m.setTRS(lx, hip, lz, yaw, -a + (if (crouch) 0.9f else 0f), 0f)
-            m.translate(0f, -0.42f, 0f).scale(0.18f, 0.84f, 0.2f)
-            r.draw(Mesh.unitCube, pants, m)
-        }
-        val torsoY = hip + 0.36f
-        r.draw(Mesh.unitCube, body, x, torsoY, z, yaw, (if (crouch) -0.2f else 0f), 0f, 0.5f, 0.62f, 0.28f)
-        if (armor > 0) r.draw(Mesh.unitCube, vestMat, x, torsoY + 0.02f, z, yaw, 0f, 0f, 0.54f, 0.48f, 0.33f)
-        val headY = torsoY + 0.48f
-        r.draw(Mesh.unitCube, skin, x, headY, z, yaw, 0f, 0f, 0.26f, 0.28f, 0.26f)
-        if (helmet > 0) r.draw(Mesh.unitCube, helmetMat, x, headY + 0.1f, z, yaw, 0f, 0f, 0.31f, 0.14f, 0.31f)
-        // Arms forward along the aim, holding the weapon.
         val gunPitch = MathX.clamp(pitch, -0.9f, 0.9f)
         val sx = x + rx * 0.22f + fx * 0.25f; val sz = z + rz * 0.22f + fz * 0.25f
         m.setTRS(sx, torsoY + 0.18f, sz, yaw, gunPitch, 0f)
         m.translate(0f, 0f, 0.18f)
         val gm = m.copy()
-        m.scale(0.12f, 0.12f, 0.42f)
-        r.draw(Mesh.unitCube, body, m)
         r.draw(gunMesh(weapon), gunMat, gm.translate(-0.05f, 0.02f, 0.12f))
-        m.setTRS(x - rx * 0.2f + fx * 0.2f, torsoY + 0.15f, z - rz * 0.2f + fz * 0.2f, yaw - 0.35f, gunPitch, 0f)
-        m.translate(0f, 0f, 0.2f).scale(0.11f, 0.11f, 0.45f)
-        r.draw(Mesh.unitCube, body, m)
         if (!r.shadowMapsActive) r.blobShadow(x, map.physics.groundHeight(x, z, y + 0.5f), z, 0.45f, 0.35f)
     }
 
@@ -1056,7 +1144,10 @@ class OeaArena : OeaGame() {
             title = "Arena",
             tagline = "Battle royale · skydive, loot, survive",
             description = "Skydive onto an island, loot pistols, SMGs, rifles, shotguns and snipers, armour and medkits, and stay inside the shrinking zone. " +
-                "Fight bots alone or friends over Wi-Fi, hotspot or online. Twin-stick touch controls with aim-down-sights.",
+                "Fight bots alone or friends over Wi-Fi, hotspot or online. Twin-stick touch controls with aim-down-sights. " +
+                "Shot Out adds three survival rules: Last Day Survival (day turns to night while waves keep landing), " +
+                "Lights Out (permanent night — your muzzle flash is the light) and Haunted (dense green fog, endless undead). " +
+                "Aim sensitivity lives in the Games hub settings and changes the camera for real.",
             accent = ACCENT,
             glyph = "◎",
             orientation = GameOrientation.LANDSCAPE,
@@ -1065,6 +1156,12 @@ class OeaArena : OeaGame() {
             maxPlayers = 12,
             modes = setOf(PlayMode.SOLO, PlayMode.LAN, PlayMode.ONLINE),
             options = listOf(
+                GameOption("rules", "Shot Out", listOf(
+                    Choice("br", "Battle Royale"),
+                    Choice("last_day", "Last Day Survival"),
+                    Choice("lights_out", "Lights Out"),
+                    Choice("haunted", "Haunted"),
+                ), "br", setOf(PlayMode.SOLO)),
                 GameOption("bots", "Bots", listOf(Choice("0", "None"), Choice("5", "5 bots"), Choice("9", "9 bots"), Choice("15", "15 bots")), "9"),
                 GameOption("difficulty", "Bot skill", listOf(Choice("easy", "Easy"), Choice("normal", "Normal"), Choice("hard", "Hard")), "normal"),
                 GameOption("zone", "Zone speed", listOf(Choice("normal", "Normal"), Choice("fast", "Fast")), "normal"),

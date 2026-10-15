@@ -73,6 +73,10 @@ class OeaAssistantService : AccessibilityService() {
     private var lastWindowKey: String? = null
     private var lastFrozenBlockAt = 0L
     private var lastFrozenPackage: String? = null
+    /** A frozen-app interception that is currently playing out; kept apart from the user's own force-stop job. */
+    private var frozenJob: FrozenBlock? = null
+
+    private class FrozenBlock(val packageName: String)
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         com.oea.launcher.fault.OeaFaultShield.guard("assistant:event") {
@@ -104,8 +108,13 @@ class OeaAssistantService : AccessibilityService() {
     private fun maybeBlockFrozenApp(packageName: String) {
         if (packageName.isBlank() || packageName == this.packageName) return
         if (packageName in setOf("com.android.systemui", "android", "com.google.android.gms")) return
-        // Don't interfere while force-stop job is driving Settings
+        // Never race an explicit user-driven force-stop run: fumbling BOTH jobs
+        // would mix their states, so a frozen app that arrived while the user
+        // is deliberately force-stopping something is left alone.
         if (job != null) return
+        // One frozen package per window: a home-then-forcestop sequence takes a
+        // moment; a second one would clobber it.
+        if (frozenJob != null) return
         // Check if package is frozen via OEA Freeze (hibernated)
         val frozen = try {
             com.oea.launcher.applock.OeaAppFreezer.isFrozen(this, packageName) &&
@@ -119,7 +128,13 @@ class OeaAssistantService : AccessibilityService() {
         if (packageName == lastFrozenPackage && now - lastFrozenBlockAt < 3000L) return
         lastFrozenPackage = packageName
         lastFrozenBlockAt = now
-        // Block: go back, then to Home, then force-stop
+        // Block: kick back, bring Home up, then force-stop the escaped app so
+        // it drops fully out of Android's cached state until it is unfrozen.
+        // This is tracked apart from a user-driven force-stop job.
+        val label = runCatching {
+            @Suppress("DEPRECATION") packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
+        }.getOrDefault(packageName)
+        frozenJob = FrozenBlock(packageName)
         handler.post {
             runCatching { performGlobalAction(GLOBAL_ACTION_BACK) }
             handler.postDelayed({
@@ -128,15 +143,17 @@ class OeaAssistantService : AccessibilityService() {
                 }
             }, 200L)
             handler.postDelayed({
+                val jobNow = frozenJob
+                frozenJob = null
                 runCatching {
-                    // Force-stop the frozen app that opened via external route
                     OeaAssistant.forceStopWhenReady(this, listOf(packageName), null) { _, _ -> }
                 }
+                if (jobNow == null || jobNow.packageName != packageName) return@postDelayed
             }, 600L)
         }
         // Show brief explanation via toast on main
         handler.post {
-            runCatching { android.widget.Toast.makeText(this, "Blocked frozen app: $packageName", android.widget.Toast.LENGTH_SHORT).show() }
+            runCatching { android.widget.Toast.makeText(this, "$label is frozen in OEA — unfreeze it in the Freezer to use it", android.widget.Toast.LENGTH_LONG).show() }
         }
         com.oea.launcher.fault.OeaFaultShield.note("assistant:frozen-block", IllegalStateException("Blocked frozen $packageName via external route"))
     }

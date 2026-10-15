@@ -23,6 +23,7 @@ import com.oea.engine.graphics.ParticleSystem
 import com.oea.engine.graphics.PerspectiveCamera
 import com.oea.engine.graphics.Renderer3D
 import com.oea.engine.graphics.Textures
+import com.oea.engine.graphics.CharRig
 import com.oea.engine.graphics.Viewport
 import com.oea.engine.graphics.ui
 import com.oea.engine.graphics.world
@@ -138,6 +139,7 @@ class OeaRunner : OeaGame() {
     private fun setupRunners() {
         lanes.clear()
         ghosts.clear()
+        pointerLane.clear()
         val players = ctx.launch.localPlayers
         val myColor = ctx.settings.playerColor
         if (split) {
@@ -298,15 +300,34 @@ class OeaRunner : OeaGame() {
         publishIsland()
     }
 
+    // ---------------------------------------------------------------- input
+
+    /**
+     * Split-screen touch ownership: each finger belongs to the player whose half
+     * of the screen it went down in, for the whole stroke. Without this, a player
+     * whose swipe chain drifts across the middle line would suddenly steer the
+     * other runner — the classic same-screen input conflict.
+     */
+    private val pointerLane = HashMap<Int, Int>()
+
     private fun handleInput() {
         val input = ctx.input
         val h = ctx.graphics.height.toFloat()
         if (paused) return
+        if (split) {
+            // Bind new fingers to the half where they went down, and forget fingers
+            // that came off the screen (pointer ids get recycled by the OS).
+            for (p in input.pointers) {
+                if (p.justPressed) pointerLane[p.id] = if (p.startY < h / 2f) 1 else 0
+                if (!p.isDown && !p.justPressed) pointerLane.remove(p.id)
+            }
+        } else if (pointerLane.isNotEmpty()) pointerLane.clear()
         while (true) {
             val s = input.consumeSwipe() ?: break
             if (phase != Phase.RUNNING) continue
-            // Split screen: the top half belongs to the player across the table (rotated view).
-            val laneIdx = if (split && s.startY < h / 2f) 1 else 0
+            // Split screen: the top half belongs to the player across the table
+            // (rotated view). Ownership follows the finger, not just the chain start.
+            val laneIdx = if (split) (pointerLane[s.pointerId] ?: if (s.startY < h / 2f) 1 else 0) else 0
             val l = lanes.getOrNull(laneIdx) ?: continue
             val rotated = l.viewport.rotate180
             val dir = if (!rotated) s.direction else when (s.direction) { Swipe.LEFT -> Swipe.RIGHT; Swipe.RIGHT -> Swipe.LEFT; Swipe.UP -> Swipe.DOWN; Swipe.DOWN -> Swipe.UP }
@@ -598,47 +619,55 @@ class OeaRunner : OeaGame() {
         }
     }
 
-    /** Procedurally animated robot runner built from primitives. */
+    /** One rig per runner colour (materials are cached per colour). */
+    private val charRigs = HashMap<Int, CharRig>()
+    private val ghostRigs = HashMap<Int, CharRig>()
+    private val charPose = CharRig.Pose()
+
+    private fun rigFor(color: Int, ghost: Boolean): CharRig =
+        if (ghost) ghostRigs.getOrPut(color) {
+            val m = RunnerArt.ghostMaterial(color)
+            CharRig(m, m, m, m, m, ghost = true)
+        } else charRigs.getOrPut(color) {
+            CharRig(
+                body = RunnerArt.bodyMaterial(color),
+                pants = com.oea.engine.graphics.Material(color = com.oea.engine.math.Colors.lerp(color, 0xFF10141A.toInt(), 0.45f), specular = 0.45f, shininess = 40f),
+                skin = com.oea.engine.graphics.Material(color = 0xFFE8B78C.toInt(), specular = 0.35f, shininess = 30f, rim = 0.25f),
+                shoes = com.oea.engine.graphics.Material(color = 0xFFF5F5F5.toInt(), specular = 0.35f),
+                hair = com.oea.engine.graphics.Material(color = 0xFF3A2418.toInt(), specular = 0.4f, shininess = 48f),
+            )
+        }
+
+    /** A real animated character on the shared rig, not a stack of boxes. */
     private fun drawCharacter(r: Renderer3D, run: Runner, ghost: Boolean) {
         val body = if (ghost) RunnerArt.ghostMaterial(run.color) else RunnerArt.bodyMaterial(run.color)
-        val dark = if (ghost) body else RunnerArt.skinDark
         val x = run.x; val y = run.y; val z = run.z
         val roll = run.rolling
-        val air = !run.grounded
-        val ph = run.phase
-        val swing = if (run.crashed) 0f else if (air) 0.5f else sin(ph) * 0.9f
-        val bob = if (air || roll || run.crashed) 0f else kotlin.math.abs(sin(ph)) * 0.08f
-        val leanRoll = -run.lean * 0.35f
         if (run.crashed) {
             // Knocked over.
             r.draw(RunnerArt.torso, body, x, y + 0.35f, z, 0f, 1.4f, 0.2f, 1f, 1f, 1f)
-            r.draw(RunnerArt.head, dark, x, y + 0.4f, z - 0.75f)
+            r.draw(RunnerArt.head, if (ghost) body else RunnerArt.skinDark, x, y + 0.4f, z - 0.75f)
             return
         }
         if (roll) {
             // Tucked into a ball, spinning.
             val spin = run.phase * 2.2f
             r.draw(Mesh.unitSphere, body, x, y + 0.48f, z, 0f, spin, 0f, 0.95f, 0.95f, 0.95f)
-            r.draw(RunnerArt.head, dark, x, y + 0.62f + sin(spin) * 0.25f, z + kotlin.math.cos(spin) * 0.25f, 0f, 0.8f)
+            r.draw(RunnerArt.head, if (ghost) body else RunnerArt.skinDark, x, y + 0.62f + sin(spin) * 0.25f, z + kotlin.math.cos(spin) * 0.25f, 0f, 0.8f)
             return
         }
-        val hipY = y + 0.95f + bob
-        // Legs.
-        for (side in intArrayOf(-1, 1)) {
-            val a = swing * side * (if (air) -0.6f else 1f) + (if (air) -0.7f else 0f)
-            r.draw(RunnerArt.limb, body, x + side * 0.15f, hipY, z, 0f, -a, leanRoll, 1.15f, 1f, 1.15f)
-            val footZ = z + kotlin.math.sin(a) * 0.62f
-            val footY = hipY - kotlin.math.cos(a) * 0.62f - 0.06f
-            r.draw(RunnerArt.shoe, RunnerArt.sole, x + side * 0.15f, footY, footZ, 0f, -a * 0.3f, 0f, 1f, 1f, 1f)
-        }
-        // Torso, head with glowing visor, arms.
-        r.draw(RunnerArt.torso, body, x, hipY - 0.05f, z + 0.05f, 0f, -0.18f - (if (air) 0.1f else 0f), leanRoll, 1f, 1f, 1f)
-        r.draw(RunnerArt.head, dark, x, hipY + 0.9f, z + 0.12f)
-        if (!ghost) r.draw(Mesh.unitCube, RunnerArt.visor, x, hipY + 0.93f, z + 0.3f, 0f, 0f, leanRoll, 0.3f, 0.09f, 0.1f)
-        for (side in intArrayOf(-1, 1)) {
-            val a = -swing * side * 0.9f + (if (air) 1.2f else 0f)
-            r.draw(RunnerArt.limb, dark, x + side * 0.33f, hipY + 0.62f, z + 0.08f, 0f, -a, leanRoll + side * 0.15f, 0.9f, 0.85f, 0.9f)
-        }
+        val speedK = MathX.clamp01((run.speed - Runner.START_SPEED) / (Runner.MAX_SPEED - Runner.START_SPEED))
+        charPose.phase = run.phase * 1.05f
+        charPose.speed = if (run.grounded) 0.45f + speedK * 0.55f else 0f
+        charPose.airborne = !run.grounded
+        charPose.crouch = false
+        charPose.lean = run.lean
+        charPose.aimHold = false
+        charPose.detail = true
+        val hipY = y + 0.92f
+        rigFor(run.color, ghost).draw(r, x, y, z, 0f, charPose)
+        // Glowing sport visor across the face.
+        if (!ghost) r.draw(Mesh.unitSphere, RunnerArt.visor, x, hipY + 0.62f, z + 0.12f, 0f, 0f, 0f, 0.30f, 0.10f, 0.16f)
         if (run.has(PowerType.JETPACK)) {
             r.draw(RunnerArt.jetpack, RunnerArt.jetpackMat, x, hipY + 0.5f, z - 0.32f, 0f, 0.8f)
             laneOf(run)?.particles?.let { p ->
@@ -656,11 +685,14 @@ class OeaRunner : OeaGame() {
     private fun drawGhostRunner(r: Renderer3D, x: Float, y: Float, z: Float, color: Int, rolling: Boolean, phase: Float) {
         val mat = RunnerArt.ghostMaterial(color)
         if (rolling) { r.draw(Mesh.unitSphere, mat, x, y + 0.48f, z, 0f, 0.95f); return }
-        val hipY = y + 0.95f + kotlin.math.abs(sin(phase)) * 0.08f
-        val swing = sin(phase) * 0.9f
-        for (side in intArrayOf(-1, 1)) r.draw(RunnerArt.limb, mat, x + side * 0.15f, hipY, z, 0f, -swing * side, 0f, 1.1f, 1f, 1.1f)
-        r.draw(RunnerArt.torso, mat, x, hipY - 0.05f, z + 0.05f, 0f, -0.18f, 0f, 1f, 1f, 1f)
-        r.draw(RunnerArt.head, mat, x, hipY + 0.9f, z + 0.12f)
+        charPose.phase = phase * 1.05f
+        charPose.speed = 0.7f
+        charPose.airborne = false
+        charPose.crouch = false
+        charPose.lean = 0f
+        charPose.aimHold = false
+        charPose.detail = true
+        rigFor(color, ghost = true).draw(r, x, y, z, 0f, charPose)
     }
 
     // ---------------------------------------------------------------- HUD
