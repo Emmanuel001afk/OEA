@@ -137,7 +137,7 @@ object OeaNotesApp {
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         column.addView(content)
 
-        refresh = { filter ->
+        refresh = refresh@{ filter ->
             currentFilter = filter
             // Folders
             folderBar.removeAllViews()
@@ -213,8 +213,10 @@ object OeaNotesApp {
                         ))
                     }
                 }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(12) })
-            } else {
-                // Group by folder
+                return@refresh
+            }
+
+            // Group by folder
             filtered.groupBy { it.folder.ifBlank { "General" } }.forEach { (folder, notes) ->
                 kit.sectionTitle(content, "$folder • ${notes.size}")
                 val g = kit.group(content)
@@ -263,7 +265,6 @@ object OeaNotesApp {
                 }
             }, LinearLayout.LayoutParams(0, kit.dp(44), 1f))
             content.addView(bottomRow)
-            }
         }
         refresh("all")
 

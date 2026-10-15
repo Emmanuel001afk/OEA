@@ -32,7 +32,6 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         try {
             startStandalone()
         } catch (t: Throwable) {
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:create", t) } catch (_: Throwable) {}
             try { Toast.makeText(this, "Game could not start: ${t.javaClass.simpleName}", Toast.LENGTH_LONG).show() } catch (_: Throwable) {}
             try { finish() } catch (_: Throwable) {}
         }
@@ -42,8 +41,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         try { OeaEngine.init(applicationContext) } catch (_: Throwable) {}
         OeaGames.registerBuiltIns(applicationContext)
         val id = intent.getStringExtra(EXTRA_GAME_ID)?.takeIf { it.isNotBlank() } ?: standaloneGameId
-        val descriptor = try { OeaEngine.registry.find(id) } catch (e: Throwable) {
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:registry", e) } catch (_: Throwable) {}
+        val descriptor = try { OeaEngine.registry.find(id) } catch (_: Throwable) {
             null
         }
         if (descriptor == null || !descriptor.supports(PlayMode.SOLO)) {
@@ -60,7 +58,6 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         }
         val mode = PlayMode.SOLO
         val problem = try { OeaEngine.surfaceProblem() } catch (e: Throwable) {
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:surface", e) } catch (_: Throwable) {}
             e.message
         }
         if (problem != null) {
@@ -77,21 +74,18 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         val gameHost = try {
             GameHost(this, descriptor, launch, this)
         } catch (e: Throwable) {
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:host", e) } catch (_: Throwable) {}
             Toast.makeText(this, "${descriptor.title} could not start on this device (${e.javaClass.simpleName})", Toast.LENGTH_LONG).show()
             finish()
             return
         }
         host = gameHost
         gameHost.onFatalError = { error ->
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:fatal", error) } catch (_: Throwable) {}
             runCatching { Toast.makeText(this, "${descriptor.title} stopped (${error.javaClass.simpleName})", Toast.LENGTH_LONG).show() }
             runCatching { finish() }
         }
         try {
             setContentView(gameHost.root)
-        } catch (e: Throwable) {
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:setContent", e) } catch (_: Throwable) {}
+        } catch (_: Throwable) {
             Toast.makeText(this, "${descriptor.title} could not create its screen", Toast.LENGTH_LONG).show()
             finish()
             return
@@ -107,15 +101,11 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
 
     override fun onResume() {
         super.onResume()
-        try { host?.onResume() } catch (e: Throwable) {
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:resume", e) } catch (_: Throwable) {}
-        }
+        try { host?.onResume() } catch (_: Throwable) {}
     }
 
     override fun onPause() {
-        try { host?.onPause() } catch (e: Throwable) {
-            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:pause", e) } catch (_: Throwable) {}
-        }
+        try { host?.onPause() } catch (_: Throwable) {}
         super.onPause()
     }
 
