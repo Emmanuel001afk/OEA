@@ -705,6 +705,22 @@ class OeaChess : OeaGame() {
         return true
     }
 
+
+    /**
+     * A deliberate flip from the players: if the board was set to turn to the
+     * player to move, per-move turning pauses (otherwise the next move would
+     * immediately undo the flip, which feels broken). Re-enable it from the
+     * menu, or at launch via the Board option.
+     */
+    private fun flipManually() {
+        viewColor = viewColor xor 1
+        camYawTarget = yawFor(viewColor)
+        if (mode == PlayMode.SAME_DEVICE && flipMode == "auto") {
+            flipMode = "off"
+            showFlash("Board turning paused — re-enable in the menu")
+        }
+    }
+
     private fun openMenu() {
         val items = ArrayList<MenuItem>()
         items += MenuItem("resume", "Resume")
@@ -713,6 +729,7 @@ class OeaChess : OeaGame() {
         if (!game.isOver && mode != PlayMode.SAME_DEVICE) items += MenuItem("resign", "Resign", destructive = true)
         items += MenuItem("view", if (view3D) "Switch to 2D board" else "Switch to 3D board")
         items += MenuItem("flip", "Flip board")
+        if (mode == PlayMode.SAME_DEVICE) items += MenuItem("autoflip", if (flipMode == "auto") "Board turning: on" else "Board turning: off", "Turn the board to the player to move after every move")
         items += MenuItem("pgn", "Share game (PGN)", "Moves in standard notation, for any chess app")
         items += MenuItem("exit", "Leave game", destructive = true)
         ctx.ui.menu("Chess", status, items) { id ->
@@ -721,7 +738,12 @@ class OeaChess : OeaGame() {
                 "draw" -> if (!drawOffered) { drawOffered = true; net?.broadcast(MSG_DRAW_OFFER); showFlash("Draw offered") }
                 "resign" -> ctx.ui.confirm("Resign?", "The game ends and your opponent wins.", "Resign") { ok -> if (ok) resign() }
                 "view" -> view3D = !view3D
-                "flip" -> { viewColor = viewColor xor 1; camYawTarget = yawFor(viewColor) }
+                "flip" -> flipManually()
+                "autoflip" -> {
+                    flipMode = if (flipMode == "auto") "off" else "auto"
+                    if (flipMode == "auto" && !game.isOver) { viewColor = game.board.side; camYawTarget = yawFor(viewColor) }
+                    showFlash(if (flipMode == "auto") "Board turns to the player to move" else "Board stays put")
+                }
                 "pgn" -> sharePgn()
                 "exit" -> leave()
             }
@@ -876,7 +898,7 @@ class OeaChess : OeaGame() {
             "menu" -> openMenu()
             "undo" -> undo()
             "hint" -> requestHint()
-            "flip" -> { viewColor = viewColor xor 1; camYawTarget = yawFor(viewColor) }
+            "flip" -> flipManually()
             "view" -> view3D = !view3D
         }
     }

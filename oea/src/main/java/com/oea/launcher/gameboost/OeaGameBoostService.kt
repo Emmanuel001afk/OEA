@@ -523,8 +523,22 @@ class OeaGameBoostService : Service() {
             front == packageName -> {
                 // OEA Home's own onResume ends sessions authoritatively; a polled
                 // or reported Home window is trusted only after the launch grace.
-                if (className == com.oea.launcher.OeaLauncherActivity::class.java.name && !inGrace) onHomeShown()
-                // Other OEA screens (capture consent, the Wi-Fi panel) are part of the session.
+                if (className == com.oea.launcher.OeaLauncherActivity::class.java.name && !inGrace) {
+                    onHomeShown()
+                    return
+                }
+                when {
+                    // A session for a game running inside OEA: the game's own
+                    // screen means "still playing"; the hub (or any other OEA
+                    // screen, after the launch grace) means the user left it.
+                    OeaGameBoostStore.isOeaGameKey(active) && isOeaGameScreen(className) -> {
+                        cancelLeave()
+                        applyGameDndPreference()
+                    }
+                    OeaGameBoostStore.isOeaGameKey(active) && isGameInterruption(className) -> cancelLeave()
+                    OeaGameBoostStore.isOeaGameKey(active) && !inGrace -> endSession("left the game")
+                    // Other OEA screens (capture consent, the Wi-Fi panel) are part of the session.
+                }
             }
             OeaGameBoostStore.isGame(this, front) -> beginSession(front)
             OeaGameBoostStore.prefs(this).getBoolean("capture_active", false) -> cancelLeave()
@@ -587,6 +601,9 @@ class OeaGameBoostService : Service() {
 
     private fun gameLabel(game: String?): String {
         if (game == null) return "your game"
+        if (OeaGameBoostStore.isOeaGameKey(game)) {
+            return OeaGameBoostStore.oeaGameTitles()[OeaGameBoostStore.oeaGameId(game)] ?: "OEA game"
+        }
         return runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(game, 0)).toString() }
             .getOrDefault(game.substringAfterLast('.'))
     }
@@ -665,6 +682,19 @@ class OeaGameBoostService : Service() {
         }.getOrNull()
         return ime != null && packageName == ime
     }
+
+    /** True when [className] is one of the screens an OEA-hosted game actually plays on. */
+    private fun isOeaGameScreen(className: String?): Boolean = className != null && (
+        className.startsWith("com.oea.launcher.games.OeaGameActivity") ||
+            className.startsWith("com.oea.games.OeaStandaloneGameActivity")
+)
+
+    /**
+     * OEA surfaces that legally appear over a running OEA-hosted game: the
+     * screen-record consent/capture UI. Seeing one must not end the session.
+     */
+    private fun isGameInterruption(className: String?): Boolean = className != null &&
+        className.startsWith("com.oea.launcher.gameboost.OeaGameCapture")
 
     private var homePackagesCache: Set<String>? = null
 
@@ -2060,6 +2090,34 @@ class OeaGameBoostService : Service() {
 }
 object OeaGameBoostStore {
     private const val PREFS = "oea_game_boost"
+
+    /**
+     * Game Boost keys for the games that run inside OEA itself (the hub games
+     * and anything registered with the OEA Engine). They are not packages, so
+     * Android's own game-category scan can never see them; they use the key
+     * `oeagame/<game id>` everywhere a package name would appear.
+     */
+    const val OEA_PREFIX = "oeagame/"
+
+    fun isOeaGameKey(key: String) = key.startsWith(OEA_PREFIX)
+
+    fun oeaGameId(key: String) = key.removePrefix(OEA_PREFIX)
+
+    /** id -> title of the games the engine currently provides (empty when the engine is not up). */
+    fun oeaGameTitles(): Map<String, String> = runCatching {
+        com.oea.engine.OeaEngine.registry.all().associate { it.id to it.title }
+    }.getOrDefault(emptyMap())
+
+    /** Game entries shaped like installed apps, so every picker/list in Game Boost can show them uniformly. */
+    fun oeaGameEntries(): List<com.oea.launcher.model.OeaAppInfo> = oeaGameTitles().map { (id, title) ->
+        com.oea.launcher.model.OeaAppInfo(
+            packageName = OEA_PREFIX + id,
+            className = "",
+            label = title,
+            category = android.content.pm.ApplicationInfo.CATEGORY_GAME
+)
+    }
+
     fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     fun enabled(context: Context) = prefs(context).getBoolean("enabled", false)
     fun setEnabled(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean("enabled", enabled).apply()
@@ -2079,6 +2137,15 @@ object OeaGameBoostStore {
      */
     fun isGame(context: Context, packageName: String): Boolean {
         val selected = games(context)
+        if (isOeaGameKey(packageName)) {
+            // OEA's own games: a selected key always counts (it is registered
+            // as a game by definition); an unknown id (registry not ready) never does.
+            if (!oeaGameTitles().containsKey(oeaGameId(packageName))) return false
+            if (packageName in selected) return true
+            if (packageName in dismissedGames(context)) return false
+            setGames(context, selected + packageName)
+            return true
+        }
         val manual = mode(context) == "manual_automatic"
         if (packageName in selected) return manual || isCategoryGame(context, packageName)
         if (packageName in dismissedGames(context) || !isCategoryGame(context, packageName)) return false

@@ -156,7 +156,7 @@ object OeaGestures {
                 "flashlight" -> toggleFlashlight(app)
                 "camera" -> {
                     try {
-                        app.startActivity(Intent(app, com.oea.launcher.miniapps.OeaMiniAppActivity::class.java).putExtra(com.oea.launcher.miniapps.OeaMiniAppActivity.EXTRA_APP, "camera").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        app.startActivity(com.oea.launcher.miniapps.OeaMiniApps.launchIntent(app, "camera").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         true
                     } catch (_: Throwable) { false }
                 }

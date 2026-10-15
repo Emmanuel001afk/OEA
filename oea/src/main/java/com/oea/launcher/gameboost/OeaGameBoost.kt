@@ -104,6 +104,26 @@ object OeaGameBoost {
     }
 
     /**
+     * A game that runs inside OEA itself was opened from the hub (or relaunched
+     * after a fault). These games have no package of their own, so the normal
+     * package-based detection can never notice them; the hub reports them
+     * directly with their engine id.
+     */
+    fun onOeaGameOpened(context: Context, gameId: String) {
+        val app = context.applicationContext
+        if (com.oea.launcher.perf.OeaLowMode.active(app)) return
+        if (!OeaGameBoostStore.enabled(app)) return
+        if (gameId.isBlank()) return
+        val key = OeaGameBoostStore.OEA_PREFIX + gameId
+        if (!OeaGameBoostStore.isGame(app, key)) return
+        if (!canFollowSessions(app)) {
+            Log.i(TAG, "Not starting a session for $key: neither OEA Assistant nor Usage access is available")
+            return
+        }
+        startSession(app, key)
+    }
+
+    /**
      * Low mode is on: end any running session and stop the overlay service.
      * Sessions also refuse to start while Low mode is active (see [onAppLaunched]
      * and [onWindowChanged]), so this cannot simply be undone by opening a game.

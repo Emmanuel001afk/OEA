@@ -6,7 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
 import com.oea.launcher.R
-import com.oea.launcher.miniapps.OeaMiniAppActivity
+import com.oea.launcher.miniapps.OeaMiniApps
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,7 +23,7 @@ class OeaClockWidgetProvider : AppWidgetProvider() {
             val now = Date()
             views.setTextViewText(R.id.clock_time, SimpleDateFormat("HH:mm", Locale.getDefault()).format(now))
             views.setTextViewText(R.id.clock_date, SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now))
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "clock")
+            val intent = OeaMiniApps.launchIntent(context, "clock")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.clock_time, pi)
             views.setOnClickPendingIntent(R.id.clock_date, pi)
@@ -57,7 +57,7 @@ class OeaWeatherWidgetProvider : AppWidgetProvider() {
             views.setTextViewText(R.id.weather_city, city)
             views.setTextViewText(R.id.weather_temp, temp)
             views.setTextViewText(R.id.weather_desc, desc)
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "weather")
+            val intent = OeaMiniApps.launchIntent(context, "weather")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.weather_city, pi)
             views.setOnClickPendingIntent(R.id.weather_temp, pi)
@@ -77,7 +77,7 @@ class OeaCalendarWidgetProvider : AppWidgetProvider() {
             val count = raw.split("\u001E").filter { it.isNotBlank() }.size
             views.setTextViewText(R.id.calendar_events, if (count == 0) "No events" else "$count events")
             views.setTextViewText(R.id.calendar_next, SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now))
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "calendar")
+            val intent = OeaMiniApps.launchIntent(context, "calendar")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.calendar_month, pi)
             appWidgetManager.updateAppWidget(id, views)
@@ -97,7 +97,7 @@ class OeaNotesWidgetProvider : AppWidgetProvider() {
             }.take(3)
             val text = if (notes.isEmpty()) "No notes yet • Tap to open OEA Notes" else notes.joinToString("\n") { "• $it" }
             views.setTextViewText(R.id.notes_content, text)
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "notes")
+            val intent = OeaMiniApps.launchIntent(context, "notes")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
             appWidgetManager.updateAppWidget(id, views)
@@ -114,7 +114,7 @@ class OeaImageWidgetProvider : AppWidgetProvider() {
             val prefs = context.getSharedPreferences("oea_image_v2", Context.MODE_PRIVATE)
             val count = prefs.getStringSet("favorites", emptySet())?.size ?: 0
             views.setTextViewText(R.id.notes_content, "EMAGE • ${count} favorites\nTap to open gallery\nUnlimited images • Albums: Screenshots, Downloads, external apps")
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "image")
+            val intent = OeaMiniApps.launchIntent(context, "emage")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
             appWidgetManager.updateAppWidget(id, views)
@@ -130,7 +130,7 @@ class OeaVideoWidgetProvider : AppWidgetProvider() {
             val favCount = prefs.getStringSet("favorites", emptySet())?.size ?: 0
             val history = prefs.getString("history", "")?.split("|")?.filter { it.isNotBlank() }?.size ?: 0
             views.setTextViewText(R.id.notes_content, "VIP • Video Player\n${favCount} fav • ${history} history\nTap to open • Unlimited videos • Albums + playlists + resume")
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "video")
+            val intent = OeaMiniApps.launchIntent(context, "vip")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
             appWidgetManager.updateAppWidget(id, views)
@@ -146,7 +146,7 @@ class OeaCalculatorWidgetProvider : AppWidgetProvider() {
             val last = prefs.getString("last_result", "Calculator")
             views.setTextViewText(R.id.clock_time, last ?: "0")
             views.setTextViewText(R.id.clock_date, "Tap to open • Scientific, Programmer, Converter, Graphing • Tape 100")
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "calculator")
+            val intent = OeaMiniApps.launchIntent(context, "calculator")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.clock_time, pi)
             views.setOnClickPendingIntent(R.id.clock_date, pi)
@@ -160,7 +160,7 @@ class OeaCameraWidgetProvider : AppWidgetProvider() {
         for (id in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.oea_widget_notes)
             views.setTextViewText(R.id.notes_content, "OEA Camera • Tap to open\nPro controls • Filters • Grid • Timer • Video • QR • Doc\nLast photo thumbnail + EMAGE integration")
-            val intent = Intent(context, OeaMiniAppActivity::class.java).putExtra(OeaMiniAppActivity.EXTRA_APP, "camera")
+            val intent = OeaMiniApps.launchIntent(context, "camera")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
             appWidgetManager.updateAppWidget(id, views)

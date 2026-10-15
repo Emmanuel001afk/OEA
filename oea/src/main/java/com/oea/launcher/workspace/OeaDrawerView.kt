@@ -502,7 +502,7 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
                 val dy = ev.rawY - downY
                 val dx = abs(ev.rawX - downX)
                 val overList = ev.y > listArea.top
-                if (!closing && dy > touchSlop * 1.5f && dy > dx * 1.4f && (!overList || isAtTop())) {
+                if (!closing && dy > touchSlop * 1.5f * com.oea.launcher.data.OeaDataStore.get(context).gestureSlopScale() && dy > dx * 1.4f && (!overList || isAtTop())) {
                     closing = true
                     hideKeyboard()
                     parent?.requestDisallowInterceptTouchEvent(true)

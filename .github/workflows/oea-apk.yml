@@ -2,6 +2,9 @@ name: OEA Launcher APK
 
 permissions:
   contents: write
+  # Needed by the "Comment Gradle error on PR" step: without this the comment
+  # call is refused and a red PR shows no reason anyone can read.
+  pull-requests: write
 
 # Serialize release publication: rapid pushes must not concurrently delete/upload
 # the same OEA-latest.apk asset, which can produce uploads.github.com 404s.

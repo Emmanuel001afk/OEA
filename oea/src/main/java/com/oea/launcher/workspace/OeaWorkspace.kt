@@ -2233,7 +2233,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 if (gestureDecided) return false
                 val dx = ev.x - downX
                 val dy = ev.y - downY
-                if (abs(dy) > touchSlop * 1.2f && abs(dy) > abs(dx) * 1.3f) {
+                val slop = touchSlop * store.gestureSlopScale()
+                if (abs(dy) > slop * 1.2f && abs(dy) > abs(dx) * 1.3f) {
                     gestureDecided = true
                     val direction = if (dy < 0) 1 else -1
                     if (canScrollUnder(this, ev.x, ev.y, direction)) return false
@@ -2245,7 +2246,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                         onHomeSwipeDown()
                         return true
                     }
-                } else if (abs(dx) > touchSlop * 1.5f) {
+                } else if (abs(dx) > slop * 1.5f) {
                     gestureDecided = true
                 }
             }
@@ -2293,7 +2294,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 val vy = velocityTracker?.yVelocity ?: 0f
                 val progress = 1f - drawer.translationY / height.toFloat().coerceAtLeast(1f)
                 drawerDragging = false
-                val open = vy < -900f || (vy < 600f && progress > 0.3f)
+                // The user's touch-gesture sensitivity sets how strong a fling
+                // has to be to dismiss the drawer.
+                val flingOpen = -900f * store.gestureSlopScale()
+                val open = vy < flingOpen || (vy < 600f && progress > 0.3f)
                 animateDrawer(open) { if (open && store.drawerKeyboard()) drawer.focusSearch(true) }
             }
         }

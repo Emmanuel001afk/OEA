@@ -232,6 +232,27 @@ class OeaDataStore private constructor(context: Context) {
     fun swipeDownAction() = prefs.getString(KEY_SWIPE_DOWN, "notifications") ?: "notifications"
     fun setSwipeDownAction(v: String) { prefs.edit().putString(KEY_SWIPE_DOWN, v).apply() }
 
+    /**
+     * Touch gesture sensitivity for Home's own gestures (drawer swipe, page
+     * fling, drawer close): 0 = Low (deliberate movements only), 1 = Standard,
+     * 2 = High (light movements). Stored in the main store, so it survives
+     * Ultra Power Saving Mode and reboots like every other gesture setting.
+     */
+    fun gestureSensitivity() = prefs.getInt(KEY_GESTURE_SENSITIVITY, 1).coerceIn(0, 2)
+    fun setGestureSensitivity(v: Int) { prefs.edit().putInt(KEY_GESTURE_SENSITIVITY, v.coerceIn(0, 2)).apply() }
+
+    /**
+     * Multiplier for Home's touch thresholds and fling velocities. Low keeps
+     * taps safe from stray swipes (longer travel, faster fling required); High
+     * reacts to lighter movements. Not applied to icon taps or long-press
+     * drags — those stay exact regardless of the sensitivity choice.
+     */
+    fun gestureSlopScale(): Float = when (gestureSensitivity()) {
+        0 -> 1.35f
+        2 -> 0.72f
+        else -> 1f
+    }
+
     /** Home double-tap: "lock", "drawer" or "none". */
     fun doubleTapAction() = prefs.getString(KEY_DOUBLE_TAP, "lock") ?: "lock"
     fun setDoubleTapAction(v: String) { prefs.edit().putString(KEY_DOUBLE_TAP, v).apply() }
@@ -523,6 +544,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_THEMED_ICONS = "themed_icons"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_SWIPE_DOWN = "gesture_swipe_down"
+        private const val KEY_GESTURE_SENSITIVITY = "gesture_touch_sensitivity"
         private const val KEY_DOUBLE_TAP = "gesture_double_tap"
         private const val KEY_TRIPLE_TAP = "gesture_triple_tap"
         private const val KEY_TWO_FINGER = "gesture_two_finger"

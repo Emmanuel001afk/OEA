@@ -38,7 +38,6 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <queries>
@@ -154,12 +153,77 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- OEA mini-apps: the small tools built into the launcher. Their own task, so a mini-app that faults is contained and cannot take Home with it. -->
+        <!-- OEA mini-apps: the index host, kept internal (no launcher entry).
+             Every mini-app is below as its own activity with its own icon,
+             label and task; they are real applications, not pages of a
+             container app. -->
         <activity
             android:name="com.oea.launcher.miniapps.OeaMiniAppActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="OEA mini-apps"
             android:launchMode="singleTop"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaClockActivity"
+            android:exported="true"
+            android:label="Clock"
+            android:icon="@drawable/ic_oea_clock"
+            android:roundIcon="@drawable/ic_oea_clock"
+            android:taskAffinity="com.oea.launcher.app.clock"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Android's clock app role: other apps ask the clock to set an
+                 alarm or a timer, or to show the alarms. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SET_ALARM" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SET_TIMER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SHOW_ALARMS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaCalendarActivity"
+            android:exported="true"
+            android:label="Calendar"
+            android:icon="@drawable/ic_oea_calendar"
+            android:roundIcon="@drawable/ic_oea_calendar"
+            android:taskAffinity="com.oea.launcher.app.calendar"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Android's calendar app role: other apps hand new events over
+                 with INSERT; the event fields ride along as extras, so no
+                 calendar-provider permission is needed to receive them. -->
+            <intent-filter>
+                <action android:name="android.intent.action.INSERT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.item/event" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaImageActivity"
+            android:exported="true"
+            android:label="OEA Image"
+            android:icon="@drawable/ic_oea_image"
+            android:roundIcon="@drawable/ic_oea_image"
+            android:taskAffinity="com.oea.launcher.app.image"
+            android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -167,47 +231,141 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- Standalone aliases for each mini-app: own icon, label and task, addable to Home like any app -->
-        <activity-alias android:name=".ClockAlias" android:exported="true" android:label="Clock" android:icon="@drawable/ic_oea_clock" android:roundIcon="@drawable/ic_oea_clock" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="clock"/>
-        </activity-alias>
-        <activity-alias android:name=".CalendarAlias" android:exported="true" android:label="Calendar" android:icon="@drawable/ic_oea_calendar" android:roundIcon="@drawable/ic_oea_calendar" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="calendar"/>
-        </activity-alias>
-        <activity-alias android:name=".EmageAlias" android:exported="true" android:label="OEA Image" android:icon="@drawable/ic_oea_image" android:roundIcon="@drawable/ic_oea_image" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="emage"/>
-        </activity-alias>
-        <activity-alias android:name=".VipAlias" android:exported="true" android:label="OEA VIP" android:icon="@drawable/ic_oea_video" android:roundIcon="@drawable/ic_oea_video" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="vip"/>
-        </activity-alias>
-        <activity-alias android:name=".WeatherAlias" android:exported="true" android:label="OEA Weather" android:icon="@drawable/ic_oea_weather" android:roundIcon="@drawable/ic_oea_weather" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="weather"/>
-        </activity-alias>
-        <activity-alias android:name=".CalculatorAlias" android:exported="true" android:label="OEA Calculator" android:icon="@drawable/oic_calculate" android:roundIcon="@drawable/oic_calculate" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="calculator"/>
-        </activity-alias>
-        <activity-alias android:name=".MessagingAlias" android:exported="true" android:label="OEA Messaging" android:icon="@drawable/ic_oea_messaging" android:roundIcon="@drawable/ic_oea_messaging" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="messaging"/>
-        </activity-alias>
-        <activity-alias android:name=".NotesAlias" android:exported="true" android:label="OEA Notes" android:icon="@drawable/ic_oea_notes" android:roundIcon="@drawable/ic_oea_notes" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="notes"/>
-        </activity-alias>
-        <activity-alias android:name=".CameraAlias" android:exported="true" android:label="OEA Camera" android:icon="@drawable/ic_oea_camera" android:roundIcon="@drawable/ic_oea_camera" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="camera"/>
-        </activity-alias>
-        <activity-alias android:name=".ConsoleAlias" android:exported="true" android:label="OEA Console" android:icon="@drawable/ic_oea_console" android:roundIcon="@drawable/ic_oea_console" android:targetActivity="com.oea.launcher.miniapps.OeaMiniAppActivity">
-            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-            <meta-data android:name="oea.miniapp.id" android:value="console"/>
-        </activity-alias>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaVipActivity"
+            android:exported="true"
+            android:label="OEA VIP"
+            android:icon="@drawable/ic_oea_video"
+            android:roundIcon="@drawable/ic_oea_video"
+            android:taskAffinity="com.oea.launcher.app.vip"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaWeatherActivity"
+            android:exported="true"
+            android:label="OEA Weather"
+            android:icon="@drawable/ic_oea_weather"
+            android:roundIcon="@drawable/ic_oea_weather"
+            android:taskAffinity="com.oea.launcher.app.weather"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaCalculatorActivity"
+            android:exported="true"
+            android:label="OEA Calculator"
+            android:icon="@drawable/oic_calculate"
+            android:roundIcon="@drawable/oic_calculate"
+            android:taskAffinity="com.oea.launcher.app.calculator"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaMessagingActivity"
+            android:exported="true"
+            android:label="OEA Messaging"
+            android:icon="@drawable/ic_oea_messaging"
+            android:roundIcon="@drawable/ic_oea_messaging"
+            android:taskAffinity="com.oea.launcher.app.messaging"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaNotesActivity"
+            android:exported="true"
+            android:label="OEA Notes"
+            android:icon="@drawable/ic_oea_notes"
+            android:roundIcon="@drawable/ic_oea_notes"
+            android:taskAffinity="com.oea.launcher.app.notes"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaCameraActivity"
+            android:exported="true"
+            android:label="OEA Camera"
+            android:icon="@drawable/ic_oea_camera"
+            android:roundIcon="@drawable/ic_oea_camera"
+            android:taskAffinity="com.oea.launcher.app.camera"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaConsoleActivity"
+            android:exported="true"
+            android:label="OEA Console"
+            android:icon="@drawable/ic_oea_console"
+            android:roundIcon="@drawable/ic_oea_console"
+            android:taskAffinity="com.oea.launcher.app.console"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaGalleryActivity"
+            android:exported="true"
+            android:label="Gallery"
+            android:icon="@drawable/oic_photo_library"
+            android:roundIcon="@drawable/oic_photo_library"
+            android:taskAffinity="com.oea.launcher.app.gallery"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaVoiceActivity"
+            android:exported="true"
+            android:label="OEA Voice"
+            android:icon="@drawable/oic_mic"
+            android:roundIcon="@drawable/oic_mic"
+            android:taskAffinity="com.oea.launcher.app.voice"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaBrandedPanelTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <!-- OEA Games: the hub for games built on the OEA Game Engine. Its own
              task (like Game Boost), so a running game resumes from the icon or
              the Dynamic Island. Not singleTask: that would close a running game. -->
@@ -480,7 +638,6 @@
             android:exported="true"
             android:enabled="true">
             <intent-filter>
-                <action android:name="android.os.action.POWER_SAVE_MODE_CHANGED" />
                 <action android:name="android.os.action.POWER_SAVE_MODE_CHANGED" />
                 <action android:name="android.os.action.ULTRA_POWER_SAVING_MODE_CHANGED" />
                 <action android:name="com.samsung.android.action.ULTRA_POWER_SAVING_MODE_CHANGED" />
