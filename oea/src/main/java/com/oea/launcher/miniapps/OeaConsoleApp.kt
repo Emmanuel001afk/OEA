@@ -757,15 +757,101 @@ Our own build:
                 }
             }, LinearLayout.LayoutParams(-1, kit.dp(50)).apply { topMargin = kit.dp(8) })
 
+            val actionsRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+            actionsRow.addView(kit.primaryButton("Copy output", R.drawable.oic_text_fields) {
+                val text = output.text?.toString().orEmpty()
+                if (text.isNotBlank()) {
+                    val cm = host.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Command Output", text))
+                    consoleToast(host, "Output copied")
+                } else consoleToast(host, "Nothing to copy")
+            }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { topMargin = kit.dp(8); rightMargin = kit.dp(4) })
+            actionsRow.addView(kit.primaryButton("Share output", R.drawable.oic_share_filled) {
+                val text = output.text?.toString().orEmpty()
+                if (text.isNotBlank()) {
+                    val share = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "OEA Command Output")
+                        putExtra(Intent.EXTRA_TEXT, text)
+                    }
+                    try { host.startActivity(Intent.createChooser(share, "Share output")) } catch (_: Throwable) { consoleToast(host, "No share target") }
+                } else consoleToast(host, "Nothing to share")
+            }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { topMargin = kit.dp(8); leftMargin = kit.dp(4) })
+            panel.addView(actionsRow)
+
             kit.note(panel, "Commands are OEA's own format, not ADB. Each operation explains what it does, why access required, how to authorize and how to confirm success. No bypass of security boundaries without required privileges. Comprehensive: covers everything ADB can do within app sandbox + DO/root where available, plus OEA-specific (low mode, island, etc.).")
         })
     }
+
+    private fun consoleToast(host: Activity, msg: String) {
+        android.widget.Toast.makeText(host, msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun networkInfo(ctx: Context): String {
+        return try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                ?: return "ConnectivityManager unavailable"
+            val network = cm.activeNetwork ?: return "No active network (airplane mode or offline)"
+            val caps = cm.getNetworkCapabilities(network)
+                ?: return "No capabilities reported for the active network"
+            val transports = buildList {
+                if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) add("Wi-Fi")
+                if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) add("Cellular")
+                if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) add("Ethernet")
+                if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) add("VPN")
+            }
+            buildString {
+                append("Transports: ").append(if (transports.isEmpty()) "unknown" else transports.joinToString(" + ")).append('\n')
+                append("Validated internet: ").append(caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)).append('\n')
+                append("Metered: ").append(!caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)).append('\n')
+                append("Downstream: ").append(caps.linkDownstreamBandwidthKbps / 1000f).append(" Mbps (reported)\n")
+                append("Roaming: ").append(!caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING)).append('\n')
+                append("Source: ConnectivityManager (no extra permissions)")
+            }
+        } catch (e: Throwable) { "Network info failed: ${e.message}" }
+    }
+
+    private fun helpForTopic(topic: String): String = when (topic) {
+        "device" -> "device info|battery|memory|storage|cpu|thermal|display|sensors|network\n" +
+            "Reads public Android APIs (BatteryManager, ActivityManager, StatFs, SensorManager, ConnectivityManager). No permissions needed.\n" +
+            "Tip: 'device network' reports transport (Wi-Fi/cellular/VPN), validation, metered flag and reported link speed."
+        "package", "packages" -> "package list [frozen|hidden|system]\n" +
+            "Uses PackageManager. Frozen = Android suspension (DO/root) or OEA Freeze records. Hidden = OEA Home's hidden-apps store."
+        "freeze", "suspend", "unfreeze" -> "freeze <pkg> / unfreeze <pkg>\n" +
+            "Genuine suspension: DevicePolicyManager.setPackagesSuspended (Device Owner) or su cmd package suspend (root).\n" +
+            "Without privileges: OEA Freeze — launcher blocks it, Assistant force-stops external launches. Honest limit: other apps can hold it open until Assistant reacts.\n" +
+            "Authorize DO: on a fresh device run adb shell dpm set-device-owner com.oea.launcher/.applock.OeaDeviceAdminReceiver. Verify: package list frozen."
+        "launch", "start" -> "launch <package> — opens the app's main activity via its launch intent.\n" +
+            "Honest limits: frozen/hidden packages may fail; OEA reports the real startActivity result."
+        "overlay" -> "overlay status|request|list\n" +
+            "status draws a real 1px probe window to verify (some firmware lies about granted). request opens the system page."
+        "multitask", "split", "float", "pip" -> "multitask status | multitask split <p1> <p2> | split <p1> <p2> | float <pkg> | pip\n" +
+            "Split needs Android 7+, freeform needs Developer options enable-freeform. OEA verifies with Assistant after requesting."
+        "dnd" -> "dnd status|on|off — needs Do Not Disturb special access; verified via currentInterruptionFilter after setting."
+        "lowmode", "low", "ultra" -> "lowmode status|on|off|auto on|off\n" +
+            "LOW = OEA's Ultra Power Saving: cheap locker, frozen scenes, sensors released, optional app suspension tier."
+        "island" -> "island status|toggle — Dynamic Island state, style, over-other-apps flag, overlay verification."
+        "settings" -> "settings get|put global|secure|system <key> [value]\n" +
+            "Reads are free for public/secure values your permission level allows. Writes need WRITE_SECURE_SETTINGS (privileged) or root — OEA reports the real failure, no pretend success."
+        "appops" -> "appops get <pkg> [op] — reads AppOpsManager (0=allow, 1=ignore, 2=deny, 4=default). Writes need root via 'shell cmd appops set ...'."
+        "shell" -> "shell <cmd> — runs via su, scoped to OEA's own operations, exit code + stdout read back for verification. Refuses without root."
+        "doze" -> "doze status|request — battery optimization whitelist; request opens ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS."
+        "security" -> "security scan — flags packages with dangerous combos (overlay+accessibility+recorder, sideloaded requesters). Quick, local."
+        "performance" -> "performance trim|gc — relinquishes OEA's own memory; honest: cannot force other processes."
+        "notification" -> "notification status — listener enabled check; badges/media/quick-reply need this."
+        "diagnostics", "dump" -> "diagnostics summary — OEA fault store counts per subsystem; 'logcat' = last 5 stored entries; 'clear diagnostics' wipes."
+        "logcat" -> "logcat — OEA's own fault history (last 5). Not adb logcat; OEA cannot read other apps' logs as a normal app."
+        "mode", "wallpaper", "theme", "gesture" -> "mode list|current|apply <id> • wallpaper list • theme list • gesture list — appearance & input surface state; apply verified through the same pipeline the UI uses."
+        else -> "No topic '$topic'. Topics: " + TOPICS.joinToString(" ") + "\nOr type 'help' for the full list."
+    }
+
+    private val TOPICS = listOf("device", "package", "freeze", "launch", "overlay", "multitask", "dnd", "lowmode", "island", "settings", "appops", "shell", "doze", "security", "performance", "notification", "diagnostics", "logcat", "mode", "wallpaper", "theme", "gesture")
 
     private fun executeOeaCommand(ctx: Context, cmd: String): String {
         val parts = cmd.trim().split("\\s+".toRegex())
         if (parts.isEmpty()) return "Empty command"
         return when (parts[0].lowercase()) {
-            "help" -> """
+            "help" -> parts.getOrNull(1)?.lowercase()?.let { helpForTopic(it) } ?: """
 OEA Command System — own DSL, own build, comprehensive
 Categories:
   device — device info, battery, memory, storage, cpu, thermal, display, sensors
@@ -786,7 +872,7 @@ Categories:
   notification — listener status
   clear — clear diagnostics
   logcat — show OEA logs
-  help — this list
+  help — this list\n  launch — open an app's main activity\n  diagnostics — fault summary\n\nTip: 'help <topic>' for per-command detail, e.g. 'help freeze'
 
 Examples:
   help
@@ -831,6 +917,7 @@ Examples:
                     val dm = ctx.resources.displayMetrics
                     "Display: ${dm.widthPixels}x${dm.heightPixels} • ${dm.densityDpi} dpi • density ${dm.density} • scaled ${dm.scaledDensity}"
                 }
+                "network" -> networkInfo(ctx)
                 "sensors" -> {
                     try {
                         val sm = ctx.getSystemService(android.hardware.SensorManager::class.java)
@@ -867,6 +954,21 @@ Examples:
                     }
                 }
                 else -> "Usage: package list [frozen|hidden|system]"
+            }
+
+            "launch", "start" -> {
+                if (parts.size < 2) return "Usage: launch <package> — opens the app's main launcher activity"
+                val pkg = parts[1]
+                try {
+                    val pm = ctx.packageManager
+                    val intent = pm.getLaunchIntentForPackage(pkg)
+                    if (intent == null) "No launchable activity for $pkg (may be frozen, hidden, or a service-only package). Try 'package list' to verify it is installed."
+                    else {
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        ctx.startActivity(intent)
+                        "Launching $pkg — startActivity succeeded. Confirm: switch to the app; if it bounces back, check freezer ('package list frozen')."
+                    }
+                } catch (e: Throwable) { "Launch failed: ${e.message}" }
             }
 
             "freeze", "suspend" -> {
@@ -1113,6 +1215,20 @@ Examples:
                     } catch (e: Throwable) { "Failed: ${e.message}" }
                 }
                 else -> "Usage: appops get <package> [op]"
+            }
+
+            "diagnostics", "dump" -> when (parts.getOrNull(1)?.lowercase()) {
+                "summary" -> {
+                    val history = OeaFaultLog.history()
+                    val bySubsystem = history.groupingBy { it.subsystem }.eachCount().entries
+                        .sortedByDescending { it.value }.take(8)
+                        .joinToString("\n") { "  ${it.key}: ${it.value} events" }
+                    "OEA diagnostics summary (own store, not logcat):\n" +
+                        "Total events: ${history.size}\n" +
+                        (if (bySubsystem.isNotBlank()) "By subsystem:\n$bySubsystem\n" else "No events recorded.\n") +
+                        "Latest: use 'logcat' for the last 5 entries. Clear with 'clear diagnostics'."
+                }
+                else -> "Usage: diagnostics summary — crash/fault counts per subsystem from OEA's own fault log ('logcat' shows the last entries)"
             }
 
             "clear" -> when (parts.getOrNull(1)?.lowercase()) {

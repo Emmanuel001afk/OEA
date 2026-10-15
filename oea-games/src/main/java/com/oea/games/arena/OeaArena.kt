@@ -877,7 +877,7 @@ class OeaArena : OeaGame() {
     private val rigPose = CharRig.Pose()
     private val boots = Material(color = 0xFF1B1E24.toInt(), specular = 0.3f)
     private fun rigFor(color: Int) = soldierRigs.getOrPut(color) {
-        CharRig(body = shirt(color), pants = pants, skin = skin, shoes = boots)
+        CharRig(body = shirt(color), pants = pants, skin = skin, shoes = boots, accent = shirt(Colors.scale(color, 0.55f)))
     }
 
     /** Blocky soldier: legs, torso (team colour), vest, head/helmet, arms holding the weapon, parachute. */
@@ -900,7 +900,7 @@ class OeaArena : OeaGame() {
             rigPose.airborne = true
             rigPose.aimHold = false
             rigPose.lean = 0f
-            rigPose.detail = false
+            rigPose.detail = true
             rigFor(color).draw(r, x, y, z, yaw, rigPose)
             return
         }
@@ -918,7 +918,7 @@ class OeaArena : OeaGame() {
         rigPose.aimHold = !chute
         rigPose.aimPitch = MathX.clamp(pitch, -0.9f, 0.9f)
         rigPose.lean = 0f
-        rigPose.detail = false
+        rigPose.detail = true
         rigFor(color).draw(r, x, y, z, yaw, rigPose)
         val hip = y + (if (crouch) 0.55f else 0.9f)
         val torsoY = hip + 0.36f
