@@ -238,8 +238,17 @@ jobs:
             } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' | awk '!seen[$0]++' | head -60 | while IFS= read -r line; do
               printf '::error::%s\n' "${line//%/%25}"
             done
+            cat "$RUNNER_TEMP/gradle.log" | tail -n 200
             exit 1
           fi
+      - name: Upload Gradle log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-log
+          path: ${{ runner.temp }}/gradle.log
+          retention-days: 2
+          if-no-files-found: warn
       - name: Run engine and game unit tests
         run: |
           # Chess rules (perft), connection codes, math and N-D geometry, plus
