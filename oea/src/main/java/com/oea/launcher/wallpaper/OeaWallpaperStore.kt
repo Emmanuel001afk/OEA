@@ -136,6 +136,7 @@ object OeaWallpaperStore {
                         .putString(KEY_LAST_APPLIED, scene.id)
                         .putString(KEY_LAST_TARGET, target.name)
                         .apply()
+                    revealOnHome(app, target)
                     Result.Applied(scene, target)
                 } else {
                     Result.Failed("Android refused the wallpaper. It may be restricted by the device's wallpaper settings.")
@@ -152,6 +153,25 @@ object OeaWallpaperStore {
         apply(context, scene, target ?: lastTarget(context) ?: Target.HOME, onDone)
     }
 
+    /**
+     * A wallpaper was just written to Android through [target]. When it covers
+     * Home, Home must stop drawing its own backdrop (a live Tide/Depth/Ink
+     * scene or an OEA still scene), or the freshly applied wallpaper would sit
+     * invisibly behind it — the exact "I applied a theme but Home did not
+     * change" report. The user can always turn a live scene back on; the last
+     * explicit choice wins.
+     */
+    fun revealOnHome(context: Context, target: Target) {
+        if (target == Target.LOCK) return
+        val app = context.applicationContext
+        val store = com.oea.launcher.data.OeaDataStore.get(app)
+        if (store.wallpaperSource() == com.oea.launcher.data.OeaDataStore.WALLPAPER_OEA) {
+            store.setHomeScene(null)
+            store.setWallpaperSource(com.oea.launcher.data.OeaDataStore.WALLPAPER_SYSTEM)
+        }
+        com.oea.launcher.ui.OeaTheme.invalidate()
+    }
+
     /** Applies a user-picked photo. Fails cleanly when the image cannot be read. */
     fun applyBitmap(context: Context, bitmap: Bitmap, target: Target, onDone: (Result) -> Unit) {
         val app = context.applicationContext
@@ -163,7 +183,10 @@ object OeaWallpaperStore {
             val ok = OeaGuard.call("wallpaper:photo", false) { write(app, bitmap, target) }
             applying.set(false)
             // A photo is not a bundled scene, so the theme stops following one.
-            if (ok) setScene(app, null)
+            if (ok) {
+                setScene(app, null)
+                revealOnHome(app, target)
+            }
             OeaGuard.post("wallpaper:result", android.os.Handler(android.os.Looper.getMainLooper())) {
                 onDone(if (ok) Result.Photo(target) else Result.Failed("Android could not apply that image."))
             }

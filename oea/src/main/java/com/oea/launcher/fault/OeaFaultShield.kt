@@ -229,13 +229,48 @@ object OeaFaultShield {
     private fun onUncaught(thread: Thread, error: Throwable) {
         val kind = OeaFaultPolicy.classify(thread, mainThread, frontIsGame)
         val subsystem = subsystemOf(thread, error)
+        // An uncaught fault on the main thread has already unwound Looper.loop():
+        // the message queue is dead even though the process is still alive. A
+        // "contained" main-thread fault therefore does NOT keep Home running —
+        // it leaves a zombie process whose last window stays on the screen
+        // (black or frozen), ignoring Home, Recents and touches until the whole
+        // phone is rebooted. The only safe recovery is to record the fault and
+        // hand the thread back to Android so the process dies and Home restarts
+        // cleanly (Android relaunches the default launcher in a fresh process).
+        if (thread === mainThread) {
+            val seen = runCatching { countRecent(subsystem) }.getOrDefault(1)
+            runCatching {
+                OeaFaultLog.record(
+                    OeaFaultRecord.of(
+                        kind = kind,
+                        thread = thread,
+                        subsystem = subsystem,
+                        error = error,
+                        action = FaultAction.ESCALATE,
+                        reason = "uncaught fault on the UI thread; the process restarts instead of leaving a frozen Home",
+                        repeats = seen,
+                        process = processName()
+                    )
+                )
+            }
+            escalate(thread, error)
+            return
+        }
+        // A worker, GL or binder thread can die without taking the UI loop with
+        // it, so the policy's containment actions genuinely survive there.
         val action = handle(kind, subsystem, error, fatal = true, contained = false, thread = thread)
-        if (action == FaultAction.ESCALATE) {
-            // Let Android do its normal flow (crash dialog, restart, drop back to
-            // the system Home) after the record is on disk, so the cause is visible.
-            val handler = previous
-            if (handler != null) handler.uncaughtException(thread, error)
-            else Log.e(TAG, "Unrecoverable fault with no previous handler; the process stays as it is")
+        if (action == FaultAction.ESCALATE) escalate(thread, error)
+    }
+
+    /** Hands the dying thread back to Android's own handler (records the crash and kills the process). */
+    private fun escalate(thread: Thread, error: Throwable) {
+        val handler = previous
+        if (handler != null) {
+            runCatching { handler.uncaughtException(thread, error) }
+        } else {
+            Log.e(TAG, "Unrecoverable fault with no previous handler; killing the process so Home can restart", error)
+            runCatching { android.os.Process.killProcess(android.os.Process.myPid()) }
+            runCatching { kotlin.system.exitProcess(10) }
         }
     }
 

@@ -343,7 +343,13 @@ class OeaGamesActivity : Activity(), SessionListener {
                         .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_MODE, mode.name)
                         .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_OPTIONS, optionBundle)
                         .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_SEED, gameSeed))
-                }.onSuccess { return }
+                }.onSuccess {
+                    // The standalone game app is a real package with Android's game
+                    // category; report its launch so a Game Boost session starts even
+                    // without the assistant watching windows.
+                    runCatching { com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(applicationContext, standalonePackage) }
+                    return
+                }
                     .onFailure { toast("Opening the standalone game failed; starting it in OEA instead.") }
             }
         }

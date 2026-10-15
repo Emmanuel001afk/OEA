@@ -359,6 +359,9 @@ object OeaGameLauncher {
     fun start(activity: Activity, gameId: String, launch: GameLaunch) {
         LastMatch.remember(gameId, LastMatch(launch.mode, launch.options, launch.localPlayers))
         pending = gameId to launch
+        // Games that live inside OEA have no package the Game Boost heuristics
+        // could ever classify, so the hub reports the session's start itself.
+        runCatching { com.oea.launcher.gameboost.OeaGameBoost.onOeaGameOpened(activity.applicationContext, gameId) }
         activity.startActivity(Intent(activity, OeaGameActivity::class.java).putExtra(OeaGameActivity.EXTRA_GAME, gameId))
     }
 

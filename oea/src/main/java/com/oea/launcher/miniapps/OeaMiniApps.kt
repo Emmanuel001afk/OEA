@@ -26,52 +26,54 @@ import com.oea.launcher.ui.OeaType
  */
 object OeaMiniApps {
 
-    /** One mini-app: how it is listed and how its view is built. */
+    /** One mini-app: how it is listed, the activity that owns it, and how its view is built. */
     class App(
         val id: String,
         val label: String,
         val blurb: String,
         val icon: Int,
+        /** The mini-app's own application entry (own icon, label and task in the manifest). */
+        val activity: Class<out OeaMiniAppActivity>,
         /** Builds the mini-app's view. [host] is the activity showing it. */
         val build: (host: Activity, palette: OeaPalette) -> View
 )
 
     val all: List<App> = listOf(
         App(
-            "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.oic_schedule
+            "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.ic_oea_clock, OeaClockActivity::class.java
 ) { host, palette -> OeaClockApp.build(host, palette) },
         App(
-            "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.oic_schedule
+            "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.ic_oea_calendar, OeaCalendarActivity::class.java
 ) { host, palette -> OeaCalendarApp.build(host, palette) },
         App(
-            "emage", "OEA Image", "EMAGE • Browse, albums, downloads, previews and organization", R.drawable.oic_photo_library
+            "emage", "OEA Image", "EMAGE • Browse, albums, downloads, previews and organization", R.drawable.ic_oea_image, OeaImageActivity::class.java
 ) { host, palette -> OeaImageApp.build(host, palette) },
         App(
-            "vip", "OEA VIP", "Video Instant Player • Smooth playback, rotation, seeking", R.drawable.oic_play_arrow
+            "vip", "OEA VIP", "Video Instant Player • Smooth playback, rotation, seeking", R.drawable.ic_oea_video, OeaVipActivity::class.java
 ) { host, palette -> OeaVideoApp.build(host, palette) },
         App(
-            "weather", "OEA Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.oic_thermostat
+            "weather", "OEA Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.ic_oea_weather, OeaWeatherActivity::class.java
 ) { host, palette -> OeaWeatherApp.build(host, palette) },
         App(
-            "calculator", "OEA Calculator", "Full calculator with scientific, history and tape", R.drawable.oic_calculate
+            "calculator", "OEA Calculator", "Full calculator with scientific, history and tape", R.drawable.oic_calculate, OeaCalculatorActivity::class.java
 ) { host, palette -> OeaCalculatorApp.build(host, palette) },
         App(
-            "messaging", "OEA Messaging", "SMS messaging with proper permissions and roles", R.drawable.oic_edit
+            "messaging", "OEA Messaging", "SMS messaging with proper permissions and roles", R.drawable.ic_oea_messaging, OeaMessagingActivity::class.java
 ) { host, palette -> OeaMessagingApp.build(host, palette) },
         App(
-            "notes", "OEA Notes", "Notes, private notes, voice notes, search and organization", R.drawable.oic_edit
+            "notes", "OEA Notes", "Notes, private notes, voice notes, search and organization", R.drawable.ic_oea_notes, OeaNotesActivity::class.java
 ) { host, palette -> OeaNotesApp.build(host, palette) },
         App(
-            "camera", "OEA Camera", "Camera with preview, flash, timer and capture controls", R.drawable.oic_photo_library
+            "camera", "OEA Camera", "Camera with preview, flash, timer and capture controls", R.drawable.ic_oea_camera, OeaCameraActivity::class.java
 ) { host, palette -> OeaCameraApp.build(host, palette) },
         App(
-            "console", "OEA Console", "Central utility: diagnostics, device info, security, command system", R.drawable.oic_developer_mode
+            "console", "OEA Console", "Central utility: diagnostics, device info, security, command system", R.drawable.ic_oea_console, OeaConsoleActivity::class.java
 ) { host, palette -> OeaConsoleApp.build(host, palette) },
         App(
-            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.oic_photo_library
+            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.oic_photo_library, OeaGalleryActivity::class.java
 ) { host, palette -> OeaGalleryApp.build(host, palette) },
         App(
-            "voice", "OEA Voice", "Launcher's own speech recognizer — competes with Google, offline + launcher commands", R.drawable.oic_mic
+            "voice", "OEA Voice", "Launcher's own speech recognizer — offline + launcher commands", R.drawable.oic_mic, OeaVoiceActivity::class.java
 ) { host, palette -> OeaVoiceApp.build(host, palette) }
 )
 
@@ -112,9 +114,23 @@ object OeaMiniApps {
             }
     }
 
+    /**
+     * Opens a mini-app through its own activity and task. With no [id] it opens
+     * the index (kept for Settings and the Home menu; the index is not a
+     * launcher entry any more — the apps now stand on their own).
+     */
+    /**
+     * The explicit launch intent for a mini-app's own activity (or the index
+     * when [id] is null/unknown). Used by the launcher, widgets, gestures and
+     * voice commands, so every one of them lands on the same real application.
+     */
+    fun launchIntent(context: Context, id: String?): Intent {
+        val app = byId(id)
+        return Intent(context, app?.activity ?: OeaMiniAppActivity::class.java)
+    }
+
     fun open(context: Context, id: String? = null): Boolean = runCatching {
-        val intent = Intent(context, OeaMiniAppActivity::class.java)
-        if (id != null) intent.putExtra(OeaMiniAppActivity.EXTRA_APP, id)
+        val intent = launchIntent(context, id)
         if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
         true

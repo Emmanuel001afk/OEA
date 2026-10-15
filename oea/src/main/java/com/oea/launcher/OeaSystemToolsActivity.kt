@@ -1116,6 +1116,10 @@ open class OeaSystemToolsActivity : Activity() {
         kit.sectionTitle(box, "Touch")
         val group = kit.group(box)
         kit.row(group, R.drawable.oic_swipe_up, "Swipe up", null, value = "App drawer", chevron = false)
+        kit.stepperRow(group, R.drawable.oic_contrast, "Touch sensitivity", "How far a swipe or fling must travel before Home treats it as a gesture — Low guards against accidental swipes, High reacts to lighter movements. Applies straight away and survives restarts and power saving modes.", dataStore.gestureSensitivity(), 0, 2, { listOf("Low", "Standard", "High")[it] }) {
+            dataStore.setGestureSensitivity(it)
+            rerender()
+        }
         gestureRow(group, "swipe_down", R.drawable.oic_swipe_down, "Swipe down")
         gestureRow(group, "double_tap", R.drawable.oic_touch_app, "Double-tap Home")
         gestureRow(group, "triple_tap", R.drawable.oic_touch_app, "Triple-tap Home")

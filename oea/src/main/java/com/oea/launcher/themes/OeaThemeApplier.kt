@@ -59,6 +59,13 @@ object OeaThemeApplier {
                         OeaIconController.shared(app).invalidate()
                     }
                 }
+                if (options.wallpapers && homeOk == true) {
+                    // The theme's own picture now sits on Android's wallpaper; Home
+                    // must stop drawing a live/still OEA scene over it, and the
+                    // bundled-scene tint must end (the theme owns the colours now).
+                    com.oea.launcher.wallpaper.OeaWallpaperStore.revealOnHome(app, com.oea.launcher.wallpaper.OeaWallpaperStore.Target.HOME)
+                    if (options.colors || options.style) com.oea.launcher.wallpaper.OeaWallpaperStore.setScene(app, null)
+                }
                 OeaThemeStore.get(app).setLastApplied(theme.id)
                 OeaTheme.invalidate()
                 done(Result(homeOk, lockOk, summary(theme.name, homeOk, lockOk, options)))
@@ -72,6 +79,12 @@ object OeaThemeApplier {
         worker.execute {
             val (home, lock) = setWallpapers(app, image, image, target)
             main.post {
+                if (home == true) {
+                    // Arbitrary artwork, not a bundled scene: Home shows it (no OEA
+                    // backdrop left over it) and the tint stops following an old scene.
+                    com.oea.launcher.wallpaper.OeaWallpaperStore.revealOnHome(app, com.oea.launcher.wallpaper.OeaWallpaperStore.Target.HOME)
+                    com.oea.launcher.wallpaper.OeaWallpaperStore.setScene(app, null)
+                }
                 OeaTheme.invalidate()
                 done(Result(home, lock, summary(null, home, lock, Options(colors = false, style = false, target = target))))
             }

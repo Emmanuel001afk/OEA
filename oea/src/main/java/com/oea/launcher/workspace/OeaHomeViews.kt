@@ -473,8 +473,11 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
     private var velocityTracker: VelocityTracker? = null
     private val config = ViewConfiguration.get(context)
     private val touchSlop = config.scaledTouchSlop
-    private val minFling = config.scaledMinimumFlingVelocity * 3
     private val maxFling = config.scaledMaximumFlingVelocity
+
+    /** The user's gesture sensitivity scales both the drag start and the fling needed to turn a page. */
+    private val slop get() = touchSlop * com.oea.launcher.data.OeaDataStore.get(context).gestureSlopScale()
+    private val minFling get() = config.scaledMinimumFlingVelocity * 3 * com.oea.launcher.data.OeaDataStore.get(context).gestureSlopScale()
     private var downX = 0f
     private var downY = 0f
     private var lastX = 0f
@@ -746,7 +749,7 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
                 downX = ev.x
                 downY = ev.y
                 lastX = ev.x
-                dragging = !scroller.isFinished && abs(scroller.finalX - scroller.currX) > touchSlop
+                dragging = !scroller.isFinished && abs(scroller.finalX - scroller.currX) > slop
                 if (dragging) scroller.forceFinished(true)
                 velocityTracker?.recycle()
                 velocityTracker = VelocityTracker.obtain().also { it.addMovement(ev) }
@@ -755,7 +758,7 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
                 velocityTracker?.addMovement(ev)
                 val dx = abs(ev.x - downX)
                 val dy = abs(ev.y - downY)
-                if (!dragging && dx > touchSlop && dx > dy * 1.1f) {
+                if (!dragging && dx > slop && dx > dy * 1.1f) {
                     dragging = true
                     lastX = ev.x
                     parent?.requestDisallowInterceptTouchEvent(true)
@@ -785,7 +788,7 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging) {
-                    if (abs(ev.x - downX) > touchSlop) dragging = true else return true
+                    if (abs(ev.x - downX) > slop) dragging = true else return true
                 }
                 val dx = lastX - ev.x
                 lastX = ev.x

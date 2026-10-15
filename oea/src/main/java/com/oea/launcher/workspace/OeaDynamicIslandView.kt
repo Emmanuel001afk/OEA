@@ -450,12 +450,29 @@ class OeaDynamicIslandView(
         removeCallbacks(callTicker)
         removeCallbacks(peekCollapse)
         removeCallbacks(progressTicker)
+        removeCallbacks(configSettle)
         super.onDetachedFromWindow()
+    }
+
+    /** Rotation geometry settle timer: one reposition per rotation, not one per intermediate metric report. */
+    private var lastConfigChangeAt = 0L
+    private val configSettle = Runnable {
+        applyLayout()
+        notifyOverlayGeometry()
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        lastConfigChangeAt = SystemClock.uptimeMillis()
         applyLayout()
+        if (overlayWindow) {
+            // DisplayMetrics are re-reported several times during a rotation with
+            // intermediate (partly swapped) values; applying each one is exactly
+            // what made the island shake and jump in landscape. Defer the window
+            // geometry pass until the metrics stop moving.
+            removeCallbacks(configSettle)
+            postDelayed(configSettle, CONFIG_SETTLE_MS)
+        }
     }
 
     private fun registerBatteryReceiver() {
@@ -1334,6 +1351,14 @@ class OeaDynamicIslandView(
 
     private fun notifyOverlayGeometry() {
         if (!overlayWindow || !isAttachedToWindow) return
+        val sinceConfig = SystemClock.uptimeMillis() - lastConfigChangeAt
+        if (sinceConfig < CONFIG_SETTLE_MS) {
+            // A rotation is still settling; the settle runnable will do the
+            // geometry pass once the metrics stop moving.
+            removeCallbacks(configSettle)
+            postDelayed(configSettle, CONFIG_SETTLE_MS - sinceConfig)
+            return
+        }
         post {
             if (!overlayWindow || !isAttachedToWindow) return@post
             val callback = onOverlayGeometryChanged ?: return@post
@@ -1431,6 +1456,8 @@ class OeaDynamicIslandView(
         const val PEEK_CHARGING_MS = 2_500L
         const val FRESH_NOTIFICATION_MS = 8_000L
         const val PEEK_REPEAT_MS = 12_000L
+        /** Geometry updates are deferred this long after a rotation starts: the metrics reported mid-rotation are intermediate. */
+        const val CONFIG_SETTLE_MS = 300L
     }
 
     /** One or two small dots: green for the camera, orange for the microphone. */

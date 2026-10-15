@@ -232,11 +232,21 @@ class OeaGameBoostActivity : Activity() {
 ) == AppOpsManager.MODE_ALLOWED
     }.getOrDefault(false)
 
+    /** Display name of the game whose session is running, OEA-hosted games included. */
+    private fun runningGameLabel(key: String): String =
+        if (OeaGameBoostStore.isOeaGameKey(key)) {
+            OeaGameBoostStore.oeaGameTitles()[OeaGameBoostStore.oeaGameId(key)] ?: "OEA game"
+        } else {
+            installedApps.firstOrNull { it.packageName == key }?.label ?: "your game"
+        }
+
     private fun selectedGames(): List<OeaAppInfo> {
         val games = OeaGameBoostStore.games(this)
         val manual = OeaGameBoostStore.mode(this) == "manual_automatic"
-        return installedApps.filter { it.packageName in games && (manual || !loaded || it.packageName in detected) }
-            .sortedBy { it.label.lowercase() }
+        val installed = installedApps.filter { it.packageName in games && (manual || !loaded || it.packageName in detected) }
+        // OEA's own games are not packages, so they join from the engine registry.
+        val oea = OeaGameBoostStore.oeaGameEntries().filter { it.packageName in games }
+        return (installed + oea).sortedBy { it.label.lowercase() }
     }
 
     private fun hero() {
@@ -267,7 +277,7 @@ class OeaGameBoostActivity : Activity() {
         val status = when {
             !enabled -> "Off • tap the power button to turn on"
             !canFollow -> "Needs OEA Assistant or Usage access"
-            running != null -> "Boosting ${installedApps.firstOrNull { it.packageName == running }?.label ?: "your game"} now"
+            running != null -> "Boosting ${runningGameLabel(running)} now"
             count == 0 -> "On • add games to boost"
             else -> "On • starts with your $count game" + (if (count == 1) "" else "s") + ", idle otherwise"
         }
@@ -384,7 +394,14 @@ class OeaGameBoostActivity : Activity() {
         background = kit.ripple(null, 18)
         isClickable = true
         contentDescription = "Play ${app.label}"
-        addView(ImageView(this@OeaGameBoostActivity).apply { setImageDrawable(kit.appIcon(app)) }, LinearLayout.LayoutParams(dp(52), dp(52)))
+        addView(ImageView(this@OeaGameBoostActivity).apply {
+            val icon = kit.appIcon(app)
+                ?: if (OeaGameBoostStore.isOeaGameKey(app.packageName)) {
+                    // OEA-hosted games carry the OEA Games badge.
+                    runCatching { getDrawable(R.drawable.ic_oea_games) }.getOrNull()
+                } else null
+            setImageDrawable(icon)
+        }, LinearLayout.LayoutParams(dp(52), dp(52)))
         addView(kit.text(app.label, 12f, palette.text).apply {
             gravity = Gravity.CENTER
             maxLines = 1
@@ -427,7 +444,9 @@ class OeaGameBoostActivity : Activity() {
             return
         }
         val manual = OeaGameBoostStore.mode(this) == "manual_automatic"
-        val choices = installedApps.filter { manual || it.packageName in detected }.sortedBy { it.label.lowercase() }
+        // OEA's hub games are always selectable, whatever the detection mode says.
+        val choices = (OeaGameBoostStore.oeaGameEntries() +
+            installedApps.filter { manual || it.packageName in detected }).sortedBy { it.label.lowercase() }
         if (choices.isEmpty()) {
             toast("Android doesn't list any installed games. Switch to Auto + manual to pick apps yourself.")
             return
@@ -450,6 +469,14 @@ class OeaGameBoostActivity : Activity() {
     }
 
     private fun play(app: OeaAppInfo) {
+        if (OeaGameBoostStore.isOeaGameKey(app.packageName)) {
+            // OEA's own games open through the hub, which starts the session itself.
+            if (!OeaGameBoostStore.enabled(this)) toast("Game Boost is off. Turn it on to boost this session.")
+            runCatching {
+                startActivity(Intent(this, com.oea.launcher.games.OeaGamesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { toast("OEA Games could not open") }
+            return
+        }
         val launch = packageManager.getLaunchIntentForPackage(app.packageName)
         if (launch == null) {
             toast("${app.label} can't be opened")
