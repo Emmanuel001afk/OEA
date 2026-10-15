@@ -42,7 +42,7 @@ object OeaArtwork {
         Look(top, bottom, accent, glow, dark)
 
     private val LOOKS: Map<String, Look> = mapOf(
-        // ---- wallpaper set: Home
+        // ---- wallpaper set: Home - original 8
         "canyon_ember" to look(Color.rgb(20, 12, 18), Color.rgb(120, 44, 30), Color.rgb(255, 170, 90), Color.rgb(255, 122, 60)),
         "glass_dusk" to look(Color.rgb(24, 20, 54), Color.rgb(88, 62, 150), Color.rgb(198, 170, 255), Color.rgb(140, 110, 240)),
         "orchid_bloom" to look(Color.rgb(26, 10, 34), Color.rgb(112, 32, 96), Color.rgb(255, 160, 220), Color.rgb(226, 96, 190)),
@@ -51,23 +51,73 @@ object OeaArtwork {
         "mist_valley" to look(Color.rgb(28, 42, 40), Color.rgb(96, 126, 116), Color.rgb(196, 226, 208), Color.rgb(150, 196, 176)),
         "orbit_dawn" to look(Color.rgb(48, 26, 46), Color.rgb(226, 124, 96), Color.rgb(255, 214, 170), Color.rgb(255, 168, 120)),
         "slate_lines" to look(Color.rgb(14, 16, 22), Color.rgb(52, 60, 74), Color.rgb(158, 176, 200), Color.rgb(110, 132, 160)),
-        // ---- wallpaper set: lock screen (drawn to keep the clock area clear)
+        // ---- wallpaper set: Home - expanded 12 new distinct
+        "crimson_tide" to look(Color.rgb(32, 8, 12), Color.rgb(140, 24, 48), Color.rgb(255, 90, 120), Color.rgb(220, 50, 80)),
+        "emerald_depth" to look(Color.rgb(6, 18, 14), Color.rgb(18, 64, 48), Color.rgb(80, 220, 160), Color.rgb(40, 180, 120)),
+        "sapphire_drift" to look(Color.rgb(8, 12, 32), Color.rgb(24, 48, 120), Color.rgb(100, 160, 255), Color.rgb(60, 120, 220)),
+        "amber_haze" to look(Color.rgb(40, 24, 8), Color.rgb(160, 100, 24), Color.rgb(255, 200, 80), Color.rgb(220, 160, 40)),
+        "violet_storm" to look(Color.rgb(18, 8, 28), Color.rgb(80, 32, 120), Color.rgb(180, 120, 255), Color.rgb(140, 80, 220)),
+        "teal_lagoon" to look(Color.rgb(4, 20, 24), Color.rgb(12, 80, 80), Color.rgb(90, 230, 220), Color.rgb(50, 200, 190)),
+        "sunset_ridge" to look(Color.rgb(48, 12, 20), Color.rgb(200, 80, 40), Color.rgb(255, 180, 100), Color.rgb(240, 120, 60)),
+        "frosted_pine" to look(Color.rgb(12, 20, 18), Color.rgb(40, 80, 70), Color.rgb(140, 210, 190), Color.rgb(80, 160, 140)),
+        "desert_mirage" to look(Color.rgb(60, 40, 20), Color.rgb(180, 120, 60), Color.rgb(255, 220, 160), Color.rgb(220, 180, 100), dark = false),
+        "midnight_bloom" to look(Color.rgb(12, 8, 24), Color.rgb(48, 24, 80), Color.rgb(200, 140, 255), Color.rgb(160, 100, 220)),
+        "ocean_abyss" to look(Color.rgb(2, 10, 20), Color.rgb(8, 36, 72), Color.rgb(70, 180, 255), Color.rgb(40, 140, 220)),
+        "paper_light" to look(Color.rgb(250, 248, 240), Color.rgb(220, 216, 200), Color.rgb(120, 110, 90), Color.rgb(200, 195, 180), dark = false),
+        // ---- wallpaper set: lock screen (original 6 + expanded 8)
         "lock_midnight" to look(Color.rgb(4, 6, 16), Color.rgb(14, 22, 54), Color.rgb(140, 178, 255), Color.rgb(70, 110, 220)),
         "lock_ember" to look(Color.rgb(12, 8, 10), Color.rgb(56, 22, 16), Color.rgb(255, 148, 84), Color.rgb(210, 90, 40)),
         "lock_frost" to look(Color.rgb(226, 234, 242), Color.rgb(168, 190, 210), Color.rgb(70, 100, 130), Color.rgb(255, 255, 255), dark = false),
         "lock_violet" to look(Color.rgb(10, 8, 22), Color.rgb(48, 30, 84), Color.rgb(206, 176, 255), Color.rgb(120, 80, 200)),
         "lock_noir" to look(Color.rgb(6, 6, 8), Color.rgb(24, 24, 28), Color.rgb(200, 204, 212), Color.rgb(120, 126, 138)),
         "lock_halo" to look(Color.rgb(8, 14, 22), Color.rgb(20, 44, 62), Color.rgb(178, 240, 255), Color.rgb(90, 200, 240)),
-        // ---- generated theme artwork (lock screens for OEA's own themes)
+        "lock_crimson" to look(Color.rgb(16, 4, 8), Color.rgb(64, 16, 32), Color.rgb(255, 100, 130), Color.rgb(200, 60, 90)),
+        "lock_teal" to look(Color.rgb(4, 14, 16), Color.rgb(12, 48, 56), Color.rgb(100, 220, 210), Color.rgb(60, 180, 170)),
+        "lock_sand" to look(Color.rgb(240, 232, 216), Color.rgb(200, 180, 140), Color.rgb(140, 110, 70), Color.rgb(255, 240, 200), dark = false),
+        "lock_forest" to look(Color.rgb(8, 16, 12), Color.rgb(24, 48, 36), Color.rgb(120, 200, 160), Color.rgb(80, 160, 120)),
+        "lock_orbit" to look(Color.rgb(8, 8, 20), Color.rgb(32, 24, 64), Color.rgb(160, 140, 255), Color.rgb(100, 80, 200)),
+        "lock_slate" to look(Color.rgb(10, 12, 16), Color.rgb(36, 42, 54), Color.rgb(160, 180, 200), Color.rgb(110, 130, 160)),
+        "lock_amber" to look(Color.rgb(32, 20, 8), Color.rgb(96, 64, 16), Color.rgb(255, 190, 80), Color.rgb(200, 140, 40)),
+        "lock_ocean" to look(Color.rgb(4, 12, 20), Color.rgb(12, 40, 64), Color.rgb(90, 190, 255), Color.rgb(50, 140, 220)),
+        // ---- generated theme artwork (original 5 + expanded 10)
         "aurora_night" to look(Color.rgb(6, 16, 28), Color.rgb(14, 52, 62), Color.rgb(120, 240, 208), Color.rgb(60, 200, 190)),
         "glass_deep" to look(Color.rgb(6, 10, 26), Color.rgb(20, 40, 88), Color.rgb(150, 200, 255), Color.rgb(70, 130, 240)),
         "ridge_night" to look(Color.rgb(8, 10, 22), Color.rgb(40, 34, 68), Color.rgb(214, 170, 255), Color.rgb(120, 100, 220)),
         "forest_mist" to look(Color.rgb(8, 20, 20), Color.rgb(28, 62, 56), Color.rgb(160, 230, 200), Color.rgb(80, 180, 150)),
         "dune_dusk" to look(Color.rgb(26, 14, 10), Color.rgb(110, 56, 34), Color.rgb(255, 190, 130), Color.rgb(240, 130, 70)),
+        "crimson_night" to look(Color.rgb(20, 6, 10), Color.rgb(80, 16, 32), Color.rgb(255, 120, 140), Color.rgb(200, 60, 80)),
+        "teal_night" to look(Color.rgb(4, 16, 18), Color.rgb(12, 56, 64), Color.rgb(100, 230, 220), Color.rgb(60, 190, 180)),
+        "amber_night" to look(Color.rgb(24, 16, 4), Color.rgb(96, 64, 16), Color.rgb(255, 200, 100), Color.rgb(220, 160, 50)),
+        "violet_night" to look(Color.rgb(12, 6, 20), Color.rgb(48, 20, 80), Color.rgb(190, 140, 255), Color.rgb(140, 80, 220)),
+        "ocean_night" to look(Color.rgb(2, 8, 16), Color.rgb(8, 32, 64), Color.rgb(80, 180, 255), Color.rgb(40, 130, 220)),
+        "sand_light" to look(Color.rgb(245, 240, 225), Color.rgb(210, 190, 150), Color.rgb(130, 110, 70), Color.rgb(240, 230, 200), dark = false),
+        "pine_night" to look(Color.rgb(8, 14, 10), Color.rgb(20, 40, 32), Color.rgb(120, 200, 160), Color.rgb(70, 150, 110)),
+        "storm_night" to look(Color.rgb(10, 12, 18), Color.rgb(32, 40, 64), Color.rgb(140, 170, 220), Color.rgb(80, 110, 180)),
+        "bloom_night" to look(Color.rgb(16, 8, 20), Color.rgb(64, 24, 64), Color.rgb(220, 140, 200), Color.rgb(180, 80, 160)),
+        "abyss_night" to look(Color.rgb(2, 6, 12), Color.rgb(6, 20, 40), Color.rgb(60, 160, 240), Color.rgb(30, 100, 180)),
     )
 
-    /** Every generated picture OEA can draw for a theme. */
-    val ids: List<String> = listOf("aurora_night", "glass_deep", "ridge_night", "forest_mist", "dune_dusk")
+    /** Every generated picture OEA can draw for a theme and wallpapers. */
+    val ids: List<String> = listOf(
+        "aurora_night", "glass_deep", "ridge_night", "forest_mist", "dune_dusk",
+        "crimson_night", "teal_night", "amber_night", "violet_night", "ocean_night",
+        "sand_light", "pine_night", "storm_night", "bloom_night", "abyss_night"
+    )
+
+    /** Wallpaper home set IDs from artwork */
+    val homeArtIds = listOf(
+        "canyon_ember", "glass_dusk", "orchid_bloom", "ribbon_sea", "strata_sand",
+        "mist_valley", "orbit_dawn", "slate_lines",
+        "crimson_tide", "emerald_depth", "sapphire_drift", "amber_haze",
+        "violet_storm", "teal_lagoon", "sunset_ridge", "frosted_pine",
+        "desert_mirage", "midnight_bloom", "ocean_abyss", "paper_light"
+    )
+
+    /** Wallpaper lock set IDs */
+    val lockArtIds = listOf(
+        "lock_midnight", "lock_ember", "lock_frost", "lock_violet", "lock_noir", "lock_halo",
+        "lock_crimson", "lock_teal", "lock_sand", "lock_forest", "lock_orbit", "lock_slate", "lock_amber", "lock_ocean"
+    )
 
     fun isKnown(id: String?): Boolean = id != null && LOOKS.containsKey(id)
 
@@ -77,7 +127,51 @@ object OeaArtwork {
         "ridge_night" -> "Ridge night"
         "forest_mist" -> "Forest mist"
         "dune_dusk" -> "Dune dusk"
-        else -> "OEA artwork"
+        "crimson_night" -> "Crimson night"
+        "teal_night" -> "Teal night"
+        "amber_night" -> "Amber night"
+        "violet_night" -> "Violet night"
+        "ocean_night" -> "Ocean night"
+        "sand_light" -> "Sand light"
+        "pine_night" -> "Pine night"
+        "storm_night" -> "Storm night"
+        "bloom_night" -> "Bloom night"
+        "abyss_night" -> "Abyss night"
+        "canyon_ember" -> "Canyon ember"
+        "glass_dusk" -> "Glass dusk"
+        "orchid_bloom" -> "Orchid bloom"
+        "ribbon_sea" -> "Ribbon sea"
+        "strata_sand" -> "Strata sand"
+        "mist_valley" -> "Mist valley"
+        "orbit_dawn" -> "Orbit dawn"
+        "slate_lines" -> "Slate lines"
+        "crimson_tide" -> "Crimson tide"
+        "emerald_depth" -> "Emerald depth"
+        "sapphire_drift" -> "Sapphire drift"
+        "amber_haze" -> "Amber haze"
+        "violet_storm" -> "Violet storm"
+        "teal_lagoon" -> "Teal lagoon"
+        "sunset_ridge" -> "Sunset ridge"
+        "frosted_pine" -> "Frosted pine"
+        "desert_mirage" -> "Desert mirage"
+        "midnight_bloom" -> "Midnight bloom"
+        "ocean_abyss" -> "Ocean abyss"
+        "paper_light" -> "Paper light"
+        "lock_midnight" -> "Midnight"
+        "lock_ember" -> "Ember"
+        "lock_frost" -> "Frost"
+        "lock_violet" -> "Violet haze"
+        "lock_noir" -> "Noir"
+        "lock_halo" -> "Halo"
+        "lock_crimson" -> "Crimson lock"
+        "lock_teal" -> "Teal lock"
+        "lock_sand" -> "Sand lock"
+        "lock_forest" -> "Forest lock"
+        "lock_orbit" -> "Orbit lock"
+        "lock_slate" -> "Slate lock"
+        "lock_amber" -> "Amber lock"
+        "lock_ocean" -> "Ocean lock"
+        else -> id.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 
     /** Renders a generated picture. Returns null for an unknown id. */
@@ -104,13 +198,13 @@ object OeaArtwork {
         val random = Random(id.hashCode().toLong() * 2654435761L)
         base(canvas, paint, spec, w, h)
         when (id) {
-            "canyon_ember", "lock_ember" -> canyon(canvas, paint, spec, w, h, random)
-            "glass_dusk", "lock_violet", "glass_deep" -> glassPanels(canvas, paint, spec, w, h, random)
-            "orchid_bloom", "lock_halo" -> bloom(canvas, paint, spec, w, h, random)
-            "ribbon_sea", "aurora_night" -> ribbons(canvas, paint, spec, w, h, random)
-            "strata_sand", "lock_noir", "slate_lines" -> strata(canvas, paint, spec, w, h, random)
-            "mist_valley", "lock_frost", "forest_mist" -> mist(canvas, paint, spec, w, h, random)
-            "orbit_dawn", "lock_midnight", "ridge_night", "dune_dusk" -> orbit(canvas, paint, spec, w, h, random)
+            "canyon_ember", "lock_ember", "crimson_tide", "sunset_ridge" -> canyon(canvas, paint, spec, w, h, random)
+            "glass_dusk", "lock_violet", "glass_deep", "sapphire_drift", "violet_storm", "lock_orbit", "lock_slate" -> glassPanels(canvas, paint, spec, w, h, random)
+            "orchid_bloom", "lock_halo", "midnight_bloom", "bloom_night", "lock_crimson" -> bloom(canvas, paint, spec, w, h, random)
+            "ribbon_sea", "aurora_night", "teal_lagoon", "emerald_depth", "teal_night", "ocean_night", "ocean_abyss", "lock_teal", "lock_ocean", "abyss_night" -> ribbons(canvas, paint, spec, w, h, random)
+            "strata_sand", "lock_noir", "slate_lines", "desert_mirage", "paper_light", "sand_light", "lock_sand", "lock_slate", "lock_noir" -> strata(canvas, paint, spec, w, h, random)
+            "mist_valley", "lock_frost", "forest_mist", "frosted_pine", "pine_night", "lock_forest", "lock_frost" -> mist(canvas, paint, spec, w, h, random)
+            "orbit_dawn", "lock_midnight", "ridge_night", "dune_dusk", "amber_haze", "amber_night", "crimson_night", "violet_night", "storm_night", "lock_amber", "lock_midnight" -> orbit(canvas, paint, spec, w, h, random)
             else -> strata(canvas, paint, spec, w, h, random)
         }
         // Lock-screen art gets a vignette and a clear middle band, so the clock,

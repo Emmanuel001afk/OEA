@@ -37,20 +37,61 @@ object OeaPower {
 
     fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun waveToWake(context: Context) = prefs(context).getBoolean(KEY_WAVE, false)
-    fun liftToWake(context: Context) = prefs(context).getBoolean(KEY_LIFT, false)
-    fun sensitivity(context: Context) = prefs(context).getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
+    // Primary source is oea_power, but fallback to main DataStore backup which survives
+    // Ultra Power Saving Mode and some OEM cleanups that wipe secondary prefs.
+    fun waveToWake(context: Context): Boolean {
+        val primary = prefs(context).getBoolean(KEY_WAVE, false)
+        if (primary) return true
+        return try { com.oea.launcher.data.OeaDataStore.get(context).waveToWakeEnabled() } catch (_: Throwable) { false }
+    }
+    fun liftToWake(context: Context): Boolean {
+        val primary = prefs(context).getBoolean(KEY_LIFT, false)
+        if (primary) return true
+        return try { com.oea.launcher.data.OeaDataStore.get(context).liftToWakeEnabled() } catch (_: Throwable) { false }
+    }
+    fun sensitivity(context: Context): Int {
+        val primary = prefs(context).getInt(KEY_SENSITIVITY, -1)
+        if (primary in 0..2) return primary
+        return try { com.oea.launcher.data.OeaDataStore.get(context).waveSensitivity() } catch (_: Throwable) { 1 }
+    }
     fun requireTwoWaves(context: Context) = prefs(context).getBoolean(KEY_TWO_WAVES, true)
     fun pocketGuard(context: Context) = prefs(context).getBoolean(KEY_POCKET, true)
 
     fun set(context: Context, key: String, value: Boolean) {
         prefs(context).edit().putBoolean(key, value).apply()
+        // Mirror to main DataStore for resilience
+        try {
+            val store = com.oea.launcher.data.OeaDataStore.get(context)
+            when (key) {
+                KEY_WAVE -> store.setWaveToWakeEnabled(value)
+                KEY_LIFT -> store.setLiftToWakeEnabled(value)
+            }
+        } catch (_: Throwable) {}
         syncWakeService(context)
     }
 
     fun setSensitivity(context: Context, value: Int) {
-        prefs(context).edit().putInt(KEY_SENSITIVITY, value.coerceIn(0, 2)).apply()
+        val v = value.coerceIn(0, 2)
+        prefs(context).edit().putInt(KEY_SENSITIVITY, v).apply()
+        try { com.oea.launcher.data.OeaDataStore.get(context).setWaveSensitivity(v) } catch (_: Throwable) {}
         syncWakeService(context)
+    }
+
+    /** Restores backup after Ultra Power Saving Mode or reboot if primary was cleared */
+    fun restoreIfNeeded(context: Context) {
+        try {
+            val store = com.oea.launcher.data.OeaDataStore.get(context)
+            val powerPrefs = prefs(context)
+            if (!powerPrefs.contains(KEY_WAVE) && store.waveToWakeEnabled()) {
+                powerPrefs.edit().putBoolean(KEY_WAVE, true).apply()
+            }
+            if (!powerPrefs.contains(KEY_LIFT) && store.liftToWakeEnabled()) {
+                powerPrefs.edit().putBoolean(KEY_LIFT, true).apply()
+            }
+            if (!powerPrefs.contains(KEY_SENSITIVITY)) {
+                powerPrefs.edit().putInt(KEY_SENSITIVITY, store.waveSensitivity()).apply()
+            }
+        } catch (_: Throwable) {}
     }
 
     /**

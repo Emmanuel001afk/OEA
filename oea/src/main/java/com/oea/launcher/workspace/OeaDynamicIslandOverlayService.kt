@@ -13,7 +13,6 @@ import android.content.pm.ServiceInfo
 import android.graphics.Rect
 import android.os.Build
 import android.os.IBinder
-import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -25,26 +24,23 @@ import com.oea.launcher.data.OeaDataStore
 /**
  * Optional system-wide host for OEA's live-activity surfaces. It is started
  * only after the user enables the feature and grants Android overlay access.
+ *
+ * Stability improvements:
+ * - Guarantees startForeground is called even if notification build fails (prevents FGS timeout crash).
+ * - Uses WindowContext so resources follow rotation; geometry is debounced to prevent landscape shake.
  */
 class OeaDynamicIslandOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var store: OeaDataStore
-    /**
-     * Context the island windows are created with. On Android 11+ this is a
-     * WindowContext for TYPE_APPLICATION_OVERLAY, so its resources follow the
-     * display's rotation and size; a plain Service context can report stale
-     * metrics after rotation, which misplaced the island.
-     */
     private lateinit var windowContext: Context
     private var windowCallbacks: android.content.ComponentCallbacks? = null
     private var cardIsland: OeaDynamicIslandView? = null
     private var cameraIsland: OeaDynamicIslandView? = null
     private var receiverRegistered = false
     private var overlayAppOps: AppOpsManager? = null
+    private var lastGeometryRefresh = 0L
 
     private val preferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        // Launch counters and unrelated settings change often; only island and
-        // appearance keys need the overlay to re-render.
         if (key == null || key == "dynamic_island_enabled" || key.startsWith("island_") || key.startsWith("theme_") ||
             key == "accent_mode" || key == "glass_style"
         ) mainHandler.post { refreshIslands() }
@@ -68,15 +64,23 @@ class OeaDynamicIslandOverlayService : Service() {
     private val mainHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
     private val configurationReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_CONFIGURATION_CHANGED) refreshDisplayGeometry()
+            if (intent.action == Intent.ACTION_CONFIGURATION_CHANGED) {
+                // Debounce: rotation triggers multiple broadcasts; prevent shake by throttling.
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastGeometryRefresh < 250L) {
+                    mainHandler.removeCallbacks(geometryRunnable)
+                    mainHandler.postDelayed(geometryRunnable, 250L)
+                } else {
+                    refreshDisplayGeometry()
+                }
+                lastGeometryRefresh = now
+            }
         }
     }
+    private val geometryRunnable = Runnable { refreshDisplayGeometry() }
 
     override fun onCreate() {
         super.onCreate()
-        // The island is an optional extra that lives in the launcher's own
-        // process, so everything after the framework's setup runs inside the
-        // fault shield: a fault here can never be seen as a launcher crash.
         com.oea.launcher.fault.OeaFaultShield.guard("island-overlay:create") {
             overlayActive = false
             store = OeaDataStore.get(applicationContext)
@@ -89,23 +93,34 @@ class OeaDynamicIslandOverlayService : Service() {
             }
             windowManager = manager
             createNotificationChannel()
-            // Promote before doing WindowManager work; this is a user-visible,
-            // explicit feature and must not silently become a background service.
-            val notification = buildNotification()
-            val promoted = runCatching {
+            var promoted = false
+            try {
+                val notification = try { buildNotification() } catch (e: Throwable) {
+                    Log.w(TAG, "Island notification build failed, using fallback", e)
+                    fallbackNotification()
+                }
                 if (Build.VERSION.SDK_INT >= 34) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
-            }.onFailure { error ->
-                // Typically Android refusing a background (re)start. Keep the
-                // user's choice: OEA Home re-promotes the island when it is next
-                // in the foreground, which Android always allows.
-                Log.w(TAG, "Android did not allow the Dynamic Island service to enter the foreground now", error)
-                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
-            }.isSuccess
+                promoted = true
+            } catch (e: Throwable) {
+                Log.w(TAG, "Island service could not enter foreground", e)
+                try {
+                    val fallback = fallbackNotification()
+                    if (Build.VERSION.SDK_INT >= 34) {
+                        startForeground(NOTIFICATION_ID, fallback, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                    } else {
+                        startForeground(NOTIFICATION_ID, fallback)
+                    }
+                    promoted = true
+                } catch (e2: Throwable) {
+                    Log.e(TAG, "Fallback promotion failed", e2)
+                }
+            }
             if (!promoted) {
+                overlayActive = false
                 stopSelf()
                 return@guard
             }
@@ -250,12 +265,12 @@ class OeaDynamicIslandOverlayService : Service() {
         }
     }
 
-    /** Rotation and display-size changes reach the WindowContext directly. */
     private fun watchWindowConfiguration() {
         if (windowContext === this || windowCallbacks != null) return
         val callbacks = object : android.content.ComponentCallbacks {
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-                mainHandler.post { refreshDisplayGeometry() }
+                mainHandler.removeCallbacks(geometryRunnable)
+                mainHandler.postDelayed(geometryRunnable, 200L)
             }
             @Deprecated("Deprecated in Java")
             override fun onLowMemory() = Unit
@@ -346,6 +361,7 @@ class OeaDynamicIslandOverlayService : Service() {
         if (Build.VERSION.SDK_INT < 28) return null
         val rects = runCatching { insets?.displayCutout?.boundingRects }.getOrNull().orEmpty()
         val screenWidth = windowContext.resources.displayMetrics.widthPixels
+        // Only consider top cutouts (top <= 8dp). In landscape, side cutouts are ignored to prevent shake.
         return rects
             .filter { it.top <= dp(8) && it.width() in 1 until screenWidth / 2 }
             .minByOrNull { kotlin.math.abs(it.centerX() - screenWidth / 2) }
@@ -408,6 +424,23 @@ class OeaDynamicIslandOverlayService : Service() {
             .build()
     }
 
+    private fun fallbackNotification(): Notification {
+        createNotificationChannel()
+        val stopIntent = PendingIntent.getService(
+            this,
+            0,
+            Intent(this, OeaDynamicIslandOverlayService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
+            .setContentTitle("OEA Dynamic Island")
+            .setContentText("Island active")
+            .setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Turn off", stopIntent)
+            .build()
+    }
+
     companion object {
         @Volatile internal var overlayActive: Boolean = false
         private const val TAG = "OeaIslandOverlay"
@@ -416,39 +449,21 @@ class OeaDynamicIslandOverlayService : Service() {
         private const val ACTION_STOP = "com.oea.launcher.action.STOP_ISLAND_OVERLAY"
         private const val ACTION_REFRESH = "com.oea.launcher.action.REFRESH_ISLAND_OVERLAY"
 
-        /**
-         * Called whenever OEA Home is in front: starts the island service only
-         * if the user enabled it and it isn't running (for example after
-         * Android stopped OEA in the background). Never stops or restarts a
-         * running service, so returning Home has no visible effect on it.
-         */
         fun ensureRunning(context: Context) {
             if (overlayActive) return
             val app = context.applicationContext
-            // Low mode switches the system-wide island off without forgetting the
-            // user's choice: leaving Low mode brings it straight back.
             if (com.oea.launcher.perf.OeaLowMode.active(app)) return
             val store = OeaDataStore.get(app)
             if (!store.dynamicIslandEnabled() || !store.islandOnOtherApps() || !com.oea.launcher.privilege.OeaPrivileges.canOverlay(app)) return
             sync(app)
         }
 
-        /** Low mode: stop the overlay service and its foreground notification. */
         fun stopForLowMode(context: Context) {
             val app = context.applicationContext
             overlayActive = false
             runCatching { app.stopService(Intent(app, OeaDynamicIslandOverlayService::class.java)) }
         }
 
-        /** Starts only from a visible user action or stops when any prerequisite is gone. */
-        /**
-         * Actually tries to draw something and asks whether it worked.
-         *
-         * Android can report `canDrawOverlays` as true and still throw or silently
-         * drop a window (AppOps-backed firmware, multi-profile or "restricted
-         * settings" devices). The settings screen uses this so a toggle that is on
-         * but does nothing is detected and reported instead of looking broken.
-         */
         fun verifyOverlay(context: Context): Boolean {
             val app = context.applicationContext
             if (!com.oea.launcher.privilege.OeaPrivileges.canOverlay(app)) return false
@@ -483,7 +498,6 @@ class OeaDynamicIslandOverlayService : Service() {
             runCatching {
                 if (Build.VERSION.SDK_INT >= 26) app.startForegroundService(intent) else app.startService(intent)
             }.onFailure {
-                // Keep the user's choice; the next foreground visit retries.
                 Log.w(TAG, "Could not start system-wide island service", it)
             }
         }

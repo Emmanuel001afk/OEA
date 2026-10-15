@@ -68,36 +68,54 @@ class OeaQuickControlsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        render()
+        // Contain any fault in this sheet: it must never be seen as a launcher crash.
+        val ok = com.oea.launcher.fault.OeaFaultShield.guard("quick-controls:create") { render() }
+        if (!ok) {
+            com.oea.launcher.ui.OeaScreenFailure.show(this, "Quick Controls", IllegalStateException("Quick controls could not be displayed"))
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        // Colours may have changed while the sheet was behind something else.
-        render()
+        com.oea.launcher.fault.OeaFaultShield.guard("quick-controls:resume") { render() }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
 
     private fun render() {
-        palette = OeaTheme.resolve(this)
-        OeaInsets.edgeToEdge(window, lightBars = false)
-        val root = FrameLayout(this).apply {
-            setBackgroundColor(OeaTheme.alpha(Color.BLACK, 0x66))
-            setOnClickListener { finish() }
+        try {
+            palette = OeaTheme.resolve(this)
+            OeaInsets.edgeToEdge(window, lightBars = false)
+            runCatching { window.decorView.setBackgroundColor(Color.TRANSPARENT) }
+            val root = FrameLayout(this).apply {
+                setBackgroundColor(OeaTheme.alpha(Color.BLACK, 0x66))
+                setOnClickListener { finish() }
+            }
+            val sheet = try {
+                OeaQuickControls.sheet(this, palette) { finish() }
+            } catch (e: Throwable) {
+                com.oea.launcher.fault.OeaFaultShield.note("quick-controls:sheet", e)
+                // Fallback: minimal controls so user is not stuck with black screen.
+                OeaQuickControls.fallbackSheet(this, palette) { finish() }
+            }
+            val scroll = android.widget.ScrollView(this).apply {
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                addView(sheet)
+            }
+            root.addView(scroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            root.setOnApplyWindowInsetsListener { _, insets ->
+                runCatching {
+                    val bars = OeaInsets.bars(insets)
+                    sheet.setPadding(dp(18), dp(10), dp(18), dp(18) + bars[3])
+                }
+                insets
+            }
+            setContentView(root)
+        } catch (e: Throwable) {
+            com.oea.launcher.fault.OeaFaultShield.note("quick-controls:render", e)
+            throw e
         }
-        val sheet = OeaQuickControls.sheet(this, palette) { finish() }
-        val scroll = android.widget.ScrollView(this).apply {
-            isVerticalScrollBarEnabled = false
-            addView(sheet)
-        }
-        root.addView(scroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
-        root.setOnApplyWindowInsetsListener { _, insets ->
-            val bars = OeaInsets.bars(insets)
-            sheet.setPadding(dp(18), dp(10), dp(18), dp(18) + bars[3])
-            insets
-        }
-        setContentView(root)
     }
 }
 

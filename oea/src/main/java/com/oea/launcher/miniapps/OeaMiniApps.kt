@@ -16,10 +16,13 @@ import com.oea.launcher.ui.OeaType
  * OEA's launcher mini-apps: the small tools that should not need a separate app
  * installed, or a trip through the store.
  *
- * Every mini-app is a plain View builder. That keeps them cheap to open and, more
- * importantly, **contained**: a mini-app builds inside a `runCatching`, so a fault
+ * Every mini-app is a plain View builder. That keeps them cheap to open and,
+ * more importantly, **contained**: a mini-app builds inside a `runCatching`, so a fault
  * in one shows a card in its own page and leaves Home, the drawer and every other
  * mini-app untouched. Nothing here can take the launcher down with it.
+ *
+ * Expanded ecosystem: Clock, Calendar, EMAGE (OEA Image), VIP (Video Instant Player),
+ * Weather, Calculator (full), Messaging, Notes (full), Camera and Console (central utility).
  */
 object OeaMiniApps {
 
@@ -35,23 +38,42 @@ object OeaMiniApps {
 
     val all: List<App> = listOf(
         App(
-            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and the live scenes", R.drawable.oic_photo_library,
-        ) { host, palette -> OeaGalleryApp.build(host, palette) },
+            "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.oic_schedule,
+        ) { host, palette -> OeaClockApp.build(host, palette) },
         App(
-            "notes", "Notes", "Quick notes that stay on this phone", R.drawable.oic_edit,
+            "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.oic_schedule,
+        ) { host, palette -> OeaCalendarApp.build(host, palette) },
+        App(
+            "emage", "OEA Image", "EMAGE • Browse, albums, downloads, previews and organization", R.drawable.oic_photo_library,
+        ) { host, palette -> OeaImageApp.build(host, palette) },
+        App(
+            "vip", "OEA VIP", "Video Instant Player • Smooth playback, rotation, seeking", R.drawable.oic_play_arrow,
+        ) { host, palette -> OeaVideoApp.build(host, palette) },
+        App(
+            "weather", "OEA Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.oic_thermostat,
+        ) { host, palette -> OeaWeatherApp.build(host, palette) },
+        App(
+            "calculator", "OEA Calculator", "Full calculator with scientific, history and tape", R.drawable.oic_calculate,
+        ) { host, palette -> OeaCalculatorApp.build(host, palette) },
+        App(
+            "messaging", "OEA Messaging", "SMS messaging with proper permissions and roles", R.drawable.oic_edit,
+        ) { host, palette -> OeaMessagingApp.build(host, palette) },
+        App(
+            "notes", "OEA Notes", "Notes, private notes, voice notes, search and organization", R.drawable.oic_edit,
         ) { host, palette -> OeaNotesApp.build(host, palette) },
         App(
-            "calculator", "Calculator", "Arithmetic with a running tape", R.drawable.oic_calculate,
-        ) { host, palette -> OeaCalculatorApp.build(host, palette) },
+            "camera", "OEA Camera", "Camera with preview, flash, timer and capture controls", R.drawable.oic_photo_library,
+        ) { host, palette -> OeaCameraApp.build(host, palette) },
+        App(
+            "console", "OEA Console", "Central utility: diagnostics, device info, security, command system", R.drawable.oic_developer_mode,
+        ) { host, palette -> OeaConsoleApp.build(host, palette) },
+        App(
+            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.oic_photo_library,
+        ) { host, palette -> OeaGalleryApp.build(host, palette) },
     )
 
     fun byId(id: String?): App? = all.firstOrNull { it.id == id }
 
-    /**
-     * Builds a mini-app's view, or a contained failure card when it cannot start.
-     * The user is told what happened and given the route to the fault log, exactly
-     * as OEA's own fault shield does elsewhere — a mini-app never fails silently.
-     */
     fun build(host: Activity, id: String?, kit: OeaKit): View {
         val app = byId(id)
         if (app == null) {
@@ -87,7 +109,6 @@ object OeaMiniApps {
             }
     }
 
-    /** Starts the mini-app host. Used by Home's menu and by Settings. */
     fun open(context: Context, id: String? = null): Boolean = runCatching {
         val intent = Intent(context, OeaMiniAppActivity::class.java)
         if (id != null) intent.putExtra(OeaMiniAppActivity.EXTRA_APP, id)
@@ -99,7 +120,6 @@ object OeaMiniApps {
         false
     }
 
-    /** A tile used by the host's index and by any list that offers the mini-apps. */
     fun tile(kit: OeaKit, app: App, onClick: () -> Unit): View {
         val column = LinearLayout(kit.context).apply {
             orientation = LinearLayout.VERTICAL
@@ -127,7 +147,6 @@ object OeaMiniApps {
         return column
     }
 
-    /** A three-to-a-row grid of the mini-apps. */
     fun grid(kit: OeaKit, parent: LinearLayout, onOpen: (App) -> Unit) {
         all.chunked(3).forEach { chunk ->
             val row = LinearLayout(kit.context).apply { orientation = LinearLayout.HORIZONTAL }

@@ -242,6 +242,11 @@ class OeaLauncherEngine(context: Context) {
     }
 
     fun launchApp(packageName: String, className: String) {
+        // Central freeze guard: block any OEA-initiated launch of frozen apps.
+        if (com.oea.launcher.applock.OeaAppFreezer.isFrozen(appContext, packageName)) {
+            Log.w(TAG, "Launch blocked for frozen $packageName")
+            return
+        }
         runCatching {
             appContext.startActivity(Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_LAUNCHER)

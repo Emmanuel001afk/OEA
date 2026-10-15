@@ -80,6 +80,10 @@ object OeaNotificationState {
         }
     }
 
+    fun snapshot(): List<StatusBarNotification> = synchronized(lock) {
+        active.values.sortedByDescending { it.postTime }.toList()
+    }
+
     /** Most recently active media notification used by the existing At a Glance controls. */
     fun media(): StatusBarNotification? = synchronized(lock) {
         active.values

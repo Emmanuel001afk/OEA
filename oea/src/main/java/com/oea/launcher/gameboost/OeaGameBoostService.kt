@@ -337,18 +337,32 @@ class OeaGameBoostService : Service() {
             OeaGameBoost.attach(this)
             screenInteractive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive }.getOrNull() ?: true
             createChannel()
-            // startForegroundService() requires this promptly. A refused promotion
-            // (Android's background-start limits) must never crash OEA: the
-            // service stops and the next game launch from OEA starts it again.
-            val promoted = runCatching {
-                val notification = sessionNotification(null)
+            var promoted = false
+            try {
+                val notification = try { sessionNotification(null) } catch (e: Throwable) {
+                    android.util.Log.w("OeaGameBoost", "Notification build failed", e)
+                    fallbackNotification()
+                }
                 if (Build.VERSION.SDK_INT >= 29) {
                     startForeground(NOTIFICATION_ID, notification, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
-            }.onFailure { diagnostic(android.util.Log.WARN, "Game Boost could not enter the foreground: ${it.javaClass.simpleName}:${it.message}") }
-                .isSuccess
+                promoted = true
+            } catch (e: Throwable) {
+                diagnostic(android.util.Log.WARN, "Game Boost could not enter the foreground: ${e.javaClass.simpleName}:${e.message}")
+                try {
+                    val fallback = fallbackNotification()
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        startForeground(NOTIFICATION_ID, fallback, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
+                    } else {
+                        startForeground(NOTIFICATION_ID, fallback)
+                    }
+                    promoted = true
+                } catch (e2: Throwable) {
+                    android.util.Log.e("OeaGameBoost", "Fallback promotion failed", e2)
+                }
+            }
             if (!promoted) {
                 stopSelf()
                 return@guard
@@ -1972,6 +1986,14 @@ class OeaGameBoostService : Service() {
         }
         latest
     }.getOrNull()
+
+    private fun fallbackNotification(): android.app.Notification {
+        createChannel()
+        val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL) else {
+            @Suppress("DEPRECATION") android.app.Notification.Builder(this)
+        }
+        return builder.setSmallIcon(R.drawable.ic_oea_launcher_monochrome).setContentTitle("Game Boost").setContentText("Session starting").setOngoing(true).build()
+    }
 
     private fun isUsageAccessGranted() = runCatching {
         val appOps = getSystemService(AppOpsManager::class.java)

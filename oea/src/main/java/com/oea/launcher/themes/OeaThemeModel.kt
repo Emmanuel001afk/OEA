@@ -102,6 +102,30 @@ object OeaThemeCatalog {
     val RIDGE_LOCK = OeaImageRef.Generated("ridge_night", "Ridge night")
     val FOREST_LOCK = OeaImageRef.Generated("forest_mist", "Forest mist")
     val DUNE_LOCK = OeaImageRef.Generated("dune_dusk", "Dune dusk")
+    // Expanded generated locks
+    val CRIMSON_LOCK = OeaImageRef.Generated("crimson_night", "Crimson night")
+    val TEAL_LOCK = OeaImageRef.Generated("teal_night", "Teal night")
+    val AMBER_LOCK = OeaImageRef.Generated("amber_night", "Amber night")
+    val VIOLET_LOCK = OeaImageRef.Generated("violet_night", "Violet night")
+    val OCEAN_NIGHT_LOCK = OeaImageRef.Generated("ocean_night", "Ocean night")
+    val SAND_LIGHT_LOCK = OeaImageRef.Generated("sand_light", "Sand light")
+    val PINE_LOCK = OeaImageRef.Generated("pine_night", "Pine night")
+    val STORM_LOCK = OeaImageRef.Generated("storm_night", "Storm night")
+    val BLOOM_LOCK = OeaImageRef.Generated("bloom_night", "Bloom night")
+    val ABYSS_LOCK = OeaImageRef.Generated("abyss_night", "Abyss night")
+    // Wallpaper-art based for themes (distinct from wallpaper library usage)
+    val CRIMSON_TIDE_HOME = OeaImageRef.Generated("crimson_tide", "Crimson tide")
+    val EMERALD_HOME = OeaImageRef.Generated("emerald_depth", "Emerald depth")
+    val SAPPHIRE_HOME = OeaImageRef.Generated("sapphire_drift", "Sapphire drift")
+    val AMBER_HAZE_HOME = OeaImageRef.Generated("amber_haze", "Amber haze")
+    val VIOLET_STORM_HOME = OeaImageRef.Generated("violet_storm", "Violet storm")
+    val TEAL_LAGOON_HOME = OeaImageRef.Generated("teal_lagoon", "Teal lagoon")
+    val SUNSET_RIDGE_HOME = OeaImageRef.Generated("sunset_ridge", "Sunset ridge")
+    val FROSTED_PINE_HOME = OeaImageRef.Generated("frosted_pine", "Frosted pine")
+    val DESERT_MIRAGE_HOME = OeaImageRef.Generated("desert_mirage", "Desert mirage")
+    val MIDNIGHT_BLOOM_HOME = OeaImageRef.Generated("midnight_bloom", "Midnight bloom")
+    val OCEAN_ABYSS_HOME = OeaImageRef.Generated("ocean_abyss", "Ocean abyss")
+    val PAPER_LIGHT_HOME = OeaImageRef.Generated("paper_light", "Paper light")
 
     /** Every bundled picture, offered in the wallpaper library too. */
     val bundledImages: List<OeaImageRef.Bundled> = listOf(
@@ -113,32 +137,33 @@ object OeaThemeCatalog {
     fun bundled(name: String): OeaImageRef.Bundled? = bundledImages.firstOrNull { it.name == name }
 
     /**
-     * Ten original themes. The first five use the same picture on Home and
-     * the lock screen; the other five pair two different pictures.
+     * Twenty polished themes: original 10 + 10 new distinct coordinated looks.
+     * Themes provide coordinated appearance: same image for home & lock or different,
+     * with colours matched. Wallpaper has its own distinct collection.
      */
     val builtIns: List<OeaThemeSpec> = listOf(
         OeaThemeSpec(
-            "aurora", "Aurora", "Northern lights over a still lake", AURORA, OeaThemeCatalog.AURORA_LOCK,
+            "aurora", "Aurora", "Northern lights over a still lake", AURORA, AURORA_LOCK,
             accentDark = Color.rgb(95, 227, 192), accentLight = Color.rgb(0, 121, 107), surfaceTint = Color.rgb(24, 70, 82),
             mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "liquid",
         ),
         OeaThemeSpec(
-            "liquid_glass", "Liquid Glass", "Flowing glass, frosted surfaces and liquid motion", LIQUID_GLASS, OeaThemeCatalog.GLASS_LOCK,
+            "liquid_glass", "Liquid Glass", "Flowing glass, frosted surfaces and liquid motion", LIQUID_GLASS, GLASS_LOCK,
             accentDark = Color.rgb(124, 196, 255), accentLight = Color.rgb(21, 101, 192), surfaceTint = Color.rgb(27, 42, 85),
             mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "liquid",
         ),
         OeaThemeSpec(
-            "mountain_dawn", "Mountain Dawn", "First light on misty peaks", MOUNTAIN, OeaThemeCatalog.RIDGE_LOCK,
+            "mountain_dawn", "Mountain Dawn", "First light on misty peaks", MOUNTAIN, RIDGE_LOCK,
             accentDark = Color.rgb(255, 180, 138), accentLight = Color.rgb(180, 83, 42), surfaceTint = Color.rgb(107, 74, 58),
             mode = "system", glassStyle = "classic", iconShape = "rounded", dockStyle = "glass", pageEffect = "classic",
         ),
         OeaThemeSpec(
-            "forest_river", "Forest River", "Calm water through deep green woods", FOREST, OeaThemeCatalog.FOREST_LOCK,
+            "forest_river", "Forest River", "Calm water through deep green woods", FOREST, FOREST_LOCK,
             accentDark = Color.rgb(139, 214, 160), accentLight = Color.rgb(46, 125, 79), surfaceTint = Color.rgb(47, 74, 52),
             mode = "dark", glassStyle = "classic", iconShape = "circle", dockStyle = "glass", pageEffect = "stack",
         ),
         OeaThemeSpec(
-            "desert_coast", "Desert Coast", "Warm dunes meeting the sea", DESERT, OeaThemeCatalog.DUNE_LOCK,
+            "desert_coast", "Desert Coast", "Warm dunes meeting the sea", DESERT, DUNE_LOCK,
             accentDark = Color.rgb(242, 194, 123), accentLight = Color.rgb(140, 90, 0), surfaceTint = Color.rgb(107, 82, 50),
             mode = "system", glassStyle = "classic", iconShape = "rounded", dockStyle = "solid", pageEffect = "zoom",
         ),
@@ -167,12 +192,63 @@ object OeaThemeCatalog {
             accentDark = Color.rgb(215, 220, 228), accentLight = Color.rgb(60, 67, 80), surfaceTint = Color.rgb(35, 38, 44),
             mode = "dark", glassStyle = "classic", iconShape = "square", dockStyle = "solid", pageEffect = "classic",
         ),
+        // New 10 distinct themes using generated artwork - each has purpose
+        OeaThemeSpec(
+            "crimson_tide", "Crimson Tide", "Bold red waves with soft glow", CRIMSON_TIDE_HOME, CRIMSON_LOCK,
+            accentDark = Color.rgb(255, 120, 140), accentLight = Color.rgb(180, 40, 70), surfaceTint = Color.rgb(64, 20, 32),
+            mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "liquid",
+        ),
+        OeaThemeSpec(
+            "emerald_forest", "Emerald Forest", "Deep emerald with misty layers", EMERALD_HOME, PINE_LOCK,
+            accentDark = Color.rgb(120, 220, 160), accentLight = Color.rgb(40, 120, 80), surfaceTint = Color.rgb(20, 56, 40),
+            mode = "dark", glassStyle = "classic", iconShape = "circle", dockStyle = "glass", pageEffect = "stack",
+        ),
+        OeaThemeSpec(
+            "sapphire_drift", "Sapphire Drift", "Cool sapphire drift, calm and focused", SAPPHIRE_HOME, STORM_LOCK,
+            accentDark = Color.rgb(140, 180, 255), accentLight = Color.rgb(40, 80, 180), surfaceTint = Color.rgb(20, 32, 64),
+            mode = "dark", glassStyle = "liquid", iconShape = "rounded", dockStyle = "glass", pageEffect = "fade",
+        ),
+        OeaThemeSpec(
+            "amber_haze", "Amber Haze", "Warm amber haze for reading", AMBER_HAZE_HOME, AMBER_LOCK,
+            accentDark = Color.rgb(255, 200, 100), accentLight = Color.rgb(160, 100, 20), surfaceTint = Color.rgb(80, 50, 20),
+            mode = "light", glassStyle = "classic", iconShape = "rounded", dockStyle = "solid", pageEffect = "zoom",
+        ),
+        OeaThemeSpec(
+            "violet_storm", "Violet Storm", "Electric violet storm", VIOLET_STORM_HOME, VIOLET_LOCK,
+            accentDark = Color.rgb(190, 140, 255), accentLight = Color.rgb(100, 50, 180), surfaceTint = Color.rgb(40, 20, 64),
+            mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "cube",
+        ),
+        OeaThemeSpec(
+            "teal_lagoon", "Teal Lagoon", "Calm teal lagoon, minimal distraction", TEAL_LAGOON_HOME, TEAL_LOCK,
+            accentDark = Color.rgb(100, 230, 220), accentLight = Color.rgb(0, 120, 110), surfaceTint = Color.rgb(12, 56, 56),
+            mode = "system", glassStyle = "liquid", iconShape = "circle", dockStyle = "glass", pageEffect = "liquid",
+        ),
+        OeaThemeSpec(
+            "sunset_ridge", "Sunset Ridge", "Sunset over ridges, warm and vibrant", SUNSET_RIDGE_HOME, OCEAN_NIGHT_LOCK,
+            accentDark = Color.rgb(255, 180, 100), accentLight = Color.rgb(180, 80, 30), surfaceTint = Color.rgb(80, 40, 24),
+            mode = "dark", glassStyle = "classic", iconShape = "rounded", dockStyle = "glass", pageEffect = "depth",
+        ),
+        OeaThemeSpec(
+            "midnight_bloom", "Midnight Bloom", "Midnight bloom with violet petals", MIDNIGHT_BLOOM_HOME, BLOOM_LOCK,
+            accentDark = Color.rgb(220, 160, 255), accentLight = Color.rgb(120, 60, 180), surfaceTint = Color.rgb(48, 24, 64),
+            mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "none", pageEffect = "paper",
+        ),
+        OeaThemeSpec(
+            "ocean_abyss", "Ocean Abyss", "Deep ocean abyss, OLED friendly", OCEAN_ABYSS_HOME, ABYSS_LOCK,
+            accentDark = Color.rgb(80, 180, 255), accentLight = Color.rgb(0, 100, 180), surfaceTint = Color.rgb(6, 20, 40),
+            mode = "dark", glassStyle = "classic", iconShape = "square", dockStyle = "glass", pageEffect = "depth",
+        ),
+        OeaThemeSpec(
+            "paper_light", "Paper Light", "Light paper, calm and readable", PAPER_LIGHT_HOME, SAND_LIGHT_LOCK,
+            accentDark = Color.rgb(200, 190, 160), accentLight = Color.rgb(100, 90, 70), surfaceTint = Color.rgb(245, 240, 225),
+            mode = "light", glassStyle = "classic", iconShape = "circle", dockStyle = "none", pageEffect = "paper",
+        ),
     )
 
     val ICON_SHAPES = listOf("system" to "System", "circle" to "Circle", "squircle" to "Squircle", "rounded" to "Rounded", "teardrop" to "Teardrop", "square" to "Square")
     val DOCK_STYLES = listOf("glass" to "Glass", "solid" to "Solid", "none" to "None")
     val GLASS_STYLES = listOf("classic" to "Classic", "liquid" to "Liquid glass")
-    val PAGE_EFFECTS = listOf("classic" to "Classic", "liquid" to "Liquid", "cube" to "Cube", "stack" to "Stack", "zoom" to "Zoom", "fade" to "Fade", "none" to "None")
+    val PAGE_EFFECTS = listOf("classic" to "Classic", "liquid" to "Liquid", "cube" to "Cube", "stack" to "Stack", "zoom" to "Zoom", "fade" to "Fade", "none" to "None", "depth" to "Depth", "paper" to "Paper")
     val MODES = listOf("system" to "Keep current", "dark" to "Dark", "light" to "Light")
 
     fun label(options: List<Pair<String, String>>, value: String) = options.firstOrNull { it.first == value }?.second ?: value

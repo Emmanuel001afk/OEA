@@ -211,7 +211,7 @@ class OeaGameBoostActivity : Activity() {
         val y = scroll.scrollY
         palette = gamePalette()
         kit = OeaKit(this, palette)
-        window.decorView.setBackgroundColor(palette.background)
+        runCatching { window.decorView.setBackgroundColor(palette.background) }
         content.removeAllViews()
         content.setPadding(dp(16), dp(10), dp(16), dp(28))
         hero()

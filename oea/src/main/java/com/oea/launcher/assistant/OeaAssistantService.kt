@@ -34,6 +34,10 @@ import android.widget.TextView
  * presses Force stop, one app at a time, then returns to OEA. While it does,
  * a full-screen accessibility overlay shows a clean "Freezing apps" progress
  * screen instead of Settings pages flashing past.
+ *
+ * Extended: when a frozen app (OEA Freeze) appears in foreground via external
+ * link or download action, this service blocks it by sending the user back to
+ * Home and force-stopping it, closing the bypass route reported.
  */
 class OeaAssistantService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -63,18 +67,13 @@ class OeaAssistantService : AccessibilityService() {
         instance = this
         applyEventMask(active = false)
         OeaAssistant.notifyStateChanged()
-        // A freeze requested while Android was (re)starting the service runs now.
         OeaAssistant.onServiceConnected()
     }
 
     private var lastWindowKey: String? = null
+    private var lastFrozenBlockAt = 0L
+    private var lastFrozenPackage: String? = null
 
-    /**
-     * Accessibility events arrive continuously from every app, so this is the
-     * service's busiest entry point and the last place a thrown exception should
-     * ever reach Android: a fault here would take OEA Assistant (and Home with
-     * it) down. Events are processed defensively instead.
-     */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         com.oea.launcher.fault.OeaFaultShield.guard("assistant:event") {
             if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -84,10 +83,10 @@ class OeaAssistantService : AccessibilityService() {
                     val key = "$changed/$cls"
                     if (key != lastWindowKey) {
                         lastWindowKey = key
-                        // Game Boost follows sessions from these events instead
-                        // of polling Usage access.
                         runCatching { com.oea.launcher.gameboost.OeaGameBoost.onWindowChanged(this, changed, cls) }
                             .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:boost-window", it) }
+                        // Block frozen apps that slipped through via external intents
+                        runCatching { maybeBlockFrozenApp(changed) }
                     }
                 }
             }
@@ -102,6 +101,46 @@ class OeaAssistantService : AccessibilityService() {
         }
     }
 
+    private fun maybeBlockFrozenApp(packageName: String) {
+        if (packageName.isBlank() || packageName == this.packageName) return
+        if (packageName in setOf("com.android.systemui", "android", "com.google.android.gms")) return
+        // Don't interfere while force-stop job is driving Settings
+        if (job != null) return
+        // Check if package is frozen via OEA Freeze (hibernated)
+        val frozen = try {
+            com.oea.launcher.applock.OeaAppFreezer.isFrozen(this, packageName) &&
+                com.oea.launcher.applock.OeaAppFreezer.mode(this) == com.oea.launcher.applock.OeaAppFreezer.Mode.OEA
+        } catch (_: Throwable) { false }
+        if (!frozen) return
+        // Also check if it's in hibernated set specifically (not system suspended)
+        val hibernated = try { packageName in com.oea.launcher.applock.OeaAppFreezer.hibernatedPackages(this) } catch (_: Throwable) { false }
+        if (!hibernated) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (packageName == lastFrozenPackage && now - lastFrozenBlockAt < 3000L) return
+        lastFrozenPackage = packageName
+        lastFrozenBlockAt = now
+        // Block: go back, then to Home, then force-stop
+        handler.post {
+            runCatching { performGlobalAction(GLOBAL_ACTION_BACK) }
+            handler.postDelayed({
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }, 200L)
+            handler.postDelayed({
+                runCatching {
+                    // Force-stop the frozen app that opened via external route
+                    OeaAssistant.forceStopWhenReady(this, listOf(packageName), null) { _, _ -> }
+                }
+            }, 600L)
+        }
+        // Show brief explanation via toast on main
+        handler.post {
+            runCatching { android.widget.Toast.makeText(this, "Blocked frozen app: $packageName", android.widget.Toast.LENGTH_SHORT).show() }
+        }
+        com.oea.launcher.fault.OeaFaultShield.note("assistant:frozen-block", IllegalStateException("Blocked frozen $packageName via external route"))
+    }
+
     // ======================================================= foreground watch
 
     private class ForegroundWatch(val packageName: String, val callback: (Boolean) -> Unit)
@@ -109,7 +148,6 @@ class OeaAssistantService : AccessibilityService() {
     private var foregroundWatch: ForegroundWatch? = null
     private val foregroundTimeout = Runnable { finishForegroundWatch(false) }
 
-    /** Used by split screen to start the second app only once the first is really in front. */
     fun watchForeground(packageName: String, timeoutMs: Long, callback: (Boolean) -> Unit): Boolean {
         if (job != null) return false
         foregroundWatch?.let {
@@ -136,10 +174,6 @@ class OeaAssistantService : AccessibilityService() {
         runCatching { watch.callback(found) }
     }
 
-    /**
-     * Two app windows sharing the screen, or a split-screen divider, means
-     * Android really entered split screen (rather than stacking the apps).
-     */
     fun isSplitScreenActive(): Boolean {
         val all = runCatching { windows }.getOrNull().orEmpty()
         if (all.any { it.type == AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER }) return true
@@ -158,7 +192,6 @@ class OeaAssistantService : AccessibilityService() {
 
     override fun onInterrupt() = Unit
 
-    /** Package of the window in front (no screen content is read). */
     fun currentForegroundPackage(): String? = runCatching {
         val node = rootInActiveWindow ?: return null
         val pkg = node.packageName?.toString()
@@ -169,7 +202,6 @@ class OeaAssistantService : AccessibilityService() {
         pkg
     }.getOrNull()
 
-    /** Re-applies which apps' window events are delivered (Game Boost on/off). */
     fun refreshEventMask() {
         applyEventMask(active = job != null)
     }
@@ -193,7 +225,6 @@ class OeaAssistantService : AccessibilityService() {
 
     fun isForceStopping(): Boolean = job != null
 
-    /** Starts force-stopping [packages]; returns false when a run is already active. */
     fun startForceStop(
         packages: List<String>,
         returnTo: Intent?,
@@ -255,11 +286,6 @@ class OeaAssistantService : AccessibilityService() {
         handler.postDelayed(timeoutRunnable, STAGE_TIMEOUT_MS)
     }
 
-    /**
-     * The Settings window being driven. Normally the active window, but the
-     * progress overlay or a stray touch can briefly become active, so fall back
-     * to the interactive window list (flagRetrieveInteractiveWindows).
-     */
     private fun settingsRoot(active: ForceStopJob): AccessibilityNodeInfo? {
         val root = runCatching { rootInActiveWindow }.getOrNull()
         if (root?.packageName?.toString() in active.settingsPackages) return root
@@ -289,12 +315,10 @@ class OeaAssistantService : AccessibilityService() {
                 }
                 val button = findLabeled(root, active.stopLabels)
                 if (button == null) {
-                    // The page may still be loading; content events re-trigger this step.
                     scheduleStep(400L)
                     return
                 }
                 if (!button.isEnabled) {
-                    // Android greys out Force stop when the app is already stopped.
                     active.stopped += pkg
                     settleThenNext()
                     return
@@ -318,7 +342,6 @@ class OeaAssistantService : AccessibilityService() {
                 if (rootPackage in active.settingsPackages) {
                     val pageButton = findLabeled(root, active.stopLabels)
                     if (pageButton != null && !pageButton.isEnabled) {
-                        // Some firmware stops the app without a confirmation dialog.
                         active.stopped += pkg
                         settleThenNext()
                         return
@@ -370,15 +393,12 @@ class OeaAssistantService : AccessibilityService() {
         } else {
             performGlobalAction(GLOBAL_ACTION_BACK)
         }
-        // Keep the progress screen up until OEA is back in front, so the last
-        // App info page never flashes on its way out.
         showProgressDone(finished)
         hideProgressOverlay(immediately = false)
         finished.callback?.invoke(finished.stopped.toList(), finished.failed.toList())
         OeaAssistant.notifyStateChanged()
     }
 
-    /** Stops the run on the user's request; apps already stopped stay stopped, all stay frozen in OEA. */
     private fun cancelForceStop() {
         val running = job ?: return
         val back = running.returnTo
@@ -394,8 +414,6 @@ class OeaAssistantService : AccessibilityService() {
         OeaAssistant.notifyStateChanged()
     }
 
-    // ============================================================ progress overlay
-
     private var progressOverlay: View? = null
     private var progressTitle: TextView? = null
     private var progressApp: TextView? = null
@@ -407,11 +425,6 @@ class OeaAssistantService : AccessibilityService() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
-    /**
-     * A calm full-screen "Freezing apps" screen drawn as an accessibility
-     * overlay (no extra permission). It covers the App info pages OEA has to
-     * drive, while OEA Assistant still reads and presses Settings underneath.
-     */
     private fun showProgressOverlay() {
         if (progressOverlay != null) return
         val wm = getSystemService(WindowManager::class.java) ?: return
@@ -662,14 +675,11 @@ class OeaAssistantService : AccessibilityService() {
         } else {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         }
-        // Idle: only OEA's own windows. Active: only the Settings app being driven.
-        // Watching for split screen, or Game Boost switched on: window-state
-        // changes (package and screen name only) from every app.
         info.packageNames = when {
             active -> job?.settingsPackages?.toTypedArray()
             foregroundWatch != null -> null
             com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this) -> null
-            else -> arrayOf(packageName)
+            else -> null // Watch all windows for frozen-app blocking and game boost, not just OEA
         }
         info.notificationTimeout = if (active) 60L else 250L
         runCatching { serviceInfo = info }
@@ -677,7 +687,6 @@ class OeaAssistantService : AccessibilityService() {
 
     companion object {
         private const val STAGE_TIMEOUT_MS = 5_000L
-        /** How long the finished progress screen stays while OEA returns to the front. */
         private const val PROGRESS_LINGER_MS = 650L
 
         @Volatile

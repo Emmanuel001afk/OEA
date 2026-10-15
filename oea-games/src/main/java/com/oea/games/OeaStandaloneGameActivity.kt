@@ -30,73 +30,104 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
-            OeaGames.registerBuiltIns(applicationContext)
-            val id = intent.getStringExtra(EXTRA_GAME_ID)?.takeIf { it.isNotBlank() } ?: standaloneGameId
-            val descriptor = OeaEngine.registry.find(id)
-            if (descriptor == null || !descriptor.supports(PlayMode.SOLO)) {
-                Toast.makeText(this, "This game isn't available in this build.", Toast.LENGTH_LONG).show()
-                finish()
-                return
-            }
-            val options = descriptor.options.associate { it.id to it.default }.toMutableMap().apply {
+            startStandalone()
+        } catch (t: Throwable) {
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:create", t) } catch (_: Throwable) {}
+            try { Toast.makeText(this, "Game could not start: ${t.javaClass.simpleName}", Toast.LENGTH_LONG).show() } catch (_: Throwable) {}
+            try { finish() } catch (_: Throwable) {}
+        }
+    }
+
+    private fun startStandalone() {
+        try { OeaEngine.init(applicationContext) } catch (_: Throwable) {}
+        OeaGames.registerBuiltIns(applicationContext)
+        val id = intent.getStringExtra(EXTRA_GAME_ID)?.takeIf { it.isNotBlank() } ?: standaloneGameId
+        val descriptor = try { OeaEngine.registry.find(id) } catch (e: Throwable) {
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:registry", e) } catch (_: Throwable) {}
+            null
+        }
+        if (descriptor == null || !descriptor.supports(PlayMode.SOLO)) {
+            Toast.makeText(this, "This game isn't available in this build.", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        val options = descriptor.options.associate { it.id to it.default }.toMutableMap().apply {
+            try {
                 intent.getBundleExtra(EXTRA_GAME_OPTIONS)?.let { bundle ->
                     bundle.keySet().forEach { key -> bundle.getString(key)?.let { this[key] = it } }
                 }
-            }
-            // Standalone entries are solo applications. Multiplayer sessions
-            // are coordinated by the OEA Games hub, not passed across APKs.
-            val mode = PlayMode.SOLO
-            // Ask the driver first: a missing ES 3 configuration would otherwise
-            // surface inside GLSurfaceView's own thread and take the whole app with
-            // it, and a declared ES 2.0 minimum alone is not proof of anything.
-            OeaEngine.surfaceProblem()?.let { reason ->
-                Toast.makeText(this, reason, Toast.LENGTH_LONG).show()
-                finish()
-                return
-            }
-            val launch = GameLaunch(
-                mode = mode,
-                options = options,
-                seed = intent.getLongExtra(EXTRA_GAME_SEED, System.nanoTime()),
-                localPlayers = listOf(LocalPlayer(OeaEngine.settings.playerName, OeaEngine.settings.playerColor)),
-            )
-            val gameHost = GameHost(this, descriptor, launch, this)
-            host = gameHost
-            gameHost.onFatalError = { error ->
-                Toast.makeText(this, "${descriptor.title} stopped because of an error (${error.javaClass.simpleName}).", Toast.LENGTH_LONG).show()
-                finish()
-            }
+            } catch (_: Throwable) {}
+        }
+        val mode = PlayMode.SOLO
+        val problem = try { OeaEngine.surfaceProblem() } catch (e: Throwable) {
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:surface", e) } catch (_: Throwable) {}
+            e.message
+        }
+        if (problem != null) {
+            Toast.makeText(this, problem, Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        val launch = GameLaunch(
+            mode = mode,
+            options = options,
+            seed = intent.getLongExtra(EXTRA_GAME_SEED, System.nanoTime()),
+            localPlayers = listOf(LocalPlayer(OeaEngine.settings.playerName, OeaEngine.settings.playerColor)),
+        )
+        val gameHost = try {
+            GameHost(this, descriptor, launch, this)
+        } catch (e: Throwable) {
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:host", e) } catch (_: Throwable) {}
+            Toast.makeText(this, "${descriptor.title} could not start on this device (${e.javaClass.simpleName})", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        host = gameHost
+        gameHost.onFatalError = { error ->
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:fatal", error) } catch (_: Throwable) {}
+            runCatching { Toast.makeText(this, "${descriptor.title} stopped (${error.javaClass.simpleName})", Toast.LENGTH_LONG).show() }
+            runCatching { finish() }
+        }
+        try {
             setContentView(gameHost.root)
-            if (Build.VERSION.SDK_INT >= 33) {
+        } catch (e: Throwable) {
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:setContent", e) } catch (_: Throwable) {}
+            Toast.makeText(this, "${descriptor.title} could not create its screen", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
                 ) { handleBack() }
-            }
-        } catch (error: Exception) {
-            Toast.makeText(this, "${error.message ?: "The game could not start."}", Toast.LENGTH_LONG).show()
-            finish()
+            } catch (_: Throwable) {}
         }
     }
 
     override fun onResume() {
         super.onResume()
-        host?.onResume()
+        try { host?.onResume() } catch (e: Throwable) {
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:resume", e) } catch (_: Throwable) {}
+        }
     }
 
     override fun onPause() {
-        host?.onPause()
+        try { host?.onPause() } catch (e: Throwable) {
+            try { com.oea.launcher.fault.OeaFaultShield.note("standalone-game:pause", e) } catch (_: Throwable) {}
+        }
         super.onPause()
     }
 
     override fun onDestroy() {
-        host?.onDestroy()
+        try { host?.onDestroy() } catch (_: Throwable) {}
         host = null
         super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        host?.onWindowFocusChanged(hasFocus)
+        try { host?.onWindowFocusChanged(hasFocus) } catch (_: Throwable) {}
     }
 
     @Deprecated("Back is routed to the game first")
@@ -104,10 +135,14 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
 
     private fun handleBack() {
         val currentHost = host ?: run { finish(); return }
-        currentHost.onBackPressed {
-            confirm("Leave the game?", "Your progress in this round will be lost.", "Leave", "Stay") { leave ->
-                if (leave) finish()
+        try {
+            currentHost.onBackPressed {
+                confirm("Leave the game?", "Your progress in this round will be lost.", "Leave", "Stay") { leave ->
+                    if (leave) finish()
+                }
             }
+        } catch (e: Throwable) {
+            finish()
         }
     }
 
@@ -120,7 +155,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     override fun onGenericMotionEvent(event: MotionEvent): Boolean =
         host?.dispatchGenericMotionEvent(event) == true || super.onGenericMotionEvent(event)
 
-    override fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    override fun toast(message: String) = runCatching { Toast.makeText(this, message, Toast.LENGTH_SHORT).show() }.let { }
 
     override fun share(text: String, title: String) {
         runCatching {
@@ -129,39 +164,45 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     }
 
     override fun menu(title: String, subtitle: String?, items: List<MenuItem>, onPick: (String?) -> Unit) {
-        val labels = items.map { it.label }.toTypedArray()
-        val builder = AlertDialog.Builder(this).setTitle(title).setItems(labels) { _, which -> onPick(items[which].id) }
-        if (!subtitle.isNullOrBlank()) builder.setMessage(subtitle)
-        builder.setOnCancelListener { onPick(null) }
-        builder.show()
+        try {
+            val labels = items.map { it.label }.toTypedArray()
+            val builder = AlertDialog.Builder(this).setTitle(title).setItems(labels) { _, which -> onPick(items[which].id) }
+            if (!subtitle.isNullOrBlank()) builder.setMessage(subtitle)
+            builder.setOnCancelListener { onPick(null) }
+            builder.show()
+        } catch (_: Throwable) { onPick(null) }
     }
 
     override fun confirm(title: String, message: String, positive: String, negative: String, onResult: (Boolean) -> Unit) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton(positive) { _, _ -> onResult(true) }
-            .setNegativeButton(negative) { _, _ -> onResult(false) }
-            .setOnCancelListener { onResult(false) }
-            .show()
+        try {
+            AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(positive) { _, _ -> onResult(true) }
+                .setNegativeButton(negative) { _, _ -> onResult(false) }
+                .setOnCancelListener { onResult(false) }
+                .show()
+        } catch (_: Throwable) { onResult(false) }
     }
 
     override fun prompt(title: String, hint: String, initial: String, onResult: (String?) -> Unit) {
-        val input = EditText(this).apply {
-            this.hint = hint
-            setText(initial)
-            setSelection(text.length)
-        }
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(input)
-            .setPositiveButton("OK") { _, _ -> onResult(input.text?.toString()) }
-            .setNegativeButton("Cancel") { _, _ -> onResult(null) }
-            .setOnCancelListener { onResult(null) }
-            .show()
+        try {
+            val input = EditText(this).apply {
+                this.hint = hint
+                setText(initial)
+                setSelection(text.length)
+            }
+            AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(input)
+                .setPositiveButton("OK") { _, _ -> onResult(input.text?.toString()) }
+                .setNegativeButton("Cancel") { _, _ -> onResult(null) }
+                .setOnCancelListener { onResult(null) }
+                .show()
+        } catch (_: Throwable) { onResult(null) }
     }
 
-    override fun exit(result: GameResult?) = finish()
+    override fun exit(result: GameResult?) = runCatching { finish() }.let { }
 
     companion object {
         const val EXTRA_GAME_ID = "com.oea.games.extra.GAME_ID"

@@ -1366,6 +1366,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val cols = cols()
         val rows = rows()
         if (apps.isNotEmpty() && catalogueAuthoritative) pruneUninstalled()
+        pruneHiddenApps()
         var items = ws.items()
         var folders = ws.folders()
         // Legacy data: folder members were also stored as items carrying folderId.
@@ -1446,6 +1447,28 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (placedFolders != ws.folders()) ws.replaceFolders(placedFolders)
         ws.setPages(pages)
         ws.setLayoutGrid(cols, rows)
+    }
+
+    private fun pruneHiddenApps() {
+        if (apps.isEmpty()) return
+        val hiddenKeys = apps.filter { store.isHidden(it.packageName, it.className) }.map { appKey(it) }.toSet()
+        if (hiddenKeys.isEmpty()) return
+        val items = ws.items().filterNot { !it.isShortcut && it.id in hiddenKeys }
+        if (items.size != ws.items().size) ws.replaceItems(items)
+        val dock = ws.dock().filterNot { it in hiddenKeys }
+        if (dock.size != ws.dock().size) ws.setDock(dock)
+        val folders = ws.folders().mapNotNull { folder ->
+            val remaining = folder.members.filterNot { it in hiddenKeys }
+            when {
+                remaining.isEmpty() -> null
+                remaining.size < 2 && !folder.isPair -> null
+                remaining.size != folder.members.size -> folder.copy(members = remaining)
+                else -> folder
+            }
+        }
+        if (folders.size != ws.folders().size || folders.any { f -> f.members.size != ws.folders().firstOrNull { it.id == f.id }?.members?.size }) {
+            ws.replaceFolders(folders)
+        }
     }
 
     /**
@@ -3420,7 +3443,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         /** Settings that only change the app drawer and search. */
         private val DRAWER_KEYS = setOf(
             "drawer_mode", "sort_mode", "drawer_categories", "show_most_used", "drawer_wallpaper_background",
-            "search_wallpaper_visible", "hidden_apps",
+            "search_wallpaper_visible",
         )
         /** Settings that restyle Home's chrome (dock, search bar, glance, glass, page motion) without new pages. */
         private val CHROME_KEYS = setOf("dock_style", "search_bar_position", "glance_style", "glass_style", "page_effect", "low_mode_enabled")

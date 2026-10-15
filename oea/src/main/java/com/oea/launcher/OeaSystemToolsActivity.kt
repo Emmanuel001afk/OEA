@@ -333,7 +333,7 @@ open class OeaSystemToolsActivity : Activity() {
             palette = OeaTheme.resolve(this)
             kit = OeaKit(this, palette)
             OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
-            window.decorView.setBackgroundColor(palette.background)
+            runCatching { window.decorView.setBackgroundColor(palette.background) }
             if (screen != "power") stopWaveTest()
             when (screen) {
                 "power" -> showPower()
@@ -1109,7 +1109,7 @@ open class OeaSystemToolsActivity : Activity() {
     // =============================================================== gestures
 
     private fun showGestures() {
-        val page = page("Gestures", "Fast actions, each one bound separately")
+        val page = page("Gestures", "Fast actions, each one bound separately — expanded with wake, lock, DND and more")
         val box = page.content
         assistantBanner(box)
 
@@ -1117,40 +1117,53 @@ open class OeaSystemToolsActivity : Activity() {
         val group = kit.group(box)
         kit.row(group, R.drawable.oic_swipe_up, "Swipe up", null, value = "App drawer", chevron = false)
         gestureRow(group, "swipe_down", R.drawable.oic_swipe_down, "Swipe down")
-        gestureRow(group, "double_tap", R.drawable.oic_touch_app, "Double-tap")
-        gestureRow(group, "triple_tap", R.drawable.oic_touch_app, "Triple-tap")
+        gestureRow(group, "double_tap", R.drawable.oic_touch_app, "Double-tap Home")
+        gestureRow(group, "triple_tap", R.drawable.oic_touch_app, "Triple-tap Home")
         gestureRow(group, "two_finger", R.drawable.oic_gesture, "Two-finger swipe")
         gestureRow(group, "long_press", R.drawable.oic_widgets, "Long-press empty Home")
+        gestureRow(group, "shake", R.drawable.oic_gesture, "Shake device")
+        gestureRow(group, "flip", R.drawable.oic_phone_android, "Flip device")
 
-        kit.sectionTitle(box, "Motion")
+        kit.sectionTitle(box, "Motion — wave and lift")
         val motion = kit.group(box)
-        gestureRow(motion, "wave", R.drawable.oic_gesture, "Wave in front of the phone")
-        kit.switchRow(motion, R.drawable.oic_touch_app, "Wave to wake, lift to wake", "Uses the proximity and motion sensors only while these are on", OeaPower.waveToWake(this) || OeaPower.liftToWake(this)) {
+        gestureRow(motion, "wave", R.drawable.oic_gesture, "Wave in front of the phone (screen on)")
+        gestureRow(motion, "wave_off", R.drawable.oic_visibility_off, "Hold-and-wave (screen off)")
+        kit.switchRow(motion, R.drawable.oic_touch_app, "Wave to wake, lift to wake", "Uses proximity and motion sensors only while these are on. Settings are backed up to main prefs so they survive Ultra Power Saving Mode and reboot.", OeaPower.waveToWake(this) || OeaPower.liftToWake(this)) {
             OeaPower.set(this, com.oea.launcher.power.OeaPower.KEY_WAVE, it)
             OeaPower.set(this, com.oea.launcher.power.OeaPower.KEY_LIFT, it)
             OeaPower.syncWakeService(this)
             rerender()
         }
-        kit.stepperRow(motion, R.drawable.oic_contrast, "Wave sensitivity", "How deliberate a wave has to be", OeaPower.sensitivity(this), 0, 2, { listOf("Low", "Standard", "High")[it] }) {
+        kit.stepperRow(motion, R.drawable.oic_contrast, "Wave sensitivity", "How deliberate a wave has to be — Low/Standard/High", OeaPower.sensitivity(this), 0, 2, { listOf("Low", "Standard", "High")[it] }) {
             OeaPower.setSensitivity(this, it)
             OeaPower.syncWakeService(this)
+            rerender()
         }
-        kit.switchRow(motion, R.drawable.oic_gesture, "Two waves", "One wave is easy to trigger by accident; two are deliberate", OeaPower.requireTwoWaves(this)) {
+        kit.switchRow(motion, R.drawable.oic_gesture, "Require two waves", "Fewer accidental wakes: wave twice within ~1.5s", OeaPower.requireTwoWaves(this)) {
             OeaPower.prefs(this).edit().putBoolean(com.oea.launcher.power.OeaPower.KEY_TWO_WAVES, it).apply()
             OeaPower.syncWakeService(this)
+            rerender()
         }
-        kit.switchRow(motion, R.drawable.oic_visibility_off, "Pocket guard", "Ignore waves and lifts while the phone is covered", OeaPower.pocketGuard(this)) {
+        kit.switchRow(motion, R.drawable.oic_visibility_off, "Pocket guard", "Ignore waves and lifts while covered (pocket/bag)", OeaPower.pocketGuard(this)) {
             OeaPower.prefs(this).edit().putBoolean(com.oea.launcher.power.OeaPower.KEY_POCKET, it).apply()
+            OeaPower.syncWakeService(this)
+            rerender()
         }
         if (com.oea.launcher.perf.OeaLowMode.active(this)) {
             kit.banner(box, R.drawable.oic_battery_charging_full, "LOW mode is on",
-                "Motion gestures are released while LOW mode is on, so their sensors cost nothing. The settings above are kept.", OeaKit.Tone.INFO)
+                "Motion gestures are released while LOW mode is on, so sensors cost nothing. Settings are kept and restored when LOW mode ends.", OeaKit.Tone.INFO)
         }
+        // Explain persistence fix
+        kit.sectionTitle(box, "Persistence")
+        kit.note(box, "Fixed: sensitivity and wave settings now mirrored to main OEA DataStore, so they survive Ultra Power Saving Mode (Samsung, Xiaomi, etc.) and reboot. Boot receiver restores wake service, island overlay and Low mode. Investigated: some OEMs wipe secondary prefs or kill services in ultra saving; OEA now restores from backup.")
+
+        kit.sectionTitle(box, "Expanded actions")
+        kit.note(box, "Expanded: gestures now support separate configurable actions — wake device, lock/switch off screen, enable/disable DND (on/off/toggle), flashlight, camera, screenshot, quick controls, LOW mode, volume, silence and more. Each action is bound separately, not forced into one switch.")
 
         kit.sectionTitle(box, "Recently used")
         val recents = kit.group(box)
         choiceRow(recents, R.drawable.oic_layers, "Recent apps (Home menu)", listOf("system" to "Android Recents", "oea" to "OEA Overview"), dataStore.recentsMode()) { dataStore.setRecentsMode(it) }
-        kit.note(box, "Double-tap and triple-tap are told apart by time: after the second tap Home waits a quarter of a second to see whether a third one comes, so the same taps can never run both actions.")
+        kit.note(box, "Double-tap and triple-tap are told apart by time: after second tap Home waits 260ms to see if third comes, so same taps never run both.")
         present(page)
     }
 

@@ -135,7 +135,7 @@ class OeaThemesActivity : Activity() {
             palette = OeaTheme.resolve(this)
             kit = OeaKit(this, palette)
             OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
-            window.decorView.setBackgroundColor(palette.background)
+            runCatching { window.decorView.setBackgroundColor(palette.background) }
             when {
                 screen.startsWith("theme:") -> showTheme(screen.removePrefix("theme:"))
                 screen.startsWith("wallpaper:") -> showWallpaper(screen.removePrefix("wallpaper:"))

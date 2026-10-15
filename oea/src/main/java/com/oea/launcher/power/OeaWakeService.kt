@@ -99,11 +99,43 @@ class OeaWakeService : Service() {
         instance = this
         running = true
         sensorManager = getSystemService(SensorManager::class.java)
-        val promoted = runCatching {
-            if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            else startForeground(NOTIFICATION_ID, notification())
-        }.onFailure { Log.w(TAG, "Wake service could not enter the foreground", it) }.isSuccess
+        // Android 14+ requires startForeground within ~10s after startForegroundService().
+        // If our normal notification fails to build, we must still call startForeground
+        // with a minimal fallback before stopping, otherwise the system throws
+        // ForegroundServiceDidNotStartInTimeException.
+        var promoted = false
+        try {
+            val notif = try { notification() } catch (e: Throwable) {
+                Log.w(TAG, "Wake notification build failed, using fallback", e)
+                fallbackNotification()
+            }
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
+            }
+            promoted = true
+        } catch (e: Throwable) {
+            Log.w(TAG, "Wake service could not enter the foreground", e)
+            // Last resort: try a bare notification so we satisfy the FGS contract, then stop.
+            try {
+                val fallback = fallbackNotification()
+                if (Build.VERSION.SDK_INT >= 34) {
+                    startForeground(NOTIFICATION_ID, fallback, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(NOTIFICATION_ID, fallback)
+                }
+                promoted = true
+            } catch (e2: Throwable) {
+                Log.e(TAG, "Fallback foreground promotion also failed", e2)
+            }
+        }
         if (!promoted) {
+            // We never managed to promote; stop quickly to avoid FGS timeout crash.
+            // On Android 14+, if startForeground was never called, the system will
+            // still throw, but we have tried our best; mark not running.
+            running = false
+            instance = null
             stopSelf()
             return
         }
@@ -118,6 +150,26 @@ class OeaWakeService : Service() {
             true
         }.getOrDefault(false)
         reloadSettings()
+    }
+
+    private fun fallbackNotification(): android.app.Notification {
+        val manager = getSystemService(android.app.NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26) {
+            runCatching {
+                manager?.createNotificationChannel(android.app.NotificationChannel(CHANNEL, \"Wake gestures\", android.app.NotificationManager.IMPORTANCE_MIN).apply {
+                    description = \"Keeps OEA's wake gestures available.\"\n                    setShowBadge(false)
+                })
+            }
+        }
+        val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, CHANNEL)
+        else @Suppress(\"DEPRECATION\") android.app.Notification.Builder(this)
+        return builder
+            .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
+            .setContentTitle(\"OEA wake gestures\")
+            .setContentText(\"Sensors active while screen is off\")
+            .setOngoing(true)
+            .setShowWhen(false)
+            .build()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

@@ -85,13 +85,30 @@ class OeaGameCaptureService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        // A refused media-projection promotion must not crash OEA; the capture
-        // simply doesn't start and Game Boost's controls return to normal.
-        val promoted = runCatching {
+        var promoted = false
+        try {
+            val notif = try {
+                notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot")
+            } catch (e: Throwable) {
+                android.util.Log.w("OeaGameCapture", "Notification build failed", e)
+                fallbackNotification()
+            }
             if (Build.VERSION.SDK_INT >= 29) {
-                startForeground(NOTIFICATION_ID, notification(if (mode == OeaGameCaptureActivity.MODE_RECORD) "Recording game screen" else "Saving screenshot"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-            } else startForeground(NOTIFICATION_ID, notification("OEA Game Capture"))
-        }.onFailure { android.util.Log.w("OeaGameCapture", "Capture could not enter the foreground", it) }.isSuccess
+                startForeground(NOTIFICATION_ID, notif, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else startForeground(NOTIFICATION_ID, notif)
+            promoted = true
+        } catch (e: Throwable) {
+            android.util.Log.w("OeaGameCapture", "Capture could not enter the foreground", e)
+            try {
+                val fallback = fallbackNotification()
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startForeground(NOTIFICATION_ID, fallback, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                } else startForeground(NOTIFICATION_ID, fallback)
+                promoted = true
+            } catch (e2: Throwable) {
+                android.util.Log.e("OeaGameCapture", "Fallback promotion failed", e2)
+            }
+        }
         if (!promoted) {
             clearCaptureState()
             stopSelf(startId)
@@ -488,6 +505,14 @@ class OeaGameCaptureService : Service() {
             .setContentText(text)
             .setOngoing(true)
             .addAction(android.R.drawable.ic_media_pause, "Stop", android.app.PendingIntent.getService(this, 1, Intent(this, OeaGameCaptureService::class.java).setAction(ACTION_STOP), android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
+            .build()
+
+    private fun fallbackNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setContentTitle("OEA Capture")
+            .setContentText("Starting")
+            .setOngoing(true)
             .build()
 
     private fun stamp() = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
