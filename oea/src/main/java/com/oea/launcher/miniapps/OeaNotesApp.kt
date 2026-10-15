@@ -213,10 +213,8 @@ object OeaNotesApp {
                         ))
                     }
                 }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(12) })
-                return@refresh
-            }
-
-            // Group by folder
+            } else {
+                // Group by folder
             filtered.groupBy { it.folder.ifBlank { "General" } }.forEach { (folder, notes) ->
                 kit.sectionTitle(content, "$folder • ${notes.size}")
                 val g = kit.group(content)
@@ -265,6 +263,7 @@ object OeaNotesApp {
                 }
             }, LinearLayout.LayoutParams(0, kit.dp(44), 1f))
             content.addView(bottomRow)
+            }
         }
         refresh("all")
 

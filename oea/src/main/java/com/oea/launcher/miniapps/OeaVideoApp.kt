@@ -442,6 +442,8 @@ object OeaVideoApp {
 
         kit.sheet(item.name, "OEA VIP • ${formatDuration(item.duration)} • ${item.bucket} • ${formatSize(item.size)}") { panel, dialog ->
             val videoView = VideoView(host).apply { setBackgroundColor(Color.BLACK) }
+            var mediaPlayerRef: android.media.MediaPlayer? = null
+            var pendingSpeed = 1f
             panel.addView(videoView, LinearLayout.LayoutParams(-1, kit.dp(240)))
 
             val controls = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, kit.dp(10), 0, 0) }
@@ -481,10 +483,11 @@ object OeaVideoApp {
             listOf(0.25f to "0.25x", 0.5f to "0.5x", 1f to "1x", 1.25f to "1.25x", 1.5f to "1.5x", 2f to "2x", 3f to "3x").forEach { (speed, label) ->
                 speedRow.addView(kit.chip(label, speed == 1f) {
                     try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            val current = videoView.getPlaybackParams()
-                            current.speed = speed
-                            videoView.setPlaybackParams(current)
+                        pendingSpeed = speed
+                        mediaPlayerRef?.let { mp ->
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                mp.playbackParams = mp.playbackParams.apply { this.speed = pendingSpeed }
+                            }
                         }
                     } catch (_: Throwable) {}
                 }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
@@ -500,6 +503,12 @@ object OeaVideoApp {
             try {
                 videoView.setVideoURI(item.uri)
                 videoView.setOnPreparedListener { mp ->
+                    mediaPlayerRef = mp
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && pendingSpeed != 1f) {
+                            mp.playbackParams = mp.playbackParams.apply { speed = pendingSpeed }
+                        }
+                    } catch (_: Throwable) {}
                     mp.isLooping = loop
                     // Resume progress if exists
                     val progressKey = "progress_${item.uri}"
