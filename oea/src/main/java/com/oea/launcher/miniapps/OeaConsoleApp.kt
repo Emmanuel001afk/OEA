@@ -766,7 +766,7 @@ Our own build:
                     consoleToast(host, "Output copied")
                 } else consoleToast(host, "Nothing to copy")
             }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { topMargin = kit.dp(8); rightMargin = kit.dp(4) })
-            actionsRow.addView(kit.primaryButton("Share output", R.drawable.oic_share) {
+            actionsRow.addView(kit.primaryButton("Share output", R.drawable.oic_share_filled) {
                 val text = output.text?.toString().orEmpty()
                 if (text.isNotBlank()) {
                     val share = Intent(Intent.ACTION_SEND).apply {
