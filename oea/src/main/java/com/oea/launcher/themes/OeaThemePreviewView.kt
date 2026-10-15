@@ -24,6 +24,9 @@ import java.util.concurrent.Executors
  * real wallpaper (centre-cropped like Android does), with Home's icons, dock
  * and search bar, or the lock screen's clock and a notification, drawn in
  * the theme's colours, icon shape and glass style.
+ *
+ * Fixed: proper previews, larger distinct collections, fixed transparent/white look.
+ * Placeholder never white — rich accent-based dark gradient with shimmer, so user can preview image they want to use.
  */
 class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : View(context) {
     private val density = resources.displayMetrics.density
@@ -37,20 +40,9 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
 
     var theme: OeaThemeSpec? = null
         set(value) { field = value; invalidate() }
-    /** Rounded "phone" corners; 0 draws a plain rectangle (full-screen preview). */
     var cornerDp = 18f
         set(value) { field = value; invalidate() }
 
-    /**
-     * Shows [ref] as soon as possible.
-     *
-     * The full preview is decoded off the main thread, but a tile must never be
-     * a blank rectangle while that happens — that is exactly how the wallpaper
-     * grid used to look plain. So a *small* copy is decoded synchronously first
-     * (a bounded `inSampleSize` decode: a fraction of an already-cached
-     * thumbnail, a millisecond or two of work) and the sharp version replaces it
-     * the moment the loader finishes.
-     */
     fun setImage(ref: OeaImageRef?) {
         if (ref == null) {
             requested = null
@@ -67,7 +59,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
             invalidate()
             return
         }
-        // Quick synchronous pass so the very first frame already shows the picture.
         bitmap = runCatching {
             OeaThemeImages.cached(ref, QUICK_W) ?: OeaThemeImages.thumbnail(app, ref, QUICK_W, QUICK_H)
         }.getOrNull()
@@ -121,32 +112,27 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         val image = bitmap
         val t = theme
         if (image == null || image.isRecycled) {
-            // Nothing decoded yet: show the theme's mood, never a flat white rectangle.
-            // Previous version blended towards white for light themes, causing white look where user cannot preview image.
-            // Fixed: always show rich accent-based gradient, darkened, with subtle pattern, never white.
             val tint = t?.surfaceTint ?: Color.rgb(20, 24, 32)
             val acc = accent()
-            // If tint is light (paper_light etc), use accent as base, not tint, to avoid white
             val isLightTint = OeaTheme.luminance(tint) > 0.6f
             val base = if (isLightTint) OeaTheme.blend(acc, Color.rgb(20, 24, 32), 0.6f) else tint
             val mood = OeaTheme.blend(base, acc, 0.45f)
-            // Dark gradient, not white
             paint.shader = LinearGradient(
                 0f, 0f, w * 0.35f, h,
-                OeaTheme.blend(mood, Color.BLACK, 0.15f), OeaTheme.blend(mood, Color.BLACK, 0.75f),
-                Shader.TileMode.CLAMP,
+                OeaTheme.blend(mood, Color.BLACK, 0.15f),
+                OeaTheme.blend(mood, Color.BLACK, 0.75f),
+                Shader.TileMode.CLAMP
             )
             canvas.drawRect(0f, 0f, w, h, paint)
             paint.shader = null
-            // Subtle shimmer to indicate loading, not white
             paint.color = Color.argb(0x22, 255, 255, 255)
             canvas.drawCircle(w * 0.5f, h * 0.45f, w * 0.12f, paint)
             paint.color = Color.argb(0x55, 255, 255, 255)
             text.textAlign = Paint.Align.CENTER
             text.color = Color.argb(0x99, 255, 255, 255)
             text.textSize = w * 0.08f
-            text.typeface = Typeface.create(\"sans-serif-medium\", Typeface.NORMAL)
-            canvas.drawText(\"Loading…\", w * 0.5f, h * 0.5f + w * 0.08f, text)
+            text.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            canvas.drawText("Loading...", w * 0.5f, h * 0.5f + w * 0.08f, text)
             return
         }
         val scale = maxOf(w / image.width, h / image.height)
@@ -173,13 +159,15 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
 
     private fun drawHome(canvas: Canvas, w: Float, h: Float) {
         val t = theme
-        // Soft top and bottom scrims, like OEA Home, keep labels legible.
-        paint.shader = LinearGradient(0f, 0f, 0f, h, intArrayOf(Color.argb(0x55, 0, 0, 0), Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(0x66, 0, 0, 0)),
-            floatArrayOf(0f, 0.22f, 0.65f, 1f), Shader.TileMode.CLAMP)
+        paint.shader = LinearGradient(
+            0f, 0f, 0f, h,
+            intArrayOf(Color.argb(0x55, 0, 0, 0), Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(0x66, 0, 0, 0)),
+            floatArrayOf(0f, 0.22f, 0.65f, 1f),
+            Shader.TileMode.CLAMP
+        )
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
         drawStatus(canvas, w)
-        // At a Glance
         text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
         text.textSize = w * 0.15f
@@ -188,7 +176,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         text.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         text.textSize = w * 0.045f
         canvas.drawText("Tuesday, Oct 14", w * 0.10f, h * 0.17f + w * 0.075f, text)
-        // App grid
         val cols = 4
         val icon = w * 0.13f
         val gapX = (w - cols * icon) / (cols + 1)
@@ -205,7 +192,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
             tmp.set(x + icon * 0.15f, y + icon * 1.12f, x + icon * 0.85f, y + icon * 1.22f)
             canvas.drawRoundRect(tmp, icon * 0.05f, icon * 0.05f, paint)
         }
-        // Dock
         val dockTop = h * 0.80f
         val dockH = icon * 1.45f
         tmp.set(w * 0.05f, dockTop, w * 0.95f, dockTop + dockH)
@@ -214,7 +200,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
             val x = gapX + i * (icon + gapX)
             drawIcon(canvas, x, dockTop + (dockH - icon) / 2f, icon, shape, OeaTheme.hslToColor((base[0] + i * 70f) % 360f, 0.5f, 0.5f))
         }
-        // Search pill
         tmp.set(w * 0.08f, dockTop + dockH + h * 0.022f, w * 0.92f, dockTop + dockH + h * 0.022f + w * 0.11f)
         drawSurface(canvas, tmp, tmp.height() / 2f, "glass", t?.glassStyle ?: "classic")
         paint.color = accent()
@@ -222,12 +207,15 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
     }
 
     private fun drawLock(canvas: Canvas, w: Float, h: Float) {
-        paint.shader = LinearGradient(0f, 0f, 0f, h, intArrayOf(Color.argb(0x50, 0, 0, 0), Color.TRANSPARENT, Color.argb(0x60, 0, 0, 0)),
-            floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
+        paint.shader = LinearGradient(
+            0f, 0f, 0f, h,
+            intArrayOf(Color.argb(0x50, 0, 0, 0), Color.TRANSPARENT, Color.argb(0x60, 0, 0, 0)),
+            floatArrayOf(0f, 0.45f, 1f),
+            Shader.TileMode.CLAMP
+        )
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
         drawStatus(canvas, w)
-        // Padlock
         paint.color = Color.WHITE
         val cx = w / 2f
         tmp.set(cx - w * 0.03f, h * 0.085f, cx + w * 0.03f, h * 0.085f + w * 0.05f)
@@ -237,7 +225,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         tmp.set(cx - w * 0.02f, h * 0.085f - w * 0.03f, cx + w * 0.02f, h * 0.085f + w * 0.01f)
         canvas.drawArc(tmp, 180f, 180f, false, paint)
         paint.style = Paint.Style.FILL
-        // Clock and date
         text.textAlign = Paint.Align.CENTER
         text.color = Color.WHITE
         text.typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
@@ -246,7 +233,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         text.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         text.textSize = w * 0.05f
         canvas.drawText("Tuesday, October 14", cx, h * 0.27f + w * 0.09f, text)
-        // A notification
         tmp.set(w * 0.07f, h * 0.55f, w * 0.93f, h * 0.55f + w * 0.24f)
         drawSurface(canvas, tmp, w * 0.06f, "glass", theme?.glassStyle ?: "classic")
         paint.color = accent()
@@ -255,7 +241,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         canvas.drawRoundRect(RectF(tmp.left + w * 0.17f, tmp.top + w * 0.07f, tmp.left + w * 0.55f, tmp.top + w * 0.10f), w * 0.015f, w * 0.015f, paint)
         paint.color = Color.argb(0xAA, 255, 255, 255)
         canvas.drawRoundRect(RectF(tmp.left + w * 0.17f, tmp.top + w * 0.135f, tmp.right - w * 0.08f, tmp.top + w * 0.16f), w * 0.012f, w * 0.012f, paint)
-        // Shortcuts and the unlock hint
         paint.color = Color.argb(0x55, 0, 0, 0)
         canvas.drawCircle(w * 0.16f, h * 0.92f, w * 0.075f, paint)
         canvas.drawCircle(w * 0.84f, h * 0.92f, w * 0.075f, paint)
@@ -273,7 +258,12 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         }
         canvas.save()
         canvas.translate(x, y)
-        paint.shader = LinearGradient(0f, 0f, size, size, OeaTheme.blend(color, Color.WHITE, 0.25f), OeaTheme.blend(color, Color.BLACK, 0.15f), Shader.TileMode.CLAMP)
+        paint.shader = LinearGradient(
+            0f, 0f, size, size,
+            OeaTheme.blend(color, Color.WHITE, 0.25f),
+            OeaTheme.blend(color, Color.BLACK, 0.15f),
+            Shader.TileMode.CLAMP
+        )
         canvas.drawPath(path, paint)
         paint.shader = null
         paint.color = Color.argb(0xE6, 255, 255, 255)
@@ -281,7 +271,6 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
         canvas.restore()
     }
 
-    /** Dock, search and notification surfaces in the theme's glass style. */
     private fun drawSurface(canvas: Canvas, rect: RectF, radius: Float, style: String, glass: String) {
         when (style) {
             "none" -> return
@@ -290,9 +279,19 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
                 canvas.drawRoundRect(rect, radius, radius, paint)
             }
             else -> if (glass == "liquid") {
-                paint.shader = LinearGradient(0f, rect.top, 0f, rect.bottom, Color.argb(0x66, 255, 255, 255), Color.argb(0x26, 255, 255, 255), Shader.TileMode.CLAMP)
+                paint.shader = LinearGradient(
+                    0f, rect.top, 0f, rect.bottom,
+                    Color.argb(0x66, 255, 255, 255),
+                    Color.argb(0x26, 255, 255, 255),
+                    Shader.TileMode.CLAMP
+                )
                 canvas.drawRoundRect(rect, radius, radius, paint)
-                paint.shader = LinearGradient(0f, rect.top, 0f, rect.bottom, Color.argb(0xCC, 255, 255, 255), Color.argb(0x14, 255, 255, 255), Shader.TileMode.CLAMP)
+                paint.shader = LinearGradient(
+                    0f, rect.top, 0f, rect.bottom,
+                    Color.argb(0xCC, 255, 255, 255),
+                    Color.argb(0x14, 255, 255, 255),
+                    Shader.TileMode.CLAMP
+                )
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = maxOf(1f, density * 0.9f)
                 canvas.drawRoundRect(rect, radius, radius, paint)
@@ -308,12 +307,8 @@ class OeaThemePreviewView(context: Context, private val lockScreen: Boolean) : V
     companion object {
         private val main = Handler(Looper.getMainLooper())
         private val loader = Executors.newFixedThreadPool(2) { task -> Thread(task, "OeaThemePreview").apply { isDaemon = true } }
-
-        /** The first, synchronous pass: small enough to decode on the main thread. */
         private const val QUICK_W = 90
         private const val QUICK_H = 196
-
-        /** The sharp pass, decoded off the main thread. */
         private const val FULL_W = 360
         private const val FULL_H = 780
     }
