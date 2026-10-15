@@ -365,6 +365,15 @@ class OeaDataStore private constructor(context: Context) {
     fun lowModeAutoEngaged() = prefs.getBoolean(KEY_LOW_MODE_AUTO_ENGAGED, false)
     fun setLowModeAutoEngaged(v: Boolean) { prefs.edit().putBoolean(KEY_LOW_MODE_AUTO_ENGAGED, v).apply() }
 
+    fun lowModeTier() = prefs.getString(KEY_LOW_MODE_TIER, "balanced") ?: "balanced"
+    fun setLowModeTier(v: String) { prefs.edit().putString(KEY_LOW_MODE_TIER, v).apply() }
+
+    fun visualMode() = prefs.getString(KEY_VISUAL_MODE, "classic") ?: "classic"
+    fun setVisualMode(v: String) { prefs.edit().putString(KEY_VISUAL_MODE, v).apply() }
+
+    fun behaviorMode(): String? = prefs.getString(KEY_BEHAVIOR_MODE, null)?.takeIf { it.isNotBlank() }
+    fun setBehaviorMode(v: String) { prefs.edit().putString(KEY_BEHAVIOR_MODE, v).apply() }
+
     /** Recents button: "system" (Android Recents via OEA Assistant) or "oea" (OEA Overview). */
     fun recentsMode() = prefs.getString(KEY_RECENTS_MODE, "system") ?: "system"
     fun setRecentsMode(v: String) { prefs.edit().putString(KEY_RECENTS_MODE, v).apply() }
@@ -508,7 +517,7 @@ class OeaDataStore private constructor(context: Context) {
         const val GLASS_CLASSIC = "classic"
         const val GLASS_LIQUID = "liquid"
         val PAGE_EFFECTS = listOf("classic", "liquid", "cube", "stack", "zoom", "fade", "none", "depth", "paper")
-        val MODES = listOf("classic", "liquid", "tide", "depth", "ink", "study", "music", "sleeping", "focus", "gaming", "reading", "work", "driving")
+        val MODES = listOf("classic", "liquid", "tide", "depth", "ink", "aurora", "glass", "mesh", "paper", "slate", "bloom", "study", "music", "sleeping", "focus", "gaming", "reading", "work", "driving", "low")
         const val WALLPAPER_SYSTEM = "system"
         const val WALLPAPER_OEA = "oea"
         private const val KEY_THEMED_ICONS = "themed_icons"
@@ -538,6 +547,9 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_LOW_MODE_SUSPEND = "low_mode_suspend_apps"
         private const val KEY_LOW_MODE_APPS = "low_mode_apps"
         private const val KEY_LOW_MODE_AUTO_ENGAGED = "low_mode_auto_engaged"
+        private const val KEY_LOW_MODE_TIER = "low_mode_tier"
+        private const val KEY_VISUAL_MODE = "visual_mode"
+        private const val KEY_BEHAVIOR_MODE = "behavior_mode"
         private const val KEY_RECENTS_MODE = "recents_mode"
         private const val KEY_DRAWER_CATEGORIES = "drawer_categories"
         private const val KEY_DRAWER_KEYBOARD = "drawer_keyboard"
