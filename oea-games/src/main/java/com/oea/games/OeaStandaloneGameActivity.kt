@@ -55,7 +55,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
      * this hook for Game Boost without making separately installed games depend
      * on the launcher package.
      */
-    protected open fun onStandaloneMatchStarted(gameId: String) = Unit
+    protected open fun onStandaloneGameOpened(gameId: String) = Unit
 
     private var host: GameHost? = null
     private val main = Handler(Looper.getMainLooper())
@@ -99,6 +99,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             return
         }
         this.descriptor = descriptor
+        runCatching { onStandaloneGameOpened(descriptor.id) }
         descriptor.options.forEach { opt ->
             chosenOptions[opt.id] = OeaEngine.settings.lastOption(descriptor.id, opt.id)?.takeIf { v -> opt.choices.any { it.value == v } } ?: opt.default
         }
@@ -533,7 +534,6 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         }
         try {
             setContentView(gameHost.root)
-            runCatching { onStandaloneMatchStarted(d.id) }
         } catch (_: Throwable) {
             Toast.makeText(this, "${d.title} could not create its screen", Toast.LENGTH_LONG).show()
             finish()
