@@ -116,7 +116,7 @@ internal class RunnerWorld(var seed: Long) {
     }
 
     private fun populate(c: Chunk, previous: Chunk?, rng: Rng) {
-        val difficulty = MathX.clamp01(index / 70f)
+        val difficulty = MathX.clamp01(c.index / 70f)
         val pattern = rng.weighted(floatArrayOf(
             1.4f - difficulty,          // 0 coins & hurdles
             1.2f,                        // 1 hurdles
