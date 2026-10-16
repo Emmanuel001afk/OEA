@@ -123,25 +123,33 @@ class OeaAuthorityActivity : Activity() {
             val result = runCatching {
                 OeaAdbAuthority.pairAndConnect(this@OeaAuthorityActivity, host, pairingPort, code, connectPort)
             }
-            setBusy(false, result.fold({ it }, { "Could not complete pairing: ${it.message ?: it.javaClass.simpleName}" }))
+            val message = result.fold({ it }, { "Could not complete pairing: ${it.message ?: it.javaClass.simpleName}" })
+            setBusy(false, message)
             codeField.setText("")
-            refreshStatus()
+            refreshStatus(message)
         }
     }
 
     private fun reconnect() {
-        setBusy(true, "Reconnecting and verifying the saved endpoint…")
+        val host = hostField.text.toString().trim()
+        val port = connectPortField.text.toString().toIntOrNull()
+        if (port == null) {
+            toast("Enter the connection port shown on the main Wireless debugging screen.")
+            return
+        }
+        setBusy(true, "Reconnecting and verifying the endpoint…")
         work.launch {
-            val result = runCatching { OeaAdbAuthority.reconnect(this@OeaAuthorityActivity) }
-            setBusy(false, result.fold({ it }, { "Reconnect failed: ${it.message ?: it.javaClass.simpleName}" }))
-            refreshStatus()
+            val result = runCatching { OeaAdbAuthority.connect(this@OeaAuthorityActivity, host, port) }
+            val message = result.fold({ it }, { "Reconnect failed: ${it.message ?: it.javaClass.simpleName}" })
+            setBusy(false, message)
+            refreshStatus(message)
         }
     }
 
-    private fun refreshStatus() {
+    private fun refreshStatus(lastResult: String? = null) {
         val status = OeaAdbAuthority.status(this)
-        statusText.text = status.note
-        statusText.setTextColor(if (status.connected) Color.rgb(113, 220, 165) else muted)
+        statusText.text = if (lastResult.isNullOrBlank()) status.note else "$lastResult\n\n${status.note}"
+        statusText.setTextColor(if (status.connected) Color.rgb(113, 220, 165) else if (!lastResult.isNullOrBlank()) ink else muted)
         if (status.host != null && hostField.text.isNullOrBlank()) hostField.setText(status.host)
         if (status.port != null && connectPortField.text.isNullOrBlank()) connectPortField.setText(status.port.toString())
         reconnectButton.isEnabled = status.configured
