@@ -1,11 +1,19 @@
 package com.oea.launcher.privilege
 
+import android.content.Context
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import com.oea.launcher.assistant.OeaAssistant
+import com.oea.launcher.privilege.adb.AdbConnection
+import com.oea.launcher.privilege.adb.AdbKeys
+import com.oea.launcher.privilege.adb.PairingConnection
+import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
- * Reads the Wireless debugging screens for Access Doctor.
+ * Reads the Wireless debugging screens for Access Doctor, and performs the
+ * actual wireless pairing with them.
  *
  * While "armed", OEA Assistant (the Accessibility service) looks at Settings
  * windows and reads three things by itself:
@@ -18,13 +26,26 @@ import com.oea.launcher.assistant.OeaAssistant
  * valid only while its dialog is open, so it is dropped after two minutes, and
  * the whole watch stops after five minutes or as soon as both values are read.
  *
- * Nothing here talks to ADB. The captured values are the input for the pairing
- * step, which is not part of this build.
+ * Once the values are captured, [executePairing] performs the real handshake
+ * with the phone's adbd — the same one the desktop's `adb pair` runs: TLS 1.3
+ * with OEA's ADB identity, SPAKE2 over the 6-digit code, and an encrypted
+ * PeerInfo exchange whose payload (OEA's ADB public key) is what authorizes
+ * this install. Afterwards [connectAdb] opens the TLS-secured ADB connection
+ * on the connection port, ready for shell/sync streams.
  */
 object OeaWirelessPairing {
 
     data class Pairing(val code: String, val host: String, val port: Int, val capturedAt: Long, val manual: Boolean = false)
     data class Connection(val host: String, val port: Int, val capturedAt: Long, val manual: Boolean = false)
+
+    /** Where the pairing run got to, for the Access Doctor card. */
+    sealed class Outcome {
+        object Idle : Outcome()
+        object Running : Outcome()
+        data class Paired(val device: String, val at: Long) : Outcome()
+        data class Connected(val device: String, val banner: String, val at: Long) : Outcome()
+        data class Failed(val message: String, val at: Long) : Outcome()
+    }
 
     private const val WATCH_MS = 5 * 60_000L
     private const val CODE_TTL_MS = 2 * 60_000L
@@ -36,10 +57,103 @@ object OeaWirelessPairing {
         private set
     @Volatile var connection: Connection? = null
         private set
+    @Volatile var outcome: Outcome = Outcome.Idle
+        private set
     @Volatile private var watchUntil = 0L
     @Volatile private var lastScan = 0L
+    @Volatile private var adbKeys: AdbKeys? = null
+    @Volatile private var adbSession: AdbConnection? = null
+    @Volatile private var adbSessionAt = 0L
+
+    private const val CONNECT_TIMEOUT_MS = 5_000
+    private const val SOCKET_TIMEOUT_MS = 15_000
 
     fun isWatching(): Boolean = SystemClock.elapsedRealtime() < watchUntil
+
+    fun outcomeText(): String = when (val o = outcome) {
+        is Outcome.Idle -> "Not paired yet"
+        is Outcome.Running -> "Pairing…"
+        is Outcome.Paired -> "Paired with the phone${if (o.device.isNotBlank()) " ($o.device)" else ""}"
+        is Outcome.Connected -> "Connected over Wi-Fi (${o.banner})"
+        is Outcome.Failed -> "Failed: ${o.message}"
+    }
+
+    fun isAdbConnected(): Boolean {
+        val session = adbSession ?: return false
+        return SystemClock.elapsedRealtime() - adbSessionAt < 60_000L && !session.isClosed()
+    }
+
+    /**
+     * Runs the real pairing with the captured values: TLS 1.3 + SPAKE2 with the
+     * 6-digit code against the phone's pairing port, then — when the connection
+     * port is known — the TLS ADB connection. Safe to call twice; runs on its
+     * own thread and reports through [outcome].
+     */
+    @Synchronized
+    fun executePairing(context: Context) {
+        val target = freshPairing() ?: run {
+            outcome = Outcome.Failed("No pairing code has been read yet", SystemClock.elapsedRealtime())
+            OeaAssistant.notifyStateChanged()
+            return
+        }
+        if (outcome is Outcome.Running) return
+        outcome = Outcome.Running
+        OeaAssistant.notifyStateChanged()
+        Thread({
+            try {
+                val keys = adbKeys ?: AdbKeys.loadOrCreate(adbDir(context)).also { adbKeys = it }
+                // 1) the pairing handshake on the pairing port
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(target.host, target.port), CONNECT_TIMEOUT_MS)
+                    socket.soTimeout = SOCKET_TIMEOUT_MS
+                    val pairingConnection = PairingConnection(socket, keys, target.code)
+                    val device = pairingConnection.pair()
+                    outcome = Outcome.Paired(device, SystemClock.elapsedRealtime())
+                }
+                // 2) the TLS ADB connection on the connection port
+                connectAdb()
+            } catch (e: Exception) {
+                outcome = Outcome.Failed(e.message ?: e.javaClass.simpleName, SystemClock.elapsedRealtime())
+            }
+            OeaAssistant.notifyStateChanged()
+        }, "oea-wireless-pairing").start()
+    }
+
+    /**
+     * Opens the TLS-protected ADB connection on the connection port. Needs a
+     * completed pairing (the phone must already hold OEA's public key).
+     */
+    @Synchronized
+    fun connectAdb() {
+        val keys = adbKeys ?: throw IllegalStateException("Pair first")
+        val target = connection ?: throw IllegalStateException("No connection port has been read yet")
+        adbSession?.close()
+        adbSession = null
+        val socket = Socket()
+        socket.connect(InetSocketAddress(target.host, target.port), CONNECT_TIMEOUT_MS)
+        socket.soTimeout = SOCKET_TIMEOUT_MS
+        val adb = AdbConnection(socket, keys)
+        val banner = adb.connect()
+        adbSession = adb
+        adbSessionAt = SystemClock.elapsedRealtime()
+        outcome = Outcome.Connected(
+            (outcome as? Outcome.Paired)?.device ?: "",
+            "v${banner.version shr 24}.${banner.version and 0xFFFFFF}, ${banner.maxPayload / 1024} KiB",
+            adbSessionAt)
+    }
+
+    /** Runs a shell command on the phone over the connected ADB session. */
+    fun shell(command: String, timeoutMs: Long = 10_000L): String {
+        val session = adbSession ?: throw IllegalStateException("Not connected")
+        return session.shell(command, timeoutMs)
+    }
+
+    fun closeAdb() {
+        adbSession?.close()
+        adbSession = null
+    }
+
+    private fun adbDir(context: Context): File = File(context.filesDir, "adb").apply { mkdirs() }
 
     /** Starts watching. The caller opens the Wireless debugging screen. */
     fun startWatching() {
@@ -60,6 +174,8 @@ object OeaWirelessPairing {
     fun clear() {
         pairing = null
         connection = null
+        closeAdb()
+        outcome = Outcome.Idle
         OeaAssistant.notifyStateChanged()
     }
 

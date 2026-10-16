@@ -2936,6 +2936,9 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_developer_mode, "Connection port",
             connection?.let { "${it.host}:${it.port} • read ${ago(it.capturedAt)}" } ?: "Not read yet — open Wireless debugging",
             chevron = false)
+        kit.row(group, R.drawable.oic_check_circle_fill, "Pairing",
+            wp.outcomeText(),
+            chevron = false)
         if (watching) {
             kit.note(box, "Watching the Wireless debugging screens. Open “Pair device with pairing code” and OEA reads it as it appears.")
         }
@@ -2949,6 +2952,13 @@ open class OeaSystemToolsActivity : Activity() {
                     .onFailure { toast("Open Developer options, then Wireless debugging.") }
                 rerender()
             }, LinearLayout.LayoutParams(-2, dp(42)))
+        }
+        if (pairing != null && wp.outcome !is com.oea.launcher.privilege.OeaWirelessPairing.Outcome.Running) {
+            buttons.addView(kit.primaryButton("Pair now", R.drawable.oic_lock) {
+                wp.executePairing(this)
+                rerender()
+                toast("Pairing with ${pairing.host}:${pairing.port}…")
+            }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(8) })
         }
         if (pairing != null || connection != null) {
             buttons.addView(kit.quietButton("Clear", R.drawable.oic_delete) { wp.clear(); rerender() }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(8) })
