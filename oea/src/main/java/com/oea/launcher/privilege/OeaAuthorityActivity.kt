@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
+import com.oea.launcher.assistant.OeaAssistant
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -32,6 +33,8 @@ class OeaAuthorityActivity : Activity() {
     private lateinit var pairButton: Button
     private lateinit var reconnectButton: Button
     private lateinit var forgetButton: Button
+    private var autoReadStartedAt = 0L
+    private val pairingListener: () -> Unit = { runOnUiThread { refreshCapturedValues() } }
 
     private val inkColor = Color.rgb(235, 240, 248)
     private val mutedColor = Color.rgb(164, 177, 196)
@@ -42,7 +45,55 @@ class OeaAuthorityActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildUi()
+        OeaAssistant.addListener(pairingListener)
         refreshStatus()
+        refreshCapturedValues()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshCapturedValues()
+        refreshStatus()
+    }
+
+    private fun beginAutoRead() {
+        autoReadStartedAt = android.os.SystemClock.elapsedRealtime()
+        OeaWirelessPairing.clear()
+        OeaWirelessPairing.startWatching()
+        runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
+            .onFailure { runCatching { startActivity(Intent(Settings.ACTION_SETTINGS)) } }
+        statusText.text = "Auto-read is active for five minutes. Open Wireless debugging, capture the pairing code, then return here to pair."
+        statusText.setTextColor(accentColor)
+    }
+
+    private fun refreshCapturedValues() {
+        val pair = OeaWirelessPairing.freshPairing()
+        val connection = OeaWirelessPairing.connection
+        if (pair != null) {
+            hostField.setTextIfDifferent(pair.host)
+            pairingPortField.setTextIfDifferent(pair.port.toString())
+            codeField.setTextIfDifferent(pair.code)
+        }
+        if (connection != null) {
+            if (pair == null || hostField.text.isNullOrBlank()) hostField.setTextIfDifferent(connection.host)
+            connectPortField.setTextIfDifferent(connection.port.toString())
+        }
+        if (pair != null || connection != null) {
+            val captured = buildList {
+                if (pair != null) add("pairing endpoint and code")
+                if (connection != null) add("connection port")
+            }.joinToString(" + ")
+            statusText.text = "Automatically captured $captured. Check the values, then tap Pair and verify connection."
+            statusText.setTextColor(accentColor)
+        } else if (autoReadStartedAt != 0L &&
+            android.os.SystemClock.elapsedRealtime() - autoReadStartedAt > 5 * 60_000L) {
+            statusText.text = "Auto-read timed out. Tap Auto-read again, or enter the values manually."
+            statusText.setTextColor(mutedColor)
+        }
+    }
+
+    private fun EditText.setTextIfDifferent(value: String) {
+        if (text.toString() != value) setText(value)
     }
 
     private fun buildUi() {
@@ -73,7 +124,7 @@ class OeaAuthorityActivity : Activity() {
         root.addView(card().apply {
             addView(text("Pair this phone", 18, inkColor, true))
             addView(text(
-                "On this phone, open Developer options → Wireless debugging → Pair device with pairing code. Enter that screen's IP/port and six-digit code below. Then use the separate connection port shown on the main Wireless debugging screen.",
+                "Auto-read is preferred: tap the button above, open Wireless debugging, and let OEA capture the pairing dialog and the separate connection port. Manual entry remains available if Android does not expose the values to Accessibility.",
                 14, mutedColor, false
             ).apply { setPadding(0, dp(8), 0, dp(12)) })
 
@@ -216,6 +267,7 @@ class OeaAuthorityActivity : Activity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     override fun onDestroy() {
+        OeaAssistant.removeListener(pairingListener)
         work.cancel()
         super.onDestroy()
     }
