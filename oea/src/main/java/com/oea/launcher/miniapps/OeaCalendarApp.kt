@@ -82,24 +82,24 @@ object OeaCalendarApp {
                 clear(); set(monthCal.get(Calendar.YEAR), monthCal.get(Calendar.MONTH), 1, 0, 0, 0)
                 add(Calendar.MONTH, 1)
             }.timeInMillis
-            val uri = android.content.CalendarContract.Instances.CONTENT_URI.buildUpon()
+            val uri = android.provider.CalendarContract.Instances.CONTENT_URI.buildUpon()
             android.content.ContentUris.appendId(uri, start)
             android.content.ContentUris.appendId(uri, end)
             host.contentResolver.query(
                 uri.build(),
                 arrayOf(
-                    android.content.CalendarContract.Instances.TITLE,
-                    android.content.CalendarContract.Instances.BEGIN,
-                    android.content.CalendarContract.Instances.END,
-                    android.content.CalendarContract.Instances.ALL_DAY,
+                    android.provider.CalendarContract.Instances.TITLE,
+                    android.provider.CalendarContract.Instances.BEGIN,
+                    android.provider.CalendarContract.Instances.END,
+                    android.provider.CalendarContract.Instances.ALL_DAY,
                 ),
                 null, null,
-                android.content.CalendarContract.Instances.BEGIN + " ASC",
+                android.provider.CalendarContract.Instances.BEGIN + " ASC",
             )?.use { c ->
-                val titleI = c.getColumnIndex(android.content.CalendarContract.Instances.TITLE)
-                val beginI = c.getColumnIndex(android.content.CalendarContract.Instances.BEGIN)
-                val endI = c.getColumnIndex(android.content.CalendarContract.Instances.END)
-                val allDayI = c.getColumnIndex(android.content.CalendarContract.Instances.ALL_DAY)
+                val titleI = c.getColumnIndex(android.provider.CalendarContract.Instances.TITLE)
+                val beginI = c.getColumnIndex(android.provider.CalendarContract.Instances.BEGIN)
+                val endI = c.getColumnIndex(android.provider.CalendarContract.Instances.END)
+                val allDayI = c.getColumnIndex(android.provider.CalendarContract.Instances.ALL_DAY)
                 while (c.moveToNext() && out.size < 240) {
                     val begin = c.getLong(beginI)
                     val endMs = c.getLong(endI)
@@ -191,8 +191,9 @@ object OeaCalendarApp {
         }
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val previousButton = kit.circleIconButton(R.drawable.oic_chevron_right, "Previous month", palette.cardHigh, palette.text).apply { rotation = 180f }
-        val nextButton = kit.circleIconButton(R.drawable.oic_chevron_right, "Next month", palette.cardHigh, palette.text)
+        val previousButton = kit.circleIconButton(R.drawable.oic_chevron_right, "Previous month", palette.cardHigh, palette.text) { }
+            .apply { rotation = 180f }
+        val nextButton = kit.circleIconButton(R.drawable.oic_chevron_right, "Next month", palette.cardHigh, palette.text) { }
         val monthText = kit.text("", 20f, palette.text, OeaType.medium)
         header.addView(previousButton, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(4) })
         header.addView(monthText, LinearLayout.LayoutParams(0, -2, 1f))
