@@ -115,10 +115,7 @@ class OeaAuthorityActivity : Activity() {
                 "OEA contains its own ADB pairing and shell client. No Shizuku or companion app is needed. Android still requires Wireless Debugging to be enabled and the pairing code to be approved by you.",
                 14, mutedColor, false
             ).apply { setPadding(0, dp(8), 0, dp(14)) })
-            addView(button("Open Developer options") {
-                runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
-                    .onFailure { runCatching { startActivity(Intent(Settings.ACTION_SETTINGS)) } }
-            })
+            addView(button("Open Wireless debugging & auto-read") { beginAutoRead() })
         })
 
         root.addView(card().apply {
