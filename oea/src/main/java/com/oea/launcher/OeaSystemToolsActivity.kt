@@ -2959,14 +2959,14 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private fun askWirelessManually() {
-        kit.prompt("Pairing code", "The 6 digits in “Pair device with pairing code”.", "123 456", "", numeric = true) { code ->
+        kit.prompt("Pairing code", "The 6 digits in “Pair device with pairing code”.", "123 456", "", numeric = true) codePrompt@{ code ->
             val digits = code.filter { it.isDigit() }
-            if (digits.length != 6) return@prompt "The code is 6 digits."
-            kit.prompt("Pairing address", "Shown next to the code, for example 192.168.1.20:37125", "192.168.1.20:37125") { address ->
-                if (!Regex("""\d{1,3}(\.\d{1,3}){3}:\d{2,5}""").matches(address.trim())) return@prompt "Use the form 192.168.1.20:37125"
-                kit.prompt("Connection port", "The port in Wireless debugging, for example 41235 (optional)", "41235", "", numeric = true) { port ->
+            if (digits.length != 6) return@codePrompt "The code is 6 digits."
+            kit.prompt("Pairing address", "Shown next to the code, for example 192.168.1.20:37125", "192.168.1.20:37125") addressPrompt@{ address ->
+                if (!Regex("""\d{1,3}(\.\d{1,3}){3}:\d{2,5}""").matches(address.trim())) return@addressPrompt "Use the form 192.168.1.20:37125"
+                kit.prompt("Connection port", "The port in Wireless debugging, for example 41235 (optional)", "41235", "", numeric = true) portPrompt@{ port ->
                     val value = port.trim().toIntOrNull()
-                    if (port.isNotBlank() && (value == null || value !in 1..65535)) return@prompt "That is not a port number."
+                    if (port.isNotBlank() && (value == null || value !in 1..65535)) return@portPrompt "That is not a port number."
                     com.oea.launcher.privilege.OeaWirelessPairing.setManual(digits, address.trim(), value)
                     toast("Saved. OEA will use these values.")
                     rerender()
