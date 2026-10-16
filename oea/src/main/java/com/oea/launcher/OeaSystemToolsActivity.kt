@@ -2857,7 +2857,10 @@ open class OeaSystemToolsActivity : Activity() {
         doctorCheck = ::check
 
         val actions = kit.group(box)
-        kit.row(actions, R.drawable.oic_shield_fill, "Repair everything OEA can repair", "Uses OEA's own channel — no PC and no other app") {
+        kit.row(actions, R.drawable.oic_developer_mode, "OEA Authority bridge", "Pair OEA with Android Wireless Debugging; no companion app required") {
+            startActivity(Intent(this, com.oea.launcher.privilege.OeaAuthorityActivity::class.java))
+        }
+        kit.row(actions, R.drawable.oic_shield_fill, "Repair everything OEA can repair", "Uses OEA's available authority; Android may still require your approval") {
             OeaPrivileges.repairAll(this) { summary ->
                 toast(summary.describe())
                 check()
