@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import com.flyfishxu.kadb.Kadb
 import com.flyfishxu.kadb.cert.KadbCert
+import com.flyfishxu.kadb.cert.KadbCertPolicy
 import com.flyfishxu.kadb.cert.OkioFilePrivateKeyStore
 import okio.Path.Companion.toPath
 import java.io.File
@@ -71,8 +72,8 @@ object OeaAdbAuthority {
         require(pairingPort in 1..65535) { "Pairing port must be between 1 and 65535." }
         require(connectPort in 1..65535) { "Connection port must be between 1 and 65535." }
         require(pairingCode.matches(Regex("\\d{6}"))) { "Enter the six-digit pairing code currently shown by Android." }
-        require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            "OEA's embedded Wireless Debugging bridge requires Android 9 or newer."
+        require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            "OEA's embedded Wireless Debugging bridge requires Android 11 or newer."
         }
 
         ensureIdentity(context.applicationContext)
@@ -163,7 +164,11 @@ object OeaAdbAuthority {
             if (identityPath != path) {
                 // Kadb defaults to an in-memory key store; persist the host key
                 // privately so Android continues to trust OEA after process death.
-                KadbCert.configure(OkioFilePrivateKeyStore(path.toPath()))
+                KadbCert.configure(
+                    store = OkioFilePrivateKeyStore(path.toPath()),
+                    policy = KadbCertPolicy(),
+                    additionalPrivateKeysPem = emptyList()
+                )
                 KadbCert.ensureReady()
                 identityPath = path
             }
