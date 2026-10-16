@@ -17,17 +17,17 @@ import com.oea.launcher.gameboost.OeaGameBoost
 /** Endless Days — the train-yard runner. */
 class OeaEndlessDaysActivity : OeaStandaloneGameActivity() {
     override val standaloneGameId: String get() = "runner"
-    override fun onStandaloneMatchStarted(gameId: String) { OeaGameBoost.onOeaGameOpened(this, gameId) }
+    override fun onStandaloneGameOpened(gameId: String) { OeaGameBoost.onOeaGameOpened(this, gameId) }
 }
 
 /** Send Off — the competitive shooter. */
 class OeaSendOffActivity : OeaStandaloneGameActivity() {
     override val standaloneGameId: String get() = "arena"
-    override fun onStandaloneMatchStarted(gameId: String) { OeaGameBoost.onOeaGameOpened(this, gameId) }
+    override fun onStandaloneGameOpened(gameId: String) { OeaGameBoost.onOeaGameOpened(this, gameId) }
 }
 
 /** Chess — rules, AI levels, pass & play and multiplayer. */
 class OeaChessGameActivity : OeaStandaloneGameActivity() {
     override val standaloneGameId: String get() = "chess"
-    override fun onStandaloneMatchStarted(gameId: String) { OeaGameBoost.onOeaGameOpened(this, gameId) }
+    override fun onStandaloneGameOpened(gameId: String) { OeaGameBoost.onOeaGameOpened(this, gameId) }
 }
