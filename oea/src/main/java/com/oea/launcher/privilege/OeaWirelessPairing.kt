@@ -18,8 +18,8 @@ import com.oea.launcher.assistant.OeaAssistant
  * valid only while its dialog is open, so it is dropped after two minutes, and
  * the whole watch stops after five minutes or as soon as both values are read.
  *
- * Nothing here talks to ADB. The captured values are the input for the pairing
- * step, which is not part of this build.
+ * Captured values feed OEA's embedded ADB pairing flow. Ambiguous endpoints
+ * are rejected rather than guessed.
  */
 object OeaWirelessPairing {
 
@@ -105,25 +105,29 @@ object OeaWirelessPairing {
     /** Pure parsing step (no Android types), so it can be unit-tested on the JVM. */
     internal fun read(texts: List<String>, now: Long): Boolean {
         val code = texts.firstNotNullOfOrNull { t -> codeRe.matchEntire(t.trim())?.let { it.groupValues[1] + it.groupValues[2] } }
-        val addresses = texts.mapNotNull { t -> addressRe.find(t)?.let { m -> m.groupValues[1] to m.groupValues[2].toInt() } }
-        // The pairing dialog is its own window, so it does not contain the screen's
-        // "Wireless debugging" title. The main screen always does, and shows the
-        // connection address; its "Pair device with pairing code" row is not a code.
-        val mainScreen = texts.any { it.equals("Wireless debugging", ignoreCase = true) }
+        val addresses = texts.mapNotNull { t ->
+            addressRe.find(t)?.let { m -> m.groupValues[1] to m.groupValues[2].toInt() }
+        }.distinct()
+        // Never guess when the Accessibility tree contains multiple endpoints.
+        val uniqueAddress = addresses.singleOrNull()
+        val mainScreen = texts.any {
+            it.trim().equals("Wireless debugging", ignoreCase = true) ||
+                it.trim().equals("Wireless debugging settings", ignoreCase = true)
+        }
         var changed = false
 
-        if (code != null && addresses.isNotEmpty()) {
-            // The pairing dialog shows the code together with the pairing address.
-            val (host, port) = addresses.first()
+        if (code != null && uniqueAddress != null) {
+            // The pairing dialog shows the code together with its temporary endpoint.
+            val (host, port) = uniqueAddress
             val current = pairing
             if (current == null || current.code != code || current.host != host || current.port != port) {
                 pairing = Pairing(code, host, port, now)
                 changed = true
             }
         }
-        if (mainScreen && code == null && addresses.isNotEmpty()) {
-            // The Wireless debugging screen shows the connection address and port.
-            val (host, port) = addresses.first()
+        if (mainScreen && code == null && uniqueAddress != null) {
+            // The main Wireless debugging page exposes the separate connection endpoint.
+            val (host, port) = uniqueAddress
             val current = connection
             if (current == null || current.port != port || current.host != host) {
                 connection = Connection(host, port, now)
