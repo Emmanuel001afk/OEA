@@ -129,7 +129,6 @@ object OeaAdbAuthority {
                 val response = adb.shell(command)
                 val output = response.allOutput.take(MAX_OUTPUT).trim()
                 val ok = response.exitCode == 0
-                if (!ok) sessionReady.set(false)
                 ok to (output.ifBlank { response.errorOutput.take(MAX_OUTPUT).trim() })
             }
         }.getOrElse {
@@ -172,9 +171,36 @@ object OeaAdbAuthority {
     }
 
     private fun isAllowedCommand(command: String): Boolean {
-        if (command == "id" || command == "dumpsys package") return true
+        if (command == "id" || command == "dumpsys package" ||
+            command == "settings put secure accessibility_enabled 1") return true
         val packageName = "[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+"
-        return Regex("cmd package (?:suspend|unsuspend) --user 0 $packageName").matches(command) ||
-            Regex("dumpsys package $packageName").matches(command)
+        if (Regex("cmd package (?:suspend|unsuspend) --user 0 $packageName").matches(command) ||
+            Regex("dumpsys package $packageName").matches(command)) return true
+
+        // Permission-repair commands are scoped to OEA's own package only.
+        if (Regex("appops set com\\.oea\\.launcher (?:SYSTEM_ALERT_WINDOW|GET_USAGE_STATS) allow").matches(command)) return true
+        if (Regex("dumpsys deviceidle whitelist \\+com\\.oea\\.launcher").matches(command)) return true
+        if (Regex("cmd package set-home-activity com\\.oea\\.launcher/com\\.oea\\.launcher\\.[A-Za-z0-9_.$]+").matches(command)) return true
+        if (Regex("pm grant com\\.oea\\.launcher android\\.permission\\.[A-Z0-9_]+").matches(command)) return true
+
+        val accessibilityPrefix = "settings put secure enabled_accessibility_services "
+        val notificationPrefix = "settings put secure enabled_notification_listeners "
+        if (command.startsWith(accessibilityPrefix)) {
+            val rest = command.removePrefix(accessibilityPrefix)
+            val pieces = rest.split(" && ")
+            if (pieces.size !in 1..2) return false
+            if (pieces.size == 2 && pieces[1] != "settings put secure accessibility_enabled 1") return false
+            if (pieces[0].contains(" && ")) return false
+            return validServiceList(pieces[0])
+        }
+        if (command.startsWith(notificationPrefix)) {
+            return validServiceList(command.removePrefix(notificationPrefix))
+        }
+        return false
+    }
+
+    private fun validServiceList(value: String): Boolean {
+        if (!value.matches(Regex("[A-Za-z0-9_.$/:+-]+"))) return false
+        return value.split(':').any { it.startsWith("com.oea.launcher/") }
     }
 }
