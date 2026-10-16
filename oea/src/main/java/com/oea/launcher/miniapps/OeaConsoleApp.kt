@@ -1277,10 +1277,11 @@ Examples:
             val mode = OeaAppFreezer.mode(host)
             kit.banner(panel, if (mode == OeaAppFreezer.Mode.SYSTEM) R.drawable.oic_check_circle_fill else R.drawable.oic_info, "Mode: $mode • Backend: $backend", when (backend) {
                 OeaAppFreezer.Backend.DEVICE_OWNER -> "System freeze via DevicePolicyManager.setPackagesSuspended — genuine suspension, Android blocks launch, background, notifications. Preserves data. Verified via isPackageSuspended and dumpsys."
-                OeaAppFreezer.Backend.ROOT -> "System freeze via su cmd package suspend — genuine suspension, verified via dumpsys package suspended=true"
+                OeaAppFreezer.Backend.ROOT -> "System freeze via root cmd package suspend — genuine suspension, verified by reading Android package state."
+                OeaAppFreezer.Backend.ADB -> "System freeze through OEA Authority's authorized Wireless Debugging shell — genuine package suspension, verified from Android package state."
                 else -> "OEA Freeze: blocks in OEA and force-stops via Assistant. Cannot prevent other apps from launching it without DO/root; mitigation: Assistant watches all windows and blocks frozen via external routes (packageNames null, performs BACK/HOME + forceStop)."
             }, tone = if (mode == OeaAppFreezer.Mode.SYSTEM) OeaKit.Tone.SUCCESS else OeaKit.Tone.INFO)
-            kit.note(panel, "Freezing preserves data. Unfreezing restores. Genuine freezing needs Device Owner (adb shell dpm set-device-owner com.oea.launcher/.applock.OeaDeviceAdminReceiver) or root. Without, best supported alternative is OEA Freeze with Assistant blocking external routes. Prevents bypass via external links/downloads via maybeBlockFrozenApp.")
+            kit.note(panel, "Freezing preserves data. Unfreezing restores. Genuine freezing works with Device Owner, root, or an explicitly paired OEA Authority Wireless Debugging bridge. Without one, best supported alternative is OEA Freeze with Assistant blocking external routes. Prevents bypass via external links/downloads via maybeBlockFrozenApp.")
         }
     }
 
