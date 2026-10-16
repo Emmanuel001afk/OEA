@@ -119,7 +119,9 @@ object OeaPrivileges {
         Privilege.CALL_SCREENING_ROLE, Privilege.DND_ACCESS, Privilege.ROOT,
         -> false
 
-        else -> isDeviceOwner(context) && privilege.runtimePermission != null || OeaShell.available() && rootCommand(context, privilege) != null
+        else -> isDeviceOwner(context) && privilege.runtimePermission != null ||
+            OeaShell.available() && rootCommand(context, privilege) != null ||
+            OeaAdbAuthority.isSessionReady() && rootCommand(context, privilege) != null
     }
 
     private fun read(context: Context, privilege: Privilege): Grant = when (privilege) {
@@ -251,10 +253,16 @@ object OeaPrivileges {
      */
     fun reconnectAssistant(context: Context): Boolean {
         if (!OeaAssistant.isEnabled(context) || OeaAssistant.isConnected()) return false
-        if (!OeaShell.available()) return false
-        return OeaGuard.call("privileges:rebind", false) {
-            OeaShell.applyAndVerify("settings put secure accessibility_enabled 1") { OeaAssistant.isConnected() }
+        if (OeaShell.available()) {
+            return OeaGuard.call("privileges:rebind", false) {
+                OeaShell.applyAndVerify("settings put secure accessibility_enabled 1") { OeaAssistant.isConnected() }
+            }
         }
+        if (OeaAdbAuthority.isSessionReady()) {
+            val (ok, _) = OeaAdbAuthority.runShell("settings put secure accessibility_enabled 1")
+            return ok
+        }
+        return false
     }
 
     // ------------------------------------------------------------- capabilities
@@ -347,7 +355,22 @@ object OeaPrivileges {
             return if (verified) Outcome.granted("root")
             else Outcome.unverified("Root accepted the change but Android did not apply it.")
         }
-        // 3. No privileged channel: the user's own tap, verified when they return.
+        // 3. OEA's embedded Wireless Debugging bridge. Pairing is explicit and
+        // user-authorized; once connected, use only OEA's scoped command allowlist.
+        if (OeaAdbAuthority.isSessionReady()) {
+            val command = rootCommand(context, privilege)
+                ?: return Outcome.blocked("Android requires the user to switch this on; OEA has no supported command for it.")
+            val (accepted, output) = OeaAdbAuthority.runShell(command)
+            if (!accepted) return Outcome.unverified(output.ifBlank { "OEA Authority could not apply the change." })
+            repeat(6) {
+                if (runCatching { read(context, privilege) == Grant.GRANTED }.getOrDefault(false)) {
+                    return Outcome.granted("OEA Authority (Wireless Debugging)")
+                }
+                Thread.sleep(200)
+            }
+            return Outcome.unverified("The bridge accepted the command, but Android did not confirm the permission became active.")
+        }
+        // 4. No privileged channel: the user's own tap, verified when they return.
         return openAndroidPage(context, privilege)
     }
 
