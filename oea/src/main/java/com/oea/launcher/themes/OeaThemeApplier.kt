@@ -114,11 +114,13 @@ object OeaThemeApplier {
                 // simply have failed and left the lock screen untouched.
                 is OeaImageRef.Generated -> {
                     val bitmap = OeaThemeImages.renderForWallpaper(context, ref, size.first, size.second) ?: return@runCatching false
-                    val ok = wm.setBitmap(bitmap, null, true, which) != 0
+                    wm.setBitmap(bitmap, null, true, which)
                     runCatching { bitmap.recycle() }
-                    ok
+                    true
                 }
-                else -> OeaThemeImages.stream(context, ref)?.use { stream -> wm.setStream(stream, null, true, which) != 0 } ?: false
+                else -> OeaThemeImages.stream(context, ref)?.use {
+                    stream -> wm.setStream(stream, null, true, which); true
+                } ?: false
             }
         }.onFailure { Log.w(TAG, "Android refused the wallpaper (which=$which)", it) }.getOrDefault(false)
         return when (target) {

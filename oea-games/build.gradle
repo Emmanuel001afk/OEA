@@ -2,7 +2,8 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
-// First-party OEA games (Runner, Arena, Chess and the Engine Lab). They are
+// First-party OEA games (Endless Days, Send Off, Chess and the Engine Lab).
+// Their stable internal ids remain runner and arena for save/network compatibility. They are
 // written only against the engine's public API, exactly like new games should be.
 android {
     namespace "com.oea.games"

@@ -8,7 +8,8 @@ import com.oea.games.lab.EngineLab
 import com.oea.games.runner.OeaRunner
 
 /**
- * First-party games. Each one is a [com.oea.engine.core.GameDescriptor]
+ * First-party games. The public names are Endless Days, Send Off, Chess and Engine Lab;
+ * internal ids stay stable for saves and network compatibility. Each one is a [com.oea.engine.core.GameDescriptor]
  * registered with the engine; to add your own game, write an
  * `OeaGame` subclass with a descriptor and register it here (or from any
  * module) — the Games hub, lobbies, multiplayer and the Dynamic Island pick

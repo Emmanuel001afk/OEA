@@ -21,9 +21,11 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.core.content.FileProvider
 import com.oea.launcher.R
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
 import java.io.File
 import java.text.SimpleDateFormat
@@ -66,8 +68,115 @@ object OeaCameraApp {
     private const val KEY_HDR = "hdr"
     private const val KEY_LOCATION = "location"
     private const val KEY_SHUTTER_SOUND = "shutter_sound"
+    private const val KEY_PENDING_SYSTEM_CAPTURE = "pending_system_capture"
+    private const val REQUEST_SYSTEM_PHOTO = 3001
+    private const val REQUEST_QR = 3002
+    private const val REQUEST_DOCUMENT = 3003
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    @Suppress("DEPRECATION")
+    private fun outputUri(intent: Intent?): Uri? {
+        if (intent == null) return null
+        return if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(MediaStore.EXTRA_OUTPUT, Uri::class.java)
+        else intent.getParcelableExtra(MediaStore.EXTRA_OUTPUT)
+    }
+
+    private fun isExternalCapture(host: Activity): Boolean =
+        host.intent?.action == MediaStore.ACTION_IMAGE_CAPTURE || host.intent?.action == MediaStore.ACTION_VIDEO_CAPTURE
+
+    /** Copies a private recording into a caller-owned output URI without ever exposing file://. */
+    private fun copyToUri(context: Context, file: File, target: Uri): Boolean = try {
+        context.contentResolver.openOutputStream(target)?.use { out -> file.inputStream().use { it.copyTo(out) } } != null
+    } catch (_: Throwable) { false }
+
+    private fun providerUri(context: Context, file: File): Uri? =
+        runCatching { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file) }.getOrNull()
+
+    private fun finishExternalCapture(host: Activity, target: Uri?, file: File, mime: String): Boolean {
+        val resultUri = if (target != null) {
+            if (!copyToUri(host, file, target)) return false
+            target
+        } else providerUri(host, file) ?: return false
+        host.setResult(Activity.RESULT_OK, Intent().setDataAndType(resultUri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        host.finish()
+        return true
+    }
+
+    /**
+     * Handles results from the optional system-camera and QR fallbacks. Keeping
+     * this in the camera app means an incoming ACTION_IMAGE_CAPTURE flow and an
+     * in-app fallback use the same provider-safe result path.
+     */
+    fun handleActivityResult(host: Activity, requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == REQUEST_QR) {
+            if (resultCode == Activity.RESULT_OK) {
+                val result = data?.getStringExtra("SCAN_RESULT")?.trim()
+                if (!result.isNullOrBlank()) {
+                    runCatching { host.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("QR result", result)) }
+                    android.widget.Toast.makeText(host, "QR result copied", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            return true
+        }
+        if (requestCode != REQUEST_SYSTEM_PHOTO && requestCode != REQUEST_DOCUMENT) return false
+
+        val p = prefs(host)
+        val pendingPath = p.getString(KEY_PENDING_SYSTEM_CAPTURE, null)
+        p.edit().remove(KEY_PENDING_SYSTEM_CAPTURE).apply()
+        val pendingFile = pendingPath?.let { File(it) }?.takeIf { it.isFile && it.length() > 0L }
+        val target = outputUri(host.intent)
+        if (resultCode != Activity.RESULT_OK) {
+            pendingFile?.delete()
+            if (isExternalCapture(host)) {
+                host.setResult(Activity.RESULT_CANCELED)
+                host.finish()
+            }
+            return true
+        }
+        if (isExternalCapture(host)) {
+            val resultMime = if (host.intent?.action == MediaStore.ACTION_VIDEO_CAPTURE) "video/mp4" else "image/jpeg"
+            // If the caller supplied EXTRA_OUTPUT, the system camera already
+            // wrote to it. Return that content URI, never a raw path.
+            if (target != null) {
+                host.setResult(Activity.RESULT_OK, Intent().setDataAndType(target, resultMime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                host.finish()
+                return true
+            }
+            if (pendingFile != null) {
+                val uri = providerUri(host, pendingFile)
+                if (uri != null) {
+                    host.setResult(Activity.RESULT_OK, Intent().setDataAndType(uri, resultMime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                    host.finish()
+                    return true
+                }
+            }
+            // No output URI and no provider-backed fallback: pass through a
+            // camera thumbnail only when one was actually returned. Video
+            // callers must never receive a successful empty result.
+            if (data != null) {
+                host.setResult(Activity.RESULT_OK, data)
+            } else {
+                host.setResult(Activity.RESULT_CANCELED)
+            }
+            host.finish()
+            return true
+        }
+        if (pendingFile != null) {
+            android.media.MediaScannerConnection.scanFile(host, arrayOf(pendingFile.absolutePath), arrayOf("image/jpeg"), null)
+            showCapturedSheet(host, OeaKit(host, OeaTheme.resolve(host)), pendingFile, FilterMode.NONE)
+            return true
+        }
+        val thumb = data?.extras?.get("data") as? Bitmap
+        if (thumb != null) {
+            val saved = saveBitmap(host, thumb, hdr = false, filter = FilterMode.NONE, front = false)
+            if (saved != null) showCapturedSheet(host, OeaKit(host, OeaTheme.resolve(host)), saved, FilterMode.NONE)
+            thumb.recycle()
+        } else {
+            android.widget.Toast.makeText(host, "Capture failed", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        return true
+    }
 
     enum class FlashMode { AUTO, ON, OFF, TORCH }
     enum class TimerMode(val seconds: Int, val label: String) { OFF(0, "Off"), S3(3, "3s"), S5(5, "5s"), S10(10, "10s") }
@@ -96,7 +205,9 @@ object OeaCameraApp {
         var front = p.getBoolean(KEY_FACING, false)
         var zoom = p.getFloat(KEY_ZOOM, 1f).coerceIn(1f, 8f)
         var hdr = p.getBoolean(KEY_HDR, false)
-        var captureMode = CaptureMode.PHOTO
+        val captureTarget = outputUri(host.intent)
+        val externalCapture = isExternalCapture(host)
+        var captureMode = if (host.intent?.action == MediaStore.ACTION_VIDEO_CAPTURE) CaptureMode.VIDEO else CaptureMode.PHOTO
         var isRecording = false
 
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
@@ -123,12 +234,14 @@ object OeaCameraApp {
             kit.banner(column, R.drawable.oic_info, "Camera permission needed", "OEA Camera needs CAMERA for preview and pro controls. Without it, system camera fallback works.", OeaKit.Tone.WARNING, "Allow") {
                 try { host.requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 2001) } catch (_: Throwable) {}
             }
-            column.addView(kit.primaryButton("Open system camera", R.drawable.oic_photo_library) { openSystemCamera(host) }, LinearLayout.LayoutParams(-1, kit.dp(50)).apply { topMargin = kit.dp(12) })
+            column.addView(kit.primaryButton("Open system camera", R.drawable.oic_photo_library) { openSystemCamera(host, captureTarget, REQUEST_SYSTEM_PHOTO) }, LinearLayout.LayoutParams(-1, kit.dp(50)).apply { topMargin = kit.dp(12) })
             kit.note(column, "System fallback works. Grant CAMERA for OEA's own preview, flash, zoom, filters and pro controls.")
             return column
         }
 
         // Top controls: flash, timer, aspect, filter, hdr, grid
+        var gridOverlay: GridOverlayView? = null
+        var updateFilterOverlay: (() -> Unit)? = null
         val topBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         fun refreshTop() {
             topBar.removeAllViews()
@@ -146,6 +259,7 @@ object OeaCameraApp {
             topBar.addView(kit.chip("Grid: ${grid.label}", grid != GridMode.OFF) {
                 grid = GridMode.values()[(grid.ordinal + 1) % GridMode.values().size]
                 p.edit().putString(KEY_GRID, grid.name).apply()
+                gridOverlay?.setMode(grid)
                 refreshTop()
             }, LinearLayout.LayoutParams(-2, kit.dp(34)).apply { rightMargin = kit.dp(6) })
             topBar.addView(kit.chip("Aspect: ${aspect.label}", aspect != AspectMode.R_4_3) {
@@ -156,6 +270,7 @@ object OeaCameraApp {
             topBar.addView(kit.chip("Filter: ${filter.label}", filter != FilterMode.NONE) {
                 filter = FilterMode.values()[(filter.ordinal + 1) % FilterMode.values().size]
                 p.edit().putString(KEY_FILTER, filter.name).apply()
+                updateFilterOverlay?.invoke()
                 refreshTop()
             }, LinearLayout.LayoutParams(-2, kit.dp(34)).apply { rightMargin = kit.dp(6) })
             topBar.addView(kit.chip("HDR: ${if (hdr) "On" else "Off"}", hdr) {
@@ -176,6 +291,7 @@ object OeaCameraApp {
         previewCard.addView(textureView, FrameLayout.LayoutParams(-1, kit.dp(420)))
         // Grid overlay
         val gridView = GridOverlayView(host, grid)
+        gridOverlay = gridView
         previewCard.addView(gridView, FrameLayout.LayoutParams(-1, kit.dp(420)))
         // Filter overlay preview
         val filterOverlay = View(host).apply { alpha = 0.0f }
@@ -202,6 +318,7 @@ object OeaCameraApp {
                 else -> Color.TRANSPARENT
             })
         }
+        updateFilterOverlay = { applyFilterOverlay() }
         applyFilterOverlay()
 
         // Camera helper
@@ -319,10 +436,10 @@ object OeaCameraApp {
                                             proBox.visibility = if (mmm == CaptureMode.PRO) View.VISIBLE else View.GONE
                                             // refresh again
                                             modeRow.removeAllViews()
-                                            CaptureMode.values().forEach { final ->
-                                                modeRow.addView(kit.chip(final.label, final == mmm) {
-                                                    captureMode = final
-                                                    proBox.visibility = if (final == CaptureMode.PRO) View.VISIBLE else View.GONE
+                                            CaptureMode.values().forEach { lastMode ->
+                                                modeRow.addView(kit.chip(lastMode.label, lastMode == mmm) {
+                                                    captureMode = lastMode
+                                                    proBox.visibility = if (lastMode == CaptureMode.PRO) View.VISIBLE else View.GONE
                                                     // avoid infinite recursion - just update
                                                 }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
                                             }
@@ -361,11 +478,18 @@ object OeaCameraApp {
                             bmp.recycle()
                             if (filtered != bmp) filtered.recycle()
                             host.runOnUiThread {
+                                if (externalCapture) {
+                                    if (saved != null && finishExternalCapture(host, captureTarget, saved, "image/jpeg")) return@runOnUiThread
+                                    saved?.delete()
+                                    host.setResult(Activity.RESULT_CANCELED)
+                                    host.finish()
+                                    return@runOnUiThread
+                                }
                                 android.widget.Toast.makeText(host, if (saved != null) "Saved to ${saved.name}" else "Capture failed", android.widget.Toast.LENGTH_SHORT).show()
                                 if (saved != null) showCapturedSheet(host, kit, saved, filter)
                             }
                         } else {
-                            openSystemCamera(host)
+                            openSystemCamera(host, captureTarget, REQUEST_SYSTEM_PHOTO)
                         }
                     }
                     if (timer.seconds > 0) {
@@ -381,13 +505,33 @@ object OeaCameraApp {
                             host.runOnUiThread {
                                 isRecording = false
                                 innerCapture.background = kit.oval(Color.WHITE)
+                                if (!success && externalCapture) {
+                                    host.setResult(Activity.RESULT_CANCELED)
+                                    host.finish()
+                                    return@runOnUiThread
+                                }
                                 android.widget.Toast.makeText(host, if (success) "Video saved: ${file?.name}" else "Video failed", android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }
                     } else {
-                        cameraHelper?.stopVideoRecording()
+                        val file = cameraHelper?.stopVideoRecording()
                         isRecording = false
                         innerCapture.background = kit.oval(Color.WHITE)
+                        if (externalCapture) {
+                            if (file != null && finishExternalCapture(host, captureTarget, file, "video/mp4")) {
+                                // External VIDEO_CAPTURE callers receive the same
+                                // grant-safe URI contract as photo callers.
+                            } else {
+                                file?.delete()
+                                host.setResult(Activity.RESULT_CANCELED)
+                                host.finish()
+                            }
+                        } else if (file != null) {
+                            android.media.MediaScannerConnection.scanFile(host, arrayOf(file.absolutePath), arrayOf("video/mp4"), null)
+                            android.widget.Toast.makeText(host, "Video saved: ${file.name}", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            android.widget.Toast.makeText(host, "Video failed", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
                 CaptureMode.QR -> openQrScanner(host)
@@ -416,12 +560,31 @@ object OeaCameraApp {
         }
     }
 
-    private fun openSystemCamera(host: Activity) {
+    private fun openSystemCamera(host: Activity, requestedOutput: Uri?, requestCode: Int) {
         try {
-            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-            host.startActivityForResult(intent, 3001)
+            val video = host.intent?.action == MediaStore.ACTION_VIDEO_CAPTURE && requestCode == REQUEST_SYSTEM_PHOTO
+            val intent = Intent(if (video) MediaStore.ACTION_VIDEO_CAPTURE else MediaStore.ACTION_IMAGE_CAPTURE)
+            val output = requestedOutput ?: run {
+                val dir = File(host.getExternalFilesDir(if (video) android.os.Environment.DIRECTORY_MOVIES else android.os.Environment.DIRECTORY_PICTURES), "OEA")
+                dir.mkdirs()
+                val file = File(dir, "OEA_FALLBACK_${System.currentTimeMillis()}.${if (video) "mp4" else "jpg"}")
+                prefs(host).edit().putString(KEY_PENDING_SYSTEM_CAPTURE, file.absolutePath).apply()
+                providerUri(host, file)
+            }
+            if (output != null) {
+                intent.putExtra(MediaStore.EXTRA_OUTPUT, output)
+                intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                intent.clipData = android.content.ClipData.newRawUri("OEA capture", output)
+            }
+            host.startActivityForResult(intent, requestCode)
         } catch (_: Throwable) {
-            android.widget.Toast.makeText(host, "No camera app available", android.widget.Toast.LENGTH_SHORT).show()
+            prefs(host).edit().remove(KEY_PENDING_SYSTEM_CAPTURE).apply()
+            if (isExternalCapture(host)) {
+                host.setResult(Activity.RESULT_CANCELED)
+                host.finish()
+            } else {
+                android.widget.Toast.makeText(host, "No camera app available", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -442,9 +605,9 @@ object OeaCameraApp {
 
     private fun openDocumentScanner(host: Activity) {
         try {
-            // Try to open system document scanner or camera
-            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-            host.startActivityForResult(intent, 3003)
+            // Try to open system document scanner or camera. The output is a
+            // provider URI so older camera apps can write it safely too.
+            openSystemCamera(host, requestedOutput = null, requestCode = REQUEST_DOCUMENT)
         } catch (_: Throwable) {
             android.widget.Toast.makeText(host, "Document scan: capture photo then crop in EMAGE editor", android.widget.Toast.LENGTH_SHORT).show()
         }
@@ -516,32 +679,38 @@ object OeaCameraApp {
 
             val file = File(dir, "OEA_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}_${filter.name.lowercase()}.jpg")
             file.outputStream().use { toSave.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-            if (toSave != finalBmp && toSave != bmp) toSave.recycle()
-            if (finalBmp != bmp) finalBmp.recycle()
-            android.media.MediaScannerConnection.scanFile(host, arrayOf(file.absolutePath), arrayOf("image/jpeg"), null)
-            // Also save to MediaStore for gallery visibility
+            // Also save to MediaStore for gallery visibility. Keep the row
+            // pending until its bytes are written; otherwise a gallery can
+            // index a zero-byte image during the short write window.
             try {
                 if (Build.VERSION.SDK_INT >= 29) {
                     val values = android.content.ContentValues().apply {
                         put(MediaStore.Images.Media.DISPLAY_NAME, file.name)
                         put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                         put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/OEA")
-                        put(MediaStore.Images.Media.IS_PENDING, 0)
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
                     }
                     host.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)?.let { uri ->
                         host.contentResolver.openOutputStream(uri)?.use { out -> toSave.compress(Bitmap.CompressFormat.JPEG, 92, out) }
+                        host.contentResolver.update(uri, android.content.ContentValues().apply {
+                            put(MediaStore.Images.Media.IS_PENDING, 0)
+                        }, null, null)
                     }
                 }
             } catch (_: Throwable) {}
+            android.media.MediaScannerConnection.scanFile(host, arrayOf(file.absolutePath), arrayOf("image/jpeg"), null)
+            if (toSave != finalBmp && toSave != bmp) toSave.recycle()
+            if (finalBmp != bmp) finalBmp.recycle()
             file
         } catch (_: Throwable) { null }
     }
 
     private fun showCapturedSheet(host: Activity, kit: OeaKit, file: File, filter: FilterMode) {
+        val fileUri = runCatching { FileProvider.getUriForFile(host, "${host.packageName}.fileprovider", file) }.getOrNull() ?: return
         kit.sheet("Photo saved", file.name) { panel, dialog ->
             val iv = ImageView(host).apply {
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                setImageURI(Uri.fromFile(file))
+                setImageURI(fileUri)
                 background = kit.rounded(Color.BLACK, 16)
                 clipToOutline = true
             }
@@ -552,7 +721,7 @@ object OeaCameraApp {
                     try {
                         host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                             type = "image/*"
-                            putExtra(Intent.EXTRA_STREAM, Uri.fromFile(file))
+                            putExtra(Intent.EXTRA_STREAM, fileUri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }, "Share photo"))
                     } catch (_: Throwable) {}
@@ -665,6 +834,11 @@ object OeaCameraApp {
 
         fun stop() {
             try { session?.close() } catch (_: Throwable) {}
+            try { mediaRecorder?.reset() } catch (_: Throwable) {}
+            try { mediaRecorder?.release() } catch (_: Throwable) {}
+            mediaRecorder = null
+            recordingFile?.delete()
+            recordingFile = null
             try { cameraDevice?.close() } catch (_: Throwable) {}
             session = null; cameraDevice = null
         }
@@ -734,28 +908,49 @@ object OeaCameraApp {
             } catch (_: Throwable) {}
         }
 
+        private fun abortVideoRecording() {
+            try { session?.close() } catch (_: Throwable) {}
+            session = null
+            try { mediaRecorder?.reset() } catch (_: Throwable) {}
+            try { mediaRecorder?.release() } catch (_: Throwable) {}
+            mediaRecorder = null
+            recordingFile?.delete()
+            recordingFile = null
+            // Reuse the already-open camera instead of opening a second device.
+            createSession()
+        }
+
         fun startVideoRecording(ctx: Context, onResult: (Boolean, File?) -> Unit) {
             try {
                 val dir = File(ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES), "OEA")
                 dir.mkdirs()
                 recordingFile = File(dir, "OEA_VID_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.mp4")
+                val audioEnabled = Build.VERSION.SDK_INT < 23 ||
+                    ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
                 mediaRecorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else @Suppress("DEPRECATION") MediaRecorder()
                 mediaRecorder?.apply {
                     setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    if (audioEnabled) setAudioSource(MediaRecorder.AudioSource.MIC)
                     setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                     setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    if (audioEnabled) setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                     setVideoSize(1280, 720)
                     setVideoFrameRate(30)
                     setOutputFile(recordingFile!!.absolutePath)
                     prepare()
                 }
-                val recorderSurface = mediaRecorder?.surface ?: return
-                val device = cameraDevice ?: return
-                val surfaceTexture = textureView.surfaceTexture ?: return
+                val recorderSurface = mediaRecorder?.surface
+                val device = cameraDevice
+                val surfaceTexture = textureView.surfaceTexture
+                if (recorderSurface == null || device == null || surfaceTexture == null) {
+                    abortVideoRecording()
+                    onResult(false, null)
+                    return
+                }
                 surfaceTexture.setDefaultBufferSize(1280, 720)
                 val previewSurface = android.view.Surface(surfaceTexture)
+                try { session?.close() } catch (_: Throwable) {}
+                session = null
                 val req = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD).apply {
                     addTarget(previewSurface)
                     addTarget(recorderSurface)
@@ -766,19 +961,33 @@ object OeaCameraApp {
                         try {
                             s.setRepeatingRequest(req.build(), null, null)
                             mediaRecorder?.start()
-                        } catch (e: Throwable) { onResult(false, null) }
+                        } catch (_: Throwable) {
+                            abortVideoRecording()
+                            onResult(false, null)
+                        }
                     }
-                    override fun onConfigureFailed(s: android.hardware.camera2.CameraCaptureSession) { onResult(false, null) }
+                    override fun onConfigureFailed(s: android.hardware.camera2.CameraCaptureSession) {
+                        abortVideoRecording()
+                        onResult(false, null)
+                    }
                 }, android.os.Handler(android.os.Looper.getMainLooper()))
-            } catch (e: Throwable) { onResult(false, null) }
+            } catch (_: Throwable) {
+                abortVideoRecording()
+                onResult(false, null)
+            }
         }
 
-        fun stopVideoRecording() {
+        fun stopVideoRecording(): File? {
+            val finished = recordingFile
+            try { session?.close() } catch (_: Throwable) {}
+            session = null
             try { mediaRecorder?.stop() } catch (_: Throwable) {}
             try { mediaRecorder?.release() } catch (_: Throwable) {}
             mediaRecorder = null
-            // Restart preview
-            start()
+            recordingFile = null
+            // Restart preview after the recorder has released its surface.
+            createSession()
+            return finished?.takeIf { it.isFile && it.length() > 0L }
         }
     }
 }

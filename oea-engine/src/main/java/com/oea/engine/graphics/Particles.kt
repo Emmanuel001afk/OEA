@@ -55,6 +55,22 @@ class ParticleSystem(
         private set
     /** 0..1, set from quality settings by the game/engine; scales [burst] counts. */
     var density = 1f
+    /**
+     * World physics hooks (VFX pipeline). When set, particles are advected by
+     * the sampled wind/fluid field and bounce off the ground instead of
+     * passing through it. Null keeps the classic canned behaviour.
+     */
+    /** Samples the local wind/fluid velocity into [out] (vx, vy, vz). */
+    var wind: ((x: Float, y: Float, z: Float, out: FloatArray) -> Unit)? = null
+    /** Ground height at (x, z); particles collide when below it. */
+    var ground: ((x: Float, z: Float) -> Float)? = null
+    /** Solid-volume query for walls/props; the particle is rewound and reflected. */
+    var obstacle: ((x: Float, y: Float, z: Float) -> Boolean)? = null
+    /** Restitution for ground bounces; 0 kills vertical speed (sandbag). */
+    var bounce = 0f
+    /** Extra upward force (fire, smoke): added to gravity per step. */
+    var buoyancy = 0f
+    private val windOut = FloatArray(3)
     private val rng = Rng(0x5EED)
     private var densityCarry = 0f
 
@@ -116,11 +132,49 @@ class ParticleSystem(
                 continue
             }
             val d = 1f / (1f + drag[i] * dt)
-            vx[i] *= d; vy[i] = (vy[i] + gravity[i] * dt) * d; vz[i] *= d
+            vx[i] *= d; vy[i] = (vy[i] + (gravity[i] + buoyancy) * dt) * d; vz[i] *= d
+            // Wind/fluid advection: the air carries the particle, not the other way round.
+            val w = wind
+            if (w != null) {
+                w(px[i], py[i], pz[i], windOut)
+                val k = dt * 1.6f / (1f + drag[i] * 0.6f)
+                vx[i] += (windOut[0] - vx[i] * 0.25f) * k
+                vy[i] += (windOut[1] - vy[i] * 0.15f) * k
+                vz[i] += (windOut[2] - vz[i] * 0.25f) * k
+            }
             px[i] += vx[i] * dt; py[i] += vy[i] * dt; pz[i] += vz[i] * dt
+            // Solid-volume collision: rewind through a wall/prop and reflect
+            // the velocity. It is deliberately cheap and stable for phones;
+            // the fluid grid supplies the detailed smoke flow around the wall.
+            val wall = obstacle
+            if (wall != null && wall(px[i], py[i], pz[i])) {
+                px[i] -= vx[i] * dt; py[i] -= vy[i] * dt; pz[i] -= vz[i] * dt
+                vx[i] = -vx[i] * 0.42f; vy[i] = -vy[i] * 0.42f; vz[i] = -vz[i] * 0.42f
+            }
             rot[i] += spin[i] * dt
+            // Ground collision: sparks bounce and skitter, smoke settles.
+            val g = ground
+            if (g != null) {
+                val h = g(px[i], pz[i])
+                if (py[i] < h) {
+                    py[i] = h
+                    if (bounce > 0f) {
+                        vy[i] = -vy[i] * bounce
+                        vx[i] *= 0.72f; vz[i] *= 0.72f
+                        if (kotlin.math.abs(vy[i]) < 0.35f && bounce > 0.01f) { vy[i] = 0f; skitter(i) }
+                    } else {
+                        vy[i] = 0f
+                        vx[i] *= 0.4f; vz[i] *= 0.4f
+                    }
+                }
+            }
             i++
         }
+    }
+
+    /** Sparks die after skittering to rest instead of sliding forever. */
+    private fun skitter(i: Int) {
+        if (vx[i] * vx[i] + vz[i] * vz[i] < 0.2f && rng.chance(0.4f)) life[i] = maxLife[i]
     }
 
     private fun copy(from: Int, to: Int) {

@@ -52,6 +52,26 @@ class Material(
     }
 }
 
+/**
+ * A dynamic point light: muzzle flashes, fire, sparks, magical bursts. The VFX
+ * system spawns these and the renderer lights the scene from them — real light
+ * on skin, cloth and terrain, not stuck-on glows. [radius] is where the light
+ * reaches zero.
+ */
+class PointLight {
+    var x = 0f; var y = 0f; var z = 0f
+    /** sRGB ARGB; intensity scales it in the shader. */
+    var color: Int = 0xFFFFC890.toInt()
+    var intensity = 1f
+    var radius = 6f
+
+    fun set(x: Float, y: Float, z: Float, color: Int, intensity: Float, radius: Float): PointLight {
+        this.x = x; this.y = y; this.z = z
+        this.color = color; this.intensity = intensity; this.radius = radius
+        return this
+    }
+}
+
 /** Lighting, sky and fog for a 3D pass. */
 class Environment {
     /** Direction towards the sun. */
@@ -76,6 +96,12 @@ class Environment {
     /** Shadow coverage radius around the camera focus. */
     var shadowDistance = 45f
     var shadowStrength = 0.72f
+    /**
+     * Dynamic point lights for this pass (fire, sparks, magic, muzzle flashes).
+     * The renderer lights from the strongest few near the camera. Clear and
+     * refill per frame from the VFX system — max 8.
+     */
+    val pointLights = ArrayList<PointLight>(8)
 
     fun copyFrom(o: Environment): Environment {
         sunDirection.set(o.sunDirection); sunColor = o.sunColor; sunIntensity = o.sunIntensity
@@ -83,6 +109,8 @@ class Environment {
         drawSky = o.drawSky; skyTop = o.skyTop; skyHorizon = o.skyHorizon; skyGround = o.skyGround; sunSize = o.sunSize
         clearColor = o.clearColor; fogColor = o.fogColor; fogDensity = o.fogDensity; exposure = o.exposure
         shadows = o.shadows; shadowDistance = o.shadowDistance; shadowStrength = o.shadowStrength
+        pointLights.clear()
+        o.pointLights.forEach { l -> pointLights.add(PointLight().set(l.x, l.y, l.z, l.color, l.intensity, l.radius)) }
         return this
     }
 

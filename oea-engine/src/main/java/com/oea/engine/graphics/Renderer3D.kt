@@ -375,6 +375,7 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         std.set1f("u_exposure", env.exposure)
         std.set1i("u_tex", 0)
         std.set1i("u_shadowMap", 1)
+        uploadPointLights(cam)
         val map = shadowMap
         if (shadowsThisPass && map != null) {
             map.bindTexture(1)
@@ -382,6 +383,39 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         } else {
             ShadowMap.bindDummy(1)
             std.set4f("u_shadowParams", 0f, 0f, 0f, 0f)
+        }
+    }
+
+    /** Strongest few point lights near the camera; the rest fade out silently. */
+    private fun uploadPointLights(cam: Camera) {
+        val lights = env.pointLights
+        val n = lights.size
+        if (n == 0) {
+            for (i in 0 until 8) std.set4f("u_pointColor[$i]", 0f, 0f, 0f, 0f)
+            return
+        }
+        // Importance = intensity / (1 + distance²/radius²); sort the few we keep.
+        if (n > 1) {
+            val cx = cam.position.x; val cy = cam.position.y; val cz = cam.position.z
+            lights.sortWith { a, b ->
+                val da = (a.x - cx) * (a.x - cx) + (a.y - cy) * (a.y - cy) + (a.z - cz) * (a.z - cz)
+                val db = (b.x - cx) * (b.x - cx) + (b.y - cy) * (b.y - cy) + (b.z - cz) * (b.z - cz)
+                val ia = a.intensity / (1f + da / (a.radius * a.radius + 1e-3f))
+                val ib = b.intensity / (1f + db / (b.radius * b.radius + 1e-3f))
+                if (ib > ia) 1 else if (ib < ia) -1 else 0
+            }
+        }
+        var i = 0
+        while (i < 8 && i < n) {
+            val l = lights[i]
+            std.set4f("u_pointPos[$i]", l.x, l.y, l.z, l.radius)
+            Colors.toLinear(l.color, lin)
+            std.set4f("u_pointColor[$i]", lin[0] * l.intensity, lin[1] * l.intensity, lin[2] * l.intensity, 1f)
+            i++
+        }
+        while (i < 8) {
+            std.set4f("u_pointColor[$i]", 0f, 0f, 0f, 0f)
+            i++
         }
     }
 

@@ -131,6 +131,28 @@ class EngineSettings internal constructor(context: Context) {
         get() = prefs.getFloat("volume", 0.9f).coerceIn(0f, 1f)
         set(v) = prefs.edit().putFloat("volume", v.coerceIn(0f, 1f)).apply()
 
+    /**
+     * Extra multiplier applied only while aiming down sights. Below 1 slows the
+     * view down for precision; 1 keeps hip-fire feel.
+     */
+    var adsSensitivity: Float
+        get() = prefs.getFloat("ads_sensitivity", 0.85f).coerceIn(0.3f, 1.5f)
+        set(v) = prefs.edit().putFloat("ads_sensitivity", v.coerceIn(0.3f, 1.5f)).apply()
+
+    /** Invert the vertical look axis (flight-style controls). */
+    var invertLookY: Boolean
+        get() = prefs.getBoolean("invert_look_y", false)
+        set(v) = prefs.edit().putBoolean("invert_look_y", v).apply()
+
+    /**
+     * Hard cap on how fast the view can turn, in degrees per second. 0 = no
+     * limit. Touch drags and gamepads both respect it, so a glitched pointer
+     * can never spin the camera faster than a human hand.
+     */
+    var turnSpeedLimit: Float
+        get() = prefs.getFloat("turn_speed_limit", 0f).coerceIn(0f, 360f)
+        set(v) = prefs.edit().putFloat("turn_speed_limit", v.coerceIn(0f, 360f)).apply()
+
     /** Touch aiming sensitivity multiplier (Arena and other shooters). */
     var lookSensitivity: Float
         get() = prefs.getFloat("look_sensitivity", 1f).coerceIn(0.2f, 3f)

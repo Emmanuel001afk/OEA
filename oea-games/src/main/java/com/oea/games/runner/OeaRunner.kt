@@ -43,7 +43,7 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * OEA Runner: an endless train-yard runner. Swipe to change lanes, jump and
+ * OEA Endless Days: an endless train-yard runner. Swipe to change lanes, jump and
  * roll; ride ramps onto train roofs; grab coins and power-ups (magnet,
  * jetpack, super jump, 2× score, shield).
  *
@@ -456,7 +456,7 @@ class OeaRunner : OeaGame() {
         if (phase == Phase.OVER) { ctx.island.end(); return }
         val rank = if (ghosts.isNotEmpty()) 1 + ghosts.values.count { it.distance > r.z } else 0
         ctx.island.update(LiveActivity(
-            title = if (net != null) "Runner race" else if (split) "Runner duel" else "Runner",
+            title = if (net != null) "Endless Days race" else if (split) "Endless Days duel" else "Endless Days",
             subtitle = "${r.score} pts · ${r.coins} coins · ${r.z.toInt()} m",
             compactText = if (rank > 0) "Place $rank of ${ghosts.size + 1}" else "${r.z.toInt()} m",
             trailing = if (rank > 0) "#$rank" else "${r.score}",
@@ -480,7 +480,7 @@ class OeaRunner : OeaGame() {
         if (paused) items += MenuItem("resume", "Resume")
         if (net == null) items += MenuItem("restart", "Restart run")
         items += MenuItem("exit", if (net != null) "Leave race" else "Exit", destructive = true)
-        ctx.ui.menu("Runner", if (paused) "Paused" else null, items) { id ->
+        ctx.ui.menu("Endless Days", if (paused) "Paused" else null, items) { id ->
             when (id) {
                 "resume", null -> paused = false
                 "restart" -> { paused = false; restart() }
@@ -859,8 +859,8 @@ class OeaRunner : OeaGame() {
 
         val descriptor = GameDescriptor(
             id = ID,
-            title = "Runner",
-            tagline = "Endless train-yard runner · race your friends",
+            title = "Endless Days",
+            tagline = "Endless train-yard survival · race your friends",
             description = "Swipe through an endless rail yard: dodge trains, jump hurdles, roll under barriers, ride ramps onto roofs and grab power-ups. " +
                 "Duel on one phone in split screen, take turns, or race friends on Wi-Fi, hotspot or online — everyone runs the same track.",
             accent = ACCENT,
