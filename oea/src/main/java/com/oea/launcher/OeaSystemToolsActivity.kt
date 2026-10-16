@@ -827,8 +827,12 @@ open class OeaSystemToolsActivity : Activity() {
         kit.sectionTitle(box, "Going further")
         val deep = kit.group(box)
         val backend = OeaAppFreezer.backend(this)
-        if (backend == OeaAppFreezer.Backend.NONE) {
-            kit.row(deep, R.drawable.oic_info, "Suspend chosen apps", "Pair OEA Authority in Access Doctor, or use Device Owner/root; OEA won't pretend ordinary Device Admin can suspend apps.", chevron = false)
+        if (backend != OeaAppFreezer.Backend.DEVICE_OWNER &&
+            backend != OeaAppFreezer.Backend.ROOT &&
+            backend != OeaAppFreezer.Backend.ADB) {
+            kit.row(deep, R.drawable.oic_info, "Suspend chosen apps",
+                "Ordinary Device Admin cannot suspend apps. Pair OEA Authority in Access Doctor, or use Device Owner/root.",
+                chevron = false)
         } else {
             kit.switchRow(deep, R.drawable.oic_block, "Suspend chosen apps",
                 "Stops the apps you pick while LOW mode is on (${backend.name.lowercase().replace('_', ' ')})", dataStore.lowModeSuspendApps()) {
