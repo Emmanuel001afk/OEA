@@ -100,15 +100,24 @@ object OeaAdbAuthority {
         "Paired and verified. OEA shell identity: ${probe.second.trim()}"
     }
 
-    suspend fun reconnect(context: Context): String = withContext(Dispatchers.IO) {
-        ensureIdentity(context.applicationContext)
+    suspend fun reconnect(context: Context): String {
         val saved = status(context)
         val host = saved.host ?: throw IllegalStateException("No saved endpoint. Pair OEA first.")
         val port = saved.port ?: throw IllegalStateException("No saved connection port. Pair OEA first.")
+        return connect(context, host, port)
+    }
+
+    /** Connect to an edited endpoint without requiring a new pairing code. */
+    suspend fun connect(context: Context, host: String, port: Int): String = withContext(Dispatchers.IO) {
+        ensureIdentity(context.applicationContext)
+        val safeHost = validateHost(host)
+        require(port in 1..65535) { "Connection port must be between 1 and 65535." }
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_HOST, safeHost).putInt(KEY_CONNECT_PORT, port).apply()
         sessionReady.set(false)
-        val probe = connectAndProbe(host, port)
+        val probe = connectAndProbe(safeHost, port)
         if (!probe.first) {
-            throw IllegalStateException("Could not reconnect to $host:$port: ${probe.second}")
+            throw IllegalStateException("Could not connect to $safeHost:$port: ${probe.second}")
         }
         sessionReady.set(true)
         "Connected and verified. OEA shell identity: ${probe.second.trim()}"
