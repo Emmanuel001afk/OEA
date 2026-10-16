@@ -4,7 +4,7 @@ plugins {
 android {
     namespace "com.oea.launcher"
 
-    compileSdk 36
+    compileSdk 37
     defaultConfig {
         applicationId "com.oea.launcher"
         minSdk 26
@@ -30,6 +30,8 @@ dependencies {
     implementation project(":oea-games")
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
+    // Embedded Wireless Debugging pairing and ADB shell transport (Apache-2.0); no companion APK.
+    implementation "com.flyfishxu:kadb:2.1.5"
 
     // The stability rules (fault policy), the theme catalogue, the wave detector
     // and the bundled-wallpaper model are pure Kotlin, so they are covered by
