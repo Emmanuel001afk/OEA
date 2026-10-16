@@ -59,7 +59,7 @@ import java.util.concurrent.Executors
  * - OeaAccessDoctor verifies live state, not just switch (probe overlay window, check assistant connection)
  * - No fake overlay tricks, no claiming ordinary app can bypass security
  * - Broader than few functions: covers overlay, multitasking (freeform, split, PIP), suspension (freeze), restricted settings (DND, battery optimization, write settings, secure settings), diagnostics, device info, security, storage, performance, sound
- * - On-device, no laptop needed, no Shizuku helper, no third-party
+ * - On-device, no companion app. This is not a self-elevating ADB daemon: ordinary app sandboxing prevents OEA from starting an ADB/shell-privileged process by itself. Root and Device Owner are detected when already available; otherwise OEA uses Android's permission UI and verifies the result.
  * - Commands are OEA's own DSL, not ADB: e.g., "device info", "package list", "freeze com.example", "overlay status", "multitask split pkg1 pkg2", etc.
  */
 object OeaConsoleApp {
@@ -702,7 +702,7 @@ object OeaConsoleApp {
 
     private fun showCommandSystem(host: Activity, kit: OeaKit) {
         kit.sheet("OEA Command System", "Our own implementation, own format, own build — inspired by ADB, not a wrapper — comprehensive", build = { panel, _ ->
-            kit.banner(panel, R.drawable.oic_developer_mode, "Built-in, on-device, comprehensive", "No laptop, no Shizuku, no helper app. OEA's own privileged service layer using DevicePolicyManager, root shell channel (su), appops, settings, PackageManager, ActivityManager — scoped to OEA's own package and always verified. Own DSL, not ADB.", OeaKit.Tone.INFO)
+            kit.banner(panel, R.drawable.oic_developer_mode, "OEA-owned authority manager", "No companion app is required. On an ordinary unrooted phone, Android still requires user approval for special access. Root enables OEA's verified shell channel; Device Owner enables only the management operations Android permits. OEA never claims a permission was overridden unless Android confirms it.", OeaKit.Tone.INFO)
             kit.sectionTitle(panel, "Architecture & Research")
             kit.note(panel, """
 OEA Command System research:
@@ -711,7 +711,7 @@ OEA Command System research:
 - Android permission architecture: runtime permissions (READ_SMS), appops (SYSTEM_ALERT_WINDOW, GET_USAGE_STATS, WRITE_SETTINGS), special access (notification listener, accessibility, device admin, device owner), roles (HOME, SMS, DIALER).
 - Wireless Debugging: adb over Wi-Fi, pairing code, needs PC or helper.
 - Root: su binary, scoped commands, verification by reading state back (e.g., after pm suspend, check isPackageSuspended).
-- Device Owner: DevicePolicyManager.setPermissionGrantState, setPackagesSuspended, setApplicationHidden, setUninstallBlocked, etc. Provision via adb shell dpm set-device-owner com.oea.launcher/.applock.OeaDeviceAdminReceiver.
+- Device Owner: only the DevicePolicyManager operations Android permits to an enrolled owner. This does not universally grant overlay, usage access, or unrestricted shell authority; provisioning requires Android's managed-device setup path.
 
 Our own build:
 - OeaShell: runs su commands for OEA's own package only, always verified (reads back state). No arbitrary root for other apps.
