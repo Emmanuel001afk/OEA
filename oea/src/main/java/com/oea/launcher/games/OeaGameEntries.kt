@@ -1,26 +1,44 @@
 package com.oea.launcher.games
 
+import com.oea.games.OeaStandaloneGameActivity
+
 /**
- * The three games as standalone mini-apps: each one has its own launcher icon,
- * label and task, and opens straight on its own front menu (Play, match setup,
- * With friends, About). The shared "OEA Games" container is gone; the engine,
- * the match hand-off and the live game screen are the same as before.
+ * The three games as true standalone mini-apps: each launcher entry IS the
+ * game's own app — its own front menu (Play, Match setup, Play with friends,
+ * Controls & aim, About), its own remembered settings, its own multiplayer and
+ * its own task — built on the shared [OeaStandaloneGameActivity] from
+ * `:oea-games`. Nothing routes through the old hub anymore: tapping the icon
+ * opens the game, and Play starts the match in this app.
  *
- * Game Boost finds these games through the engine registry (ids below), so
- * they are detected as games without any extra setup.
+ * The stable engine ids (`runner`, `arena`, `chess`) are unchanged, so Game
+ * Boost keeps detecting these games exactly as before: the boost session is
+ * reported from [onMatchStarted], which fires when a match really reaches the
+ * screen (same hook the in-hub player uses).
  */
 
 /** Endless Days — the train-yard runner. */
-class OeaEndlessDaysActivity : OeaGamesActivity() {
-    override val pinnedGameId: String? get() = "runner"
+class OeaEndlessDaysActivity : OeaStandaloneGameActivity() {
+    override val standaloneGameId: String = "runner"
+
+    override fun onMatchStarted(gameId: String) {
+        runCatching { com.oea.launcher.gameboost.OeaGameBoost.onOeaGameOpened(applicationContext, gameId) }
+    }
 }
 
 /** Send Off — the competitive shooter. */
-class OeaSendOffActivity : OeaGamesActivity() {
-    override val pinnedGameId: String? get() = "arena"
+class OeaSendOffActivity : OeaStandaloneGameActivity() {
+    override val standaloneGameId: String = "arena"
+
+    override fun onMatchStarted(gameId: String) {
+        runCatching { com.oea.launcher.gameboost.OeaGameBoost.onOeaGameOpened(applicationContext, gameId) }
+    }
 }
 
 /** Chess — complete rules, AI levels, pass & play and multiplayer. */
-class OeaChessGameActivity : OeaGamesActivity() {
-    override val pinnedGameId: String? get() = "chess"
+class OeaChessGameActivity : OeaStandaloneGameActivity() {
+    override val standaloneGameId: String = "chess"
+
+    override fun onMatchStarted(gameId: String) {
+        runCatching { com.oea.launcher.gameboost.OeaGameBoost.onOeaGameOpened(applicationContext, gameId) }
+    }
 }

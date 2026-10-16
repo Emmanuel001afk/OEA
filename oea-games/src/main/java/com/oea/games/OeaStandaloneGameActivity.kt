@@ -529,7 +529,15 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             finish()
             return
         }
+        onMatchStarted(d.id)
     }
+
+    /**
+     * Called when a match actually reached the screen. Host apps (the OEA
+     * launcher entries) override this to report the session to their own
+     * systems — Game Boost, for example — which live outside this library.
+     */
+    protected open fun onMatchStarted(gameId: String) {}
 
     // ================================================================ activity plumbing
 
