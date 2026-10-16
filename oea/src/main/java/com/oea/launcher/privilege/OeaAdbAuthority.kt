@@ -210,6 +210,7 @@ object OeaAdbAuthority {
         // Permission-repair commands are scoped to OEA's own package only.
         if (Regex("appops set com\\.oea\\.launcher (?:SYSTEM_ALERT_WINDOW|GET_USAGE_STATS) allow").matches(command)) return true
         if (Regex("dumpsys deviceidle whitelist \\+com\\.oea\\.launcher").matches(command)) return true
+        if (command == "cmd notification allow_dnd com.oea.launcher") return true
         if (Regex("cmd package set-home-activity com\\.oea\\.launcher/com\\.oea\\.launcher\\.[A-Za-z0-9_.]+").matches(command)) return true
         if (Regex("pm grant com\\.oea\\.launcher android\\.permission\\.[A-Z0-9_]+").matches(command)) return true
 
