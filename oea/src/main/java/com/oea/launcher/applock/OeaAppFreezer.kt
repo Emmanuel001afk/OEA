@@ -3,6 +3,7 @@ package com.oea.launcher.applock
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import com.oea.launcher.privilege.OeaAdbAuthority
 import java.util.concurrent.TimeUnit
 
 /**
@@ -18,7 +19,7 @@ import java.util.concurrent.TimeUnit
  *    Home and the drawer until it is unfrozen.
  */
 object OeaAppFreezer {
-    enum class Backend { DEVICE_OWNER, ROOT, DEVICE_ADMIN, NONE }
+    enum class Backend { DEVICE_OWNER, ROOT, ADB, DEVICE_ADMIN, NONE }
     enum class Mode { SYSTEM, OEA }
 
     @Volatile private var rootAvailableCache: Boolean? = null
@@ -29,6 +30,7 @@ object OeaAppFreezer {
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
         if (dpm?.isDeviceOwnerApp(context.packageName) == true) return Backend.DEVICE_OWNER
         if (hasRoot()) return Backend.ROOT
+        if (OeaAdbAuthority.isSessionReady()) return Backend.ADB
         val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
         if (dpm?.isAdminActive(admin) == true) return Backend.DEVICE_ADMIN
         return Backend.NONE
@@ -69,11 +71,24 @@ object OeaAppFreezer {
             return Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.ROOT)
         }
 
+        if (OeaAdbAuthority.isSessionReady()) {
+            val command = if (frozen) "cmd package suspend --user 0 $packageName"
+                else "cmd package unsuspend --user 0 $packageName"
+            val (success, output) = OeaAdbAuthority.runShell(command)
+            if (!success) return Result(false, output.ifBlank { "OEA Wireless Debugging suspension command failed" }, Backend.ADB)
+            val actual = adbSuspensionState(packageName)
+            if (actual == null || actual != frozen) {
+                return Result(false, "Android did not confirm the requested frozen state through Wireless Debugging. Nothing was saved.", Backend.ADB)
+            }
+            persist(context, packageName, frozen)
+            return Result(true, if (frozen) "App frozen and verified through OEA Authority" else "App restored and verified through OEA Authority", Backend.ADB)
+        }
+
         val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
         return if (dpm?.isAdminActive(admin) == true) {
-            Result(false, "Device Admin is active, but Android does not let ordinary Device Admin freeze apps. OEA must be provisioned as Device Owner or have root access.", Backend.DEVICE_ADMIN)
+            Result(false, "Device Admin is active, but Android does not let ordinary Device Admin freeze apps. Use Device Owner, root, or pair OEA Authority through Wireless Debugging.", Backend.DEVICE_ADMIN)
         } else {
-            Result(false, "App freezing needs Device Owner or root authority on this Android device.", Backend.NONE)
+            Result(false, "App freezing needs Device Owner, root, or a paired OEA Authority Wireless Debugging bridge on this Android device.", Backend.NONE)
         }
     }
 
@@ -82,7 +97,7 @@ object OeaAppFreezer {
 
     /** SYSTEM when Android grants real package suspension, otherwise OEA Freeze. */
     fun mode(context: Context): Mode = when (backend(context)) {
-        Backend.DEVICE_OWNER, Backend.ROOT -> Mode.SYSTEM
+        Backend.DEVICE_OWNER, Backend.ROOT, Backend.ADB -> Mode.SYSTEM
         Backend.DEVICE_ADMIN, Backend.NONE -> Mode.OEA
     }
 
@@ -136,6 +151,14 @@ object OeaAppFreezer {
         val block = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""")
             .findAll(dump).firstOrNull { it.groupValues[1] == packageName } ?: return null
         val state = Regex("""(?m)^\s*User 0:.*$""").find(block.groupValues[2])?.value ?: return null
+        return Regex("""\bsuspended=true\b""").containsMatchIn(state)
+    }
+
+    private fun adbSuspensionState(packageName: String): Boolean? {
+        if (!packageName.matches(Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+"))) return null
+        val (success, dump) = OeaAdbAuthority.runShell("dumpsys package $packageName")
+        if (!success || !dump.contains("Package [$packageName]")) return null
+        val state = Regex("""(?m)^\s*User 0:.*$""").find(dump)?.value ?: return null
         return Regex("""\bsuspended=true\b""").containsMatchIn(state)
     }
 
