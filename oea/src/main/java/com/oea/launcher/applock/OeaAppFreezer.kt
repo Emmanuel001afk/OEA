@@ -3,6 +3,7 @@ package com.oea.launcher.applock
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import com.oea.launcher.privilege.OeaAdbAuthority
 import java.util.concurrent.TimeUnit
 
 /**
