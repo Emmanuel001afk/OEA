@@ -34,6 +34,7 @@ class OeaAuthorityActivity : Activity() {
     private lateinit var reconnectButton: Button
     private lateinit var forgetButton: Button
     private var autoReadStartedAt = 0L
+    private var autoCapturedCode: String? = null
     private val pairingListener: () -> Unit = { runOnUiThread { refreshCapturedValues() } }
 
     private val inkColor = Color.rgb(235, 240, 248)
@@ -58,6 +59,11 @@ class OeaAuthorityActivity : Activity() {
 
     private fun beginAutoRead() {
         autoReadStartedAt = android.os.SystemClock.elapsedRealtime()
+        autoCapturedCode = null
+        hostField.setText("")
+        pairingPortField.setText("")
+        codeField.setText("")
+        connectPortField.setText("")
         OeaWirelessPairing.clear()
         OeaWirelessPairing.startWatching()
         runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
@@ -73,6 +79,11 @@ class OeaAuthorityActivity : Activity() {
             hostField.setTextIfDifferent(pair.host)
             pairingPortField.setTextIfDifferent(pair.port.toString())
             codeField.setTextIfDifferent(pair.code)
+            autoCapturedCode = pair.code
+        } else if (autoCapturedCode != null && codeField.text.toString() == autoCapturedCode) {
+            // Never leave an expired automatically-read one-time code usable.
+            codeField.setText("")
+            autoCapturedCode = null
         }
         if (connection != null) {
             if (pair == null || hostField.text.isNullOrBlank()) hostField.setTextIfDifferent(connection.host)
