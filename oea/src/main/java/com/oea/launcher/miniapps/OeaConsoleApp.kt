@@ -668,11 +668,11 @@ object OeaConsoleApp {
                 } catch (_: Throwable) {}
             }
 
-            kit.sectionTitle(panel, "Suspend chosen apps (needs DO/root)")
+            kit.sectionTitle(panel, "Suspend chosen apps (system authority)")
             val deep = kit.group(panel)
             val backend = OeaAppFreezer.backend(host)
             if (backend == OeaAppFreezer.Backend.NONE) {
-                kit.row(deep, R.drawable.oic_info, "Suspend chosen apps", "Not available: needs device owner or root", chevron = false)
+                kit.row(deep, R.drawable.oic_info, "Suspend chosen apps", "Pair OEA Authority in Access Doctor, or use Device Owner/root.", chevron = false)
             } else {
                 kit.switchRow(deep, R.drawable.oic_block, "Suspend chosen apps", "Stops apps you pick while LOW on (${backend.name.lowercase()})", OeaDataStore.get(host).lowModeSuspendApps()) {
                     OeaDataStore.get(host).setLowModeSuspendApps(it)
