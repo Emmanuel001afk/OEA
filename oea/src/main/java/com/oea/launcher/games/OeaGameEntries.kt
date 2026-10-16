@@ -1,26 +1,29 @@
 package com.oea.launcher.games
 
+import com.oea.games.OeaStandaloneGameActivity
+
 /**
- * The three games as standalone mini-apps: each one has its own launcher icon,
- * label and task, and opens straight on its own front menu (Play, match setup,
- * With friends, About). The shared "OEA Games" container is gone; the engine,
- * the match hand-off and the live game screen are the same as before.
+ * Dedicated launcher entries for OEA's built-in games.
  *
- * Game Boost finds these games through the engine registry (ids below), so
- * they are detected as games without any extra setup.
+ * These activities intentionally inherit the standalone game shell rather
+ * than the OEA Games hub. Each opens its own game front menu and remains
+ * independent of the hub's navigation and settings screens.
+ *
+ * Keep the ids aligned with the OEA Engine registry so Game Boost can identify
+ * the games consistently.
  */
 
 /** Endless Days — the train-yard runner. */
-class OeaEndlessDaysActivity : OeaGamesActivity() {
-    override val pinnedGameId: String? get() = "runner"
+class OeaEndlessDaysActivity : OeaStandaloneGameActivity() {
+    override val standaloneGameId: String get() = "runner"
 }
 
 /** Send Off — the competitive shooter. */
-class OeaSendOffActivity : OeaGamesActivity() {
-    override val pinnedGameId: String? get() = "arena"
+class OeaSendOffActivity : OeaStandaloneGameActivity() {
+    override val standaloneGameId: String get() = "arena"
 }
 
-/** Chess — complete rules, AI levels, pass & play and multiplayer. */
-class OeaChessGameActivity : OeaGamesActivity() {
-    override val pinnedGameId: String? get() = "chess"
+/** Chess — rules, AI levels, pass & play and multiplayer. */
+class OeaChessGameActivity : OeaStandaloneGameActivity() {
+    override val standaloneGameId: String get() = "chess"
 }
