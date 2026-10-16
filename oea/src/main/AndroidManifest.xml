@@ -97,6 +97,11 @@
         </activity>
         <!-- OEA Settings: its own task, reachable from Home and as an app. -->
         <activity
+            android:name=".privilege.OeaAuthorityActivity"
+            android:exported="false"
+            android:label="OEA Authority"
+            android:theme="@style/OeaPanelTheme" />
+        <activity
             android:name=".OeaSystemToolsActivity"
             android:exported="false"
             android:label="OEA Settings"
