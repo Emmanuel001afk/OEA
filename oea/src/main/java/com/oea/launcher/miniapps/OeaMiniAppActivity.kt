@@ -107,6 +107,13 @@ open class OeaMiniAppActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
     }
 
+    override fun onPause() {
+        if (screenId == "camera") {
+            OeaFaultShield.guard("miniapp:camera:pause") { OeaCameraApp.onHostPaused(this) }
+        }
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
         OeaFaultShield.guard("miniapp:host:resume") {
