@@ -30,6 +30,8 @@ dependencies {
     implementation project(":oea-games")
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
+    // OEA-owned Wireless Debugging pairing and verified shell transport; no companion app.
+    implementation "com.flyfishxu:kadb:2.1.1"
 
     // The stability rules (fault policy), the theme catalogue, the wave detector
     // and the bundled-wallpaper model are pure Kotlin, so they are covered by

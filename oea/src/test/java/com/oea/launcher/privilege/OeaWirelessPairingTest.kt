@@ -36,6 +36,14 @@ class OeaWirelessPairingTest {
         assertEquals("192.168.1.20", c.host)
     }
 
+    @Test fun ambiguousEndpointsAreNotGuessed() {
+        val changed = OeaWirelessPairing.read(
+            listOf("Pair device with pairing code", "123 456", "192.168.1.20:37125", "192.168.1.21:37125"),
+            now = 3_000L
+        )
+        assertFalse(changed)
+    }
+
     @Test fun unrelatedTextChangesNothing() {
         assertFalse(OeaWirelessPairing.read(listOf("Bluetooth", "Storage", "42"), now = 3_000L))
     }

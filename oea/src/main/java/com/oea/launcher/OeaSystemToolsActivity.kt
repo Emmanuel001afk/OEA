@@ -827,8 +827,12 @@ open class OeaSystemToolsActivity : Activity() {
         kit.sectionTitle(box, "Going further")
         val deep = kit.group(box)
         val backend = OeaAppFreezer.backend(this)
-        if (backend == OeaAppFreezer.Backend.NONE) {
-            kit.row(deep, R.drawable.oic_info, "Suspend chosen apps", "Not available here: it needs device owner or root, and OEA will not pretend otherwise", chevron = false)
+        if (backend != OeaAppFreezer.Backend.DEVICE_OWNER &&
+            backend != OeaAppFreezer.Backend.ROOT &&
+            backend != OeaAppFreezer.Backend.ADB) {
+            kit.row(deep, R.drawable.oic_info, "Suspend chosen apps",
+                "Ordinary Device Admin cannot suspend apps. Pair OEA Authority in Access Doctor, or use Device Owner/root.",
+                chevron = false)
         } else {
             kit.switchRow(deep, R.drawable.oic_block, "Suspend chosen apps",
                 "Stops the apps you pick while LOW mode is on (${backend.name.lowercase().replace('_', ' ')})", dataStore.lowModeSuspendApps()) {
@@ -1903,7 +1907,11 @@ open class OeaSystemToolsActivity : Activity() {
         titles.addView(kit.text("Freezer", 24f, palette.text, OeaType.medium))
         val assistantGranted = OeaAssistant.isEnabled(this)
         val modeLine = when {
-            systemMode -> if (backend == OeaAppFreezer.Backend.ROOT) "System freeze • Root" else "System freeze • Device Owner"
+            systemMode -> when (backend) {
+                OeaAppFreezer.Backend.ROOT -> "System freeze • Root"
+                OeaAppFreezer.Backend.ADB -> "System freeze • Wireless Debugging"
+                else -> "System freeze • Device Owner"
+            }
             OeaAssistant.isConnected() -> "OEA Freeze • Assistant ready"
             assistantGranted -> "OEA Freeze • Assistant on"
             else -> "OEA Freeze • Assistant off"
@@ -1938,6 +1946,17 @@ open class OeaSystemToolsActivity : Activity() {
             else "Frozen apps are blocked in OEA and force-stopped, so they stay asleep: no background work, alarms or notifications.",
             13f, palette.textSecondary
 ).apply { setLineSpacing(dp(2).toFloat(), 1f); setPadding(0, dp(4), 0, 0) })
+        if (backend != OeaAppFreezer.Backend.DEVICE_OWNER &&
+            backend != OeaAppFreezer.Backend.ROOT &&
+            backend != OeaAppFreezer.Backend.ADB) {
+            hero.addView(kit.quietButton("Pair OEA Authority for system freeze", R.drawable.oic_lock) {
+                startActivity(Intent(this, com.oea.launcher.privilege.OeaAuthorityActivity::class.java))
+            }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
+            hero.addView(kit.text(
+                "Wireless Debugging lets OEA request real Android package suspension after you pair it on this phone.",
+                12f, palette.textTertiary
+            ).apply { setPadding(0, dp(6), 0, 0); setLineSpacing(dp(2).toFloat(), 1f) })
+        }
         if (!systemMode && !assistantGranted) {
             // Only when OEA Assistant has genuinely never been switched on.
             hero.addView(kit.button("Turn on OEA Assistant", ice, if (palette.dark) Color.rgb(6, 22, 34) else Color.WHITE, R.drawable.oic_accessibility_new) {
@@ -2944,6 +2963,8 @@ open class OeaSystemToolsActivity : Activity() {
             buttons.addView(kit.quietButton("Stop", R.drawable.oic_close) { wp.stopWatching(); rerender() }, LinearLayout.LayoutParams(-2, dp(42)))
         } else {
             buttons.addView(kit.primaryButton("Start reading", R.drawable.oic_developer_mode) {
+                // A fresh read must not combine a new code with a stale port from an earlier session.
+                wp.clear()
                 wp.startWatching()
                 runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                     .onFailure { toast("Open Developer options, then Wireless debugging.") }
@@ -2954,6 +2975,9 @@ open class OeaSystemToolsActivity : Activity() {
             buttons.addView(kit.quietButton("Clear", R.drawable.oic_delete) { wp.clear(); rerender() }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(8) })
         }
         group.addView(buttons)
+        kit.primaryButton("Pair OEA Authority", R.drawable.oic_lock) {
+            startActivity(Intent(this, com.oea.launcher.privilege.OeaAuthorityActivity::class.java))
+        }.also { box.addView(it, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(4) }) }
         // Fallback only: the values the user types are used exactly like read ones.
         kit.quietButton("Type them in instead (fallback)", R.drawable.oic_text_fields) { askWirelessManually() }.also { box.addView(it, LinearLayout.LayoutParams(-1, dp(44))) }
     }
