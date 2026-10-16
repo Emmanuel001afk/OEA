@@ -3,6 +3,10 @@ package com.oea.launcher.privilege
 import android.content.Context
 import android.os.Build
 import com.flyfishxu.kadb.Kadb
+import com.flyfishxu.kadb.cert.KadbCert
+import com.flyfishxu.kadb.cert.OkioFilePrivateKeyStore
+import okio.Path.Companion.toPath
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -26,6 +30,8 @@ object OeaAdbAuthority {
     private const val KEY_CONNECT_PORT = "connect_port"
     private const val MAX_OUTPUT = 256 * 1024
     private val sessionReady = AtomicBoolean(false)
+    private val identityLock = Any()
+    @Volatile private var identityPath: String? = null
 
     data class Status(
         val configured: Boolean,
@@ -70,6 +76,7 @@ object OeaAdbAuthority {
             "OEA's embedded Wireless Debugging bridge requires Android 9 or newer."
         }
 
+        ensureIdentity(context.applicationContext)
         // Fail quickly on a stale or mistyped endpoint before beginning TLS pairing.
         Socket().use { socket ->
             socket.connect(InetSocketAddress(safeHost, pairingPort), 3_500)
@@ -94,6 +101,7 @@ object OeaAdbAuthority {
     }
 
     suspend fun reconnect(context: Context): String = withContext(Dispatchers.IO) {
+        ensureIdentity(context.applicationContext)
         val saved = status(context)
         val host = saved.host ?: throw IllegalStateException("No saved endpoint. Pair OEA first.")
         val port = saved.port ?: throw IllegalStateException("No saved connection port. Pair OEA first.")
@@ -139,6 +147,20 @@ object OeaAdbAuthority {
 
     private var cachedHost: String? = null
     private var cachedPort: Int? = null
+
+    private fun ensureIdentity(context: Context) {
+        val file = File(context.filesDir, "oea-adb-host-key.pem")
+        val path = file.absolutePath
+        synchronized(identityLock) {
+            if (identityPath != path) {
+                // Kadb defaults to an in-memory key store; persist the host key
+                // privately so Android continues to trust OEA after process death.
+                KadbCert.configure(OkioFilePrivateKeyStore(path.toPath()))
+                KadbCert.ensureReady()
+                identityPath = path
+            }
+        }
+    }
 
     private fun connectAndProbe(host: String, port: Int): Pair<Boolean, String> {
         val result = runCatching {
