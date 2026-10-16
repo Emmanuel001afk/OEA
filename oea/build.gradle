@@ -4,7 +4,7 @@ plugins {
 android {
     namespace "com.oea.launcher"
 
-    compileSdk 36
+    compileSdk 37
     defaultConfig {
         applicationId "com.oea.launcher"
         minSdk 26
