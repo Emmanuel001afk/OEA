@@ -153,8 +153,8 @@ object OeaAccessDoctor {
                 val can = OeaPrivileges.canUseDnd(app)
                 when {
                     can -> Finding(privilege, State.WORKING, "OEA can switch sound mode and Do Not Disturb.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it.", "Tap Fix.", command = command(root, "appops set ${app.packageName} ACCESS_NOTIFICATION_POLICY allow"))
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Sound & vibration › Do Not Disturb access.", command = command(root, "appops set ${app.packageName} ACCESS_NOTIFICATION_POLICY allow"))
+                    privileged -> Finding(privilege, State.OEA_CAN_FIX, if (root) "Not granted; OEA has root and can grant DND access." else "Not granted; OEA Authority can request DND access through Android's notification service.", "Tap Fix.", command = command(root, "cmd notification allow_dnd ${app.packageName}"))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Sound & vibration › Do Not Disturb access.", command = command(root, "cmd notification allow_dnd ${app.packageName}"))
                 }
             }
 
