@@ -130,6 +130,9 @@ object OeaAppFreezer {
             Backend.DEVICE_OWNER -> candidates.filterTo(mutableSetOf()) { pkg ->
                 runCatching { context.packageManager.isPackageSuspended(pkg) }.getOrDefault(false)
             }
+            Backend.ADB -> candidates.filterTo(mutableSetOf()) { pkg ->
+                adbSuspensionState(pkg) == true
+            }
             Backend.ROOT -> {
                 val (success, dump) = runShell("dumpsys package")
                 if (!success || !dump.contains("Package [")) return
