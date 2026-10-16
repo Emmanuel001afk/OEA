@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
@@ -82,8 +83,32 @@ class OeaThemesActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val incomingUri = intent?.data
+        if (incomingUri != null && (intent.action == Intent.ACTION_ATTACH_DATA || intent.action == Intent.ACTION_SET_WALLPAPER)) {
+            // A picture sent from EMAGE or another gallery: add it to the library
+            // and open its page, where Home, lock screen or both are one tap away.
+            current = SCREEN_HOME
+            show(current)
+            importIncomingPicture(incomingUri)
+            return
+        }
         intent?.getStringExtra(EXTRA_SCREEN)?.let { if (it.isNotBlank()) current = it }
         show(current)
+    }
+
+    private fun importIncomingPicture(uri: Uri) {
+        toast("Adding picture…")
+        io.execute {
+            val imported = runCatching { store.importToLibrary(uri) }.getOrNull()
+            main.post {
+                if (isDestroyed) return@post
+                if (imported == null) {
+                    toast("That picture couldn't be read.")
+                    return@post
+                }
+                navigate("wallpaper:${imported.key}")
+            }
+        }
     }
 
     private var resumedOnce = false
@@ -1022,11 +1047,21 @@ class OeaThemesActivity : Activity() {
 
     private fun pickImage(slot: String) {
         pendingPick = slot
+        // Android 13+: the system Photo Picker. It needs no storage permission
+        // and shows the phone's pictures, so OEA never has to "read images".
+        // Older Android: the document picker, which also grants read access.
+        val photoPicker = Intent(android.provider.MediaStore.ACTION_PICK_IMAGES).apply { type = "image/*" }
+        val started = Build.VERSION.SDK_INT >= 33 && runCatching {
+            @Suppress("DEPRECATION")
+            startActivityForResult(photoPicker, REQUEST_PICK)
+        }.isSuccess
+        if (started) return
         runCatching {
             @Suppress("DEPRECATION")
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 type = "image/*"
                 addCategory(Intent.CATEGORY_OPENABLE)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }, REQUEST_PICK)
         }.onFailure {
             pendingPick = null

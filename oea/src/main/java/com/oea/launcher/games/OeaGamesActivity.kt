@@ -66,7 +66,7 @@ import com.oea.launcher.ui.OeaType
  * the two supported methods (local Wi-Fi / hotspot, and online WebRTC with
  * codes and QR), runs lobbies and holds the engine's settings.
  */
-class OeaGamesActivity : Activity(), SessionListener {
+open class OeaGamesActivity : Activity(), SessionListener {
     private sealed class Page {
         object Home : Page()
         data class Game(val id: String) : Page()
@@ -97,6 +97,12 @@ class OeaGamesActivity : Activity(), SessionListener {
     private val lobbyOptions = HashMap<String, String>()
     private var lobbyMode = PlayMode.LAN
 
+    /**
+     * A game that has its own launcher entry (Endless Days, Send Off, Chess)
+     * opens straight on that game's own front menu. The plain hub leaves this null.
+     */
+    protected open val pinnedGameId: String? get() = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
@@ -105,13 +111,18 @@ class OeaGamesActivity : Activity(), SessionListener {
             kit = OeaKit(this, palette)
             OeaInsets.edgeToEdge(window, lightBars = false)
             NetSession.current?.let { s -> s.addListener(this); if (s.phase == SessionPhase.LOBBY || s.phase == SessionPhase.PLAYING || s.phase == SessionPhase.CONNECTING) page = Page.Lobby }
+            val openGame = pinnedGameId ?: intent?.getStringExtra(EXTRA_OPEN_GAME)
+            if (page == Page.Home && openGame != null && OeaEngine.registry.find(openGame) != null) {
+                page = Page.Game(openGame)
+                onEnter(page)
+            }
             render()
             // Android 16+ (target SDK 36) delivers Back only through this callback.
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
             }
         } catch (e: Throwable) {
-            OeaScreenFailure.show(this, "OEA Games", e)
+            OeaScreenFailure.show(this, "Games", e)
         }
     }
 
@@ -189,7 +200,7 @@ class OeaGamesActivity : Activity(), SessionListener {
                 Page.Profile -> renderProfile()
             }
         } catch (e: Throwable) {
-            OeaScreenFailure.show(this, "OEA Games", e)
+            OeaScreenFailure.show(this, "Games", e)
         }
     }
 
@@ -212,7 +223,7 @@ class OeaGamesActivity : Activity(), SessionListener {
     private fun renderHome() {
         val device = OeaEngine.device
         val perfHz = device.maxRefreshRate.toInt()
-        val p = page("OEA Games", "OEA Engine ${OeaEngine.VERSION} · ${device.recommendedTier.label} graphics · $perfHz Hz")
+        val p = page("Games", "OEA Engine ${OeaEngine.VERSION} · ${device.recommendedTier.label} graphics · $perfHz Hz")
         val box = p.content
         NetSession.current?.takeIf { it.phase != SessionPhase.CLOSED }?.let { s ->
             kit.banner(box, R.drawable.oic_sports_esports, if (s.isHost) "You're hosting ${s.descriptor.title}" else "You're in a ${s.descriptor.title} lobby",
@@ -355,8 +366,8 @@ class OeaGamesActivity : Activity(), SessionListener {
                 // user explicitly chooses to — never silently.
                 AlertDialog.Builder(this)
                     .setTitle("${d.title} has its own app")
-                    .setMessage("${d.title} is an independent app ($standalonePackage) with its own icon, settings and multiplayer. Install it for the full experience — or run this match inside OEA Games just this once.")
-                    .setPositiveButton("Run inside OEA Games") { _, _ -> startInHub(d, mode, options, players, session) }
+                    .setMessage("${d.title} is an independent app ($standalonePackage) with its own icon, settings and multiplayer. Install it for the full experience — or run this match inside OEA just this once.")
+                    .setPositiveButton("Run inside OEA") { _, _ -> startInHub(d, mode, options, players, session) }
                     .setNegativeButton("Cancel", null)
                     .show()
                 return
@@ -1007,7 +1018,7 @@ class OeaGamesActivity : Activity(), SessionListener {
     }.getOrNull()?.takeIf { it.isNotBlank() }
 
     private fun shareCode(d: GameDescriptor, code: String, invite: Boolean) {
-        val text = if (invite) "Join my ${d.title} game in OEA! Open OEA Games › Join with a code, paste this, then send me the reply code:\n\n$code"
+        val text = if (invite) "Join my ${d.title} game in OEA! Open the game › Join with a code, paste this, then send me the reply code:\n\n$code"
         else "Here's my reply for ${d.title} — paste it in your invite screen (Connect):\n\n$code"
         runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share code")) }
     }
@@ -1081,6 +1092,8 @@ class OeaGamesActivity : Activity(), SessionListener {
     }
 
     private companion object {
+        /** Intent extra: the id of the game whose front menu the hub opens first. */
+        const val EXTRA_OPEN_GAME = "oea.games.open_game"
         const val REQ_CAMERA = 41
         const val REQ_IMAGE = 42
     }

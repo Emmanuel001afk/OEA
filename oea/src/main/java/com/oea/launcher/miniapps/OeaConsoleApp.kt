@@ -70,7 +70,7 @@ object OeaConsoleApp {
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("OEA Console", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(kit.text("Console", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(kit.iconBadge(R.drawable.oic_developer_mode, palette.accentSoft, palette.onAccentSoft, 40))
         column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
         kit.note(column, "Advanced device utilities: diagnostics, device info, security checks, storage tools, performance and our own ADB-inspired command system. Everything here uses supported Android APIs and explains its limits honestly. No laptop, no Shizuku, no helper app — OEA's own privileged service layer.")

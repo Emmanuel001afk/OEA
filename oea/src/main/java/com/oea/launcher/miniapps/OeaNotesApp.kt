@@ -115,7 +115,7 @@ object OeaNotesApp {
         var currentFolder: String? = null
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("OEA Notes", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(kit.text("Notes", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
             kit.prompt("Search notes", null, "Search", searchQuery) { q ->
                 searchQuery = q.trim()

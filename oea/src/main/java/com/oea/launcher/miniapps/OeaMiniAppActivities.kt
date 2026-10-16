@@ -17,32 +17,29 @@ class OeaClockActivity : OeaMiniAppActivity() { override val appId get() = "cloc
 /** Calendar — month/week/day views, events and reminders. */
 class OeaCalendarActivity : OeaMiniAppActivity() { override val appId get() = "calendar" }
 
-/** OEA Image (EMAGE) — photos, albums, downloads and organization. */
+/** EMAGE — photos, albums, downloads, and the OEA pictures (wallpapers, lock screens, live scenes). */
 class OeaImageActivity : OeaMiniAppActivity() { override val appId get() = "emage" }
 
-/** OEA VIP (Video Instant Player) — video playback. */
+/** VIP (Video Instant Player) — full-screen video and audio playback with PIP. */
 class OeaVipActivity : OeaMiniAppActivity() { override val appId get() = "vip" }
 
-/** OEA Weather — forecast with a real data source. */
+/** Weather — forecast with a real data source. */
 class OeaWeatherActivity : OeaMiniAppActivity() { override val appId get() = "weather" }
 
-/** OEA Calculator — arithmetic, scientific, memory and tape. */
+/** Calculator — arithmetic, scientific, memory and tape. */
 class OeaCalculatorActivity : OeaMiniAppActivity() { override val appId get() = "calculator" }
 
-/** OEA Messaging — SMS with the correct Android role handling. */
+/** Messaging — SMS with the correct Android role handling. */
 class OeaMessagingActivity : OeaMiniAppActivity() { override val appId get() = "messaging" }
 
-/** OEA Notes — notes, private notes and voice notes. */
+/** Notes — notes, private notes and voice notes. */
 class OeaNotesActivity : OeaMiniAppActivity() { override val appId get() = "notes" }
 
-/** OEA Camera — viewfinder, flash, timer and capture. */
+/** Camera — viewfinder, flash, timer and capture. */
 class OeaCameraActivity : OeaMiniAppActivity() { override val appId get() = "camera" }
 
-/** OEA Console — the central utility: diagnostics, device, security, command system. */
+/** Console — the central utility: diagnostics, device, security, command system. */
 class OeaConsoleActivity : OeaMiniAppActivity() { override val appId get() = "console" }
 
-/** OEA Gallery — every OEA picture in one place. */
-class OeaGalleryActivity : OeaMiniAppActivity() { override val appId get() = "gallery" }
-
-/** OEA Voice — the launcher's own speech recognizer. */
+/** Voice — the launcher's own speech recognizer. */
 class OeaVoiceActivity : OeaMiniAppActivity() { override val appId get() = "voice" }

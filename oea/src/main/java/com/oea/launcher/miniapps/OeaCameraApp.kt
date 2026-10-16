@@ -194,13 +194,18 @@ object OeaCameraApp {
         TIMELAPSE("Time-lapse", "Fast motion recording")
     }
 
+    /**
+     * The Camera, full-screen: the viewfinder fills the window and the controls
+     * sit over it in three clear bands — a top bar (flash, timer, grid, filter,
+     * settings), a bottom band (zoom, modes, shutter row). Pro controls appear
+     * above the shutter only in Pro mode. Capture itself is unchanged.
+     */
     fun build(host: Activity, palette: OeaPalette): View {
         val kit = OeaKit(host, palette)
         val p = prefs(host)
         var flash = runCatching { FlashMode.valueOf(p.getString(KEY_FLASH, "AUTO") ?: "AUTO") }.getOrDefault(FlashMode.AUTO)
         var timer = runCatching { TimerMode.valueOf(p.getString(KEY_TIMER, "OFF") ?: "OFF") }.getOrDefault(TimerMode.OFF)
         var grid = runCatching { GridMode.valueOf(p.getString(KEY_GRID, "GRID_3X3") ?: "GRID_3X3") }.getOrDefault(GridMode.GRID_3X3)
-        var aspect = runCatching { AspectMode.valueOf(p.getString(KEY_ASPECT, "R_4_3") ?: "R_4_3") }.getOrDefault(AspectMode.R_4_3)
         var filter = runCatching { FilterMode.valueOf(p.getString(KEY_FILTER, "NONE") ?: "NONE") }.getOrDefault(FilterMode.NONE)
         var front = p.getBoolean(KEY_FACING, false)
         var zoom = p.getFloat(KEY_ZOOM, 1f).coerceIn(1f, 8f)
@@ -209,105 +214,48 @@ object OeaCameraApp {
         val externalCapture = isExternalCapture(host)
         var captureMode = if (host.intent?.action == MediaStore.ACTION_VIDEO_CAPTURE) CaptureMode.VIDEO else CaptureMode.PHOTO
         var isRecording = false
+        val density = host.resources.displayMetrics.density
+        fun dp(v: Int) = (v * density + 0.5f).toInt()
+        // Chips are styled when created; this repaints one when its selection changes.
+        fun styleChip(view: TextView, selected: Boolean) {
+            view.setTextColor(if (selected) palette.onAccent else palette.text)
+            view.background = kit.ripple(kit.rounded(if (selected) palette.accent else palette.cardHigh, 18), 18)
+        }
 
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-
-        // Header with title and gallery shortcut
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("OEA Camera", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
-        val lastThumb = lastPhotoThumb(host)
-        val galleryBtn = if (lastThumb != null) {
-            FrameLayout(host).apply {
-                val iv = ImageView(host).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setImageBitmap(lastThumb); clipToOutline = true; background = kit.rounded(Color.BLACK, 10) }
-                addView(iv, FrameLayout.LayoutParams(kit.dp(40), kit.dp(40)))
-                isClickable = true
-                setOnClickListener { openGallery(host) }
-            }
-        } else kit.circleIconButton(R.drawable.oic_photo_library, "Gallery", palette.cardHigh, palette.text) { openGallery(host) }
-        header.addView(galleryBtn, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })
-        header.addView(kit.circleIconButton(R.drawable.oic_settings, "Settings", palette.cardHigh, palette.text) {
-            showSettings(host, kit, palette)
-        }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)))
-        column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+        val root = FrameLayout(host).apply { setBackgroundColor(Color.BLACK) }
 
         if (host.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            kit.banner(column, R.drawable.oic_info, "Camera permission needed", "OEA Camera needs CAMERA for preview and pro controls. Without it, system camera fallback works.", OeaKit.Tone.WARNING, "Allow") {
-                try { host.requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 2001) } catch (_: Throwable) {}
+            val column = LinearLayout(host).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(24), dp(24), dp(24), dp(24))
             }
-            column.addView(kit.primaryButton("Open system camera", R.drawable.oic_photo_library) { openSystemCamera(host, captureTarget, REQUEST_SYSTEM_PHOTO) }, LinearLayout.LayoutParams(-1, kit.dp(50)).apply { topMargin = kit.dp(12) })
-            kit.note(column, "System fallback works. Grant CAMERA for OEA's own preview, flash, zoom, filters and pro controls.")
-            return column
+            column.addView(kit.text("Camera needs permission", 20f, Color.WHITE, OeaType.medium).apply { gravity = Gravity.CENTER })
+            column.addView(kit.text("Allow the camera to use OEA's own viewfinder, flash, zoom and pro controls. Without it, the system camera still takes photos.", 14f, Color.LTGRAY).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(20)) })
+            column.addView(kit.primaryButton("Allow camera", R.drawable.oic_info) {
+                try { host.requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 2001) } catch (_: Throwable) {}
+            }, LinearLayout.LayoutParams(-1, dp(50)))
+            column.addView(kit.tonalButton("Open system camera", R.drawable.oic_photo_library) { openSystemCamera(host, captureTarget, REQUEST_SYSTEM_PHOTO) }, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+            root.addView(column, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+            return root
         }
 
-        // Top controls: flash, timer, aspect, filter, hdr, grid
-        var gridOverlay: GridOverlayView? = null
-        var updateFilterOverlay: (() -> Unit)? = null
-        val topBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        fun refreshTop() {
-            topBar.removeAllViews()
-            topBar.addView(kit.chip("Flash: ${flash.name.lowercase().replaceFirstChar { it.uppercase() }}", flash != FlashMode.OFF) {
-                flash = FlashMode.values()[(flash.ordinal + 1) % FlashMode.values().size]
-                p.edit().putString(KEY_FLASH, flash.name).apply()
-                applyFlash(host, flash, front)
-                refreshTop()
-            }, LinearLayout.LayoutParams(-2, kit.dp(34)).apply { rightMargin = kit.dp(6) })
-            topBar.addView(kit.chip("Timer: ${timer.label}", timer != TimerMode.OFF) {
-                timer = TimerMode.values()[(timer.ordinal + 1) % TimerMode.values().size]
-                p.edit().putString(KEY_TIMER, timer.name).apply()
-                refreshTop()
-            }, LinearLayout.LayoutParams(-2, kit.dp(34)).apply { rightMargin = kit.dp(6) })
-            topBar.addView(kit.chip("Grid: ${grid.label}", grid != GridMode.OFF) {
-                grid = GridMode.values()[(grid.ordinal + 1) % GridMode.values().size]
-                p.edit().putString(KEY_GRID, grid.name).apply()
-                gridOverlay?.setMode(grid)
-                refreshTop()
-            }, LinearLayout.LayoutParams(-2, kit.dp(34)).apply { rightMargin = kit.dp(6) })
-            topBar.addView(kit.chip("Aspect: ${aspect.label}", aspect != AspectMode.R_4_3) {
-                aspect = AspectMode.values()[(aspect.ordinal + 1) % AspectMode.values().size]
-                p.edit().putString(KEY_ASPECT, aspect.name).apply()
-                refreshTop()
-            }, LinearLayout.LayoutParams(-2, kit.dp(34)).apply { rightMargin = kit.dp(6) })
-            topBar.addView(kit.chip("Filter: ${filter.label}", filter != FilterMode.NONE) {
-                filter = FilterMode.values()[(filter.ordinal + 1) % FilterMode.values().size]
-                p.edit().putString(KEY_FILTER, filter.name).apply()
-                updateFilterOverlay?.invoke()
-                refreshTop()
-            }, LinearLayout.LayoutParams(-2, kit.dp(34)).apply { rightMargin = kit.dp(6) })
-            topBar.addView(kit.chip("HDR: ${if (hdr) "On" else "Off"}", hdr) {
-                hdr = !hdr
-                p.edit().putBoolean(KEY_HDR, hdr).apply()
-                refreshTop()
-            }, LinearLayout.LayoutParams(-2, kit.dp(34)))
-        }
-        refreshTop()
-        column.addView(kit.hscroll(topBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
-
-        // Preview container
-        val previewCard = FrameLayout(host).apply {
-            background = kit.rounded(Color.BLACK, 22)
-            clipToOutline = true
-        }
+        // ---- viewfinder: full-bleed, grid and filter layered on top
         val textureView = TextureView(host)
-        previewCard.addView(textureView, FrameLayout.LayoutParams(-1, kit.dp(420)))
-        // Grid overlay
+        root.addView(textureView, FrameLayout.LayoutParams(-1, -1))
         val gridView = GridOverlayView(host, grid)
-        gridOverlay = gridView
-        previewCard.addView(gridView, FrameLayout.LayoutParams(-1, kit.dp(420)))
-        // Filter overlay preview
-        val filterOverlay = View(host).apply { alpha = 0.0f }
-        previewCard.addView(filterOverlay, FrameLayout.LayoutParams(-1, kit.dp(420)))
-        // Focus indicator
+        val gridOverlay: GridOverlayView = gridView
+        root.addView(gridView, FrameLayout.LayoutParams(-1, -1))
+        val filterOverlay = View(host).apply { alpha = 0f }
+        root.addView(filterOverlay, FrameLayout.LayoutParams(-1, -1))
         val focusView = View(host).apply {
-            background = kit.oval(Color.TRANSPARENT, Color.WHITE, kit.dp(2))
+            background = kit.oval(Color.TRANSPARENT, Color.WHITE, dp(2))
             visibility = View.GONE
         }
-        previewCard.addView(focusView, FrameLayout.LayoutParams(kit.dp(72), kit.dp(72), Gravity.CENTER))
+        root.addView(focusView, FrameLayout.LayoutParams(dp(72), dp(72)))
 
         fun applyFilterOverlay() {
-            filterOverlay.alpha = when (filter) {
-                FilterMode.NONE -> 0f
-                else -> 0.18f
-            }
+            filterOverlay.alpha = if (filter == FilterMode.NONE) 0f else 0.18f
             filterOverlay.setBackgroundColor(when (filter) {
                 FilterMode.MONO -> Color.GRAY
                 FilterMode.SEPIA -> Color.rgb(112, 66, 20)
@@ -318,23 +266,21 @@ object OeaCameraApp {
                 else -> Color.TRANSPARENT
             })
         }
-        updateFilterOverlay = { applyFilterOverlay() }
         applyFilterOverlay()
 
-        // Camera helper
+        // ---- camera helper, tied to the viewfinder's life
         var cameraHelper: AdvancedCameraHelper? = null
         try {
             cameraHelper = AdvancedCameraHelper(host, textureView, front, zoom, flash)
             cameraHelper.start()
-            previewCard.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(v: View) { cameraHelper?.start() }
                 override fun onViewDetachedFromWindow(v: View) { cameraHelper?.stop() }
             })
-            // Tap to focus
             textureView.setOnTouchListener { _, event ->
                 if (event.action == MotionEvent.ACTION_UP) {
-                    focusView.x = event.x - kit.dp(36)
-                    focusView.y = event.y - kit.dp(36)
+                    focusView.x = event.x - dp(36)
+                    focusView.y = event.y - dp(36)
                     focusView.visibility = View.VISIBLE
                     focusView.alpha = 1f
                     focusView.animate().alpha(0f).setStartDelay(800).setDuration(300).withEndAction { focusView.visibility = View.GONE }.start()
@@ -344,127 +290,166 @@ object OeaCameraApp {
             }
         } catch (_: Throwable) {}
 
-        // Zoom slider
-        val zoomRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, kit.dp(8), 0, 0) }
-        zoomRow.addView(kit.text("Zoom", 12f, palette.textSecondary), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(8) })
+        // ---- top bar
+        val topBar = LinearLayout(host).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0x66000000)
+            setPadding(dp(10), dp(30), dp(10), dp(8))
+        }
+        val flashChip = kit.chip("Flash ${flash.name.lowercase().replaceFirstChar { it.uppercase() }}", flash != FlashMode.OFF) {}
+        val timerChip = kit.chip("Timer ${timer.label}", timer != TimerMode.OFF) {}
+        val gridChip = kit.chip("Grid ${grid.label}", grid != GridMode.OFF) {}
+        val filterChip = kit.chip("Filter ${filter.label}", filter != FilterMode.NONE) {}
+        fun refreshChips() {
+            flashChip.text = "Flash ${flash.name.lowercase().replaceFirstChar { it.uppercase() }}"
+            styleChip(flashChip, flash != FlashMode.OFF)
+            timerChip.text = "Timer ${timer.label}"
+            gridChip.text = "Grid ${grid.label}"
+            filterChip.text = "Filter ${filter.label}"
+        }
+        flashChip.setOnClickListener {
+            flash = FlashMode.values()[(flash.ordinal + 1) % FlashMode.values().size]
+            p.edit().putString(KEY_FLASH, flash.name).apply()
+            applyFlash(host, flash, front)
+            refreshChips()
+        }
+        timerChip.setOnClickListener {
+            timer = TimerMode.values()[(timer.ordinal + 1) % TimerMode.values().size]
+            p.edit().putString(KEY_TIMER, timer.name).apply()
+            refreshChips()
+        }
+        gridChip.setOnClickListener {
+            grid = GridMode.values()[(grid.ordinal + 1) % GridMode.values().size]
+            p.edit().putString(KEY_GRID, grid.name).apply()
+            gridOverlay.setMode(grid)
+            refreshChips()
+        }
+        filterChip.setOnClickListener {
+            filter = FilterMode.values()[(filter.ordinal + 1) % FilterMode.values().size]
+            p.edit().putString(KEY_FILTER, filter.name).apply()
+            applyFilterOverlay()
+            refreshChips()
+        }
+        val chipLp = { LinearLayout.LayoutParams(-2, dp(32)).apply { rightMargin = dp(6) } }
+        val chips = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+        chips.addView(flashChip, chipLp())
+        chips.addView(timerChip, chipLp())
+        chips.addView(gridChip, chipLp())
+        chips.addView(filterChip, chipLp())
+        topBar.addView(kit.hscroll(chips), LinearLayout.LayoutParams(0, -2, 1f))
+        topBar.addView(kit.circleIconButton(R.drawable.oic_settings, "Camera settings", 0x33FFFFFF, Color.WHITE) {
+            showSettings(host, kit, palette)
+        }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(6) })
+        root.addView(topBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+
+        // ---- bottom band: pro controls, zoom, modes, shutter row
+        val bottom = LinearLayout(host).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0x66000000)
+            setPadding(dp(12), dp(10), dp(12), dp(22))
+        }
+        root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+
+        // Pro controls: only in Pro mode.
+        val proBox = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val isoBar = SeekBar(host).apply { max = 100 }
+        val expBar = SeekBar(host).apply { max = 200; progress = 100 }
+        val wbBar = SeekBar(host).apply { max = 100 }
+        fun addProRow(label: String, bar: SeekBar) {
+            val r = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            r.addView(kit.text(label, 12f, Color.WHITE), LinearLayout.LayoutParams(dp(40), -2))
+            r.addView(bar, LinearLayout.LayoutParams(0, -2, 1f))
+            proBox.addView(r, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        }
+        addProRow("ISO", isoBar)
+        addProRow("EV", expBar)
+        addProRow("WB", wbBar)
+        bottom.addView(proBox, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+
+        // Zoom presets and a fine slider share one row.
+        val zoomRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val zoomLabels = mutableListOf<Pair<Float, TextView>>()
+        fun refreshZoom() {
+            zoomLabels.forEach { (level, view) -> styleChip(view, kotlin.math.abs(level - zoom) < 0.05f) }
+        }
+        listOf(1f, 2f, 4f).forEach { level ->
+            val chip = kit.chip("${level.toInt()}×", false) {
+                zoom = level
+                p.edit().putFloat(KEY_ZOOM, zoom).apply()
+                cameraHelper?.setZoom(zoom)
+                refreshZoom()
+            }
+            zoomLabels += level to chip
+            zoomRow.addView(chip, LinearLayout.LayoutParams(dp(56), dp(34)).apply { rightMargin = dp(6) })
+        }
+        refreshZoom()
         val zoomBar = SeekBar(host).apply { max = 700; progress = ((zoom - 1f) * 100).toInt() }
         zoomBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
                     zoom = 1f + progress / 100f
-                    prefs(host).edit().putFloat(KEY_ZOOM, zoom).apply()
+                    p.edit().putFloat(KEY_ZOOM, zoom).apply()
                     cameraHelper?.setZoom(zoom)
+                    refreshZoom()
                 }
             }
             override fun onStartTrackingTouch(sb: SeekBar?) = Unit
             override fun onStopTrackingTouch(sb: SeekBar?) = Unit
         })
-        zoomRow.addView(zoomBar, LinearLayout.LayoutParams(0, -2, 1f))
-        zoomRow.addView(kit.text("${String.format(Locale.US, "%.1fx", zoom)}", 12f, palette.textSecondary), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = kit.dp(8) })
+        zoomRow.addView(zoomBar, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(4) })
+        bottom.addView(zoomRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
 
-        column.addView(previewCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-        column.addView(zoomRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
-
-        // Pro controls (only visible in Pro mode)
-        val proBox = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
-        val isoBar = SeekBar(host).apply { max = 100 }
-        val expBar = SeekBar(host).apply { max = 200; progress = 100 }
-        val wbBar = SeekBar(host).apply { max = 100 }
-        proBox.addView(kit.text("Pro controls — ISO, Exposure, White Balance (where hardware supports)", 12f, palette.textSecondary).apply { setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(6)) })
-        fun addProRow(label: String, bar: SeekBar) {
-            val r = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            r.addView(kit.text(label, 12f, palette.textSecondary), LinearLayout.LayoutParams(kit.dp(60), -2))
-            r.addView(bar, LinearLayout.LayoutParams(0, -2, 1f))
-            proBox.addView(r, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
+        // Modes: one row of chips, selection updated in place.
+        val modeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+        val modeChips = mutableListOf<Pair<CaptureMode, TextView>>()
+        fun selectMode(mode: CaptureMode) {
+            captureMode = mode
+            proBox.visibility = if (mode == CaptureMode.PRO) View.VISIBLE else View.GONE
+            modeChips.forEach { (m, view) -> styleChip(view, m == mode) }
+            when (mode) {
+                CaptureMode.QR -> openQrScanner(host)
+                CaptureMode.DOC -> openDocumentScanner(host)
+                CaptureMode.VIDEO, CaptureMode.TIMELAPSE -> android.widget.Toast.makeText(host, "${mode.label}: tap the shutter to record", android.widget.Toast.LENGTH_SHORT).show()
+                else -> Unit
+            }
         }
-        addProRow("ISO", isoBar)
-        addProRow("EV", expBar)
-        addProRow("WB", wbBar)
-        column.addView(proBox)
+        CaptureMode.values().forEach { mode ->
+            val chip = kit.chip(mode.label, mode == captureMode) { selectMode(mode) }
+            modeChips += mode to chip
+            modeRow.addView(chip, LinearLayout.LayoutParams(-2, dp(34)).apply { rightMargin = dp(6) })
+        }
+        bottom.addView(kit.hscroll(modeRow), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+        proBox.visibility = if (captureMode == CaptureMode.PRO) View.VISIBLE else View.GONE
 
-        // Capture controls
-        val controls = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        // Shutter row: a quiet switch on each side of the shutter.
+        val shutterRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val captureBtn = FrameLayout(host).apply {
-            background = kit.oval(Color.WHITE, palette.accent, kit.dp(4))
+            background = kit.oval(Color.WHITE, palette.accent, dp(4))
             isClickable = true
         }
         val innerCapture = View(host).apply { background = kit.oval(if (isRecording) Color.RED else Color.WHITE) }
-        captureBtn.addView(innerCapture, FrameLayout.LayoutParams(kit.dp(56), kit.dp(56), Gravity.CENTER))
-        val switchBtn = kit.circleIconButton(R.drawable.oic_refresh, "Switch camera", palette.cardHigh, palette.text) {
+        captureBtn.addView(innerCapture, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER))
+        val switchBtn = kit.circleIconButton(R.drawable.oic_refresh, "Switch camera", 0x33FFFFFF, Color.WHITE) {
             front = !front
             p.edit().putBoolean(KEY_FACING, front).apply()
             cameraHelper?.switchCamera(front)
         }
-        val flashBtn = kit.circleIconButton(R.drawable.oic_flash_on, "Flash", palette.cardHigh, palette.text) {
-            flash = FlashMode.values()[(flash.ordinal + 1) % FlashMode.values().size]
-            p.edit().putString(KEY_FLASH, flash.name).apply()
-            applyFlash(host, flash, front)
-            refreshTop()
-            android.widget.Toast.makeText(host, "Flash: ${flash.name}", android.widget.Toast.LENGTH_SHORT).show()
-        }
-
-        controls.addView(flashBtn, LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { rightMargin = kit.dp(16) })
-        controls.addView(captureBtn, LinearLayout.LayoutParams(kit.dp(80), kit.dp(80)).apply { gravity = Gravity.CENTER })
-        controls.addView(switchBtn, LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { leftMargin = kit.dp(16) })
-
-        column.addView(controls, LinearLayout.LayoutParams(-1, -2).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = kit.dp(12) })
-
-        // Mode selector
-        val modeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        CaptureMode.values().forEach { mode ->
-            modeRow.addView(kit.chip(mode.label, mode == captureMode) {
-                captureMode = mode
-                // Update UI
-                proBox.visibility = if (mode == CaptureMode.PRO) View.VISIBLE else View.GONE
-                (modeRow.parent as? View)?.let { parent ->
-                    // Rebuild chips
-                    modeRow.removeAllViews()
-                    CaptureMode.values().forEach { m ->
-                        modeRow.addView(kit.chip(m.label, m == mode) {
-                            captureMode = m
-                            proBox.visibility = if (m == CaptureMode.PRO) View.VISIBLE else View.GONE
-                            // Update modeRow chips
-                            modeRow.removeAllViews()
-                            CaptureMode.values().forEach { mm ->
-                                modeRow.addView(kit.chip(mm.label, mm == m) {
-                                    captureMode = mm
-                                    proBox.visibility = if (mm == CaptureMode.PRO) View.VISIBLE else View.GONE
-                                    modeRow.removeAllViews()
-                                    CaptureMode.values().forEach { mmm ->
-                                        modeRow.addView(kit.chip(mmm.label, mmm == mm) {
-                                            captureMode = mmm
-                                            proBox.visibility = if (mmm == CaptureMode.PRO) View.VISIBLE else View.GONE
-                                            // refresh again
-                                            modeRow.removeAllViews()
-                                            CaptureMode.values().forEach { lastMode ->
-                                                modeRow.addView(kit.chip(lastMode.label, lastMode == mmm) {
-                                                    captureMode = lastMode
-                                                    proBox.visibility = if (lastMode == CaptureMode.PRO) View.VISIBLE else View.GONE
-                                                    // avoid infinite recursion - just update
-                                                }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-                                            }
-                                        }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-                                    }
-                                }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-                            }
-                            // Handle mode specific actions
-                            when (m) {
-                                CaptureMode.QR -> openQrScanner(host)
-                                CaptureMode.DOC -> openDocumentScanner(host)
-                                CaptureMode.VIDEO, CaptureMode.TIMELAPSE -> android.widget.Toast.makeText(host, "${m.label} mode: tap shutter to record", android.widget.Toast.LENGTH_SHORT).show()
-                                else -> {}
-                            }
-                        }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-                    }
-                }
-                when (mode) {
-                    CaptureMode.QR -> openQrScanner(host)
-                    CaptureMode.DOC -> openDocumentScanner(host)
-                    else -> {}
-                }
-            }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-        }
-        column.addView(kit.hscroll(modeRow), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+        val lastThumb = lastPhotoThumb(host)
+        val galleryBtn = if (lastThumb != null) {
+            FrameLayout(host).apply {
+                val iv = ImageView(host).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setImageBitmap(lastThumb); clipToOutline = true; background = kit.rounded(Color.BLACK, 10) }
+                addView(iv, FrameLayout.LayoutParams(dp(48), dp(48)))
+                isClickable = true
+                setOnClickListener { openGallery(host) }
+            }
+        } else kit.circleIconButton(R.drawable.oic_photo_library, "EMAGE", 0x33FFFFFF, Color.WHITE) { openGallery(host) }
+        shutterRow.addView(galleryBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
+        shutterRow.addView(View(host), LinearLayout.LayoutParams(0, 1, 1f))
+        shutterRow.addView(captureBtn, LinearLayout.LayoutParams(dp(80), dp(80)))
+        shutterRow.addView(View(host), LinearLayout.LayoutParams(0, 1, 1f))
+        shutterRow.addView(switchBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
+        bottom.addView(shutterRow, LinearLayout.LayoutParams(-1, -2))
 
         // Capture logic
         captureBtn.setOnClickListener {
@@ -539,8 +524,7 @@ object OeaCameraApp {
             }
         }
 
-        kit.note(column, "OEA Camera: competitive implementation with Camera2 preview, flash/torch, timer, grid, aspect, filters, zoom, tap-to-focus, pro controls (ISO/EV/WB), portrait bokeh simulation, night multi-frame, QR scan, document scan, video recording. Unique: privacy blur option, EMAGE quick edit, last photo thumbnail. All controls polished, no dead buttons.")
-        return column
+        return root
     }
 
     private fun lastPhotoThumb(host: Activity): Bitmap? {

@@ -60,16 +60,62 @@ object OeaVideoApp {
         val bucket: String,
         val relativePath: String,
         val width: Int,
-        val height: Int
+        val height: Int,
+        /** True for a music or recording file: played with the same controls over a cover. */
+        val audio: Boolean = false
     )
 
     private const val PREFS = "oea_video_v2"
+    private const val EXTRA_VIEW_HANDLED = "oea.vip.view_handled"
     private const val KEY_FAV = "fav_uris"
     private const val KEY_HISTORY = "history"
     private const val KEY_PLAYLISTS = "playlists"
     private const val KEY_GRID = "grid_mode"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Every audio file on the phone (music, recordings, voice notes), newest first. */
+    private fun queryAudio(context: Context, limit: Int = 500): List<VideoItem> {
+        val list = mutableListOf<VideoItem>()
+        runCatching {
+            val proj = arrayOf(
+                android.provider.MediaStore.Audio.Media._ID,
+                android.provider.MediaStore.Audio.Media.DISPLAY_NAME,
+                android.provider.MediaStore.Audio.Media.DURATION,
+                android.provider.MediaStore.Audio.Media.SIZE,
+                android.provider.MediaStore.Audio.Media.DATE_ADDED,
+                android.provider.MediaStore.Audio.Media.ALBUM
+            )
+            context.contentResolver.query(
+                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                proj, null, null,
+                "${android.provider.MediaStore.Audio.Media.DATE_ADDED} DESC LIMIT $limit"
+            )?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media._ID)
+                val nameCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DISPLAY_NAME)
+                val durCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DURATION)
+                val sizeCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.SIZE)
+                val dateCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATE_ADDED)
+                val albumCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.ALBUM)
+                while (c.moveToNext()) {
+                    val uri = android.content.ContentUris.withAppendedId(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, c.getLong(idCol))
+                    list.add(VideoItem(
+                        uri = uri,
+                        name = c.getString(nameCol) ?: "Audio",
+                        duration = c.getLong(durCol),
+                        size = c.getLong(sizeCol),
+                        date = c.getLong(dateCol) * 1000,
+                        bucket = c.getString(albumCol) ?: "Audio",
+                        relativePath = "",
+                        width = 0,
+                        height = 0,
+                        audio = true
+                    ))
+                }
+            }
+        }
+        return list
+    }
 
     private fun queryVideos(context: Context, offset: Int = 0, limit: Int = 200): List<VideoItem> {
         val list = mutableListOf<VideoItem>()
@@ -162,12 +208,14 @@ object OeaVideoApp {
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         val mediaPermission = if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO else android.Manifest.permission.READ_EXTERNAL_STORAGE
         if (host.checkSelfPermission(mediaPermission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            kit.banner(column, R.drawable.ic_oea_video, "Connect your device videos", "VIP can show Camera, Downloads and other video folders on this phone. OEA never uploads them.", OeaKit.Tone.INFO, "Allow") {
-                runCatching { host.requestPermissions(arrayOf(mediaPermission), 2202) }
+            kit.banner(column, R.drawable.ic_oea_video, "Connect your device videos", "VIP can show your videos and audio files (music, recordings, downloads). OEA never uploads them.", OeaKit.Tone.INFO, "Allow") {
+                val audioPermission = if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_AUDIO else android.Manifest.permission.READ_EXTERNAL_STORAGE
+                runCatching { host.requestPermissions(arrayOf(mediaPermission, audioPermission), 2202) }
             }
             kit.note(column, "OEA's own recordings remain available without granting video access.")
         }
         var videos: MutableList<VideoItem> = mutableListOf()
+        var audioItems: List<VideoItem> = emptyList()
         var currentBucket: String? = null
         var currentTab = "albums"
         var searchQuery = ""
@@ -203,14 +251,15 @@ object OeaVideoApp {
                 "history" to "History",
                 "recordings" to "Recordings",
                 "downloads" to "Downloads",
-                "large" to "Large"
+                "large" to "Large",
+                "audio" to "Audio"
             ).forEach { (id, label) ->
                 tabBar.addView(kit.chip(label, id == currentTab) { currentTab = id; currentBucket = null; refresh(false, false) }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
             }
         }
 
         fun filtered(): List<VideoItem> {
-            var list: List<VideoItem> = videos
+            var list: List<VideoItem> = if (currentTab == "audio") audioItems else videos
             list = when (currentTab) {
                 "favorites" -> {
                     val fav = prefs(host).getStringSet(KEY_FAV, emptySet()) ?: emptySet()
@@ -356,8 +405,10 @@ object OeaVideoApp {
             if (!loadMore) listHost.removeAllViews().also { listHost.addView(kit.text("Loading videos...", 13f, palette.textSecondary)) }
             io.execute {
                 val batch = if (loadMore) queryVideos(host, loadedOffset, 200) else queryVideos(host, 0, 300)
+                val audioBatch = if (loadMore) null else queryAudio(host)
                 host.runOnUiThread {
                     if (host.isDestroyed) return@runOnUiThread
+                    if (audioBatch != null) audioItems = audioBatch
                     if (loadMore) {
                         if (batch.isEmpty()) hasMore = false else { videos.addAll(batch); loadedOffset += batch.size }
                     } else {
@@ -381,6 +432,16 @@ object OeaVideoApp {
         }
 
         refresh(false, false)
+
+        // Opened from another app (a video or audio file's "Open with"): play it
+        // full-screen straight away, once per launch.
+        val incoming = host.intent
+        val incomingUri = incoming?.data
+        if (incomingUri != null && incoming.action == Intent.ACTION_VIEW && !incoming.getBooleanExtra(EXTRA_VIEW_HANDLED, false)) {
+            incoming.putExtra(EXTRA_VIEW_HANDLED, true)
+            val audioFile = (incoming.type ?: "").startsWith("audio/")
+            host.runOnUiThread { launchPlayer(host, incomingUri, "Opened file", "Opened from another app", audioFile) }
+        }
         return column
     }
 
@@ -440,160 +501,29 @@ object OeaVideoApp {
         }
     }
 
+    /** Opens the full-screen player (its own window: PIP, rotation, lock, brightness). */
     private fun openPlayer(host: Activity, kit: OeaKit, item: VideoItem) {
-        // Save to history
         try {
             val hist = prefs(host).getString(KEY_HISTORY, "")?.split("|")?.filter { it.isNotBlank() }?.toMutableList() ?: mutableListOf()
             hist.remove(item.uri.toString())
             hist.add(0, item.uri.toString())
             prefs(host).edit().putString(KEY_HISTORY, hist.take(100).joinToString("|")).apply()
         } catch (_: Throwable) {}
+        launchPlayer(host, item.uri, item.name, "${if (item.audio) "Audio" else "Video"} • ${formatDuration(item.duration)} • ${item.bucket}", item.audio)
+    }
 
-        kit.sheet(item.name, "OEA VIP • ${formatDuration(item.duration)} • ${item.bucket} • ${formatSize(item.size)}") { panel, dialog ->
-            val videoView = VideoView(host).apply { setBackgroundColor(Color.BLACK) }
-            var mediaPlayerRef: android.media.MediaPlayer? = null
-            var pendingSpeed = 1f
-            panel.addView(videoView, LinearLayout.LayoutParams(-1, kit.dp(240)))
-
-            val controls = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, kit.dp(10), 0, 0) }
-            val playBtn = kit.primaryButton("Play", R.drawable.oic_play_arrow) {}
-            val pauseBtn = kit.tonalButton("Pause", R.drawable.oic_pause) {}
-            val pipBtn = kit.quietButton("PIP", R.drawable.oic_select_window) {
-                try {
-                    if (Build.VERSION.SDK_INT >= 26) {
-                        val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
-                        host.enterPictureInPictureMode(params)
-                    }
-                } catch (_: Throwable) {
-                    android.widget.Toast.makeText(host, "PIP not supported", android.widget.Toast.LENGTH_SHORT).show()
-                }
-            }
-            controls.addView(playBtn, LinearLayout.LayoutParams(-2, kit.dp(44)).apply { rightMargin = kit.dp(8) })
-            controls.addView(pauseBtn, LinearLayout.LayoutParams(-2, kit.dp(44)).apply { rightMargin = kit.dp(8) })
-            controls.addView(pipBtn, LinearLayout.LayoutParams(-2, kit.dp(44)))
-            panel.addView(controls)
-
-            val seekBar = SeekBar(host).apply { max = 1000 }
-            panel.addView(seekBar, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(8) })
-
-            val timeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, kit.dp(6), 0, 0) }
-            val timeText = kit.text("00:00 / ${formatDuration(item.duration)}", 12f, kit.palette.textSecondary)
-            timeRow.addView(timeText, LinearLayout.LayoutParams(0, -2, 1f))
-            val loopChip = kit.chip("Loop: Off", false) {}
-            var loop = false
-            loopChip.setOnClickListener {
-                loop = !loop
-                (loopChip as TextView).text = "Loop: ${if (loop) "On" else "Off"}"
-            }
-            timeRow.addView(loopChip, LinearLayout.LayoutParams(-2, kit.dp(32)))
-            panel.addView(timeRow)
-
-            val speedRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(8), 0, 0) }
-            listOf(0.25f to "0.25x", 0.5f to "0.5x", 1f to "1x", 1.25f to "1.25x", 1.5f to "1.5x", 2f to "2x", 3f to "3x").forEach { (speed, label) ->
-                speedRow.addView(kit.chip(label, speed == 1f) {
-                    try {
-                        pendingSpeed = speed
-                        mediaPlayerRef?.let { mp ->
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                mp.playbackParams = mp.playbackParams.apply { this.speed = pendingSpeed }
-                            }
-                        }
-                    } catch (_: Throwable) {}
-                }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-            }
-            panel.addView(kit.hscroll(speedRow))
-
-            val volRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, kit.dp(8), 0, 0) }
-            volRow.addView(kit.text("Volume", 12f, kit.palette.textSecondary), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(8) })
-            val volBar = SeekBar(host).apply { max = 100; progress = 80 }
-            volRow.addView(volBar, LinearLayout.LayoutParams(0, -2, 1f))
-            panel.addView(volRow)
-
-            try {
-                videoView.setVideoURI(item.uri)
-                videoView.setOnPreparedListener { mp ->
-                    mediaPlayerRef = mp
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && pendingSpeed != 1f) {
-                            mp.playbackParams = mp.playbackParams.apply { speed = pendingSpeed }
-                        }
-                    } catch (_: Throwable) {}
-                    mp.isLooping = loop
-                    // Resume progress if exists
-                    val progressKey = "progress_${item.uri}"
-                    val savedPos = prefs(host).getInt(progressKey, 0)
-                    if (savedPos > 0 && savedPos < mp.duration) videoView.seekTo(savedPos)
-                    val handler = android.os.Handler(android.os.Looper.getMainLooper())
-                    handler.post(object : Runnable {
-                        override fun run() {
-                            if (host.isDestroyed) return
-                            if (videoView.isPlaying) {
-                                val pos = videoView.currentPosition
-                                val dur = videoView.duration.coerceAtLeast(1)
-                                seekBar.progress = (pos * 1000L / dur).toInt().coerceIn(0, 1000)
-                                timeText.text = "${formatDuration(pos.toLong())} / ${formatDuration(dur.toLong())}"
-                                // Save progress
-                                prefs(host).edit().putInt(progressKey, pos).apply()
-                            }
-                            handler.postDelayed(this, 500L)
-                        }
-                    })
-                    // Volume
-                    volBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                        override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                            if (fromUser) {
-                                val vol = p / 100f
-                                mp.setVolume(vol, vol)
-                            }
-                        }
-                        override fun onStartTrackingTouch(sb: SeekBar?) = Unit
-                        override fun onStopTrackingTouch(sb: SeekBar?) = Unit
-                    })
-                }
-                videoView.setOnCompletionListener {
-                    if (loop) videoView.start()
-                }
-                playBtn.setOnClickListener { videoView.start() }
-                pauseBtn.setOnClickListener { videoView.pause() }
-                seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                        if (fromUser) {
-                            val dur = videoView.duration
-                            videoView.seekTo((p * dur / 1000f).toInt())
-                        }
-                    }
-                    override fun onStartTrackingTouch(sb: SeekBar?) = Unit
-                    override fun onStopTrackingTouch(sb: SeekBar?) = Unit
-                })
-                videoView.setOnErrorListener { _, _, _ ->
-                    panel.addView(kit.text("Playback error — try external player", 13f, kit.palette.danger))
-                    true
-                }
-            } catch (e: Throwable) {
-                panel.addView(kit.text("Could not open video: ${e.message}", 13f, kit.palette.danger))
-            }
-
-            panel.addView(kit.buttonRow(
-                kit.quietButton("Close") { dialog.dismiss() },
-                kit.tonalButton("External") {
-                    dialog.dismiss()
-                    try {
-                        host.startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(item.uri, "video/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) })
-                    } catch (_: Throwable) {}
-                },
-                kit.tonalButton("Share") {
-                    dialog.dismiss()
-                    try {
-                        host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                            type = "video/*"
-                            putExtra(Intent.EXTRA_STREAM, item.uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }, "Share video"))
-                    } catch (_: Throwable) {}
-                }
-            ))
-
-            kit.note(panel, "VIP unique: resume playback, speed control, loop, PIP, volume gesture, playlists, history. Subtitles: if ${item.name.substringBeforeLast('.')}.srt exists in same folder, OEA will show it (detection via MediaStore). Background audio: PIP keeps playing. Equalizer via AudioManager bass boost where supported.")
+    /** Starts the VIP player for any picture-less media [uri]. */
+    fun launchPlayer(host: Activity, uri: Uri, title: String, subtitle: String, audio: Boolean) {
+        runCatching {
+            host.startActivity(Intent(host, OeaVipPlayerActivity::class.java)
+                .setData(uri)
+                .putExtra(OeaVipPlayerActivity.EXTRA_URI, uri.toString())
+                .putExtra(OeaVipPlayerActivity.EXTRA_TITLE, title)
+                .putExtra(OeaVipPlayerActivity.EXTRA_SUBTITLE, subtitle)
+                .putExtra(OeaVipPlayerActivity.EXTRA_AUDIO, audio)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        }.onFailure {
+            android.widget.Toast.makeText(host, "The player could not open this file.", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
