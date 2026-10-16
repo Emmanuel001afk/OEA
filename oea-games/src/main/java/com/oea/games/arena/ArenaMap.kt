@@ -16,7 +16,7 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /** Seeded battle-royale island: terrain, towns with enterable houses, cover, trees and loot spots. */
-internal class ArenaMap(val seed: Long) {
+internal class ArenaMap(val seed: Long, private val terrainStyle: String = "island") {
     class Tree(val x: Float, val z: Float, val y: Float, val scale: Float, val tint: Int)
     class Rock(val x: Float, val y: Float, val z: Float, val sx: Float, val sy: Float, val sz: Float, val yaw: Float)
     class House(val x0: Float, val z0: Float, val x1: Float, val z1: Float, val floor: Float, val doorSide: Int)
@@ -59,7 +59,14 @@ internal class ArenaMap(val seed: Long) {
         for (j in 0 until res) for (i in 0 until res) {
             val x = origin + i * cell; val z = origin + j * cell
             val r = sqrt(x * x + z * z) / (SIZE / 2f)
-            var h = noise.fbm(x * 0.012f, z * 0.012f, 4) * 10f + noise.ridged(x * 0.02f + 7f, z * 0.02f, 3) * 5f + 3.5f
+            val broad = noise.fbm(x * 0.012f, z * 0.012f, 4)
+            val ridge = noise.ridged(x * 0.02f + 7f, z * 0.02f, 3)
+            // Terrain presets change the actual walkable island profile, not just its label.
+            var h = when (terrainStyle) {
+                "highlands" -> broad * 15f + ridge * 11f + 4f
+                "badlands" -> broad * 7f + ridge * 14f + 2.5f
+                else -> broad * 10f + ridge * 5f + 3.5f
+            }
             // Island falloff into the sea.
             val edge = MathX.smoothstep(0.72f, 0.98f, r)
             h = MathX.lerp(h, -4f, edge)
@@ -120,8 +127,16 @@ internal class ArenaMap(val seed: Long) {
         terrainMesh = buildTerrainMesh()
     }
 
-    private fun townHeight(noise: Noise, t: FloatArray): Float =
-        max(1.6f, noise.fbm(t[0] * 0.012f, t[1] * 0.012f, 4) * 10f + 3.5f)
+    private fun townHeight(noise: Noise, t: FloatArray): Float {
+        val broad = noise.fbm(t[0] * 0.012f, t[1] * 0.012f, 4)
+        val ridge = noise.ridged(t[0] * 0.02f + 7f, t[1] * 0.02f, 3)
+        val base = when (terrainStyle) {
+            "highlands" -> broad * 15f + ridge * 11f + 4f
+            "badlands" -> broad * 7f + ridge * 14f + 2.5f
+            else -> broad * 10f + ridge * 5f + 3.5f
+        }
+        return max(1.6f, base)
+    }
 
     private fun randomLand(rng: Rng, radiusFraction: Float): Pair<Float, Float> {
         repeat(40) {
