@@ -313,7 +313,10 @@ object OeaCameraApp {
         flashChip.setOnClickListener {
             flash = FlashMode.values()[(flash.ordinal + 1) % FlashMode.values().size]
             p.edit().putString(KEY_FLASH, flash.name).apply()
-            applyFlash(host, flash, front)
+            val torchReady = applyFlash(host, flash, front)
+            if (flash == FlashMode.TORCH && !torchReady) {
+                android.widget.Toast.makeText(host, "This device has no available rear-camera torch.", android.widget.Toast.LENGTH_SHORT).show()
+            }
             refreshChips()
         }
         timerChip.setOnClickListener {
@@ -604,14 +607,15 @@ object OeaCameraApp {
      * Some phones list the front camera first, and some have rear cameras
      * without a flash, so never assume cameraIdList.first() is torch-capable.
      */
-    private fun applyFlash(ctx: Context, mode: FlashMode, front: Boolean) {
-        val manager = runCatching { ctx.getSystemService(CameraManager::class.java) }.getOrNull() ?: return
+    private fun applyFlash(ctx: Context, mode: FlashMode, front: Boolean): Boolean {
+        val manager = runCatching { ctx.getSystemService(CameraManager::class.java) }.getOrNull()
+            ?: return mode != FlashMode.TORCH
         val activeId = torchCameraId
         if (activeId != null && (mode != FlashMode.TORCH || front)) {
             runCatching { manager.setTorchMode(activeId, false) }
             torchCameraId = null
         }
-        if (mode != FlashMode.TORCH || front) return
+        if (mode != FlashMode.TORCH || front) return true
 
         val rearFlashId = runCatching {
             manager.cameraIdList.firstOrNull { id ->
@@ -621,13 +625,15 @@ object OeaCameraApp {
             }
         }.getOrNull() ?: run {
             torchCameraId = null
-            return
+            return false
         }
-        runCatching {
+        return runCatching {
             manager.setTorchMode(rearFlashId, true)
             torchCameraId = rearFlashId
-        }.onFailure {
+            true
+        }.getOrElse {
             torchCameraId = null
+            false
         }
     }
 
