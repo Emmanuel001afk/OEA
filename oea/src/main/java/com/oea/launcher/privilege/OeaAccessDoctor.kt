@@ -107,8 +107,7 @@ object OeaAccessDoctor {
                         command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow")
 )
                     root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it now.", "Tap Fix.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
-                    owner -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA is the device owner and can grant it now.", "Tap Fix.")
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Apps › OEA › Display over other apps.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Device Owner alone cannot grant Display over other apps on this Android build. Open Android Settings › Apps › OEA › Display over other apps; a supported root channel can instead change AppOps.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
                 }
             }
 
