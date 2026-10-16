@@ -48,6 +48,15 @@ import com.oea.engine.net.session.SessionPhase
  */
 open class OeaStandaloneGameActivity : Activity(), HostUi {
     protected open val standaloneGameId: String = ""
+
+    /**
+     * Optional host-app callback after a match surface was created successfully.
+     * The shared games module stays independent of the launcher; OEA can use
+     * this hook for Game Boost without making separately installed games depend
+     * on the launcher package.
+     */
+    protected open fun onStandaloneMatchStarted(gameId: String) = Unit
+
     private var host: GameHost? = null
     private val main = Handler(Looper.getMainLooper())
 
@@ -524,6 +533,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         }
         try {
             setContentView(gameHost.root)
+            runCatching { onStandaloneMatchStarted(d.id) }
         } catch (_: Throwable) {
             Toast.makeText(this, "${d.title} could not create its screen", Toast.LENGTH_LONG).show()
             finish()
