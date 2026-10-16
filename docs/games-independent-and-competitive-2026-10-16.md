@@ -1,7 +1,11 @@
-# Games independent, Arena competitive — 2026-10-16
+# Games independent, Send Off competitive — 2026-10-16
+
+Public branding is now **Endless Days** (stable id `runner`) and **Send Off**
+(stable id `arena`). Package names and wire ids remain unchanged so existing
+installs, saves and network invites continue to work.
 
 Restructure of OEA's own games into complete, independent apps, and a
-competitive pass over Arena (modes, guns, characters, levels, maps, controls,
+competitive pass over Send Off (modes, guns, characters, levels, maps, controls,
 aim tuning). Implemented against the real sources in this checkout. This
 sandbox has no JDK/Android SDK and Maven is unreachable, so **nothing here is
 compile- or device-verified**; every change was reviewed twice against the
@@ -41,7 +45,7 @@ hub process (the session socket lives there); the standalone apps can host and
 join those matches by themselves now. The in-hub engine path remains for the
 Engine Lab and hub-hosted sessions.
 
-## 2. Arena — competitive restructure
+## 2. Send Off (stable id `arena`) — competitive restructure
 
 ### Modes with real simulation differences (`rules`, works solo and online)
 
@@ -85,14 +89,14 @@ option (all / rifles & autos / long range / close quarters / pistols & SMGs).
 
 ### Characters ("human like")
 
-`CharRig` (shared by Arena and Runner, source-compatible) gained:
+`CharRig` (shared by Send Off and Endless Days, source-compatible) gained:
 
 - **Faces**: brows, dark eyes, nose and mouth riding the head yaw; ears stay.
 - **Hair styles**: short cap, ponytail, top bun.
 - **Body types**: a `feminine` build (narrower shoulders, wider hips, slimmer
   neck) — soldiers alternate builds per player id.
 - **Gear**: optional day pack on the back.
-- Arena soldiers get per-id scale variety (±5 %), team-coloured kits in TDM
+- Send Off soldiers get per-id scale variety (±5 %), team-coloured kits in TDM
   (helmets for everyone on a team) and per-variant rigs cached per
   (colour, id).
 
@@ -100,12 +104,12 @@ option (all / rifles & autos / long range / close quarters / pistols & SMGs).
 
 - **Look sensitivity** (existing), plus **ADS sensitivity** (extra multiplier
   while aiming), **invert-Y** and a **turn-speed limit** (degrees/second, 0 =
-  off) — new `EngineSettings` fields, editable live from Arena's pause menu
+  off) — new `EngineSettings` fields, editable live from Send Off's pause menu
   (cycles with sensible steps) and from the standalone Controls dialog and the
   hub settings page.
 - **Glitch-proof turning**: `LookPad` now swallows pointer-resync jumps above
   160–420 px/frame and ignores the frame a finger is claimed (no catch-up
-  snap); Arena clamps per-frame look deltas to 28 % of the screen and — when
+  snap); Send Off clamps per-frame look deltas to 28 % of the screen and — when
   the limit is set — clamps touch *and* gamepad yaw/pitch to `turnLimit × dt`,
   so the camera can never spin faster than the configured rate. Yaw stays
   wrapped to (−π, π] for long sessions.
@@ -125,14 +129,14 @@ the XP won.
   `turnSpeedLimit` (0–360°/s) next to `lookSensitivity`.
 - `LookPad`: `maxDeltaPx` glitch clamp + claim-frame suppression.
 - `CharRig`: faces, hair styles, `feminine`, `backpack` (all optional,
-  default-off — Runner's existing constructor calls compile unchanged).
+  default-off — Endless Days' existing constructor calls compile unchanged).
 
 ## Verification
 
 - **Static (done)**: Kotlin lexer brace/paren/bracket balance over every edited
   file; `when` exhaustiveness over the grown `Weapon` enum (gunMesh, pitches,
   bot spacing); snapshot write/read field order mirrored; constructor arities
-  checked against every call site (CharRig in Runner, ArenaSim in OeaArena,
+  checked against every call site (CharRig in Endless Days, ArenaSim in OeaArena,
   GameLaunch/NetSession in the standalone host); no other module references the
   moved `ArenaMap` materials.
 - **Not verified here**: compilation, GLES behaviour, device touch feel of the

@@ -47,7 +47,8 @@ enum class FaultAction {
 /** Everything the policy needs to know about one fault. */
 data class FaultInput(
     val kind: ThreadKind,
-    /** Subsystem tag, e.g. `home`, `game:runner`, `island-host`, `widget-host`. */
+    /** Subsystem tag, e.g. `home`, `game:runner`, `island-host`, `widget-host`.
+     * The runner id is intentionally stable even though its public name is Endless Days. */
     val subsystem: String,
     /** Faults of the same subsystem seen in [windowMs] so far, including this one. */
     val repeats: Int,

@@ -21,7 +21,7 @@ import com.oea.engine.math.Rng
  * outfits; anything can be randomized and everything persists per device.
  *
  * Games own an instance, draw [drawOverlay] when [open], and hand [spec] to
- * their character's [CharRig] — see Arena's locker.
+ * their character's [CharRig] — see Send Off's locker.
  */
 class CharacterStudio(private val storage: GameStorage) {
 

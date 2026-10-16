@@ -55,7 +55,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * OEA Arena: a mobile battle royale foundation. Skydive onto an island,
+ * OEA Send Off: a mobile battle royale foundation. Skydive onto an island,
  * loot weapons, armour and medkits, survive a shrinking zone and outlast
  * bots and friends. Host-authoritative networking at 30 Hz with client-side
  * prediction and reconciliation, snapshot interpolation of other players and
@@ -972,7 +972,7 @@ class OeaArena : OeaGame() {
         if (matchOver) { ctx.island.end(); return }
         val alive = if (isAuthority) sim.aliveCount else actors.values.count { it.alive }
         ctx.island.update(LiveActivity(
-            title = "Arena · $alive alive",
+            title = "Send Off · $alive alive",
             subtitle = if (me.alive) "${me.health.toInt()} HP · ${me.kills} kills" else "Eliminated · spectating",
             compactText = "$alive alive",
             trailing = "${me.kills} ◎",
@@ -1007,7 +1007,7 @@ class OeaArena : OeaGame() {
             MenuItem("info", "Match & controls"),
             MenuItem("exit", if (net != null) "Leave match" else "Quit match", destructive = true),
         )
-        ctx.ui.menu("Arena · Level $levelNow", if (net == null) "The match keeps running" else null, items) { id ->
+        ctx.ui.menu("Send Off · Level $levelNow", if (net == null) "The match keeps running" else null, items) { id ->
             when (id) {
                 "sens" -> {
                     val steps = floatArrayOf(0.4f, 0.6f, 0.8f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f)
@@ -1038,7 +1038,7 @@ class OeaArena : OeaGame() {
                 "info" -> ctx.ui.menu("Match & controls", modeBlurb(), listOf(MenuItem("back", "Back"))) { openPauseMenu() }
                 "exit" -> {
                     ctx.storage.putInt("xp", xpTotal)
-                    ctx.ui.exit(GameResult("Left the arena", local?.kills?.toLong() ?: 0))
+                    ctx.ui.exit(GameResult("Left Send Off", local?.kills?.toLong() ?: 0))
                 }
             }
         }
@@ -1572,7 +1572,7 @@ class OeaArena : OeaGame() {
 
         val descriptor = GameDescriptor(
             id = ID,
-            title = "Arena",
+            title = "Send Off",
             tagline = "Battle royale · team deathmatch · gun game",
             description = "A competitive shooter with real modes, not labels. Battle Royale: skydive, loot pistols, SMGs, rifles, shotguns, revolvers, marksman rifles, LMGs and snipers, stay inside the shrinking zone, be last standing. " +
                 "Team Deathmatch: two teams, respawns, spawn protection, first to 40 eliminations. Gun Game: every kill advances your gun — a kill with the final pan wins. " +

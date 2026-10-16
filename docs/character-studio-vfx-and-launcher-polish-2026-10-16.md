@@ -28,14 +28,14 @@ The reusable engine data model is in `oea-engine/.../graphics/CharSpec.kt`:
   procedural cotton, knit, fleece, tactical, canvas, leather, rubber, metal
   and skin-pore textures and regenerates them after a GPU context loss.
 
-`CharacterStudio` in `oea-games` is the in-game editor. Arena opens it from
+`CharacterStudio` in `oea-games` is the in-game editor. Send Off opens it from
 Pause → Character studio. It is a live turntable over the real soldier, with
 Body / Face / Hair / Skin / Outfit tabs, cycle controls, slider controls,
 Randomize, Reset and Done. It saves to the game's private `GameStorage`; the
 same `CharSpec` is passed to the same `CharRig` that draws the playable local
 character, so changes apply immediately rather than to a preview-only dummy.
 
-`CharRig` remains source-compatible with Runner and older Arena call sites:
+`CharRig` remains source-compatible with Endless Days and older Send Off call sites:
 legacy material arguments still work. When given a `CharSpec`, it adds facial
 masses, variable skeleton scales, clothing shells, texture-backed materials,
 headwear, facial hair, markings and back items. `CharFx` adds live interaction
@@ -72,7 +72,7 @@ skin, clothes and terrain. Sun shadow mapping remains active for cast shadows;
 point-light shadows would require a cube shadow atlas and are deliberately the
 next GPU-tier upgrade rather than pretending an additive billboard is a shadow.
 
-Arena wires the system to terrain, houses, shooting, impacts, weather and
+Send Off (the stable `arena` game id) wires the system to terrain, houses, shooting, impacts, weather and
 haunted fog. It registers the particle systems during the world pass and keeps
 old muzzle/dust systems intact for compatibility.
 

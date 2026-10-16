@@ -805,7 +805,7 @@ class OeaGamesActivity : Activity(), SessionListener {
         kit.switchRow(g, R.drawable.oic_touch_app, "Haptics", null, s.haptics) { s.haptics = it }
         kit.switchRow(g, R.drawable.oic_music_note, "Sound effects", null, s.sound) { s.sound = it }
         kit.switchRow(g, R.drawable.oic_headset, "Music", null, s.music) { s.music = it }
-        kit.stepperRow(g, R.drawable.oic_gesture, "Aim sensitivity", "Arena and other shooters", (s.lookSensitivity * 10f).toInt(), 2, 30, { String.format(java.util.Locale.US, "%.1f×", it / 10f) }) { s.lookSensitivity = it / 10f }
+        kit.stepperRow(g, R.drawable.oic_gesture, "Aim sensitivity", "Send Off and other shooters", (s.lookSensitivity * 10f).toInt(), 2, 30, { String.format(java.util.Locale.US, "%.1f×", it / 10f) }) { s.lookSensitivity = it / 10f }
         kit.stepperRow(g, R.drawable.oic_gesture, "ADS sensitivity", "Extra multiplier while aiming down sights", (s.adsSensitivity * 10f).toInt(), 3, 15, { String.format(java.util.Locale.US, "%.0f%%", it * 10f) }) { s.adsSensitivity = it / 10f }
         kit.stepperRow(g, R.drawable.oic_tune, "Turn speed limit", "Caps how fast the view can turn — glitch-proof aiming", (s.turnSpeedLimit / 10f).toInt(), 0, 36, { if (it == 0) "Off" else String.format(java.util.Locale.US, "%d°/s", it * 10) }) { s.turnSpeedLimit = it * 10f }
         kit.note(box, "Thermal protection steps quality down before your phone throttles, and Android's Game Mode (battery or performance) is respected. Changes apply the next time a game starts.")
@@ -960,7 +960,7 @@ class OeaGamesActivity : Activity(), SessionListener {
             }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(10) })
         }
         box.addView(kit.hscroll(row))
-        kit.note(box, "Your colour tints your runner, soldier and lobby badge. If a friend already uses it, the host picks a free one for you.")
+        kit.note(box, "Your colour tints your Endless Days runner, Send Off soldier and lobby badge. If a friend already uses it, the host picks a free one for you.")
         present(p)
     }
 

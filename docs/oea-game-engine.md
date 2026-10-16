@@ -1,7 +1,7 @@
 # OEA Game Engine
 
 The OEA Game Engine is a mobile-first game engine that lives inside the OEA
-launcher. It runs OEA's own games (Runner, Arena, Chess and the Engine Lab) and
+launcher. It runs OEA's own games (Endless Days, Send Off, Chess and the Engine Lab; stable ids `runner` and `arena`) and
 is meant for building new ones. Everything runs on the players' phones: there
 are no accounts, game servers, analytics or third-party services.
 
@@ -204,7 +204,7 @@ override fun onRender(frame: Frame) {
 World passes go through dynamic resolution and post-processing; UI passes are
 drawn afterwards at native resolution so text stays sharp. Several world passes
 with different `Viewport`s make split screen; `Viewport(rotate180 = true)`
-turns a half upside down for a player sitting opposite (the Runner duel).
+turns a half upside down for a player sitting opposite (the Endless Days duel).
 
 ### Renderer3D
 
@@ -466,11 +466,11 @@ stable anonymous player token).
 
 - **Turn-based** (Chess): send moves reliably; validate on receipt; include a
   position hash and resynchronise the full game on mismatch or reconnect.
-- **Shared seed + state broadcast** (Runner): every device builds the identical
+- **Shared seed + state broadcast** (Endless Days, stable id `runner`): every device builds the identical
   world from `seed`, simulates its own player, broadcasts state at 15 Hz;
   others are rendered with `SnapshotBuffer` interpolation; the host publishes
   results.
-- **Host-authoritative** (Arena): clients send input commands at 30 Hz (each
+- **Host-authoritative** (Send Off, stable id `arena`): clients send input commands at 30 Hz (each
   packet repeats the last three); the host simulates everything and sends
   snapshots at 20 Hz; clients predict their own movement with the same code and
   reconcile (`InputHistory`); remote players are interpolated; shots are
@@ -478,7 +478,7 @@ stable anonymous player token).
 
 ## The built-in games
 
-### Runner
+### Endless Days (stable id: `runner`)
 Endless rail yard: three lanes, swipe to switch/jump/roll, trains (static and
 oncoming), hurdles, overhead bars, barriers, ramps onto train roofs, coins
 (with magnet pull) and power-ups (magnet, jetpack with sky coins, super jump,
@@ -489,7 +489,7 @@ Competition: split-screen duel on one phone (face to face), take turns on the
 same track, or race over Wi-Fi/hotspot/online (survival, 2 km, 5 km) with ghost
 runners and live standings.
 
-### Arena
+### Send Off (stable id: `arena`)
 Battle-royale foundation: skydive and parachute onto a seeded island
 (height-field terrain, towns of enterable houses with doors and windows,
 containers, crates, rocks, trees), loot pistols, SMGs, rifles, shotguns,
@@ -536,7 +536,7 @@ and rejects hardcoded public STUN servers.
 
 - The engine targets OpenGL ES 3.0 (every current phone). A Vulkan backend
   can be added behind `Graphics`/`Renderer3D` without changing games.
-- Arena characters are built from primitives; skeletal animation and glTF
+- Send Off characters are built from primitives; skeletal animation and glTF
   loading are natural next steps (`Mesh` already accepts arbitrary vertices).
 - Online play without your own STUN/TURN server connects on the same network
   and across IPv6; strict IPv4 carrier NAT needs a TURN server you run.

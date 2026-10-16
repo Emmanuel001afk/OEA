@@ -3,7 +3,7 @@
         android:allowBackup="false"
         android:appCategory="game"
         android:icon="@mipmap/ic_game_arena"
-        android:label="OEA Arena"
+        android:label="OEA Send Off"
         android:resizeableActivity="true"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <activity
@@ -11,7 +11,7 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
             android:exported="true"
             android:hardwareAccelerated="true"
-            android:label="OEA Arena"
+            android:label="OEA Send Off"
             android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
