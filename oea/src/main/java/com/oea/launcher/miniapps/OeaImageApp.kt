@@ -61,6 +61,7 @@ object OeaImageApp {
     private const val PREFS = "oea_image_v2"
     private const val KEY_FAV = "fav_uris"
     private const val KEY_TRASH = "trash_uris"
+    private const val EXTRA_VIEW_HANDLED = "oea.emage.view_handled"
     private const val KEY_GRID_COLS = "grid_cols"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -209,7 +210,8 @@ object OeaImageApp {
                 "recent" to "Recent",
                 "screenshots" to "Screenshots",
                 "downloads" to "Downloads",
-                "large" to "Large"
+                "large" to "Large",
+                "oea" to "OEA pictures"
             ).forEach { (id, label) ->
                 tabBar.addView(kit.chip(label, id == currentTab) {
                     currentTab = id
@@ -249,6 +251,13 @@ object OeaImageApp {
 
         fun renderGrid() {
             grid.removeAllViews()
+            if (currentTab == "oea") {
+                // The OEA pictures (wallpapers, lock screens, live scenes) are part of EMAGE.
+                bucketBar.visibility = View.GONE
+                grid.addView(OeaGalleryApp.build(host, palette), LinearLayout.LayoutParams(-1, -2))
+                return
+            }
+            bucketBar.visibility = View.VISIBLE
             val filtered = filteredList()
             if (currentTab == "albums" && currentBucket == null) {
                 // Show albums as cards
@@ -329,7 +338,7 @@ object OeaImageApp {
                         isClickable = true
                         background = kit.rounded(Color.TRANSPARENT, 14, palette.stroke, 1)
                         clipToOutline = true
-                        setOnClickListener { openViewer(host, kit, item) }
+                        setOnClickListener { openViewer(host, kit, item, filtered) { refresh(false, false, false) } }
                         setOnLongClickListener {
                             showItemActions(host, kit, item) { refresh(false, false, false) }
                             true
@@ -423,6 +432,17 @@ object OeaImageApp {
 
         // Initial load
         refresh(false, false, false)
+
+        // Opened from another app (a picture's "View", "Open with" or "Set as
+        // wallpaper"): show that picture full-screen, once per launch.
+        val incoming = host.intent
+        val incomingUri = incoming?.data
+        if (incomingUri != null && incoming.getBooleanExtra(EXTRA_VIEW_HANDLED, false).not() &&
+            (incoming.action == Intent.ACTION_VIEW || incoming.action == Intent.ACTION_ATTACH_DATA)) {
+            incoming.putExtra(EXTRA_VIEW_HANDLED, true)
+            val item = ImageItem(incomingUri, "Picture", System.currentTimeMillis(), 0L, "Opened", "", 0, 0)
+            host.runOnUiThread { openViewer(host, kit, item) }
+        }
         return column
     }
 
@@ -449,6 +469,16 @@ object OeaImageApp {
         }
     }
 
+    /** Details sheet for one picture (used by the full-screen viewer too). */
+    fun showDetailsFor(host: Activity, kit: OeaKit, item: ImageItem) = showDetails(host, kit, item)
+
+    /** Remembers a deleted picture in OEA's own trash list (shown in EMAGE). */
+    fun rememberTrash(host: Activity, item: ImageItem) {
+        val trash = prefs(host).getStringSet(KEY_TRASH, emptySet())?.toMutableSet() ?: mutableSetOf()
+        trash.add(item.uri.toString())
+        prefs(host).edit().putStringSet(KEY_TRASH, trash).apply()
+    }
+
     private fun showDetails(host: Activity, kit: OeaKit, item: ImageItem) {
         kit.sheet(item.name, "Image details") { panel, _ ->
             val group = kit.group(panel)
@@ -467,70 +497,10 @@ object OeaImageApp {
         }
     }
 
-    private fun openViewer(host: Activity, kit: OeaKit, item: ImageItem) {
-        kit.sheet(item.name, "${item.bucket} • ${formatSize(item.size)} • ${SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(item.date))}") { panel, dialog ->
-            val img = ImageView(host).apply { scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(kit.palette.cardHigh) }
-            panel.addView(img, LinearLayout.LayoutParams(-1, kit.dp(360)))
-            io.execute {
-                val bmp = try { host.contentResolver.loadThumbnail(item.uri, android.util.Size(1080, 1080), null) } catch (_: Throwable) { null }
-                if (bmp != null) host.runOnUiThread { if (!host.isDestroyed) img.setImageBitmap(bmp) }
-            }
-            panel.addView(kit.buttonRow(
-                kit.quietButton("Share") {
-                    dialog.dismiss()
-                    try {
-                        host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                            type = "image/*"
-                            putExtra(Intent.EXTRA_STREAM, item.uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }, "Share image"))
-                    } catch (_: Throwable) {}
-                },
-                kit.tonalButton("Edit") {
-                    dialog.dismiss()
-                    try {
-                        host.startActivity(Intent(Intent.ACTION_EDIT).apply { setDataAndType(item.uri, "image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) })
-                    } catch (_: Throwable) {
-                        android.widget.Toast.makeText(host, "No editor found", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                },
-                kit.primaryButton("Close") { dialog.dismiss() }
-            ))
-            panel.addView(kit.buttonRow(
-                kit.quietButton("Wallpaper") {
-                    dialog.dismiss()
-                    try {
-                        host.startActivity(Intent(Intent.ACTION_ATTACH_DATA).apply { setDataAndType(item.uri, "image/*"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) })
-                    } catch (_: Throwable) {
-                        android.widget.Toast.makeText(host, "Set as wallpaper via system picker", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                },
-                kit.quietButton("Delete", R.drawable.oic_delete) {
-                    dialog.dismiss()
-                    kit.confirm("Delete image?", "This removes the image from device (needs permission on Android 10+).", "Delete", destructive = true) {
-                        try {
-                            if (Build.VERSION.SDK_INT >= 30) {
-                                host.contentResolver.delete(item.uri, null, null)
-                            } else {
-                                host.contentResolver.delete(item.uri, null, null)
-                            }
-                            // Add to trash list
-                            val trash = prefs(host).getStringSet(KEY_TRASH, emptySet())?.toMutableSet() ?: mutableSetOf()
-                            trash.add(item.uri.toString())
-                            prefs(host).edit().putStringSet(KEY_TRASH, trash).apply()
-                            (host as? OeaMiniAppActivity)?.refresh()
-                        } catch (e: Throwable) {
-                            android.widget.Toast.makeText(host, "Delete failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-            ))
-            panel.addView(kit.tonalButton("Set as OEA wallpaper", R.drawable.oic_wallpaper) {
-                dialog.dismiss()
-                android.widget.Toast.makeText(host, "Opening wallpaper picker — select EMAGE image", android.widget.Toast.LENGTH_SHORT).show()
-                try { host.startActivity(Intent(host, com.oea.launcher.OeaSystemToolsActivity::class.java).putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "wallpaper")) } catch (_: Throwable) {}
-            }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) })
-        }
+    /** Full-screen viewer through the album the picture was opened from. */
+    private fun openViewer(host: Activity, kit: OeaKit, item: ImageItem, album: List<ImageItem> = listOf(item), onChanged: () -> Unit = {}) {
+        val index = album.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0)
+        OeaEmageViewer.show(host, album, index, onChanged)
     }
 
     private fun startSlideshow(host: Activity, kit: OeaKit, items: List<ImageItem>) {

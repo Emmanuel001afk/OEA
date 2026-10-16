@@ -129,7 +129,7 @@ object OeaMessagingApp {
         var refresh: () -> Unit = {}
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("OEA Messaging", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(kit.text("Messaging", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
             kit.prompt("Search messages", "Address or text", "Search") { q ->
                 // Filter in refresh

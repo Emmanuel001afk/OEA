@@ -34,7 +34,7 @@ object OeaVoiceApp {
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("OEA Voice", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(kit.text("Voice", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(kit.iconBadge(R.drawable.oic_mic, palette.accentSoft, palette.onAccentSoft, 40))
         column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
 

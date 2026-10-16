@@ -230,8 +230,13 @@ class OeaThemeStore private constructor(context: Context) {
 
         /** Decodes at most [maxW]×[maxH] (keeping aspect) without loading the full picture. */
         fun decodeScaled(maxW: Int, maxH: Int, source: () -> InputStream?): Bitmap? {
+            // A bounds-only decode always returns null (it reads the size and
+            // stops), so the result must not be used as "failed". The size is
+            // read from the options; a stream that cannot be opened is the only
+            // real failure here.
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            source()?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+            val opened = source() ?: return null
+            opened.use { BitmapFactory.decodeStream(it, null, bounds) }
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
             var sample = 1
             while (bounds.outWidth / (sample * 2) >= maxW || bounds.outHeight / (sample * 2) >= maxH) sample *= 2

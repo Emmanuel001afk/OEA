@@ -66,7 +66,7 @@ object OeaWeatherApp {
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("OEA Weather", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(kit.text("Weather", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(kit.circleIconButton(R.drawable.oic_search, "Search location", palette.cardHigh, palette.text) {
             searchLocation(host, kit) { _, _, _ -> fetchWeather(host, kit, column, force = true) }
         }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })

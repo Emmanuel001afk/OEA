@@ -108,7 +108,15 @@ internal class RunnerWorld(var seed: Long) {
             coinLine(c, 1, c.z0 + 8f, 10, 2f)
             return c
         }
-        val difficulty = MathX.clamp01(index / 70f)
+        // The chunk before this one is already generated (chunks are built in order):
+        // its trains can run into this chunk, so both are checked together.
+        val previous = chunks.lastOrNull()
+        populate(c, previous, rng)
+        return c
+    }
+
+    private fun populate(c: Chunk, previous: Chunk?, rng: Rng) {
+        val difficulty = MathX.clamp01(c.index / 70f)
         val pattern = rng.weighted(floatArrayOf(
             1.4f - difficulty,          // 0 coins & hurdles
             1.2f,                        // 1 hurdles
@@ -131,7 +139,8 @@ internal class RunnerWorld(var seed: Long) {
             }
             2 -> {
                 val z = c.z0 + 12f
-                val lanes = pick(rng, 1 + rng.nextInt(3))
+                // At most two lanes: one lane always stays open to switch into.
+                val lanes = pick(rng, 1 + rng.nextInt(2))
                 lanes.forEach { overhead(c, it, z); coinLine(c, it, z - 4f, 5, 2f, 0.5f) }
             }
             3 -> {
@@ -179,9 +188,14 @@ internal class RunnerWorld(var seed: Long) {
                 if (difficulty > 0.3f) block(c, order[2], z) else coinLine(c, order[2], z - 6f, 6, 2f)
             }
             8 -> {
-                val lanes = listOf(0, 1, 2)
-                for (k in 0 until 3) lanes.forEach { overhead(c, it, c.z0 + 7f + k * 8f) }
-                coinLine(c, rng.nextInt(3), c.z0 + 5f, 10, 2f, 0.5f)
+                // A roll section: two overhead rows, each leaving one lane open.
+                // The open lane moves between rows, so the player weaves through.
+                val gap = rng.nextInt(3)
+                for (k in 0 until 2) {
+                    val z = c.z0 + 7f + k * 11f
+                    (0..2).filter { it != (gap + k) % 3 }.forEach { overhead(c, it, z) }
+                }
+                coinLine(c, gap, c.z0 + 5f, 10, 2f, 0.5f)
             }
             else -> {
                 val rampLane = rng.nextInt(3)
@@ -194,7 +208,28 @@ internal class RunnerWorld(var seed: Long) {
             val lane = freeLane(c, rng, c.z0 + 25f)
             if (lane >= 0) powerUp(c, rng, lane, c.z0 + 25f, 1.1f)
         }
-        return c
+        tidy(c, previous)
+    }
+
+    /**
+     * Removes what would spawn inside a parked train. Trains reach past the end
+     * of their chunk, so a hurdle, block, coin or power-up that lands inside a
+     * train's body (or right against its front) is unreachable and unfair: it is
+     * dropped. Moving trains are left alone; they are meant to be dodged.
+     */
+    private fun tidy(c: Chunk, previous: Chunk?) {
+        val trains = ((previous?.obstacles ?: emptyList<Obstacle>()) + c.obstacles)
+            .filter { it.type == ObType.TRAIN && it.speed <= 0f }
+        if (trains.isEmpty()) return
+        fun inside(lane: Int, z: Float, margin: Float, maxY: Float, y: Float): Boolean =
+            y < maxY && trains.any { t -> t.lane == lane && z >= (if (t.ramp) t.rampStart else t.z0) - margin && z <= t.z1 + margin }
+        c.obstacles.removeAll { o ->
+            o.type != ObType.TRAIN && trains.any { t ->
+                t.lane == o.lane && o.z1 >= (if (t.ramp) t.rampStart else t.z0) - 3f && o.z0 <= t.z1 + 3f
+            }
+        }
+        c.coins.removeAll { inside(it.lane, it.z, 1f, RunnerWorld.TRAIN_TOP, it.y) }
+        c.powerUps.removeAll { inside(it.lane, it.z, 1f, RunnerWorld.TRAIN_TOP, it.y) }
     }
 
     private fun pick(rng: Rng, n: Int): List<Int> = mutableListOf(0, 1, 2).also { rng.shuffle(it) }.take(n.coerceIn(1, 3))

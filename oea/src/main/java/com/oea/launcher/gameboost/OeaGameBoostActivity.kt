@@ -474,7 +474,7 @@ class OeaGameBoostActivity : Activity() {
             if (!OeaGameBoostStore.enabled(this)) toast("Game Boost is off. Turn it on to boost this session.")
             runCatching {
                 startActivity(Intent(this, com.oea.launcher.games.OeaGamesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }.onFailure { toast("OEA Games could not open") }
+            }.onFailure { toast("The game hub could not open") }
             return
         }
         val launch = packageManager.getLaunchIntentForPackage(app.packageName)

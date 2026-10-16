@@ -56,6 +56,7 @@ import com.oea.launcher.privilege.Privilege
 import com.oea.launcher.runtime.OeaRuntime
 import com.oea.launcher.split.OeaSplitLauncher
 import com.oea.launcher.ui.OeaInsets
+import com.oea.launcher.miniapps.OeaMiniAppSwitches
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaScreenFailure
@@ -241,6 +242,7 @@ open class OeaSystemToolsActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        com.oea.launcher.assistant.OeaAssistant.addListener(wirelessListener)
         if (rootScreen != "hub") {
             current = rootScreen
             show(current)
@@ -294,7 +296,13 @@ open class OeaSystemToolsActivity : Activity() {
         }
     }
 
+    /** Access Doctor's Wireless debugging card refreshes as OEA Assistant reads values. */
+    private val wirelessListener: () -> Unit = {
+        if (current == "access_doctor" && !isDestroyed) main.post { if (current == "access_doctor" && !isDestroyed) rerender() }
+    }
+
     override fun onDestroy() {
+        com.oea.launcher.assistant.OeaAssistant.removeListener(wirelessListener)
         main.removeCallbacksAndMessages(null)
         appQueryWorker.shutdownNow()
         super.onDestroy()
@@ -351,6 +359,7 @@ open class OeaSystemToolsActivity : Activity() {
                 "access_doctor" -> showAccessDoctor()
                 "stability" -> showStability()
                 "wallpaper" -> showWallpaperGallery()
+                "miniapps" -> showMiniApps()
                 "modes" -> showModes()
                 "low" -> showLowMode()
                 "about" -> showAbout()
@@ -413,13 +422,10 @@ open class OeaSystemToolsActivity : Activity() {
         group = kit.group(box)
         kit.row(group, R.drawable.oic_splitscreen, "Multitasking", "Overview, split screen and floating windows") { navigate("multitasking") }
         kit.row(group, R.drawable.oic_sports_esports, "Game Boost", if (OeaGameBoostStore.enabled(this)) "On • ${OeaGameBoostStore.games(this).size} games" else "Off") { openActivity(OeaGameBoostActivity::class.java) }
-        kit.row(group, R.drawable.oic_stadia_controller_fill, "OEA Games", "Endless Days, Send Off, Chess and the OEA Game Engine") { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java) }
-        kit.row(group, R.drawable.oic_apps, "Mini-apps", "Gallery, notes and calculator — built into OEA, no download") {
-            com.oea.launcher.miniapps.OeaMiniApps.open(this)
-        }
+        kit.row(group, R.drawable.oic_apps, "Mini-apps", "${OeaMiniAppSwitches.countOn(this)} of ${com.oea.launcher.miniapps.OeaMiniApps.all.size} on • turn each one on or off") { navigate("miniapps") }
         kit.row(group, R.drawable.oic_call, "Phone", "OEA dialer, contacts and in-call screen") { openActivity(OeaPhoneActivity::class.java) }
         kit.row(group, R.drawable.oic_block, "Call Blocker", "Blocked numbers, allow list, rules and history") { openActivity(OeaCallBlockerActivity::class.java) }
-        kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "OEA Games, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
+        kit.row(group, R.drawable.oic_home, "Add OEA apps to Home", "Endless Days, Send Off, Chess, Game Boost, Phone, Call Blocker, Freezer and OEA Settings as normal Home icons") { addOeaAppsToHome() }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_accessibility_new, "Permissions & access", accessSummary()) { navigate("access") }
         kit.row(group, R.drawable.oic_developer_mode, "Access doctor", "Each permission verified live, with the exact fix — including the ones that look switched on but are not working") { navigate("access_doctor") }
@@ -432,6 +438,27 @@ open class OeaSystemToolsActivity : Activity() {
     private fun labelFor(value: String, labels: Map<String, String>) = labels[value] ?: value
 
     /** OEA's built-in apps are ordinary launcher entries; let the user pin any of them to Home. */
+    /**
+     * Mini-apps: one switch per app. Off removes the app from the drawer, search,
+     * Recents and the Home picker through Android's own component switch; its
+     * data stays where it is, and turning it back on restores it.
+     */
+    private fun showMiniApps() {
+        val page = page("Mini-apps", "Built into OEA, no download. Turn off the ones you never use.")
+        val box = page.content
+        val group = kit.group(box)
+        com.oea.launcher.miniapps.OeaMiniApps.all.forEach { app ->
+            kit.switchRow(group, app.icon, app.label, app.blurb, OeaMiniAppSwitches.isOn(this, app.id)) { checked ->
+                if (!OeaMiniAppSwitches.set(this, app.id, checked)) {
+                    toast("Android would not change ${app.label}. Try again in a moment.")
+                }
+                rerender()
+            }
+        }
+        kit.note(box, "A mini-app that is off leaves the app drawer, search, Recents and the Home picker. Its settings and files are kept, and turning it back on brings it back exactly as it was.")
+        present(page)
+    }
+
     private fun addOeaAppsToHome() {
         val builtIns = (requireApps() ?: return).filter { it.packageName == packageName }
         if (builtIns.isEmpty()) {
@@ -1618,7 +1645,7 @@ open class OeaSystemToolsActivity : Activity() {
             kit.switchRow(islandGroup, R.drawable.oic_mic, "Camera & microphone dots",
                 "Green and orange dots inside the island while any app uses the camera or microphone. Android 12+ shows its own indicator, so the island only shows dots on top of an activity it already shows; on older Android it can show them on their own.",
                 dataStore.islandPrivacyDots()) { dataStore.setIslandPrivacyDots(it) }
-            kit.row(islandGroup, R.drawable.oic_stadia_controller_fill, "OEA Games in the island", "Choose card, camera island, both or automatic for each game") {
+            kit.row(islandGroup, R.drawable.oic_stadia_controller_fill, "Games in the island", "Choose card, camera island, both or automatic for each game") {
                 openActivity(com.oea.launcher.games.OeaGamesActivity::class.java)
             }
         }
@@ -2799,6 +2826,7 @@ open class OeaSystemToolsActivity : Activity() {
     private fun showAccessDoctor() {
         val page = page("Access doctor", "Every permission verified, with the fix for each one")
         val box = page.content
+        addWirelessDebuggingCard(box)
         val status = kit.text("Checking what OEA can actually do…", 13f, palette.textSecondary).apply {
             setPadding(dp(6), dp(6), dp(6), dp(10))
         }
@@ -2873,6 +2901,81 @@ open class OeaSystemToolsActivity : Activity() {
 )
         present(page)
         check()
+    }
+
+    /**
+     * Wireless debugging for ADB pairing. OEA Assistant reads the pairing code,
+     * the pairing port and the connection port from the Settings screens, so the
+     * user does not type them. Typing is kept as a fallback behind a quiet button.
+     */
+    private fun addWirelessDebuggingCard(box: LinearLayout) {
+        val wp = com.oea.launcher.privilege.OeaWirelessPairing
+        val pairing = wp.freshPairing()
+        val connection = wp.connection
+        val watching = wp.isWatching()
+        fun ago(at: Long): String {
+            val secs = ((android.os.SystemClock.elapsedRealtime() - at) / 1000).coerceAtLeast(0)
+            return if (secs < 60) "${secs}s ago" else "${secs / 60}m ago"
+        }
+
+        kit.sectionTitle(box, "Wireless debugging")
+        kit.note(box, "OEA Assistant reads the pairing code, the pairing port and the connection port from the Wireless debugging screens by itself. You don't type them.")
+        val group = kit.group(box)
+        if (!OeaAssistant.isConnected()) {
+            kit.banner(group, R.drawable.oic_accessibility_new, "Turn on OEA Assistant first",
+                "It is the part that reads these screens. Everything stays on this phone.", OeaKit.Tone.WARNING, "Open setup") {
+                OeaAssistant.openSetup(this)
+            }
+        }
+        kit.row(group, R.drawable.oic_lock, "Pairing code",
+            pairing?.let { "${it.code.take(3)} ${it.code.drop(3)} • read ${ago(it.capturedAt)}" } ?: "Not read yet — open the pairing dialog",
+            chevron = false)
+        kit.row(group, R.drawable.oic_developer_mode, "Pairing port",
+            pairing?.let { "${it.host}:${it.port}" } ?: "Not read yet",
+            chevron = false)
+        kit.row(group, R.drawable.oic_developer_mode, "Connection port",
+            connection?.let { "${it.host}:${it.port} • read ${ago(it.capturedAt)}" } ?: "Not read yet — open Wireless debugging",
+            chevron = false)
+        if (watching) {
+            kit.note(box, "Watching the Wireless debugging screens. Open “Pair device with pairing code” and OEA reads it as it appears.")
+        }
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(4), dp(8), dp(12)) }
+        if (watching) {
+            buttons.addView(kit.quietButton("Stop", R.drawable.oic_close) { wp.stopWatching(); rerender() }, LinearLayout.LayoutParams(-2, dp(42)))
+        } else {
+            buttons.addView(kit.primaryButton("Start reading", R.drawable.oic_developer_mode) {
+                wp.startWatching()
+                runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
+                    .onFailure { toast("Open Developer options, then Wireless debugging.") }
+                rerender()
+            }, LinearLayout.LayoutParams(-2, dp(42)))
+        }
+        if (pairing != null || connection != null) {
+            buttons.addView(kit.quietButton("Clear", R.drawable.oic_delete) { wp.clear(); rerender() }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(8) })
+        }
+        group.addView(buttons)
+        // Fallback only: the values the user types are used exactly like read ones.
+        kit.quietButton("Type them in instead (fallback)", R.drawable.oic_text_fields) { askWirelessManually() }.also { box.addView(it, LinearLayout.LayoutParams(-1, dp(44))) }
+    }
+
+    private fun askWirelessManually() {
+        kit.prompt("Pairing code", "The 6 digits in “Pair device with pairing code”.", "123 456", "", numeric = true) codePrompt@{ code ->
+            val digits = code.filter { it.isDigit() }
+            if (digits.length != 6) return@codePrompt "The code is 6 digits."
+            kit.prompt("Pairing address", "Shown next to the code, for example 192.168.1.20:37125", "192.168.1.20:37125") addressPrompt@{ address ->
+                if (!Regex("""\d{1,3}(\.\d{1,3}){3}:\d{2,5}""").matches(address.trim())) return@addressPrompt "Use the form 192.168.1.20:37125"
+                kit.prompt("Connection port", "The port in Wireless debugging, for example 41235 (optional)", "41235", "", numeric = true) portPrompt@{ port ->
+                    val value = port.trim().toIntOrNull()
+                    if (port.isNotBlank() && (value == null || value !in 1..65535)) return@portPrompt "That is not a port number."
+                    com.oea.launcher.privilege.OeaWirelessPairing.setManual(digits, address.trim(), value)
+                    toast("Saved. OEA will use these values.")
+                    rerender()
+                    null
+                }
+                null
+            }
+            null
+        }
     }
 
     private fun doctorReload() {
@@ -3075,7 +3178,7 @@ open class OeaSystemToolsActivity : Activity() {
         }
         kit.row(group, R.drawable.oic_new_releases, "What's in OEA", null) {
             kit.sheet("OEA Launcher", null) { panel, _ ->
-                kit.note(panel, "• OEA Home with At a Glance, smart drawer search, app shortcuts, widgets, folders and app pairs\n• The Themes app: ten built-in themes, your own themes and a wallpaper library\n• Liquid glass surfaces and page transitions (Liquid, Cube, Stack, Zoom, Fade)\n• Dynamic Island with calls, media, notifications, games and privacy dots\n• Notification dots, icon shapes, themed icons and icon packs\n• Gestures, wave to wake, lock and power menu for a faulty power key\n• App Lock, hidden apps and the no-root App Freezer\n• Split screen, floating windows and the OEA Overview\n• Game Boost, Phone, Call Blocker, Freezer, Themes and OEA Games as their own apps")
+                kit.note(panel, "• OEA Home with At a Glance, smart drawer search, app shortcuts, widgets, folders and app pairs\n• The Themes app: ten built-in themes, your own themes and a wallpaper library\n• Liquid glass surfaces and page transitions (Liquid, Cube, Stack, Zoom, Fade)\n• Dynamic Island with calls, media, notifications, games and privacy dots\n• Notification dots, icon shapes, themed icons and icon packs\n• Gestures, wave to wake, lock and power menu for a faulty power key\n• App Lock, hidden apps and the no-root App Freezer\n• Split screen, floating windows and the OEA Overview\n• Game Boost, Phone, Call Blocker, Freezer, Themes, EMAGE, VIP and the games as their own apps")
             }
         }
         present(page)

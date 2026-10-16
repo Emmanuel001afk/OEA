@@ -359,7 +359,7 @@ object OeaSpeechEngine {
                         command.query.lowercase().contains("calendar") -> "calendar"
                         command.query.lowercase().contains("weather") -> "weather"
                         command.query.lowercase().contains("notes") -> "notes"
-                        command.query.lowercase().contains("gallery") || command.query.lowercase().contains("photos") -> "gallery"
+                        command.query.lowercase().contains("gallery") || command.query.lowercase().contains("photos") -> "emage"
                         command.query.lowercase().contains("image") || command.query.lowercase().contains("emage") -> "emage"
                         command.query.lowercase().contains("video") || command.query.lowercase().contains("vip") -> "vip"
                         command.query.lowercase().contains("message") -> "messaging"

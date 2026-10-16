@@ -69,7 +69,7 @@ object OeaMultitaskLauncher {
             val message = if (freeformAdvertised) {
                 "Requested a $sizeLabel floating window for ${app.label}. If Android grants freeform, use its system title bar to move and its resize edge/handle to resize; this phone may ignore freeform requests."
             } else {
-                "Android may open ${app.label} full screen because freeform is off. Try Developer options → \"Enable freeform windows\", restart, and request it again."
+                "${app.label} will open full screen: this phone's manufacturer has freeform windows turned off. To allow floating windows, turn on Developer options → \"Enable freeform windows\" and restart. Split screen works on most phones without it."
             }
             Result(true, message, freeformAdvertised)
         }.getOrElse { error ->

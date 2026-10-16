@@ -174,7 +174,7 @@ class OeaGameActivity : Activity(), HostUi {
         val id = gameId
         val pending = OeaGameLauncher.reload(id)
         if (pending == null) {
-            toast("Start $gameTitle again from OEA Games.")
+            toast("Start $gameTitle again from its app icon.")
             finish()
             return
         }

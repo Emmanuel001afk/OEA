@@ -39,6 +39,15 @@
     <!-- OEA Themes app: OEA's panel look; on Android 12+ its splash carries the OEA brand. -->
     <style name="OeaBrandedPanelTheme" parent="OeaPanelTheme" />
 
+    <!-- Immersive mini-apps (EMAGE, VIP, Camera): no title bar, edge to edge,
+         the window draws behind the status and navigation bars. -->
+    <style name="OeaFullscreenAppTheme" parent="OeaPanelTheme">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
     <style name="OeaGameBoostTheme" parent="OeaPanelTheme">
         <item name="android:colorAccent">#57C8FF</item>
         <item name="android:windowBackground">@android:color/black</item>

@@ -116,6 +116,9 @@ class OeaRunner : OeaGame() {
 
     override fun onCreate() {
         val launch = ctx.launch
+        // Turning is deliberate: a swipe must travel this far to count (the engine
+        // default of 26dp fired on finger drift), and lane changes are rate-limited.
+        ctx.input.swipeThresholdDp = SWIPE_THRESHOLD_DP
         mode = launch.mode
         net = ctx.net
         seed = net?.seed?.takeIf { it != 0L } ?: launch.seed
@@ -343,10 +346,17 @@ class OeaRunner : OeaGame() {
         }
     }
 
+    /** Last lane change per runner, in game seconds: a chain of swipes can't zip across lanes. */
+    private val lastLaneChange = HashMap<Runner, Double>()
+
     private fun apply(r: Runner, dir: Swipe) {
         when (dir) {
-            Swipe.LEFT -> r.moveLeft()
-            Swipe.RIGHT -> r.moveRight()
+            Swipe.LEFT, Swipe.RIGHT -> {
+                val now = ctx.time.elapsed
+                if (now - (lastLaneChange[r] ?: -1.0) < LANE_CHANGE_COOLDOWN) return
+                lastLaneChange[r] = now
+                if (dir == Swipe.LEFT) r.moveLeft() else r.moveRight()
+            }
             Swipe.UP -> r.jump(events)
             Swipe.DOWN -> r.roll(events)
         }
@@ -850,6 +860,10 @@ class OeaRunner : OeaGame() {
 
     companion object {
         const val ID = "runner"
+        /** Swipe distance (dp) that counts as a turn. Was the engine default, 26dp. */
+        const val SWIPE_THRESHOLD_DP = 44f
+        /** Seconds before the same runner can change lane again. */
+        const val LANE_CHANGE_COOLDOWN = 0.22
         private val ACCENT = 0xFFFFB03A.toInt()
         private const val MSG_STATE = 32
         private const val MSG_CRASH = 33

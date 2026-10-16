@@ -63,7 +63,7 @@ object OeaCalculatorApp {
 
         // Header with mode selector
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("OEA Calculator", 20f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(kit.text("Calculator", 20f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
 
         val modeBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }

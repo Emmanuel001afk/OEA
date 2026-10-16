@@ -134,6 +134,12 @@ open class OeaMiniAppActivity : Activity() {
     private fun render() {
         OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
         val app = OeaMiniApps.byId(screenId)
+        if (app != null && app.id == "camera") {
+            // The Camera is full-screen: its viewfinder fills the window and its
+            // controls sit over it, so it gets no title page around it.
+            setContentView(OeaMiniApps.build(this, app.id, kit))
+            return
+        }
         val page = kit.page(
             title = app?.label ?: "Mini-apps",
             subtitle = app?.blurb ?: "Small tools built into OEA. They open straight from the launcher and keep working offline.",

@@ -80,6 +80,11 @@ class OeaAssistantService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         com.oea.launcher.fault.OeaFaultShield.guard("assistant:event") {
+            // Access Doctor is waiting for the Wireless debugging screens: read them.
+            if (com.oea.launcher.privilege.OeaWirelessPairing.isWatching()) {
+                runCatching { com.oea.launcher.privilege.OeaWirelessPairing.scan(rootInActiveWindow, event?.packageName?.toString()) }
+                    .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:pairing", it) }
+            }
             if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 val changed = event.packageName?.toString()
                 if (!changed.isNullOrEmpty()) {
@@ -687,7 +692,9 @@ class OeaAssistantService : AccessibilityService() {
 
     private fun applyEventMask(active: Boolean) {
         val info = serviceInfo ?: return
-        info.eventTypes = if (active) {
+        val pairing = com.oea.launcher.privilege.OeaWirelessPairing.isWatching()
+        // Pairing reads the dialog once its code appears, which is a content change.
+        info.eventTypes = if (active || pairing) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
         } else {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
@@ -698,7 +705,11 @@ class OeaAssistantService : AccessibilityService() {
             com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this) -> null
             else -> null // Watch all windows for frozen-app blocking and game boost, not just OEA
         }
-        info.notificationTimeout = if (active) 60L else 250L
+        info.notificationTimeout = when {
+            pairing -> 100L
+            active -> 60L
+            else -> 250L
+        }
         runCatching { serviceInfo = info }
     }
 

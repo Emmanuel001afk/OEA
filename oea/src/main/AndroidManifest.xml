@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
@@ -169,6 +170,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Pictures sent from EMAGE or another gallery become wallpapers here. -->
+            <intent-filter>
+                <action android:name="android.intent.action.ATTACH_DATA" />
+                <action android:name="android.intent.action.SET_WALLPAPER" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
         <!-- OEA mini-apps: the index host, kept internal (no launcher entry).
              Every mini-app is below as its own activity with its own icon,
@@ -236,20 +244,23 @@
         <activity
             android:name="com.oea.launcher.miniapps.OeaImageActivity"
             android:exported="true"
-            android:label="OEA Image"
+            android:label="EMAGE"
             android:icon="@drawable/ic_oea_image"
             android:roundIcon="@drawable/ic_oea_image"
             android:taskAffinity="com.oea.launcher.app.image"
             android:launchMode="singleTask"
-            android:theme="@style/OeaBrandedPanelTheme"
+            android:theme="@style/OeaFullscreenAppTheme"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- EMAGE is Android's picture app: a picture opened from Files, the
+                 camera or messages opens full-screen here. Media access is
+                 requested in EMAGE itself. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
-                <action android:name="android.intent.action.GET_CONTENT" />
+                <action android:name="android.intent.action.ATTACH_DATA" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="image/*" />
@@ -258,12 +269,12 @@
         <activity
             android:name="com.oea.launcher.miniapps.OeaVipActivity"
             android:exported="true"
-            android:label="OEA VIP"
+            android:label="VIP"
             android:icon="@drawable/ic_oea_video"
             android:roundIcon="@drawable/ic_oea_video"
             android:taskAffinity="com.oea.launcher.app.vip"
             android:launchMode="singleTask"
-            android:theme="@style/OeaBrandedPanelTheme"
+            android:theme="@style/OeaFullscreenAppTheme"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -276,11 +287,30 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="video/*" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
         </activity>
+        <!-- VIP's full-screen player: its own window so Picture-in-Picture,
+             rotation (handled in place, playback continues) and brightness
+             belong to the player. Not a launcher entry; VIP opens it. -->
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaVipPlayerActivity"
+            android:exported="false"
+            android:label="VIP player"
+            android:taskAffinity="com.oea.launcher.app.vip"
+            android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:theme="@style/OeaFullscreenAppTheme"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaWeatherActivity"
             android:exported="true"
-            android:label="OEA Weather"
+            android:label="Weather"
             android:icon="@drawable/ic_oea_weather"
             android:roundIcon="@drawable/ic_oea_weather"
             android:taskAffinity="com.oea.launcher.app.weather"
@@ -295,7 +325,7 @@
         <activity
             android:name="com.oea.launcher.miniapps.OeaCalculatorActivity"
             android:exported="true"
-            android:label="OEA Calculator"
+            android:label="Calculator"
             android:icon="@drawable/ic_oea_calculator"
             android:roundIcon="@drawable/ic_oea_calculator"
             android:taskAffinity="com.oea.launcher.app.calculator"
@@ -310,7 +340,7 @@
         <activity
             android:name="com.oea.launcher.miniapps.OeaMessagingActivity"
             android:exported="true"
-            android:label="OEA Messaging"
+            android:label="Messaging"
             android:icon="@drawable/ic_oea_messaging"
             android:roundIcon="@drawable/ic_oea_messaging"
             android:taskAffinity="com.oea.launcher.app.messaging"
@@ -331,7 +361,7 @@
         <activity
             android:name="com.oea.launcher.miniapps.OeaNotesActivity"
             android:exported="true"
-            android:label="OEA Notes"
+            android:label="Notes"
             android:icon="@drawable/ic_oea_notes"
             android:roundIcon="@drawable/ic_oea_notes"
             android:taskAffinity="com.oea.launcher.app.notes"
@@ -346,12 +376,12 @@
         <activity
             android:name="com.oea.launcher.miniapps.OeaCameraActivity"
             android:exported="true"
-            android:label="OEA Camera"
+            android:label="Camera"
             android:icon="@drawable/ic_oea_camera"
             android:roundIcon="@drawable/ic_oea_camera"
             android:taskAffinity="com.oea.launcher.app.camera"
             android:launchMode="singleTask"
-            android:theme="@style/OeaBrandedPanelTheme"
+            android:theme="@style/OeaFullscreenAppTheme"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -366,7 +396,7 @@
         <activity
             android:name="com.oea.launcher.miniapps.OeaConsoleActivity"
             android:exported="true"
-            android:label="OEA Console"
+            android:label="Console"
             android:icon="@drawable/ic_oea_console"
             android:roundIcon="@drawable/ic_oea_console"
             android:taskAffinity="com.oea.launcher.app.console"
@@ -378,25 +408,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity
+        <!-- The Gallery was merged into EMAGE. Home icons pinned to the old
+             component keep working: the alias opens EMAGE. -->
+        <activity-alias
             android:name="com.oea.launcher.miniapps.OeaGalleryActivity"
-            android:exported="true"
-            android:label="Gallery"
-            android:icon="@drawable/ic_oea_gallery"
-            android:roundIcon="@drawable/ic_oea_gallery"
-            android:taskAffinity="com.oea.launcher.app.gallery"
-            android:launchMode="singleTask"
-            android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="false"
+            android:targetActivity="com.oea.launcher.miniapps.OeaImageActivity" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaVoiceActivity"
             android:exported="true"
-            android:label="OEA Voice"
+            android:label="Voice"
             android:icon="@drawable/ic_oea_voice"
             android:roundIcon="@drawable/ic_oea_voice"
             android:taskAffinity="com.oea.launcher.app.voice"
@@ -408,16 +429,57 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- OEA Games: the hub for games built on the OEA Game Engine. Its own
-             task (like Game Boost), so a running game resumes from the icon or
-             the Dynamic Island. Not singleTask: that would close a running game. -->
+        <!-- Games are standalone mini-apps now: each has its own icon, label
+             and task, and opens on its own front menu. The shared hub is no
+             longer a launcher entry; it stays as the screen behind them. -->
         <activity
             android:name="com.oea.launcher.games.OeaGamesActivity"
-            android:exported="true"
-            android:label="OEA Games"
-            android:icon="@drawable/ic_oea_games"
-            android:roundIcon="@drawable/ic_oea_games"
+            android:exported="false"
+            android:label="Games"
             android:taskAffinity="com.oea.launcher.games"
+            android:theme="@style/OeaGameBoostTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
+        <activity
+            android:name="com.oea.launcher.games.OeaEndlessDaysActivity"
+            android:exported="true"
+            android:label="Endless Days"
+            android:icon="@drawable/ic_oea_game_runner"
+            android:roundIcon="@drawable/ic_oea_game_runner"
+            android:taskAffinity="com.oea.launcher.game.runner"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaGameBoostTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.games.OeaSendOffActivity"
+            android:exported="true"
+            android:label="Send Off"
+            android:icon="@drawable/ic_oea_game_arena"
+            android:roundIcon="@drawable/ic_oea_game_arena"
+            android:taskAffinity="com.oea.launcher.game.arena"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaGameBoostTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.launcher.games.OeaChessGameActivity"
+            android:exported="true"
+            android:label="Chess"
+            android:icon="@drawable/ic_oea_game_chess"
+            android:roundIcon="@drawable/ic_oea_game_chess"
+            android:taskAffinity="com.oea.launcher.game.chess"
+            android:launchMode="singleTask"
             android:theme="@style/OeaGameBoostTheme"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
@@ -431,7 +493,7 @@
         <activity
             android:name="com.oea.launcher.games.OeaGameActivity"
             android:exported="false"
-            android:label="OEA Games"
+            android:label="Game"
             android:taskAffinity="com.oea.launcher.games"
             android:launchMode="singleTop"
             android:theme="@style/OeaGameTheme"
