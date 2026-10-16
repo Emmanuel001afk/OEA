@@ -88,7 +88,7 @@ wrapped and a process-wide boundary catches the rest.
 
 ## 2. Permissions: capability, not denial
 
-OEA does not require a companion app. Its current built-in authority layer is not a self-elevating ADB daemon: Android's app sandbox does not let an ordinary APK start a shell-privileged process by itself. Android does not allow an ordinary app to grant itself `SYSTEM_ALERT_WINDOW` (Display over other apps) or `PACKAGE_USAGE_STATS` (Usage access). On a stock unrooted device, OEA must use Android's own approval screen for these special accesses; root can change supported AppOps, while Device Owner can perform only the management operations Android explicitly permits. Neither Device Admin nor Device Owner is a universal bypass for every special permission.
+OEA now includes its own Wireless Debugging pairing screen and embedded ADB protocol client; users do not need to install Shizuku or another companion APK. This is not silent self-elevation: Android's app sandbox does not let an ordinary APK start a shell-privileged process by itself. The user must enable Wireless Debugging in Developer options, enter the temporary pairing endpoint and six-digit code, and let OEA verify the separate connection endpoint. OEA stores its ADB host key in its private app storage and never saves the one-time pairing code. Android's pairing trust can be revoked from Developer options.\n\nAfter pairing, OEA exposes a restricted command allowlist for supported operations, including verified package suspension and selected permission repairs. It does not offer a general-purpose shell. Android does not allow an ordinary app to grant itself `SYSTEM_ALERT_WINDOW` (Display over other apps) or `PACKAGE_USAGE_STATS` (Usage access); a paired shell may change supported AppOps, but each result must still be read back and verified. Root remains a separate path, while Device Owner can perform only management operations Android explicitly permits. Neither Device Admin nor Device Owner is a universal bypass for every special permission.
 
 What OEA does instead:
 
@@ -97,6 +97,7 @@ What OEA does instead:
 | Any permission OEA needs | `OeaPrivileges.grant` opens the exact Android page (with the per-app deep link where one exists) and **verifies the result** when the user returns. |
 | Switched on but not bound (accessibility, notification access) | Reported as *pending*, never as missing, and OEA nudges Android to rebind (root channel) instead of asking the user to switch it on again. |
 | Device is rooted | `OeaShell` uses the already-authorized `su` binary for supported `appops`, `settings`, `pm` and `cmd` operations. It verifies state after writes. It cannot create root on an unrooted device. |
+| Wireless Debugging is enabled and OEA is paired | OEA's embedded ADB client reconnects to the saved endpoint, verifies the shell identity, and permits only allowlisted commands. Package freeze/unfreeze is verified against `dumpsys package`; a failed or unconfirmed change is not saved as a successful freeze. |
 | OEA is device owner | `DevicePolicyManager` can grant eligible runtime permissions and perform supported device-management actions. This does not universally grant overlay, usage access, or unrestricted shell authority. |
 | No privilege available | The feature degrades: `OeaFeature` maps each feature to a preferred surface and a fallback (inside Home, or a notification), so the user loses *placement*, not the feature. |
 | Battery managers killing services | `OeaPrivileges` detects the exemption state, and Home restarts Game Boost monitoring on resume if the setting is on. |
@@ -112,7 +113,7 @@ user changes something in Android's own settings.
   a denied permission: those break on OEM builds and would be dishonest about
   what OEA can do.
 * No third-party privileged service is bundled or required.
-* Any ADB command shown is documentation only; it is not run by OEA. Features with no available authority must use Android's permission UI or a documented fallback. A future embedded ADB-compatible bridge would still require Android Wireless Debugging to be enabled and OEA to be paired/authorized; it cannot be silently bootstrapped by an ordinary APK.
+* OEA's embedded bridge is not a hidden bypass: pairing is user-initiated, Android controls whether Wireless Debugging is available, and the bridge fails closed if the connection or operation cannot be verified. Features not supported by the restricted command set still use Android's permission UI or their documented fallback.
 
 ## 3. Wallpapers and the theme that follows them
 
