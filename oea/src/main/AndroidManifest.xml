@@ -104,6 +104,13 @@
             android:taskAffinity="com.oea.launcher.settings"
             android:theme="@style/OeaPanelTheme"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".privilege.OeaAuthorityActivity"
+            android:exported="false"
+            android:label="OEA Authority"
+            android:taskAffinity="com.oea.launcher.authority"
+            android:theme="@style/OeaPanelTheme"
+            android:windowSoftInputMode="adjustResize" />
         <activity-alias
             android:name=".OeaSettingsAlias"
             android:exported="true"
