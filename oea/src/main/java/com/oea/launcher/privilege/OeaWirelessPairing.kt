@@ -95,7 +95,7 @@ object OeaWirelessPairing {
         if (texts.isEmpty()) return
         val changed = read(texts, now)
         if (changed) OeaAssistant.notifyStateChanged()
-        if (pairing != null && connection != null) {
+        if (freshPairing() != null && connection != null) {
             // Both values are in hand: stop watching so nothing else is read.
             watchUntil = 0L
             OeaAssistant.refreshEventMask()
