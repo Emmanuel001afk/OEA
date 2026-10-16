@@ -180,7 +180,7 @@ object OeaAdbAuthority {
         // Permission-repair commands are scoped to OEA's own package only.
         if (Regex("appops set com\\.oea\\.launcher (?:SYSTEM_ALERT_WINDOW|GET_USAGE_STATS) allow").matches(command)) return true
         if (Regex("dumpsys deviceidle whitelist \\+com\\.oea\\.launcher").matches(command)) return true
-        if (Regex("cmd package set-home-activity com\\.oea\\.launcher/com\\.oea\\.launcher\\.[A-Za-z0-9_.$]+").matches(command)) return true
+        if (Regex("cmd package set-home-activity com\\.oea\\.launcher/com\\.oea\\.launcher\\.[A-Za-z0-9_.]+").matches(command)) return true
         if (Regex("pm grant com\\.oea\\.launcher android\\.permission\\.[A-Z0-9_]+").matches(command)) return true
 
         val accessibilityPrefix = "settings put secure enabled_accessibility_services "
@@ -200,7 +200,7 @@ object OeaAdbAuthority {
     }
 
     private fun validServiceList(value: String): Boolean {
-        if (!value.matches(Regex("[A-Za-z0-9_.$/:+-]+"))) return false
+        if (!value.matches(Regex("[A-Za-z0-9_./:+-]+"))) return false
         return value.split(':').any { it.startsWith("com.oea.launcher/") }
     }
 }
