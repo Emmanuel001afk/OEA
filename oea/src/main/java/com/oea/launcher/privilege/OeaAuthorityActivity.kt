@@ -86,7 +86,9 @@ class OeaAuthorityActivity : Activity() {
             autoCapturedCode = null
         }
         if (connection != null) {
-            if (pair == null || hostField.text.isNullOrBlank()) hostField.setTextIfDifferent(connection.host)
+            // The main Wireless debugging page is the authoritative endpoint for
+            // the connection port and current host address.
+            hostField.setTextIfDifferent(connection.host)
             connectPortField.setTextIfDifferent(connection.port.toString())
         }
         if (pair != null || connection != null) {
