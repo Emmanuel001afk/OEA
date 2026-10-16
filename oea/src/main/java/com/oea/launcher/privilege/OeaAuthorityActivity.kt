@@ -33,11 +33,11 @@ class OeaAuthorityActivity : Activity() {
     private lateinit var reconnectButton: Button
     private lateinit var forgetButton: Button
 
-    private val ink = Color.rgb(235, 240, 248)
-    private val muted = Color.rgb(164, 177, 196)
-    private val accent = Color.rgb(104, 166, 255)
-    private val panel = Color.rgb(28, 37, 52)
-    private val background = Color.rgb(14, 20, 30)
+    private val inkColor = Color.rgb(235, 240, 248)
+    private val mutedColor = Color.rgb(164, 177, 196)
+    private val accentColor = Color.rgb(104, 166, 255)
+    private val panelColor = Color.rgb(28, 37, 52)
+    private val backgroundColor = Color.rgb(14, 20, 30)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +46,7 @@ class OeaAuthorityActivity : Activity() {
     }
 
     private fun buildUi() {
-        val scroll = ScrollView(this).apply { setBackgroundColor(background) }
+        val scroll = ScrollView(this).apply { setBackgroundColor(backgroundColor) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(20), dp(20), dp(28))
@@ -54,15 +54,15 @@ class OeaAuthorityActivity : Activity() {
         scroll.addView(root)
         setContentView(scroll)
 
-        root.addView(text("OEA Authority", 27, ink, true))
-        root.addView(text("Built-in Wireless Debugging bridge", 15, accent, true).apply {
+        root.addView(text("OEA Authority", 27, inkColor, true))
+        root.addView(text("Built-in Wireless Debugging bridge", 15, accentColor, true).apply {
             setPadding(0, dp(4), 0, dp(16))
         })
         root.addView(card().apply {
-            addView(text("One-time Android authorization", 17, ink, true))
+            addView(text("One-time Android authorization", 17, inkColor, true))
             addView(text(
                 "OEA contains its own ADB pairing and shell client. No Shizuku or companion app is needed. Android still requires Wireless Debugging to be enabled and the pairing code to be approved by you.",
-                14, muted, false
+                14, mutedColor, false
             ).apply { setPadding(0, dp(8), 0, dp(14)) })
             addView(button("Open Developer options") {
                 runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
@@ -71,10 +71,10 @@ class OeaAuthorityActivity : Activity() {
         })
 
         root.addView(card().apply {
-            addView(text("Pair this phone", 18, ink, true))
+            addView(text("Pair this phone", 18, inkColor, true))
             addView(text(
                 "On this phone, open Developer options → Wireless debugging → Pair device with pairing code. Enter that screen's IP/port and six-digit code below. Then use the separate connection port shown on the main Wireless debugging screen.",
-                14, muted, false
+                14, mutedColor, false
             ).apply { setPadding(0, dp(8), 0, dp(12)) })
 
             hostField = field("Phone local IP address", "192.168.1.10").also { addView(it) }
@@ -90,8 +90,8 @@ class OeaAuthorityActivity : Activity() {
         })
 
         root.addView(card().apply {
-            addView(text("Live verification", 17, ink, true))
-            statusText = text("Checking saved endpoint…", 14, muted, false).apply {
+            addView(text("Live verification", 17, inkColor, true))
+            statusText = text("Checking saved endpoint…", 14, mutedColor, false).apply {
                 setPadding(0, dp(8), 0, dp(12))
             }
             addView(statusText)
@@ -105,7 +105,7 @@ class OeaAuthorityActivity : Activity() {
 
         root.addView(text(
             "Safety: OEA does not expose a free-form shell. The bridge is restricted to the verified package-freeze operations it needs. To revoke Android's trust, use Wireless debugging → Paired devices / Revoke authorizations.",
-            13, muted, false
+            13, mutedColor, false
         ).apply { setPadding(dp(2), dp(4), dp(2), 0) })
     }
 
@@ -149,7 +149,7 @@ class OeaAuthorityActivity : Activity() {
     private fun refreshStatus(lastResult: String? = null) {
         val status = OeaAdbAuthority.status(this)
         statusText.text = if (lastResult.isNullOrBlank()) status.note else "$lastResult\n\n${status.note}"
-        statusText.setTextColor(if (status.connected) Color.rgb(113, 220, 165) else if (!lastResult.isNullOrBlank()) ink else muted)
+        statusText.setTextColor(if (status.connected) Color.rgb(113, 220, 165) else if (!lastResult.isNullOrBlank()) inkColor else mutedColor)
         if (status.host != null && hostField.text.isNullOrBlank()) hostField.setText(status.host)
         if (status.port != null && connectPortField.text.isNullOrBlank()) connectPortField.setText(status.port.toString())
         reconnectButton.isEnabled = status.configured
@@ -160,18 +160,18 @@ class OeaAuthorityActivity : Activity() {
         pairButton.isEnabled = !busy
         reconnectButton.isEnabled = !busy && OeaAdbAuthority.status(this).configured
         statusText.text = message
-        statusText.setTextColor(if (busy) accent else ink)
+        statusText.setTextColor(if (busy) accentColor else inkColor)
     }
 
     private fun field(label: String, hint: String): EditText {
         val input = EditText(this).apply {
             this.hint = hint
-            setHintTextColor(muted)
-            setTextColor(ink)
+            setHintTextColor(mutedColor)
+            setTextColor(inkColor)
             textSize = 15f
-            singleLine = true
+            isSingleLine = true
             setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rounded(panel)
+            background = rounded(panelColor)
             contentDescription = label
             setSelectAllOnFocus(false)
         }
@@ -182,7 +182,7 @@ class OeaAuthorityActivity : Activity() {
     private fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(15), dp(15), dp(15), dp(15))
-        background = rounded(panel)
+        background = rounded(panelColor)
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) }
     }
 
@@ -190,7 +190,7 @@ class OeaAuthorityActivity : Activity() {
         text = label
         isAllCaps = false
         textSize = 14f
-        setTextColor(ink)
+        setTextColor(inkColor)
         setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(48, 77, 115)))
         setOnClickListener { action() }
         layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(5) }
