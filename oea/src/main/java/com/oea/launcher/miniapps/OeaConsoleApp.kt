@@ -36,7 +36,7 @@ import java.util.concurrent.Executors
  * Central OEA utility mini-app — OEA Console (central utility).
  *
  * Chosen name: "Console" because it is the command centre for advanced operations:
- * - Our own ADB-inspired system (not a wrapper around ADB or Shizuku) — own format, own build, own verification
+ * - OEA-owned authority UI and restricted command layer, using an embedded ADB protocol client (not a separate Shizuku/helper app), own verification
  * - Diagnostics (expanded with crash/ANR/startup failure organization)
  * - Device information and hardware/software specs (real APIs)
  * - Security analysis and antivirus-style checks (confirmed threat vs suspicious vs legit)
@@ -49,7 +49,7 @@ import java.util.concurrent.Executors
  * - ADB: client-server, adbd daemon, shell commands via binder, pm, am, settings, dumpsys, logcat, input, svc
  * - Shizuku: privileged service via app that exposes shell via binder to other apps, uses adb wireless debugging or root
  * - Android permission architecture: runtime permissions, appops (SYSTEM_ALERT_WINDOW, GET_USAGE_STATS, etc.), special access (notification listener, accessibility, device admin, device owner), roles
- * - Wireless Debugging: pairing via QR, TLS, adb over Wi-Fi — needs PC or helper
+ * - Wireless Debugging: OEA can pair directly over TLS after the user enables Wireless Debugging and enters Android's pairing code
  * - Root: su binary, scoped commands, verification by reading state back
  * - Device Owner: DevicePolicyManager.setPermissionGrantState, setPackagesSuspended, setApplicationHidden, etc.
  *
@@ -57,7 +57,7 @@ import java.util.concurrent.Executors
  * - OeaShell runs su commands for OEA's own package only, always verified by reading back state (e.g., pm list packages --suspended, dumpsys package, appops get)
  * - OeaPrivileges opens exact Android pages and verifies result (canDrawOverlays, isNotificationListener, etc.)
  * - OeaAccessDoctor verifies live state, not just switch (probe overlay window, check assistant connection)
- * - No fake overlay tricks, no claiming ordinary app can bypass security
+ * - No fake overlay tricks, no claiming an ordinary app can bypass Android security
  * - Broader than few functions: covers overlay, multitasking (freeform, split, PIP), suspension (freeze), restricted settings (DND, battery optimization, write settings, secure settings), diagnostics, device info, security, storage, performance, sound
  * - On-device, no companion app. This is not a self-elevating ADB daemon: ordinary app sandboxing prevents OEA from starting an ADB/shell-privileged process by itself. Root and Device Owner are detected when already available; otherwise OEA uses Android's permission UI and verifies the result.
  * - Commands are OEA's own DSL, not ADB: e.g., "device info", "package list", "freeze com.example", "overlay status", "multitask split pkg1 pkg2", etc.
@@ -73,7 +73,7 @@ object OeaConsoleApp {
         header.addView(kit.text("OEA Console", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(kit.iconBadge(R.drawable.oic_developer_mode, palette.accentSoft, palette.onAccentSoft, 40))
         column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
-        kit.note(column, "Advanced device utilities: diagnostics, device info, security checks, storage tools, performance and our own ADB-inspired command system. Everything here uses supported Android APIs and explains its limits honestly. No laptop, no Shizuku, no helper app — OEA's own privileged service layer.")
+        kit.note(column, "Advanced device utilities and OEA's own authority manager. The embedded Wireless Debugging bridge pairs directly with Android after you enable it and approve pairing; root and Device Owner are detected only when already available. OEA never silently elevates itself.")
 
         // Quick stats
         val statsCard = LinearLayout(host).apply {
