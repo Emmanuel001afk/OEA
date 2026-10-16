@@ -1876,7 +1876,7 @@ open class OeaSystemToolsActivity : Activity() {
         titles.addView(kit.text("Freezer", 24f, palette.text, OeaType.medium))
         val assistantGranted = OeaAssistant.isEnabled(this)
         val modeLine = when {
-            systemMode -> if (backend == OeaAppFreezer.Backend.ROOT) "System freeze • Root" else "System freeze • Device Owner"
+            systemMode -> when (backend) { OeaAppFreezer.Backend.ROOT -> "System freeze • Root"; OeaAppFreezer.Backend.ADB -> "System freeze • OEA Authority"; else -> "System freeze • Device Owner" }
             OeaAssistant.isConnected() -> "OEA Freeze • Assistant ready"
             assistantGranted -> "OEA Freeze • Assistant on"
             else -> "OEA Freeze • Assistant off"
