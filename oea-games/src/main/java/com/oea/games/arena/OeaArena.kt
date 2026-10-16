@@ -175,7 +175,8 @@ class OeaArena : OeaGame() {
         val skill = when (settings["difficulty"] ?: launch.option("difficulty", "normal")) { "easy" -> 0.25f; "hard" -> 0.9f; else -> 0.55f }
         val fast = (settings["zone"] ?: launch.option("zone", "normal")) == "fast"
         rules = settings["rules"] ?: launch.option("rules", "br")
-        map = ArenaMap(seed)
+        val terrain = settings["terrain"] ?: launch.option("terrain", "island")
+        map = ArenaMap(seed, terrain)
         sim = ArenaSim(seed, map, fast, skill)
         when (rules) {
             // Permanent night; the moon and your muzzle flash are the light.
@@ -610,12 +611,12 @@ class OeaArena : OeaGame() {
         val sens = 0.0038f * ctx.settings.lookSensitivity / d / zoom
         val dx = look.deltaX + fire.dragDx + fire2.dragDx
         val dy = look.deltaY + fire.dragDy + fire2.dragDy
-        lookYaw -= dx * sens * 1.15f
+        lookYaw = wrapYaw(lookYaw - dx * sens * 1.15f)
         lookPitch = MathX.clamp(lookPitch - dy * sens, -1.2f, 1.1f)
         // Gamepad / keyboard.
         val gp = ctx.input.gamepad
         if (gp.connected) {
-            lookYaw -= gp.rightX * dt * 2.6f / zoom
+            lookYaw = wrapYaw(lookYaw - gp.rightX * dt * 2.6f / zoom)
             lookPitch = MathX.clamp(lookPitch - gp.rightY * dt * 1.8f / zoom, -1.2f, 1.1f)
         }
         if (adsBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) adsOn = !adsOn
@@ -1128,6 +1129,14 @@ class OeaArena : OeaGame() {
     companion object {
         const val ID = "arena"
         private val ACCENT = 0xFFFF8A3D.toInt()
+
+        /** Keep camera yaw bounded during long sessions and extreme touch drags. */
+        private fun wrapYaw(angle: Float): Float {
+            var wrapped = angle % MathX.TAU
+            if (wrapped > MathX.PI_F) wrapped -= MathX.TAU
+            if (wrapped < -MathX.PI_F) wrapped += MathX.TAU
+            return wrapped
+        }
         private const val MSG_CMD = 32
         private const val MSG_SNAP = 33
         private const val EV_HIT = 40
@@ -1147,7 +1156,7 @@ class OeaArena : OeaGame() {
                 "Fight bots alone or friends over Wi-Fi, hotspot or online. Twin-stick touch controls with aim-down-sights. " +
                 "Shot Out adds three survival rules: Last Day Survival (day turns to night while waves keep landing), " +
                 "Lights Out (permanent night — your muzzle flash is the light) and Haunted (dense green fog, endless undead). " +
-                "Aim sensitivity lives in the Games hub settings and changes the camera for real.",
+                "Aim sensitivity lives in the Games hub settings and changes the camera for real. Solo island levels include the original Green Island, steeper Highlands and broken-ridge Badlands; each reshapes the traversable terrain while keeping towns, cover and loot deterministic for the match seed.",
             accent = ACCENT,
             glyph = "◎",
             orientation = GameOrientation.LANDSCAPE,
@@ -1165,6 +1174,11 @@ class OeaArena : OeaGame() {
                 GameOption("bots", "Bots", listOf(Choice("0", "None"), Choice("5", "5 bots"), Choice("9", "9 bots"), Choice("15", "15 bots")), "9"),
                 GameOption("difficulty", "Bot skill", listOf(Choice("easy", "Easy"), Choice("normal", "Normal"), Choice("hard", "Hard")), "normal"),
                 GameOption("zone", "Zone speed", listOf(Choice("normal", "Normal"), Choice("fast", "Fast")), "normal"),
+                GameOption("terrain", "Island level", listOf(
+                    Choice("island", "Green island"),
+                    Choice("highlands", "Highlands"),
+                    Choice("badlands", "Badlands"),
+                ), "island", setOf(PlayMode.SOLO)),
             ),
             preferredIsland = IslandStyle.CARD,
             version = 1,

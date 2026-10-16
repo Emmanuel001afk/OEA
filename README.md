@@ -27,7 +27,7 @@ OEA ships its own game engine and games, opened from the **OEA Games** app (own 
 - **Performance**: highest display refresh rate, Android ADPF hint sessions, device tiering, thermal and Game Mode awareness, optional FPS overlay.
 - **Multiplayer, two methods only**: local Wi-Fi / hotspot (automatic discovery, TCP + UDP, QR or address fallback) and online WebRTC connected by exchanging an invite and a reply code or QR — no accounts or game servers; STUN/TURN only if you add your own.
 - **Dynamic Island**: games publish live activities and events to the card style, the camera island, or both (automatic or per-game placement), on Home and inside games; an optional Android-overlay mode can show compatible activities across apps after explicit permission, with all-app or per-app notification selection.
-- **Games**: Runner (endless train-yard runner; split-screen duel, take turns, races with ghost runners), Arena (battle-royale foundation with bots and host-authoritative netcode), Chess (complete rules, 10 AI levels, 3D/2D boards, clocks, pass & play, Wi-Fi/online) and the Engine Lab.
+- **Games**: Runner (endless train-yard runner; split-screen duel, take turns, races with ghost runners), Arena (battle-royale foundation with bots, three solo island terrain presets and host-authoritative netcode), Chess (complete rules, 10 AI levels, 3D/2D boards, clocks, pass & play, Wi-Fi/online) and the Engine Lab.
 
 ## OEA Systems
 
