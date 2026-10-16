@@ -88,7 +88,7 @@ object OeaAppFreezer {
         return if (dpm?.isAdminActive(admin) == true) {
             Result(false, "Device Admin is active, but Android does not let ordinary Device Admin freeze apps. OEA must be provisioned as Device Owner or have root access.", Backend.DEVICE_ADMIN)
         } else {
-            Result(false, "App freezing needs Device Owner or root authority on this Android device.", Backend.NONE)
+            Result(false, "App freezing needs Device Owner, root, or a paired OEA Authority Wireless Debugging bridge on this Android device.", Backend.NONE)
         }
     }
 
@@ -159,8 +159,8 @@ object OeaAppFreezer {
         if (!packageName.matches(Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+"))) return null
         val (success, dump) = OeaAdbAuthority.runShell("dumpsys package $packageName")
         if (!success || !dump.contains("Package [$packageName]")) return null
-        val state = Regex("""(?m)^\\s*User 0:.*$""").find(dump)?.value ?: return null
-        return Regex("""\\bsuspended=true\\b""").containsMatchIn(state)
+        val state = Regex("""(?m)^\s*User 0:.*$""").find(dump)?.value ?: return null
+        return Regex("""\bsuspended=true\b""").containsMatchIn(state)
     }
 
     private fun persist(context: Context, packageName: String, frozen: Boolean) {
