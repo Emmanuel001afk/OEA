@@ -91,6 +91,8 @@ object OeaAccessDoctor {
 
     private fun inspect(app: Context, privilege: Privilege, grant: Grant): Finding {
         val root = OeaShell.available()
+        val adb = OeaAdbAuthority.isSessionReady()
+        val privileged = root || adb
         val owner = OeaPrivileges.isDeviceOwner(app)
         return when (privilege) {
             Privilege.OVERLAY -> {
@@ -106,7 +108,7 @@ object OeaAccessDoctor {
                         "Switch Display over other apps off and on again for OEA, then press Verify. On some firmware the AppOps entry is the one that matters.",
                         command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow")
 )
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it now.", "Tap Fix.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
+                    privileged -> Finding(privilege, State.OEA_CAN_FIX, if (root) "Not granted; OEA has root and can grant it now." else "Not granted; OEA Authority has a verified Wireless Debugging shell.", "Tap Fix.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
                     else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Device Owner alone cannot grant Display over other apps on this Android build. Open Android Settings › Apps › OEA › Display over other apps; a supported root channel can instead change AppOps.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
                 }
             }
@@ -124,8 +126,7 @@ object OeaAccessDoctor {
                         "Turn OEA Assistant off and on again in Android Settings › Accessibility. If it stays greyed out, restart the phone once — Android binds accessibility services at boot.",
                         command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}")
 )
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not enabled; OEA has root and can enable its own service.", "Tap Fix.", command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}"))
-                    owner -> Finding(privilege, State.OEA_CAN_FIX, "Not enabled; OEA is the device owner and can enable it.", "Tap Fix.")
+                    privileged -> Finding(privilege, State.OEA_CAN_FIX, if (root) "Not enabled; OEA has root and can enable its own service." else "Not enabled; OEA Authority can request the supported secure-setting change.", "Tap Fix.", command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}"))
                     else -> Finding(privilege, State.NEEDS_TAP, "Not enabled.", "Turn on OEA Assistant in Android Settings › Accessibility › Installed apps.", command = "settings put secure enabled_accessibility_services ${assistantList(app)}")
                 }
             }
@@ -134,8 +135,8 @@ object OeaAccessDoctor {
                 val can = OeaPrivileges.canReadNotifications(app)
                 when {
                     can -> Finding(privilege, State.WORKING, "OEA can read notifications: the island, dots and Now Playing work.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it.", "Tap Fix.", command = command(root, "cmd notification allow_listener ${assistantComponent(app)}"))
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Notifications › Device & app notifications › OEA.", command = command(root, "cmd notification allow_listener ${assistantComponent(app)}"))
+                    privileged -> Finding(privilege, State.OEA_CAN_FIX, if (root) "Not granted; OEA has root and can enable its listener." else "Not granted; OEA Authority can apply the supported notification-listener setting.", "Tap Fix.", command = command(root, "settings put secure enabled_notification_listeners ${notificationList(app)}"))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Notifications › Device & app notifications › OEA.", command = command(root, "settings put secure enabled_notification_listeners ${notificationList(app)}"))
                 }
             }
 
@@ -143,7 +144,7 @@ object OeaAccessDoctor {
                 val can = OeaPrivileges.canReadUsage(app)
                 when {
                     can -> Finding(privilege, State.WORKING, "OEA can see which app is in front and your most-used apps.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it.", "Tap Fix.", command = command(root, "appops set ${app.packageName} GET_USAGE_STATS allow"))
+                    privileged -> Finding(privilege, State.OEA_CAN_FIX, if (root) "Not granted; OEA has root and can grant it." else "Not granted; OEA Authority can apply the supported usage-access AppOp.", "Tap Fix.", command = command(root, "appops set ${app.packageName} GET_USAGE_STATS allow"))
                     else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Special app access › Usage access › OEA.", command = command(root, "appops set ${app.packageName} GET_USAGE_STATS allow"))
                 }
             }
@@ -161,7 +162,7 @@ object OeaAccessDoctor {
                 val ok = OeaPrivileges.ignoresBatteryOptimizations(app)
                 when {
                     ok -> Finding(privilege, State.WORKING, "Android will not freeze OEA in the background.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Still battery-optimised; OEA has root and can exempt itself.", "Tap Fix.", command = command(root, "dumpsys deviceidle whitelist +${app.packageName}"))
+                    privileged -> Finding(privilege, State.OEA_CAN_FIX, if (root) "Still battery-optimised; OEA has root and can exempt itself." else "Still battery-optimised; OEA Authority can request the supported idle-whitelist change.", "Tap Fix.", command = command(root, "dumpsys deviceidle whitelist +${app.packageName}"))
                     else -> Finding(privilege, State.NEEDS_TAP, "Battery optimisation is on.", "Android Settings › Apps › OEA › Battery › Unrestricted.", command = command(root, "dumpsys deviceidle whitelist +${app.packageName}"))
                 }
             }
@@ -210,7 +211,7 @@ object OeaAccessDoctor {
                 val granted = OeaPrivileges.hasRuntimePermission(app, runtimePermission(privilege))
                 when {
                     granted -> Finding(privilege, State.WORKING, "${privilege.title} is allowed.", "Nothing to do.")
-                    root && android.os.Build.VERSION.SDK_INT < 33 -> Finding(privilege, State.OEA_CAN_FIX, "Not allowed; OEA has root and can grant it.", "Tap Fix.", command = command(root, "pm grant ${app.packageName} ${runtimePermission(privilege)}"))
+                    privileged && android.os.Build.VERSION.SDK_INT < 33 -> Finding(privilege, State.OEA_CAN_FIX, if (root) "Not allowed; OEA has root and can grant it." else "Not allowed; OEA Authority can request this runtime permission grant.", "Tap Fix.", command = command(root, "pm grant ${app.packageName} ${runtimePermission(privilege)}"))
                     else -> Finding(privilege, State.NEEDS_TAP, "Not allowed.", "Android will ask the first time OEA needs it; you can also grant it in Settings › Apps › OEA › Permissions.")
                 }
             }
@@ -257,7 +258,11 @@ object OeaAccessDoctor {
      * phone has root (so the row can be copied and run exactly as OEA runs it),
      * and bare otherwise (so it can be pasted into a PC's adb shell).
      */
-    private fun command(root: Boolean, cmd: String): String = if (root) "su -c \"$cmd\"" else cmd
+    private fun command(root: Boolean, cmd: String): String? = when {
+        root -> "su -c \"$cmd\""
+        OeaAdbAuthority.isSessionReady() -> null
+        else -> cmd
+    }
 
     /**
      * The accessibility service list OEA writes when it grants itself the
@@ -276,6 +281,13 @@ object OeaAccessDoctor {
         val keep = existing.split(':').map { it.trim() }
             .filter { it.isNotEmpty() && it != short && it != long }
         return (keep + short).joinToString(":")
+    }
+
+    private fun notificationList(app: Context): String {
+        val existing = android.provider.Settings.Secure.getString(app.contentResolver, "enabled_notification_listeners").orEmpty()
+        val ours = "${app.packageName}/com.oea.launcher.notifications.OeaNotificationListener"
+        val keep = existing.split(":").map { it.trim() }.filter { it.isNotEmpty() && !it.contains(app.packageName) }
+        return (keep + ours).joinToString(":")
     }
 
     /** What the doctor fixes by itself, in one pass. */
