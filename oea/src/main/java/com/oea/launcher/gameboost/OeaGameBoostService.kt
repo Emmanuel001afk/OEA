@@ -686,7 +686,10 @@ class OeaGameBoostService : Service() {
     /** True when [className] is one of the screens an OEA-hosted game actually plays on. */
     private fun isOeaGameScreen(className: String?): Boolean = className != null && (
         className.startsWith("com.oea.launcher.games.OeaGameActivity") ||
-            className.startsWith("com.oea.games.OeaStandaloneGameActivity")
+            className.startsWith("com.oea.games.OeaStandaloneGameActivity") ||
+            className == "com.oea.launcher.games.OeaEndlessDaysActivity" ||
+            className == "com.oea.launcher.games.OeaSendOffActivity" ||
+            className == "com.oea.launcher.games.OeaChessGameActivity"
 )
 
     /**
