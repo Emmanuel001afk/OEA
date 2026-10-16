@@ -394,6 +394,7 @@ object OeaPrivileges {
             }
 
             Privilege.BATTERY_UNRESTRICTED -> "dumpsys deviceidle whitelist +$pkg"
+            Privilege.DND_ACCESS -> "cmd notification allow_dnd $pkg"
             Privilege.HOME_ROLE -> "cmd package set-home-activity $pkg/$HOME_ACTIVITY"
             else -> privilege.runtimePermission?.let { "pm grant $pkg $it" }
         }
