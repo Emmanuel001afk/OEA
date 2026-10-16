@@ -2963,6 +2963,8 @@ open class OeaSystemToolsActivity : Activity() {
             buttons.addView(kit.quietButton("Stop", R.drawable.oic_close) { wp.stopWatching(); rerender() }, LinearLayout.LayoutParams(-2, dp(42)))
         } else {
             buttons.addView(kit.primaryButton("Start reading", R.drawable.oic_developer_mode) {
+                // A fresh read must not combine a new code with a stale port from an earlier session.
+                wp.clear()
                 wp.startWatching()
                 runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                     .onFailure { toast("Open Developer options, then Wireless debugging.") }
