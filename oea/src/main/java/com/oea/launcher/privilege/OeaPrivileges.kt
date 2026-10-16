@@ -120,8 +120,7 @@ object OeaPrivileges {
         -> false
 
         else -> isDeviceOwner(context) && privilege.runtimePermission != null ||
-            OeaShell.available() && rootCommand(context, privilege) != null ||
-            OeaAdbAuthority.isSessionReady() && rootCommand(context, privilege) != null
+            (OeaShell.available() || OeaAdbAuthority.isSessionReady()) && rootCommand(context, privilege) != null
     }
 
     private fun read(context: Context, privilege: Privilege): Grant = when (privilege) {
