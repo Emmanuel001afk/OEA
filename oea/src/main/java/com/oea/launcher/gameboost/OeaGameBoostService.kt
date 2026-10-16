@@ -531,6 +531,10 @@ class OeaGameBoostService : Service() {
                     // A session for a game running inside OEA: the game's own
                     // screen means "still playing"; the hub (or any other OEA
                     // screen, after the launch grace) means the user left it.
+                    // Usage access can identify OEA as the foreground package without
+                    // identifying the activity. Do not end a built-in game session on
+                    // that incomplete evidence; OEA Home explicitly ends it on resume.
+                    OeaGameBoostStore.isOeaGameKey(active) && className == null -> cancelLeave()
                     OeaGameBoostStore.isOeaGameKey(active) && isOeaGameScreen(className) -> {
                         cancelLeave()
                         applyGameDndPreference()
