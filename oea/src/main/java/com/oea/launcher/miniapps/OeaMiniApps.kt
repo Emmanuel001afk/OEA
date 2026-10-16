@@ -55,7 +55,7 @@ object OeaMiniApps {
             "weather", "OEA Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.ic_oea_weather, OeaWeatherActivity::class.java
 ) { host, palette -> OeaWeatherApp.build(host, palette) },
         App(
-            "calculator", "OEA Calculator", "Full calculator with scientific, history and tape", R.drawable.oic_calculate, OeaCalculatorActivity::class.java
+            "calculator", "OEA Calculator", "Full calculator with scientific, history and tape", R.drawable.ic_oea_calculator, OeaCalculatorActivity::class.java
 ) { host, palette -> OeaCalculatorApp.build(host, palette) },
         App(
             "messaging", "OEA Messaging", "SMS messaging with proper permissions and roles", R.drawable.ic_oea_messaging, OeaMessagingActivity::class.java
@@ -70,10 +70,10 @@ object OeaMiniApps {
             "console", "OEA Console", "Central utility: diagnostics, device info, security, command system", R.drawable.ic_oea_console, OeaConsoleActivity::class.java
 ) { host, palette -> OeaConsoleApp.build(host, palette) },
         App(
-            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.oic_photo_library, OeaGalleryActivity::class.java
+            "gallery", "Gallery", "Every OEA picture — wallpapers, lock screens, your photos and live scenes", R.drawable.ic_oea_gallery, OeaGalleryActivity::class.java
 ) { host, palette -> OeaGalleryApp.build(host, palette) },
         App(
-            "voice", "OEA Voice", "Launcher's own speech recognizer — offline + launcher commands", R.drawable.oic_mic, OeaVoiceActivity::class.java
+            "voice", "OEA Voice", "Launcher's own speech recognizer — offline + launcher commands", R.drawable.ic_oea_voice, OeaVoiceActivity::class.java
 ) { host, palette -> OeaVoiceApp.build(host, palette) }
 )
 

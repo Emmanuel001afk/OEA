@@ -14,6 +14,7 @@ import android.util.Rational
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import androidx.core.content.FileProvider
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -147,7 +148,8 @@ object OeaVideoApp {
                 val oeaDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES), "OEA")
                 oeaDir.listFiles()?.sortedByDescending { it.lastModified() }?.forEach { f ->
                     if (f.isFile && f.extension.lowercase() in listOf("mp4", "mkv", "webm", "avi", "mov")) {
-                        list.add(0, VideoItem(Uri.fromFile(f), f.name, 0L, f.length(), f.lastModified(), "OEA Camera", "Movies/OEA", 0, 0))
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
+                        list.add(0, VideoItem(uri, f.name, 0L, f.length(), f.lastModified(), "OEA Camera", "Movies/OEA", 0, 0))
                     }
                 }
             } catch (_: Throwable) {}
@@ -158,6 +160,13 @@ object OeaVideoApp {
     fun build(host: Activity, palette: OeaPalette): View {
         val kit = OeaKit(host, palette)
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        val mediaPermission = if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO else android.Manifest.permission.READ_EXTERNAL_STORAGE
+        if (host.checkSelfPermission(mediaPermission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            kit.banner(column, R.drawable.ic_oea_video, "Connect your device videos", "VIP can show Camera, Downloads and other video folders on this phone. OEA never uploads them.", OeaKit.Tone.INFO, "Allow") {
+                runCatching { host.requestPermissions(arrayOf(mediaPermission), 2202) }
+            }
+            kit.note(column, "OEA's own recordings remain available without granting video access.")
+        }
         var videos: MutableList<VideoItem> = mutableListOf()
         var currentBucket: String? = null
         var currentTab = "albums"

@@ -3,6 +3,11 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
@@ -35,6 +40,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.WRITE_SMS" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -55,6 +61,17 @@
         android:label="OEA Launcher"
         android:allowBackup="false"
         android:supportsRtl="true">
+        <!-- Share OEA's private recordings/photos safely with players, editors
+             and other apps; never expose a file:// URI on Android 7+. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/oea_file_paths" />
+        </provider>
         <!-- OEA Home: the default-launcher activity. It stays out of Recents,
              survives configuration changes without recreation and keeps the
              wallpaper visible behind a transparent, edge-to-edge window. -->
@@ -230,6 +247,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.GET_CONTENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
         <activity
             android:name="com.oea.launcher.miniapps.OeaVipActivity"
@@ -244,6 +268,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.GET_CONTENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
         <activity
@@ -265,8 +296,8 @@
             android:name="com.oea.launcher.miniapps.OeaCalculatorActivity"
             android:exported="true"
             android:label="OEA Calculator"
-            android:icon="@drawable/oic_calculate"
-            android:roundIcon="@drawable/oic_calculate"
+            android:icon="@drawable/ic_oea_calculator"
+            android:roundIcon="@drawable/ic_oea_calculator"
             android:taskAffinity="com.oea.launcher.app.calculator"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
@@ -289,6 +320,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="smsto" />
+                <data android:scheme="sms" />
             </intent-filter>
         </activity>
         <activity
@@ -320,6 +357,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.IMAGE_CAPTURE" />
+                <action android:name="android.media.action.VIDEO_CAPTURE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
         <activity
             android:name="com.oea.launcher.miniapps.OeaConsoleActivity"
@@ -340,8 +382,8 @@
             android:name="com.oea.launcher.miniapps.OeaGalleryActivity"
             android:exported="true"
             android:label="Gallery"
-            android:icon="@drawable/oic_photo_library"
-            android:roundIcon="@drawable/oic_photo_library"
+            android:icon="@drawable/ic_oea_gallery"
+            android:roundIcon="@drawable/ic_oea_gallery"
             android:taskAffinity="com.oea.launcher.app.gallery"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
@@ -355,8 +397,8 @@
             android:name="com.oea.launcher.miniapps.OeaVoiceActivity"
             android:exported="true"
             android:label="OEA Voice"
-            android:icon="@drawable/oic_mic"
-            android:roundIcon="@drawable/oic_mic"
+            android:icon="@drawable/ic_oea_voice"
+            android:roundIcon="@drawable/ic_oea_voice"
             android:taskAffinity="com.oea.launcher.app.voice"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
@@ -411,6 +453,25 @@
                 <action android:name="android.content.pm.action.CONFIRM_PIN_APPWIDGET" />
             </intent-filter>
         </activity>
+        <!-- Default-SMS role entry point: Android delivers new messages here
+             only after the user explicitly selects OEA Messaging as default. -->
+        <receiver
+            android:name="com.oea.launcher.miniapps.OeaSmsDeliveryReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_DELIVER" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.oea.launcher.miniapps.OeaMmsDeliveryReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_WAP_PUSH">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" />
+                <data android:mimeType="application/vnd.wap.mms-message" />
+            </intent-filter>
+        </receiver>
         <!-- OEA Assistant: accessibility service for lock, notifications,
              Recents, split screen and the no-root App Freezer. -->
         <service
@@ -593,6 +654,7 @@
             android:name="com.oea.launcher.power.OeaLockTileService"
             android:exported="true"
             android:icon="@drawable/oic_lock"
+            android:roundIcon="@drawable/oic_lock"
             android:label="Lock screen"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

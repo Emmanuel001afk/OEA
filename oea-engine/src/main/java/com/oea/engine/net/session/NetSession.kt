@@ -155,6 +155,8 @@ class NetSession private constructor(
     private var lastLobbyBroadcast = 0L
     /** Client: the WebRTC link while it isn't up yet. */
     @Volatile private var hostLinkPending: Link? = null
+    /** Desired lobby readiness survives the short connection handshake. */
+    @Volatile private var requestedReady = false
 
     val sessionId: Long = Random.nextLong()
     @Volatile var localId = if (role == SessionRole.HOST) 0 else -1
@@ -250,6 +252,7 @@ class NetSession private constructor(
     // ---------------------------------------------------------------- lobby API (UI thread)
 
     fun setReady(ready: Boolean) {
+        requestedReady = ready
         if (isHost) exec.execute { roster[localId]?.ready = ready; rebuildAndBroadcast() }
         else hostLink?.send(Channel.RELIABLE, build(MSG_READY, localId, HOST_ID) { it.bool(ready) })
     }
@@ -440,6 +443,9 @@ class NetSession private constructor(
                     clockOffset = hostTime - SystemClock.elapsedRealtime()
                     phase = SessionPhase.LOBBY
                     status = "Connected"
+                    // A lobby UI may have requested readiness before HELLO
+                    // completed; now that the host assigned our id, replay it.
+                    if (requestedReady) link.send(Channel.RELIABLE, build(MSG_READY, localId, HOST_ID) { it.bool(true) })
                     notifyUpdate()
                 }
                 MSG_REJECT -> shutdown(r.string(300), sendBye = false)

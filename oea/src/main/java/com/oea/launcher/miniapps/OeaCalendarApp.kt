@@ -63,6 +63,62 @@ object OeaCalendarApp {
         val allDay: Boolean
     )
 
+    private fun hasCalendarPermission(host: Activity): Boolean = runCatching {
+        host.checkSelfPermission("android.permission.READ_CALENDAR") == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
+
+    /**
+     * The phone's own calendar events for the month around [monthCal], read
+     * from Android's Calendar Provider. They are merged read-only into the
+     * views (ids are negative so they are never written back to OEA's store).
+     */
+    private fun loadDeviceEvents(host: Activity, monthCal: Calendar): List<Event> {
+        val out = ArrayList<Event>()
+        runCatching {
+            val start = Calendar.getInstance().apply {
+                clear(); set(monthCal.get(Calendar.YEAR), monthCal.get(Calendar.MONTH), 1, 0, 0, 0)
+            }.timeInMillis
+            val end = Calendar.getInstance().apply {
+                clear(); set(monthCal.get(Calendar.YEAR), monthCal.get(Calendar.MONTH), 1, 0, 0, 0)
+                add(Calendar.MONTH, 1)
+            }.timeInMillis
+            val uri = android.provider.CalendarContract.Instances.CONTENT_URI.buildUpon()
+            android.content.ContentUris.appendId(uri, start)
+            android.content.ContentUris.appendId(uri, end)
+            host.contentResolver.query(
+                uri.build(),
+                arrayOf(
+                    android.provider.CalendarContract.Instances.TITLE,
+                    android.provider.CalendarContract.Instances.BEGIN,
+                    android.provider.CalendarContract.Instances.END,
+                    android.provider.CalendarContract.Instances.ALL_DAY,
+                ),
+                null, null,
+                android.provider.CalendarContract.Instances.BEGIN + " ASC",
+            )?.use { c ->
+                val titleI = c.getColumnIndex(android.provider.CalendarContract.Instances.TITLE)
+                val beginI = c.getColumnIndex(android.provider.CalendarContract.Instances.BEGIN)
+                val endI = c.getColumnIndex(android.provider.CalendarContract.Instances.END)
+                val allDayI = c.getColumnIndex(android.provider.CalendarContract.Instances.ALL_DAY)
+                while (c.moveToNext() && out.size < 240) {
+                    val begin = c.getLong(beginI)
+                    val endMs = c.getLong(endI)
+                    val allDay = allDayI >= 0 && c.getInt(allDayI) == 1
+                    val s = Calendar.getInstance().apply { timeInMillis = begin }
+                    val e = Calendar.getInstance().apply { timeInMillis = if (endMs > begin) endMs else begin + 3_600_000L }
+                    val time = if (allDay) "" else String.format(java.util.Locale.US, "%02d:%02d", s.get(Calendar.HOUR_OF_DAY), s.get(Calendar.MINUTE))
+                    val endTime = if (allDay) "" else String.format(java.util.Locale.US, "%02d:%02d", e.get(Calendar.HOUR_OF_DAY), e.get(Calendar.MINUTE))
+                    out += Event(
+                        -begin, s.get(Calendar.YEAR), s.get(Calendar.MONTH), s.get(Calendar.DAY_OF_MONTH),
+                        c.getString(titleI) ?: "(untitled)", time, endTime, "", "From your device calendar",
+                        Category.OTHER.name, 0, Recurrence.NONE.name, allDay,
+                    )
+                }
+            }
+        }.onFailure { /* denied or provider missing: OEA's own events still work */ }
+        return out
+    }
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private fun decode(raw: String?): List<Event> {
@@ -135,8 +191,25 @@ object OeaCalendarApp {
         }
 
         val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val previousButton = kit.circleIconButton(R.drawable.oic_chevron_right, "Previous month", palette.cardHigh, palette.text) { }
+            .apply { rotation = 180f }
+        val nextButton = kit.circleIconButton(R.drawable.oic_chevron_right, "Next month", palette.cardHigh, palette.text) { }
         val monthText = kit.text("", 20f, palette.text, OeaType.medium)
+        header.addView(previousButton, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(4) })
         header.addView(monthText, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(nextButton, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })
+        previousButton.setOnClickListener {
+            currentCal.set(Calendar.DAY_OF_MONTH, 1)
+            currentCal.add(Calendar.MONTH, -1)
+            selectedCal = currentCal.clone() as Calendar
+            refresh()
+        }
+        nextButton.setOnClickListener {
+            currentCal.set(Calendar.DAY_OF_MONTH, 1)
+            currentCal.add(Calendar.MONTH, 1)
+            selectedCal = currentCal.clone() as Calendar
+            refresh()
+        }
         header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
             kit.prompt("Search events", "Title, location", "Search", searchQuery) { q ->
                 searchQuery = q.trim()
@@ -156,6 +229,9 @@ object OeaCalendarApp {
 
         val filterBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
         column.addView(kit.hscroll(filterBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+        val deviceHost = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        column.addView(deviceHost, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
 
         val gridHost = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         column.addView(gridHost)
@@ -198,7 +274,23 @@ object OeaCalendarApp {
 
             gridHost.removeAllViews()
             eventsHost.removeAllViews()
-            val allEvents = decode(prefs(host).getString(KEY_EVENTS, ""))
+            deviceHost.removeAllViews()
+            // Real device calendar: with permission, the phone's own events
+            // merge straight into the grid, day view and agenda.
+            val deviceEvents = if (hasCalendarPermission(host)) loadDeviceEvents(host, currentCal) else emptyList()
+            if (!hasCalendarPermission(host)) {
+                kit.row(kit.group(deviceHost), R.drawable.ic_oea_calendar, "Connect your device calendar",
+                    "Show the events your phone already has (Google, Exchange, CalDAV)") {
+                    runCatching {
+                        host.requestPermissions(arrayOf("android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR"), 2101)
+                    }
+                }
+            } else if (deviceEvents.isNotEmpty()) {
+                kit.note(deviceHost, "Device calendar connected · ${deviceEvents.size} event(s) this month are merged into your grid and agenda.")
+            } else {
+                kit.note(deviceHost, "Device calendar connected · no events this month. OEA events and device events live side by side.")
+            }
+            val allEvents = decode(prefs(host).getString(KEY_EVENTS, "")) + deviceEvents
             val filteredEvents = allEvents.filter { ev ->
                 (filterCategory == null || ev.category == filterCategory) &&
                 (searchQuery.isBlank() || ev.title.contains(searchQuery, true) || ev.location.contains(searchQuery, true) || ev.desc.contains(searchQuery, true))
@@ -315,9 +407,9 @@ object OeaCalendarApp {
                         val g = kit.group(gridHost)
                         sorted.take(50).forEach { ev ->
                             val cat = runCatching { Category.valueOf(ev.category) }.getOrDefault(Category.OTHER)
-                            kit.row(g, R.drawable.oic_schedule, ev.title, "${ev.year}-${ev.month+1}-${ev.day} ${ev.time} • ${cat.label} • ${ev.location}", trailing = null) {
-                                editEvent(host, kit, ev) { refresh() }
-                            }
+                            val readOnly = ev.id < 0L
+                            val action: (() -> Unit)? = if (readOnly) null else ({ editEvent(host, kit, ev) { refresh() } })
+                            kit.row(g, R.drawable.oic_schedule, ev.title, "${ev.year}-${ev.month+1}-${ev.day} ${ev.time} • ${cat.label} • ${ev.location}" + if (readOnly) " • Device calendar · read-only" else "", trailing = null, chevron = !readOnly, onClick = action)
                         }
                     }
                 }
@@ -345,9 +437,9 @@ object OeaCalendarApp {
                     val g = kit.group(eventsHost)
                     dayEvents.forEach { ev ->
                         val cat = runCatching { Category.valueOf(ev.category) }.getOrDefault(Category.OTHER)
-                        kit.row(g, R.drawable.oic_schedule, ev.title, "${ev.time}-${ev.endTime} • ${cat.label} • ${ev.location} • ${ev.desc} • Reminder ${ev.reminderMin}m • ${ev.recurrence}", trailing = null) {
-                            editEvent(host, kit, ev) { refresh() }
-                        }
+                        val readOnly = ev.id < 0L
+                        val action: (() -> Unit)? = if (readOnly) null else ({ editEvent(host, kit, ev) { refresh() } })
+                        kit.row(g, R.drawable.oic_schedule, ev.title, "${ev.time}-${ev.endTime} • ${cat.label} • ${ev.location} • ${ev.desc} • Reminder ${ev.reminderMin}m • ${ev.recurrence}" + if (readOnly) " • Device calendar · read-only" else "", trailing = null, chevron = !readOnly, onClick = action)
                     }
                 }
             }

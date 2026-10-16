@@ -14,7 +14,7 @@ class OeaFaultPolicyTest {
 
     private fun input(
         kind: ThreadKind,
-        subsystem: String = "game:runner",
+        subsystem: String = "game:runner", // stable Endless Days game id
         repeats: Int = 1,
         fatalError: Boolean = false,
         stackOverflow: Boolean = false,

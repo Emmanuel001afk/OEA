@@ -1,9 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <application
         android:allowBackup="false"
         android:appCategory="game"
         android:icon="@mipmap/ic_game_arena"
-        android:label="OEA Arena"
+        android:label="Send Off"
         android:resizeableActivity="true"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <activity
@@ -11,7 +15,7 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
             android:exported="true"
             android:hardwareAccelerated="true"
-            android:label="OEA Arena"
+            android:label="Send Off"
             android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

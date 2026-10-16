@@ -49,6 +49,8 @@ class OeaThemesActivity : Activity() {
     private var overlay: View? = null
     private var draft: Draft? = null
     private var pendingPick: String? = null
+    /** The packed theme JSON waiting for its export destination. */
+    private var pendingExport: String? = null
     private var busy = false
 
     /** A theme being created or edited. */
@@ -203,8 +205,10 @@ class OeaThemesActivity : Activity() {
 
         kit.sectionTitle(box, "My themes")
         val mine = store.customThemes()
-        if (mine.isEmpty()) kit.note(box, "Make a theme from your own pictures: the same picture for Home and lock, or a different one for each.")
+        if (mine.isEmpty()) kit.note(box, "Make a theme from your own pictures: the same picture for Home and lock, or a different one for each. You can also import a theme file someone shared.")
         addThemeGrid(box, mine, applied?.id, withCreate = true)
+        kit.row(kit.group(box), R.drawable.oic_palette, "Import a theme file",
+            "Open a .oea-theme.json from a friend, a backup or the cloud") { importThemeFile() }
 
         kit.sectionTitle(box, "OEA scenes")
         kit.note(box, "OEA's own live artwork. A live scene is drawn by Home itself, so Android's wallpaper — and your lock screen — stay exactly as they are.")
@@ -639,6 +643,11 @@ class OeaThemesActivity : Activity() {
         }
         box.addView(apply, LinearLayout.LayoutParams(-1, dp(52)))
         kit.note(box, "Applying never changes your apps, folders, app pairs, widgets, grid or other settings. Some phone makers manage the lock screen picture themselves; OEA tells you if Android keeps its own.")
+        kit.sectionTitle(box, "Move it around")
+        kit.row(kit.group(box), R.drawable.oic_wallpaper, "Export / upload theme file",
+            "One .oea-theme.json with its pictures — save to Downloads, upload to Drive, copy to another phone") {
+                exportTheme(theme)
+            }
         if (!theme.builtIn) {
             box.addView(kit.buttonRow(
                 kit.tonalButton("Edit", R.drawable.oic_edit) { startEditor(theme, null) },
@@ -1025,8 +1034,89 @@ class OeaThemesActivity : Activity() {
         }
     }
 
+    /** Packs the theme (pictures included) and offers any document destination. */
+    private fun exportTheme(theme: OeaThemeSpec) {
+        if (busy) return
+        busy = true
+        toast("Packing ${theme.name}…")
+        io.execute {
+            val json = store.exportTheme(theme.id)
+            main.post {
+                busy = false
+                if (isDestroyed) return@post
+                if (json == null) {
+                    toast("That theme couldn't be packed.")
+                    return@post
+                }
+                pendingExport = json
+                val safe = theme.name.replace(Regex("[^A-Za-z0-9\\-_ ]"), "").trim().ifBlank { "oea-theme" }
+                runCatching {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_TITLE, "$safe.oea-theme.json")
+                    }, REQUEST_EXPORT)
+                }.onFailure {
+                    pendingExport = null
+                    toast("No file picker is available.")
+                }
+            }
+        }
+    }
+
+    /** Brings a .oea-theme.json (from a friend, a backup, the cloud) into OEA. */
+    private fun importThemeFile() {
+        runCatching {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, REQUEST_IMPORT)
+        }.onFailure { toast("No file picker is available.") }
+    }
+
     @Deprecated("Activity results are routed manually for this simple flow")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQUEST_EXPORT) {
+            val json = pendingExport
+            pendingExport = null
+            val uri: Uri? = data?.data
+            if (resultCode != RESULT_OK || json == null || uri == null) return
+            io.execute {
+                val ok = runCatching {
+                    val out = contentResolver.openOutputStream(uri) ?: error("No output stream")
+                    out.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                    true
+                }.getOrDefault(false)
+                main.post {
+                    if (isDestroyed) return@post
+                    toast(if (ok) "Theme file saved / uploaded." else "Couldn't write the theme file.")
+                }
+            }
+            return
+        }
+        if (requestCode == REQUEST_IMPORT) {
+            val uri: Uri? = data?.data
+            if (resultCode != RESULT_OK || uri == null) return
+            toast("Importing theme…")
+            io.execute {
+                val text = runCatching {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                }.getOrNull()
+                val spec = text?.let { store.importTheme(it) }
+                main.post {
+                    if (isDestroyed) return@post
+                    if (spec == null) {
+                        toast("That file isn't an OEA theme.")
+                        return@post
+                    }
+                    toast("${spec.name} imported.")
+                    navigate("theme:${spec.id}")
+                }
+            }
+            return
+        }
         if (requestCode != REQUEST_PICK) {
             @Suppress("DEPRECATION")
             super.onActivityResult(requestCode, resultCode, data)
@@ -1061,5 +1151,7 @@ class OeaThemesActivity : Activity() {
         private const val SCREEN_HOME = "home"
         private const val SCREEN_EDITOR = "editor"
         private const val REQUEST_PICK = 0x7E01
+        private const val REQUEST_EXPORT = 0x7E02
+        private const val REQUEST_IMPORT = 0x7E03
     }
 }
