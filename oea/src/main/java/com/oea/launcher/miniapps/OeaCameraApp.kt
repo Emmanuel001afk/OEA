@@ -615,7 +615,8 @@ object OeaCameraApp {
             runCatching { manager.setTorchMode(activeId, false) }
             torchCameraId = null
         }
-        if (mode != FlashMode.TORCH || front) return true
+        if (mode != FlashMode.TORCH) return true
+        if (front) return false
 
         val rearFlashId = runCatching {
             manager.cameraIdList.firstOrNull { id ->
