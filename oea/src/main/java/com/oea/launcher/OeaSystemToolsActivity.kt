@@ -2954,6 +2954,9 @@ open class OeaSystemToolsActivity : Activity() {
             buttons.addView(kit.quietButton("Clear", R.drawable.oic_delete) { wp.clear(); rerender() }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(8) })
         }
         group.addView(buttons)
+        kit.primaryButton("Pair OEA Authority", R.drawable.oic_lock) {
+            startActivity(Intent(this, com.oea.launcher.privilege.OeaAuthorityActivity::class.java))
+        }.also { box.addView(it, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(4) }) }
         // Fallback only: the values the user types are used exactly like read ones.
         kit.quietButton("Type them in instead (fallback)", R.drawable.oic_text_fields) { askWirelessManually() }.also { box.addView(it, LinearLayout.LayoutParams(-1, dp(44))) }
     }
