@@ -159,6 +159,13 @@ object OeaImageApp {
     fun build(host: Activity, palette: OeaPalette): View {
         val kit = OeaKit(host, palette)
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        val mediaPermission = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_IMAGES else android.Manifest.permission.READ_EXTERNAL_STORAGE
+        if (host.checkSelfPermission(mediaPermission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            kit.banner(column, R.drawable.oic_photo_library, "Connect your device pictures", "EMAGE can show the images on this phone, including Camera, Screenshots, Downloads and app albums. OEA never uploads them.", OeaKit.Tone.INFO, "Allow") {
+                runCatching { host.requestPermissions(arrayOf(mediaPermission), 2201) }
+            }
+            kit.note(column, "You can still use OEA's own wallpaper library without granting photo access.")
+        }
         var images: MutableList<ImageItem> = mutableListOf()
         var currentBucket: String? = null
         var currentTab = "albums" // albums, all, favorites, recent, large, screenshots, downloads

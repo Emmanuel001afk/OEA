@@ -60,6 +60,88 @@ class OeaThemeStore private constructor(context: Context) {
     fun lastAppliedId(): String = prefs.getString(KEY_APPLIED, "") ?: ""
     fun setLastApplied(id: String) { prefs.edit().putString(KEY_APPLIED, id).apply() }
 
+    // ------------------------------------------------------- export / import
+
+    /**
+     * Packs a theme and its pictures into one portable `.oea-theme.json`
+     * string, so it can be uploaded (SAF targets Drive and friends), copied to
+     * another phone, or kept as a backup. Built-in themes export too.
+     */
+    fun exportTheme(id: String): String? {
+        val theme = find(id) ?: return null
+        return runCatching {
+            val out = JSONObject()
+            out.put("oeaTheme", 1)
+            out.put("name", theme.name); out.put("tagline", theme.tagline)
+            out.put("accentDark", theme.accentDark); out.put("accentLight", theme.accentLight)
+            out.put("tint", theme.surfaceTint); out.put("mode", theme.mode)
+            out.put("glass", theme.glassStyle); out.put("shape", theme.iconShape)
+            out.put("dock", theme.dockStyle); out.put("effect", theme.pageEffect)
+            imageB64(theme.home)?.let { out.put("homeImage", it) }
+            if (!theme.sharedImagery) imageB64(theme.lock)?.let { out.put("lockImage", it) }
+            out.toString()
+        }.onFailure { Log.w(TAG, "Could not export theme", it) }.getOrNull()
+    }
+
+    /** Base64 JPEG/PNG bytes of a picture (private copies and bundled art). */
+    private fun imageB64(ref: OeaImageRef): String? = runCatching {
+        val bytes: ByteArray = when (ref) {
+            is OeaImageRef.Imported -> File(ref.path).takeIf { it.isFile }?.readBytes()
+            is OeaImageRef.Bundled -> app.resources.openRawResource(ref.resId)?.use { it.readBytes() }
+            is OeaImageRef.Generated -> {
+                val bmp = com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, 720, 1280) ?: return null
+                val out = java.io.ByteArrayOutputStream()
+                bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                bmp.recycle()
+                out.toByteArray()
+            }
+        } ?: return null
+        // Refuse a pathological file before it becomes a giant share/upload.
+        if (bytes.size > 14 * 1024 * 1024) return null
+        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+    }.getOrNull()
+
+    /**
+     * Imports a theme file made by [exportTheme]; its pictures are copied into
+     * private storage so the theme survives anything happening to the file.
+     * Call off the main thread.
+     */
+    fun importTheme(json: String): OeaThemeSpec? = runCatching {
+        val o = JSONObject(json)
+        if (o.optInt("oeaTheme", 0) != 1) return null
+        val themeId = "t_${System.currentTimeMillis()}"
+        themesDir.mkdirs()
+        fun saveImage(b64Key: String, slot: String): OeaImageRef? {
+            val b64 = o.optString(b64Key, "")
+            if (b64.isBlank()) return null
+            val bytes = android.util.Base64.decode(b64, android.util.Base64.NO_WRAP) ?: return null
+            if (bytes.isEmpty() || bytes.size > 14 * 1024 * 1024) return null
+            val target = File(themesDir, "${themeId}_${slot}.jpg")
+            target.writeBytes(bytes)
+            return OeaImageRef.Imported(target.path)
+        }
+        val home = saveImage("homeImage", "home") ?: return null
+        val lock = saveImage("lockImage", "lock") ?: home
+        val spec = OeaThemeSpec(
+            id = themeId,
+            name = o.optString("name", "Imported theme"),
+            tagline = o.optString("tagline", ""),
+            home = home,
+            lock = lock,
+            accentDark = o.optInt("accentDark", Color.rgb(138, 180, 248)),
+            accentLight = o.optInt("accentLight", Color.rgb(26, 102, 220)),
+            surfaceTint = o.optInt("tint", 0),
+            mode = o.optString("mode", "system"),
+            glassStyle = o.optString("glass", "classic"),
+            iconShape = o.optString("shape", "system"),
+            dockStyle = o.optString("dock", "glass"),
+            pageEffect = o.optString("effect", "classic"),
+            builtIn = false,
+        )
+        saveCustom(spec)
+        spec
+    }.onFailure { Log.w(TAG, "Could not import theme", it) }.getOrNull()
+
     private fun themeJson(t: OeaThemeSpec) = JSONObject().apply {
         put("id", t.id); put("name", t.name); put("tagline", t.tagline)
         put("home", t.home.key); put("lock", t.lock.key)

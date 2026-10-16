@@ -40,7 +40,16 @@ class VirtualJoystick(
 
     val magnitude get() = value.len()
 
+    /** When true the control stands down: no touches claimed, value reads zero (UI overlays). */
+    var paused = false
+
     fun update(input: Input, width: Float, height: Float, density: Float) {
+        if (paused) {
+            input.pointer(pointerId)?.owner = null
+            pointerId = -1
+            value.set(0f, 0f); active = false
+            return
+        }
         radius = radiusDp * density
         val owned = if (pointerId >= 0) input.pointer(pointerId) else null
         if (owned == null || !owned.isDown) {
@@ -115,7 +124,16 @@ class VirtualButton(
     var cy = 0f; private set
     var radius = 1f; private set
 
+    /** When true the button stands down: no touches claimed (UI overlays). */
+    var paused = false
+
     fun update(input: Input, width: Float, height: Float, density: Float, safeLeft: Float = 0f, safeRight: Float = 0f) {
+        if (paused) {
+            input.pointer(pointerId)?.owner = null
+            pointerId = -1
+            pressed = false; justPressed = false; justReleased = false; dragDx = 0f; dragDy = 0f
+            return
+        }
         radius = radiusDp * density
         cx = anchorX * width + offsetXDp * density + (if (anchorX < 0.5f) safeLeft else -safeRight)
         cy = anchorY * height + offsetYDp * density
@@ -162,17 +180,45 @@ class VirtualButton(
 
 /** Free-look area: claims touches that start inside [region] and reports their movement. */
 class LookPad(var region: FloatArray = floatArrayOf(0.45f, 0f, 1f, 1f)) {
+    /**
+     * Largest per-frame movement (surface px) believed to come from a real
+     * finger. Android occasionally reports a pointer resync jump of hundreds of
+     * pixels the instant a second finger lifts; those spikes are what make a
+     * camera "glitch around" mid-turn. Anything beyond this is discarded.
+     */
+    var maxDeltaPx: Float = 160f
     var deltaX = 0f; private set
     var deltaY = 0f; private set
     var active = false; private set
     private var pointerId = -1
+    /** True on the frame a finger was claimed: its whole travel happened before we owned it. */
+    private var claimFrame = false
+
+    /** When true the pad stands down: no touches claimed (UI overlays). */
+    var paused = false
 
     fun update(input: Input, width: Float, height: Float) {
+        if (paused) {
+            input.pointer(pointerId)?.owner = null
+            pointerId = -1
+            claimFrame = false
+            deltaX = 0f; deltaY = 0f; active = false
+            return
+        }
         deltaX = 0f; deltaY = 0f
+        val wasClaim = claimFrame
+        claimFrame = false
         if (pointerId >= 0) {
             val p = input.pointer(pointerId)
             if (p == null || !p.isDown) { p?.owner = null; pointerId = -1; active = false }
-            else { deltaX = p.dx; deltaY = p.dy }
+            else if (!wasClaim) {
+                val ddx = p.dx; val ddy = p.dy
+                val m = maxDeltaPx
+                if (m > 0f && (ddx > m || ddx < -m || ddy > m || ddy < -m)) {
+                    // Pointer resync, not a finger: swallow the jump entirely.
+                    deltaX = 0f; deltaY = 0f
+                } else { deltaX = ddx; deltaY = ddy }
+            }
         }
         if (pointerId < 0) {
             input.forEachNewFree { p ->
@@ -181,6 +227,7 @@ class LookPad(var region: FloatArray = floatArrayOf(0.45f, 0f, 1f, 1f)) {
                     p.owner = this
                     pointerId = p.id
                     active = true
+                    claimFrame = true
                 }
             }
         }

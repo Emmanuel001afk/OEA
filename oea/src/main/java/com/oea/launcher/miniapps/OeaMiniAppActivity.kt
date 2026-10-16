@@ -75,6 +75,14 @@ open class OeaMiniAppActivity : Activity() {
         } catch (_: Throwable) { null }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // A permission just changed hands (camera, calendar, mic, SMS…): rebuild
+        // the mini-app so it picks up its new capabilities immediately instead
+        // of showing the "needs permission" card until the next visit.
+        OeaFaultShield.guard("miniapp:host:permission") { renderGuarded() }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         if (requestCode == 4001 && resultCode == RESULT_OK) {
             val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)

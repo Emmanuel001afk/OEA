@@ -2,6 +2,7 @@ package com.oea.launcher.games
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -323,26 +324,24 @@ class OeaGamesActivity : Activity(), SessionListener {
     }
 
     private fun launchGame(d: GameDescriptor, mode: PlayMode, options: Map<String, String>, players: List<LocalPlayer> = emptyList(), session: NetSession? = null) {
-        // If the user installed one of the separate game APKs, route simple
-        // solo launches through its own Android app/icon. Keep the in-hub
-        // engine path as a complete fallback and for same-device/network play.
-        val standalonePackage = when (d.id) {
-            "arena" -> "com.oea.arena"
-            "chess" -> "com.oea.chess"
-            "runner" -> "com.oea.runner"
-            else -> null
-        }
-        if (mode == PlayMode.SOLO && session == null && standalonePackage != null) {
+        // OEA's own games ship as independent apps (own icon, own task, own
+        // Android Game category). Solo and same-device play ALWAYS goes through
+        // that app when it is installed — the launcher never runs those matches
+        // itself. Networked matches stay here only while a hub lobby holds the
+        // live session; the standalone apps can host and join on their own too.
+        val standalonePackage = OeaGameRescue.standaloneFor(d.id)
+        if (session == null && standalonePackage != null) {
             val external = runCatching { packageManager.getLaunchIntentForPackage(standalonePackage) }.getOrNull()
             if (external != null) {
                 val optionBundle = android.os.Bundle().apply { options.forEach { (key, value) -> putString(key, value) } }
-                val gameSeed = System.nanoTime()
+                val playerCsv = players.joinToString(";") { it.name }
                 runCatching {
                     startActivity(external
                         .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_ID, d.id)
                         .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_MODE, mode.name)
                         .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_OPTIONS, optionBundle)
-                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_SEED, gameSeed))
+                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_PLAYERS, playerCsv)
+                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_SEED, System.nanoTime()))
                 }.onSuccess {
                     // The standalone game app is a real package with Android's game
                     // category; report its launch so a Game Boost session starts even
@@ -350,9 +349,24 @@ class OeaGamesActivity : Activity(), SessionListener {
                     runCatching { com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(applicationContext, standalonePackage) }
                     return
                 }
-                    .onFailure { toast("Opening the standalone game failed; starting it in OEA instead.") }
+                    .onFailure { toast("Opening ${d.title}'s own app failed.") }
+            } else {
+                // Not installed: say so plainly, and only run inside OEA if the
+                // user explicitly chooses to — never silently.
+                AlertDialog.Builder(this)
+                    .setTitle("${d.title} has its own app")
+                    .setMessage("${d.title} is an independent app ($standalonePackage) with its own icon, settings and multiplayer. Install it for the full experience — or run this match inside OEA Games just this once.")
+                    .setPositiveButton("Run inside OEA Games") { _, _ -> startInHub(d, mode, options, players, session) }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+                return
             }
         }
+        startInHub(d, mode, options, players, session)
+    }
+
+    /** The in-hub engine path: used for hub-hosted networked matches and Lab. */
+    private fun startInHub(d: GameDescriptor, mode: PlayMode, options: Map<String, String>, players: List<LocalPlayer>, session: NetSession?) {
         val launch = GameLaunch(mode, options, session?.seed ?: System.nanoTime(), players, session)
         OeaGameLauncher.start(this, d.id, launch)
     }
@@ -792,6 +806,8 @@ class OeaGamesActivity : Activity(), SessionListener {
         kit.switchRow(g, R.drawable.oic_music_note, "Sound effects", null, s.sound) { s.sound = it }
         kit.switchRow(g, R.drawable.oic_headset, "Music", null, s.music) { s.music = it }
         kit.stepperRow(g, R.drawable.oic_gesture, "Aim sensitivity", "Arena and other shooters", (s.lookSensitivity * 10f).toInt(), 2, 30, { String.format(java.util.Locale.US, "%.1f×", it / 10f) }) { s.lookSensitivity = it / 10f }
+        kit.stepperRow(g, R.drawable.oic_gesture, "ADS sensitivity", "Extra multiplier while aiming down sights", (s.adsSensitivity * 10f).toInt(), 3, 15, { String.format(java.util.Locale.US, "%.0f%%", it * 10f) }) { s.adsSensitivity = it / 10f }
+        kit.stepperRow(g, R.drawable.oic_tune, "Turn speed limit", "Caps how fast the view can turn — glitch-proof aiming", (s.turnSpeedLimit / 10f).toInt(), 0, 36, { if (it == 0) "Off" else String.format(java.util.Locale.US, "%d°/s", it * 10) }) { s.turnSpeedLimit = it * 10f }
         kit.note(box, "Thermal protection steps quality down before your phone throttles, and Android's Game Mode (battery or performance) is respected. Changes apply the next time a game starts.")
 
         // ------------------------------------------------------------ diagnosis

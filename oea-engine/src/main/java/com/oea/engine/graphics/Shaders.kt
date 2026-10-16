@@ -66,6 +66,11 @@ uniform vec3 u_groundAmbient;
 uniform vec4 u_fog;         // rgb, density
 uniform vec4 u_shadowParams; // enabled, texel, bias, strength
 uniform float u_exposure;
+// Dynamic point lights (fire, sparks, magic, muzzle flashes): the light that
+// VFX actually throws onto skin, cloth and terrain.
+#define MAX_POINT_LIGHTS 8
+uniform vec4 u_pointPos[MAX_POINT_LIGHTS];   // xyz = position, w = radius
+uniform vec4 u_pointColor[MAX_POINT_LIGHTS]; // rgb = linear colour × intensity, w = on/off
 out vec4 fragColor;
 """ + ACES + """
 float shadowFactor(vec3 n) {
@@ -111,6 +116,21 @@ void main() {
     vec3 ambient = mix(u_groundAmbient, u_skyAmbient, n.y * 0.5 + 0.5);
     float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * u_params.z;
     color = base.rgb * (ambient + u_sunColor * ndl * shadow) + u_sunColor * spec * shadow + rim * u_skyAmbient + u_emissive;
+    // Point lights: every flame, spark and spell throws real light around it.
+    for (int i = 0; i < MAX_POINT_LIGHTS; i++) {
+        float on = u_pointColor[i].w;
+        if (on < 0.001) continue;
+        vec3 ld = u_pointPos[i].xyz - v_worldPos;
+        float d2 = dot(ld, ld);
+        float rad = u_pointPos[i].w;
+        float att = clamp(1.0 - d2 / max(rad * rad, 1e-4), 0.0, 1.0);
+        att *= att;
+        vec3 ln = ld * inversesqrt(max(d2, 1e-4));
+        float ndl2 = max(dot(n, ln), 0.0);
+        vec3 h2 = normalize(ln + v);
+        float spec2 = pow(max(dot(n, h2), 0.0), u_params.y) * u_params.x;
+        color += u_pointColor[i].rgb * on * att * (base.rgb * ndl2 + vec3(spec2) * 0.7 + base.rgb * 0.08);
+    }
     if (u_flags.z > 0.5 && u_fog.a > 0.0) {
         float d = length(u_camPos - v_worldPos) * u_fog.a;
         color = mix(color, u_fog.rgb, clamp(1.0 - exp(-d * d), 0.0, 1.0));

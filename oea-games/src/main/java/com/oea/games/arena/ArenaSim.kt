@@ -20,22 +20,45 @@ import kotlin.math.sqrt
 internal enum class Weapon(
     val label: String, val glyph: String, val damage: Float, val headshot: Float, val rpm: Float, val mag: Int, val reload: Float,
     val spreadHip: Float, val spreadAds: Float, val range: Float, val pellets: Int, val auto: Boolean, val ammo: Int, val zoom: Float, val recoil: Float,
+    /** Movement multiplier while this weapon is held/aimed (heavy guns slow you down). */
+    val moveSpeed: Float = 1f,
 ) {
     PAN("Pan", "◍", 45f, 1.4f, 90f, 0, 0f, 0f, 0f, 2.2f, 1, false, -1, 1f, 0f),
     PISTOL("Pistol", "P", 26f, 1.8f, 380f, 12, 1.4f, 0.035f, 0.012f, 60f, 1, false, 0, 1.25f, 0.02f),
     SMG("SMG", "S", 17f, 1.6f, 820f, 30, 1.9f, 0.06f, 0.03f, 45f, 1, true, 0, 1.3f, 0.012f),
     RIFLE("Assault rifle", "A", 30f, 1.9f, 600f, 30, 2.3f, 0.045f, 0.012f, 110f, 1, true, 1, 1.6f, 0.018f),
-    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f),
-    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f);
+    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f, 0.96f),
+    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f),
+    REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f),
+    MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f),
+    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f);
 
     val interval get() = 60f / rpm
 
     companion object {
-        val AMMO_NAMES = arrayOf("Light ammo", "Rifle ammo", "Shells", "Sniper ammo")
+        val AMMO_NAMES = arrayOf("Light ammo", "Rifle ammo", "Shells", "Heavy ammo")
         val AMMO_PACK = intArrayOf(40, 40, 12, 10)
         val guns = entries.filter { it != PAN }
+
+        /** Which guns the loot tables draw from for a loadout option. */
+        fun lootPool(loadout: String): List<Weapon> = when (loadout) {
+            "snipers" -> listOf(SNIPER, MARKSMAN, REVOLVER)
+            "shotguns" -> listOf(SHOTGUN, SMG, PISTOL)
+            "close" -> listOf(PISTOL, SMG, REVOLVER)
+            "rifles" -> listOf(RIFLE, SMG, LMG, MARKSMAN)
+            else -> guns
+        }
     }
 }
+
+/** Gun Game ladder: one kill advances a stage; a kill with the final stage wins. */
+internal val GUN_LADDER = listOf(
+    Weapon.PISTOL, Weapon.SMG, Weapon.RIFLE, Weapon.SHOTGUN,
+    Weapon.REVOLVER, Weapon.MARKSMAN, Weapon.SNIPER, Weapon.LMG, Weapon.PAN,
+)
+
+/** Kills needed to win Team Deathmatch. */
+private const val TEAM_SCORE_WIN = 40
 
 internal enum class LootKind { WEAPON, AMMO, MEDKIT, ARMOR, HELMET }
 
@@ -100,6 +123,15 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     var shots = 0
     var lastShotTime = 0f
     var spread = 0f
+    /** Team 0/1 in Team Deathmatch (0 in free-for-all rules). */
+    var team = 0
+    /** Seconds of spawn protection left after a respawn. */
+    var spawnGuard = 0f
+    /** Simulation time at which a dead player respawns (respawn modes). */
+    var respawnAt = 0f
+    /** Gun Game ladder index into [GUN_LADDER]. */
+    var gunLevel = 0
+    var deaths = 0
     /** View kick from recoil not yet applied by the controlling client (radians, upwards). */
     var recoil = 0f
     var lastDamageFrom = -1
@@ -178,8 +210,19 @@ internal class Zone(seed: Long, startRadius: Float, private val fast: Boolean) {
 /**
  * Authoritative battle-royale simulation (host or solo). Deterministic given
  * the seed and inputs; clients only predict their own movement.
+ *
+ * Rules change the *simulation*, not just the lighting: `tdm` adds teams,
+ * respawns and a score race, `gun` runs the Gun Game ladder with instant
+ * respawns and no loot, the survival rules spawn endless waves.
  */
-internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone: Boolean, private val botSkill: Float) {
+internal class ArenaSim(
+    val seed: Long,
+    val map: ArenaMap,
+    private val fastZone: Boolean,
+    private val botSkill: Float,
+    val rules: String = "br",
+    val loadout: String = "all",
+) {
     val players = LinkedHashMap<Int, ArenaPlayer>()
     val loot = ArrayList<Loot>()
     val zone = Zone(seed, ArenaMap.SIZE * 0.5f, fastZone)
@@ -190,6 +233,12 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
         private set
     var winner: ArenaPlayer? = null
         private set
+    /** Team scores for [rules] == "tdm" (index 0/1). */
+    val teamScore = IntArray(2)
+    val teams = rules == "tdm"
+    val gunGame = rules == "gun"
+    val respawnMode = teams || gunGame
+    val survival = rules == "last_day" || rules == "lights_out" || rules == "haunted"
     private var lootIds = 0
     private val rng = Rng(seed xor 0xA4E7A)
     private val hit = RayHit()
@@ -198,9 +247,32 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
 
     val aliveCount: Int get() = players.values.count { it.alive }
 
-    init { spawnLoot() }
+    private var nextBotId = 120
+
+    /**
+     * Bot ids stay inside the u8 snapshot range (2–250). In survival and
+     * respawn modes the longest-dead bots are recycled so endless waves never
+     * overflow the roster.
+     */
+    fun allocBotId(): Int {
+        if (respawnMode || survival) {
+            while (players.size > 72) {
+                val dead = players.values.firstOrNull { !it.alive && it.isBot } ?: break
+                players.remove(dead.id)
+            }
+        }
+        while (players.containsKey(nextBotId)) nextBotId = if (nextBotId >= 250) 120 else nextBotId + 1
+        return nextBotId++
+    }
+
+    init {
+        if (respawnMode) zone.enabled = false
+        if (!gunGame) spawnLoot()
+    }
 
     private fun spawnLoot() {
+        val pool = Weapon.lootPool(loadout)
+        val weights = FloatArray(pool.size) { i -> 0.5f + 1.2f / (1f + i) }
         for (s in map.lootSpots) {
             val r = rng.nextFloat()
             val kind = when {
@@ -211,7 +283,7 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
                 else -> LootKind.HELMET
             }
             val value = when (kind) {
-                LootKind.WEAPON -> Weapon.guns[rng.weighted(floatArrayOf(1.2f, 1f, 1f, 0.7f, 0.35f))].ordinal
+                LootKind.WEAPON -> pool[rng.weighted(weights)].ordinal
                 LootKind.AMMO -> rng.nextInt(4)
                 LootKind.ARMOR, LootKind.HELMET -> 1 + rng.weighted(floatArrayOf(1f, 0.5f, 0.18f))
                 LootKind.MEDKIT -> 1
@@ -226,32 +298,94 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
 
     fun addPlayer(id: Int, name: String, color: Int, bot: Boolean): ArenaPlayer {
         val p = ArenaPlayer(id, name, color, bot)
+        if (teams) p.team = players.size % 2
         // Drop from the sky over a random point of the island.
         val a = rng.range(0f, MathX.TAU); val d = sqrt(rng.nextFloat()) * ArenaMap.SIZE * 0.32f
         val x = sin(a) * d; val z = cos(a) * d
         p.ctrl.teleport(x, map.heightAt(x, z) + 85f + rng.range(0f, 15f), z)
         p.yaw = rng.range(0f, MathX.TAU)
         p.input.yaw = p.yaw
+        if (gunGame) {
+            val w = GUN_LADDER[0]
+            p.slots[0] = w; p.slots[1] = Weapon.PAN; p.mags[0] = w.mag; p.mags[1] = 0; p.active = 0
+        }
         if (bot) p.bot = BotBrain(p, Rng(seed xor id.toLong() * 7919L), botSkill).also { it.attach(map.physics) }
         players[id] = p
         return p
+    }
+
+    /** Ground spawn point: the team's town in TDM, a random town otherwise. */
+    private fun spawnSpot(p: ArenaPlayer): FloatArray {
+        val towns = map.towns
+        val t = when {
+            towns.isEmpty() -> floatArrayOf(0f, 0f)
+            teams -> towns[p.team % towns.size]
+            else -> towns[rng.nextInt(towns.size)]
+        }
+        val x = t[0] + rng.range(-6f, 6f); val z = t[1] + rng.range(-6f, 6f)
+        return floatArrayOf(x, map.heightAt(x, z) + 0.1f, z)
+    }
+
+    private fun respawn(p: ArenaPlayer) {
+        val s = spawnSpot(p)
+        p.ctrl.teleport(s[0], s[1], s[2])
+        p.ctrl.velocity.setZero()
+        p.health = 100f
+        p.armor = if (teams) 1 else 0
+        p.helmet = 0
+        p.alive = true
+        p.skydiving = false
+        p.parachute = false
+        p.healProgress = 0f
+        p.reloadLeft = 0f
+        p.cooldown = 0f
+        p.switchLeft = 0f
+        p.respawnAt = 0f
+        p.spawnGuard = 3f
+        p.spread = 0f
+        p.recoil = 0f
+        if (gunGame) {
+            val w = GUN_LADDER[p.gunLevel]
+            p.slots[0] = w; p.slots[1] = Weapon.PAN; p.mags[0] = w.mag; p.mags[1] = 0; p.active = 0
+            if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 2
+        } else {
+            p.slots[0] = Weapon.SMG; p.slots[1] = Weapon.PISTOL
+            p.mags[0] = Weapon.SMG.mag; p.mags[1] = Weapon.PISTOL.mag
+            p.ammo[0] = 90; p.ammo[1] = 48
+            p.medkits = 1
+        }
     }
 
     fun step(dt: Float) {
         if (over) return
         time += dt
         for (p in players.values) {
-            if (!p.alive) continue
+            if (p.spawnGuard > 0f) p.spawnGuard -= dt
+            if (!p.alive) {
+                if (respawnMode && p.respawnAt > 0f && time >= p.respawnAt) respawn(p)
+                continue
+            }
             p.bot?.think(this, dt)
             applyInput(p, dt)
             p.history.record((time * 1000f).toLong(), p.pos.x, p.pos.y, p.pos.z)
         }
         if (zone.enabled && zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
         if (zone.enabled) for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, zoneDamage = true)
-        if (players.size > 1 && aliveCount <= 1 && !over) {
+        if (!over && teams && (teamScore[0] >= TEAM_SCORE_WIN || teamScore[1] >= TEAM_SCORE_WIN)) {
+            over = true
+            val winning = if (teamScore[0] >= teamScore[1]) 0 else 1
+            winner = players.values.filter { it.team == winning }.maxByOrNull { it.kills }
+            winner?.place = 1
+            events?.onMatchOver(winner)
+        } else if (!over && !respawnMode && players.size > 1 && aliveCount <= 1) {
             over = true
             winner = players.values.firstOrNull { it.alive }
             winner?.place = 1
+            events?.onMatchOver(winner)
+        } else if (!over && survival && players.values.none { !it.isBot && it.alive }) {
+            // Every human is out: the waves win the island.
+            over = true
+            winner = players.values.filter { it.alive }.maxByOrNull { it.kills }
             events?.onMatchOver(winner)
         }
     }
@@ -286,11 +420,13 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
         p.crouching = inp.crouch
         p.aiming = inp.ads && p.weapon != Weapon.PAN
         val sprint = my > 0.92f && !p.aiming && !p.crouching && !inp.fire
+        // Heavier guns slow you down; the lightest kit runs fastest.
+        val weight = if (p.aiming) p.weapon.moveSpeed else 1f
         val speed = when {
-            p.crouching -> 2.6f
-            p.aiming -> 3.4f
-            sprint -> 7.0f
-            else -> 5.4f
+            p.crouching -> 2.6f * weight
+            p.aiming -> 3.4f * weight
+            sprint -> 7.0f * weight
+            else -> 5.4f * weight
         }
         p.ctrl.height = if (p.crouching) 1.2f else 1.8f
         p.ctrl.move(map.physics, dirX * speed, dirZ * speed, if (inp.jump && !p.crouching) 7.4f else 0f, dt)
@@ -304,7 +440,16 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
         // Weapons.
         if (p.cooldown > 0f) p.cooldown -= dt
         if (p.switchLeft > 0f) p.switchLeft -= dt
-        if (inp.slot in 0..1 && inp.slot != p.active) { p.active = inp.slot; p.switchLeft = 0.45f; p.reloadLeft = 0f }
+        if (gunGame) {
+            // Gun Game: your gun is your ladder stage — no slot switching.
+            val lw = GUN_LADDER[p.gunLevel]
+            if (p.slots[0] != lw) {
+                p.slots[0] = lw; p.slots[1] = Weapon.PAN; p.mags[0] = lw.mag; p.mags[1] = 0; p.active = 0
+                p.reloadLeft = 0f; p.switchLeft = 0.35f
+                if (lw.ammo >= 0) p.ammo[lw.ammo] = lw.mag * 2
+            }
+            inp.slot = -1
+        } else if (inp.slot in 0..1 && inp.slot != p.active) { p.active = inp.slot; p.switchLeft = 0.45f; p.reloadLeft = 0f }
         val w = p.weapon
         if (p.reloadLeft > 0f) {
             p.reloadLeft -= dt
@@ -355,6 +500,7 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
             var head = false
             for (o in players.values) {
                 if (o === p || !o.alive || o.skydiving) continue
+                if (teams && o.team == p.team) continue // friendly fire is off
                 // Lag compensation: test where the shooter saw the target.
                 val rewindMs = p.bot?.let { 0L } ?: compensation(p)
                 if (!o.history.sample(shotTime - rewindMs, rewind)) rewind.set(o.pos)
@@ -384,6 +530,9 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
 
     fun damage(v: ArenaPlayer, from: ArenaPlayer?, amount: Float, w: Weapon, head: Boolean, zoneDamage: Boolean = false) {
         if (!v.alive) return
+        // Spawn protection: freshly respawned players get a few honest seconds.
+        if (!zoneDamage && v.spawnGuard > 0f) return
+        if (!zoneDamage && teams && from != null && from.team == v.team) return
         var dmg = amount
         if (!zoneDamage) {
             dmg *= if (head) 1f - v.helmet * 0.18f else 1f - v.armor * 0.17f
@@ -396,10 +545,32 @@ internal class ArenaSim(val seed: Long, val map: ArenaMap, private val fastZone:
         if (v.health <= 0f) {
             v.health = 0f
             v.alive = false
-            v.place = aliveCount + 1
+            v.deaths++
             v.killedBy = from?.id ?: -1
             from?.let { it.kills++ }
-            dropLoot(v)
+            if (teams && from != null && from.team != v.team) teamScore[from.team]++
+            if (gunGame) {
+                if (from != null) {
+                    if (from.gunLevel >= GUN_LADDER.size - 1 && !over) {
+                        // A kill with the final stage (the pan) wins the ladder.
+                        over = true
+                        winner = from
+                        from.place = 1
+                        events?.onMatchOver(from)
+                    } else {
+                        from.gunLevel = (from.gunLevel + 1).coerceAtMost(GUN_LADDER.size - 1)
+                    }
+                }
+                v.gunLevel = (v.gunLevel - 1).coerceAtLeast(0)
+                v.respawnAt = time + 1.5f
+            } else if (teams) {
+                v.place = 0
+                v.respawnAt = time + 4f
+                dropLoot(v)
+            } else {
+                v.place = aliveCount + 1
+                dropLoot(v)
+            }
             events?.onKill(from, v, w, head)
         }
     }
@@ -553,9 +724,11 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
 
     private fun perceive(sim: ArenaSim) {
         var best: ArenaPlayer? = null
-        var bestD = 60f + skill * 30f
+        val baseD = if (sim.gunGame) 80f else 60f
+        var bestD = baseD + skill * 30f
         for (o in sim.players.values) {
             if (o === p || !o.alive || o.skydiving) continue
+            if (sim.teams && o.team == p.team) continue
             val dx = o.pos.x - p.pos.x; val dz = o.pos.z - p.pos.z
             val d = sqrt(dx * dx + dz * dz)
             if (d > bestD) continue
@@ -565,7 +738,11 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
             if (!sim.lineOfSight(p, o)) continue
             best = o; bestD = d
         }
-        if (best != null && best !== target) { reaction = MathX.lerp(0.75f, 0.18f, skill) + rng.range(0f, 0.2f); aimError = MathX.lerp(0.45f, 0.12f, skill) }
+        if (best != null && best !== target) {
+            val extra = if (sim.gunGame) -0.08f else 0f
+            reaction = MathX.lerp(0.75f, 0.18f, skill) + rng.range(0f, 0.2f) + extra
+            aimError = MathX.lerp(0.45f, 0.12f, skill)
+        }
         target = best
     }
 
@@ -592,7 +769,15 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
         // Movement: strafe, keep a good distance for the weapon.
         strafeTimer -= dt
         if (strafeTimer <= 0f) { strafe = if (rng.chance(0.5f)) 1f else -1f; strafeTimer = rng.range(0.6f, 1.8f); inp.crouch = rng.chance(0.25f * skill) }
-        val ideal = when (w) { Weapon.SHOTGUN -> 6f; Weapon.SMG -> 12f; Weapon.SNIPER -> 45f; else -> 20f }
+        val ideal = when (w) {
+            Weapon.SHOTGUN -> 6f
+            Weapon.SMG -> 12f
+            Weapon.SNIPER -> 45f
+            Weapon.MARKSMAN -> 35f
+            Weapon.REVOLVER -> 14f
+            Weapon.LMG -> 25f
+            else -> 20f
+        }
         inp.moveX = strafe * 0.8f
         inp.moveY = if (dist > ideal * 1.3f) 0.8f else if (dist < ideal * 0.6f) -0.6f else 0f
         if (p.mags[p.active] == 0) inp.reload = true
@@ -619,6 +804,16 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
     }
 
     private fun pickGoal(sim: ArenaSim) {
+        // Respawn modes: pressure the other side of the map instead of looting.
+        if (sim.respawnMode && sim.map.towns.isNotEmpty()) {
+            val towns = sim.map.towns
+            val home = if (sim.teams) p.team % towns.size else -1
+            val choices = towns.indices.filter { it != home }
+            val t = towns[if (choices.isEmpty()) 0 else choices[rng.nextInt(choices.size)]]
+            goalX = t[0] + rng.range(-12f, 12f); goalZ = t[1] + rng.range(-12f, 12f)
+            hasGoal = true
+            return
+        }
         val z = sim.zone
         val r = (if (z.shrinking) z.toR else z.radius) * 0.75f
         val a = rng.range(0f, MathX.TAU); val d = sqrt(rng.nextFloat()) * r
