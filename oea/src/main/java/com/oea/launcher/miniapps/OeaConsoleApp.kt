@@ -1162,7 +1162,7 @@ Examples:
                 val command = parts.drop(1).joinToString(" ")
                 if (command.isBlank()) return "Usage: shell <command> (needs root, OEA only, verified)"
                 val backend = OeaAppFreezer.backend(ctx)
-                if (backend != OeaAppFreezer.Backend.ROOT) return "Root not available. Backend: $backend\nOEA's shell channel needs su binary and root grant. It runs commands scoped to OEA's own package only, verified by reading state back."
+                if (backend != OeaAppFreezer.Backend.ROOT && backend != OeaAppFreezer.Backend.ADB) return "Root not available. Backend: $backend\nOEA's root shell needs su and an approved root grant, or connect OEA Authority through Android Wireless Debugging."
                 try {
                     val proc = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
                     val out = proc.inputStream.bufferedReader().readText()
@@ -1278,6 +1278,7 @@ Examples:
             kit.banner(panel, if (mode == OeaAppFreezer.Mode.SYSTEM) R.drawable.oic_check_circle_fill else R.drawable.oic_info, "Mode: $mode • Backend: $backend", when (backend) {
                 OeaAppFreezer.Backend.DEVICE_OWNER -> "System freeze via DevicePolicyManager.setPackagesSuspended — genuine suspension, Android blocks launch, background, notifications. Preserves data. Verified via isPackageSuspended and dumpsys."
                 OeaAppFreezer.Backend.ROOT -> "System freeze via root cmd package suspend — genuine suspension, verified by reading Android package state."
+                OeaAppFreezer.Backend.ADB -> "System freeze through OEA Authority's paired Wireless Debugging shell — genuine suspension, verified from Android package state."
                 OeaAppFreezer.Backend.ADB -> "System freeze through OEA Authority's authorized Wireless Debugging shell — genuine package suspension, verified from Android package state."
                 else -> "OEA Freeze: blocks in OEA and force-stops via Assistant. Cannot prevent other apps from launching it without DO/root; mitigation: Assistant watches all windows and blocks frozen via external routes (packageNames null, performs BACK/HOME + forceStop)."
             }, tone = if (mode == OeaAppFreezer.Mode.SYSTEM) OeaKit.Tone.SUCCESS else OeaKit.Tone.INFO)
