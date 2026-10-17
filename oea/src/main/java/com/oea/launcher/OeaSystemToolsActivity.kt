@@ -2913,6 +2913,7 @@ open class OeaSystemToolsActivity : Activity() {
         val pairing = wp.freshPairing()
         val connection = wp.connection
         val watching = wp.isWatching()
+        wp.attach(applicationContext)
         fun ago(at: Long): String {
             val secs = ((android.os.SystemClock.elapsedRealtime() - at) / 1000).coerceAtLeast(0)
             return if (secs < 60) "${secs}s ago" else "${secs / 60}m ago"
