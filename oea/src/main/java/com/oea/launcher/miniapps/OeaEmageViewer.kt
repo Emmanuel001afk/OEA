@@ -236,12 +236,12 @@ internal object OeaEmageViewer {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        private val top = LinearLayout(host).apply {
+        private val topBar = LinearLayout(host).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0x99000000.toInt())
         }
-        private val bottom = LinearLayout(host).apply {
+        private val bottomBar = LinearLayout(host).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0x99000000.toInt())
@@ -249,8 +249,8 @@ internal object OeaEmageViewer {
         private val root = FrameLayout(host).apply {
             setBackgroundColor(Color.BLACK)
             addView(pager, FrameLayout.LayoutParams(-1, -1))
-            addView(top, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.TOP })
-            addView(bottom, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.BOTTOM })
+            addView(topBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+            addView(bottomBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         }
 
         private val hideChrome = Runnable { if (chromeVisible) setChrome(false) }
@@ -270,17 +270,17 @@ internal object OeaEmageViewer {
                     }
                 }
             })
-            top.setPadding(kit.dp(8), kit.dp(8), kit.dp(8), kit.dp(8))
+            topBar.setPadding(kit.dp(8), kit.dp(8), kit.dp(8), kit.dp(8))
             val titles = LinearLayout(host).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
             }
             titles.addView(counter, LinearLayout.LayoutParams(-1, -2))
             titles.addView(albumLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(1) })
-            top.addView(kit.circleIconButton(R.drawable.oic_close, "Close", 0x33FFFFFF, Color.WHITE) { dialog.dismiss() },
+            topBar.addView(kit.circleIconButton(R.drawable.oic_close, "Close", 0x33FFFFFF, Color.WHITE) { dialog.dismiss() },
                 LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { marginEnd = kit.dp(8) })
-            top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-            top.addView(kit.circleIconButton(R.drawable.oic_more_vert, "More", 0x33FFFFFF, Color.WHITE) { more() },
+            topBar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
+            topBar.addView(kit.circleIconButton(R.drawable.oic_more_vert, "More", 0x33FFFFFF, Color.WHITE) { more() },
                 LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { marginStart = kit.dp(6) })
             buildActions()
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -292,8 +292,8 @@ internal object OeaEmageViewer {
             }
             root.setOnApplyWindowInsetsListener { _, insets ->
                 val bars = OeaInsets.bars(insets)
-                top.setPadding(kit.dp(8) + bars[0], bars[1] + kit.dp(4), kit.dp(8) + bars[2], kit.dp(8))
-                bottom.setPadding(kit.dp(10) + bars[0], kit.dp(8), kit.dp(10) + bars[2], bars[3] + kit.dp(10))
+                topBar.setPadding(kit.dp(8) + bars[0], bars[1] + kit.dp(4), kit.dp(8) + bars[2], kit.dp(8))
+                bottomBar.setPadding(kit.dp(10) + bars[0], kit.dp(8), kit.dp(10) + bars[2], bars[3] + kit.dp(10))
                 insets
             }
             paintLabels()
@@ -303,7 +303,7 @@ internal object OeaEmageViewer {
         }
 
         private fun buildActions() {
-            bottom.removeAllViews()
+            bottomBar.removeAllViews()
             action(R.drawable.oic_star_fill, "Favourite") { toggleFavourite() }
             action(R.drawable.oic_share_filled, "Share") {
                 OeaMediaLibrary.share(host, listOf(current()))
@@ -338,7 +338,7 @@ internal object OeaEmageViewer {
                     setPadding(0, kit.dp(2), 0, 0)
                 }
             )
-            bottom.addView(cell, LinearLayout.LayoutParams(0, -2, 1f))
+            bottomBar.addView(cell, LinearLayout.LayoutParams(0, -2, 1f))
         }
 
         private fun current(): OeaMediaLibrary.Item = liveItems[position.coerceIn(0, (liveItems.size - 1).coerceAtLeast(0))]
@@ -359,8 +359,8 @@ internal object OeaEmageViewer {
 
         private fun setChrome(visible: Boolean) {
             chromeVisible = visible
-            top.animate().alpha(if (visible) 1f else 0f).translationY(if (visible) 0f else -kit.dpf(18f)).setDuration(170L).start()
-            bottom.animate().alpha(if (visible) 1f else 0f).translationY(if (visible) 0f else kit.dpf(18f)).setDuration(170L).start()
+            topBar.animate().alpha(if (visible) 1f else 0f).translationY(if (visible) 0f else -kit.dpf(18f)).setDuration(170L).start()
+            bottomBar.animate().alpha(if (visible) 1f else 0f).translationY(if (visible) 0f else kit.dpf(18f)).setDuration(170L).start()
             handler.removeCallbacks(hideChrome)
             if (visible) autoHide()
         }

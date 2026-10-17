@@ -335,6 +335,7 @@ class OeaScrubBar(context: Context) : View(context) {
         glow.shader = LinearGradient(
             x - 30f * density, y, x, y,
             intArrayOf(Color.TRANSPARENT, Color.argb(0x55, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))),
+            null,
             Shader.TileMode.CLAMP
         )
         rect.set(x - 30f * density, y - half, x, y + half)
@@ -531,6 +532,7 @@ class OeaShimmer(context: Context) : View(context) {
         paint.shader = LinearGradient(
             -width + 2f * width * phase, 0f, phase * width * 2f - width * 0.5f, height.toFloat(),
             intArrayOf(baseColor and 0xFFFFFF, baseColor or (0x55 shl 24), baseColor and 0xFFFFFF),
+            null,
             Shader.TileMode.CLAMP
         )
         canvas.drawRoundRect(rect, cornerRadius, cornerRadius, paint)

@@ -197,9 +197,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 flash("Double speed while you hold")
             }
 
-            override fun onScroll(down: MotionEvent, event: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            override fun onScroll(down: MotionEvent?, event: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
                 if (locked || inPip) return false
-                if (Math.abs(event.y - down.y) < Math.abs(event.x - down.x)) return false
+                val from = down ?: return false
+                if (Math.abs(event.y - from.y) < Math.abs(event.x - from.x)) return false
                 val delta = (down.y - event.y) / root.height.toFloat()
                 if (down.x < root.width / 2f) adjustBrightness(delta) else adjustVolume(delta)
                 return true
@@ -522,7 +523,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             }
             visibility = View.GONE
         }
-        bar.addView(thumbPreview, LinearLayout.LayoutParams(dp(148), dp(84), Gravity.END).apply { bottomMargin = dp(6) })
+        bar.addView(thumbPreview, LinearLayout.LayoutParams(dp(148), dp(84)).apply { gravity = Gravity.END; bottomMargin = dp(6) })
 
         val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         elapsed = text("0:00", 12.5f, 0xE6FFFFFF.toInt(), OeaType.medium)
@@ -807,7 +808,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             val wanted = dp(150) * 16 / 9
             val bitmap = runCatching {
                 if (Build.VERSION.SDK_INT >= 27) {
-                    grabber.getScaledFrameAtTime(wanted, dp(150), at * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    grabber.getScaledFrameAtTime(at * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, wanted, dp(150))
                 } else {
                     grabber.getFrameAtTime(at * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 }
@@ -993,7 +994,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private fun seekTo(target: Long) {
         if (!prepared) return
         val mp = player ?: return
-        runCatching { if (Build.VERSION.SDK_INT >= 26) mp.seekTo(target.toInt(), MediaPlayer.SEEK_CLOSEST) else mp.seekTo(target.toInt()) }
+        runCatching { if (Build.VERSION.SDK_INT >= 26) mp.seekTo(target, MediaPlayer.SEEK_CLOSEST) else mp.seekTo(target.toInt()) }
         positionMs = target
         scrub.positionMs = target
         elapsed.text = clock(target)
@@ -1276,8 +1277,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             this, action.hashCode(), intent,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
+        // The notification shade tints action icons itself, so the vector goes in
+        // as the system drew it rather than with a hand-picked colour.
         val badge = android.graphics.drawable.Icon.createWithResource(packageName, icon)
-        return RemoteAction(badge.withTint(Color.WHITE), label, label, pending)
+        return RemoteAction(badge, label, label, pending)
     }
 
     private fun updatePipParams() {

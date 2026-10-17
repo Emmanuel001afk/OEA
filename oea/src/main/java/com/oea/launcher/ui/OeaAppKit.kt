@@ -456,12 +456,13 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         }
         addView(ring, LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(12) })
         addView(text(label, 13.5f, palette.textSecondary), LinearLayout.LayoutParams(0, -2, 1f))
-        val pulse = android.animation.ValueAnimator.ofFloat(1f, 0.45f).apply {
-            duration = 700L
-            repeatCount = android.animation.ValueAnimator.INFINITE
-            repeatMode = android.animation.ValueAnimator.REVERSE
-            addUpdateListener { pulseValue -> this.alpha = pulseValue.animatedValue as Float }
-        }
+        val pulse = android.animation.ValueAnimator.ofFloat(1f, 0.45f)
+        pulse.duration = 700L
+        pulse.repeatCount = android.animation.ValueAnimator.INFINITE
+        pulse.repeatMode = android.animation.ValueAnimator.REVERSE
+        // The row fades, not the animator: inside the update listener `this` is the
+        // ValueAnimator, which has no alpha of its own.
+        pulse.addUpdateListener { pulseValue -> alpha = pulseValue.animatedValue as Float }
         addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
                 if (pulse.isRunning.not()) pulse.start()
@@ -595,7 +596,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         val root = FrameLayout(context).apply {
             clipToOutline = true
             background = rounded(palette.cardHigh, (cornerPx / context.resources.displayMetrics.density).toInt())
-            outlineProvider = object : View.OutlineProvider() {
+            outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                     outline.setRoundRect(0, 0, view.width, view.height, cornerPx.toFloat())
                 }
@@ -663,7 +664,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         val holder = FrameLayout(context).apply {
             clipToOutline = true
             background = rounded(palette.cardHigh, 16)
-            outlineProvider = object : View.OutlineProvider() {
+            outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                     outline.setRoundRect(0, 0, view.width, view.height, dpf(16f))
                 }

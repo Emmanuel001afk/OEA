@@ -738,7 +738,7 @@ object OeaMediaLibrary {
                     addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             )
-        }.onFailure { toast(context, "No app can open ${'$'}{item.name}.") }
+        }.onFailure { toast(context, "No app can open ${item.name}.") }
     }
 
     fun toast(context: Context, message: String) {

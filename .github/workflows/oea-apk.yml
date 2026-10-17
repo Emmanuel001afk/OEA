@@ -278,7 +278,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          LOG_TAIL=$(tail -n 300 "$RUNNER_TEMP/gradle.log" | sed 's/`//g' | head -c 60000)
+          # The annotations only carry the first errors and a log tail only the last,
+          # so a broken module hid half its own list. Quote every compiler error.
+          LOG_TAIL=$({ grep -E '^e: ' "$RUNNER_TEMP/gradle.log" || true; } | sed 's#file:///home/runner/work/[^/]*/[^/]*/##;s/`//g' | awk '!seen[$0]++' | head -160 | head -c 60000)
+          if [ -z "$LOG_TAIL" ]; then
+            LOG_TAIL=$(tail -n 300 "$RUNNER_TEMP/gradle.log" | sed 's/`//g' | head -c 60000)
+          fi
           PR=${{ github.event.pull_request.number }}
           if [ -n "$PR" ]; then
             gh pr comment "$PR" --repo "${{ github.repository }}" --body "### Gradle build failed

@@ -58,7 +58,7 @@ object OeaVideoApp {
 }
 
 /** VIP's library screen. */
-internal class VipScreen(val host: Activity, palette: OeaPalette) {
+internal class VipScreen(val host: Activity, val palette: OeaPalette) {
 
     private val kit = OeaAppKit(host, palette)
     val root: FrameLayout = kit.overlay()
@@ -825,7 +825,7 @@ internal class VipScreen(val host: Activity, palette: OeaPalette) {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 setBackgroundColor(palette.cardHigh)
                 clipToOutline = true
-                outlineProvider = object : View.OutlineProvider() {
+                outlineProvider = object : android.view.ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: android.graphics.Outline) {
                         outline.setRoundRect(0, 0, view.width, view.height, kit.dpf(10f))
                     }

@@ -53,7 +53,7 @@ internal class OeaVipSheet private constructor(
                 setTextColor(0xB3FFFFFF.toInt())
                 textSize = 12.5f
                 letterSpacing = 0.08f
-                allCaps = true
+                setAllCaps(true)
                 setPadding(dp(4), dp(18), dp(4), dp(8))
             },
             LinearLayout.LayoutParams(-1, -2)
@@ -112,7 +112,7 @@ internal class OeaVipSheet private constructor(
             row.addView(
                 ImageView(activity).apply {
                     setImageResource(iconRes)
-                    setColorFilter(if (selected) palette.accent else if (destructive) 0xFFFF8A80 else 0xCCFFFFFF.toInt())
+                    setColorFilter(if (selected) palette.accent else if (destructive) 0xFFFF8A80.toInt() else 0xCCFFFFFF.toInt())
                 },
                 LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(14) }
             )
@@ -323,7 +323,7 @@ internal class OeaVipSheet private constructor(
             icon = activity.getDrawable(iconRes)?.mutate()?.apply { setTint(if (selected) palette.onAccent else Color.WHITE) }
             selectedBg = palette.accent
             idleBg = 0x1FFFFFFF
-            selected = selected
+            this.selected = selected
             circleSizeDp = 46
             onChanged = { onToggle(this.selected) }
         }

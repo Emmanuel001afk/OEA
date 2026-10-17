@@ -63,9 +63,13 @@ object OeaSubtitles {
         parse(name, text)
     }.getOrNull()
 
-    fun loadFile(file: File): Track? = runCatching {
+    fun loadFile(file: File): Track? = try {
+        // A plain try/catch rather than runCatching: the result of parsing is already
+        // nullable, and Result<Track?>.getOrNull() widens that to Any?.
         parse(file.name, file.readText())
-    }.getOrNull()
+    } catch (error: Throwable) {
+        null
+    }
 
     /** Parses SRT/VTT (and only strips the tags SSA/ASS would need, refusing the rest). */
     fun parse(name: String, raw: String): Track? {

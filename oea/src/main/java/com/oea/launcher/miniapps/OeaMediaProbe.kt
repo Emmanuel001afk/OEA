@@ -143,7 +143,15 @@ object OeaMediaProbe {
                     )
                 )
             }
-            val duration = if (extractor.duration > 0L) extractor.duration / 1000L else 0L
+            // MediaExtractor has no duration of its own — the container stores it per
+            // track, and the longest one is the clip.
+            val durationUs = (0 until runCatching { extractor.trackCount }.getOrDefault(0)).mapNotNull { index ->
+                runCatching {
+                    val format = extractor.getTrackFormat(index)
+                    if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else null
+                }.getOrNull()
+            }.maxOrNull() ?: 0L
+            val duration = if (durationUs > 0L) durationUs / 1000L else 0L
             val video = tracks.firstOrNull { it.kind == "video" }
             val total = tracks.sumOf { it.bitrate }
             val retriever = MediaMetadataRetriever()
@@ -174,10 +182,9 @@ object OeaMediaProbe {
     fun photo(context: Context, uri: Uri): Photo? = runCatching {
         val stream = context.contentResolver.openInputStream(uri) ?: return@runCatching null
         val exif = stream.use { ExifInterface(it) }
-        val latLong = FloatArray(2)
-        val altitude = DoubleArray(1)
-        val hasGps = exif.getLatLong(latLong)
-        val hasAltitude = runCatching { exif.getAltitude(altitude) }.getOrDefault(false)
+        val latitude = exif.coordinate(ExifInterface.TAG_GPS_LATITUDE, ExifInterface.TAG_GPS_LATITUDE_REF)
+        val longitude = exif.coordinate(ExifInterface.TAG_GPS_LONGITUDE, ExifInterface.TAG_GPS_LONGITUDE_REF)
+        val altitudeMeters = exif.coordinate(ExifInterface.TAG_GPS_ALTITUDE, ExifInterface.TAG_GPS_ALTITUDE_REF)
         val exposure = exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME).orEmpty()
         val fNumber = exif.getAttribute(ExifInterface.TAG_F_NUMBER).orEmpty()
         Photo(
@@ -219,11 +226,35 @@ object OeaMediaProbe {
             orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL),
             width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0),
             height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0),
-            latitude = if (hasGps) latLong[0].toDouble() else null,
-            longitude = if (hasGps) latLong[1].toDouble() else null,
-            altitudeMeters = if (hasAltitude) altitude[0] else null
+            latitude = latitude,
+            longitude = longitude,
+            altitudeMeters = altitudeMeters
         )
     }.getOrNull()
+
+    /**
+     * An Exif GPS value is a handful of rationals plus a reference letter, and the
+     * convenience getters differ between the framework and the AndroidX copy of
+     * ExifInterface, so the details sheet reads the pair it is given.
+     */
+    private fun ExifInterface.coordinate(valueTag: String, refTag: String): Double? {
+        val raw = runCatching { getAttribute(valueTag) }.getOrNull() ?: return null
+        val parts = raw.split(',').mapNotNull { entry ->
+            val ratio = entry.trim().split('/')
+            runCatching {
+                if (ratio.size == 2) ratio[0].trim().toDouble() / ratio[1].trim().toDouble()
+                else ratio[0].trim().toDouble()
+            }.getOrNull()
+        }
+        if (parts.isEmpty()) return null
+        var degrees = parts.getOrElse(0) { 0.0 } +
+            parts.getOrElse(1) { 0.0 } / 60.0 +
+            parts.getOrElse(2) { 0.0 } / 3600.0
+        when (runCatching { getAttribute(refTag) }.getOrNull()?.trim()?.uppercase(Locale.getDefault())) {
+            "S", "W", "1" -> degrees = -degrees
+        }
+        return degrees
+    }
 
     private fun sizeOf(context: Context, uri: Uri): Long = runCatching {
         context.contentResolver.openFileDescriptor(uri, "r")?.use { stat -> if (stat.statSize > 0) stat.statSize else 0L } ?: 0L

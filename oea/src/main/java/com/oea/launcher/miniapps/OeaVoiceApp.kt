@@ -258,7 +258,7 @@ object OeaVoiceApp {
                         // and whistles at the phone.
                         continuous = false
                         prefs(host).edit().putBoolean(KEY_CONTINUOUS, false).apply()
-                        keepToggle[0]?.isChecked = false
+                        keepToggle[0]?.setChecked(false)
                         commandView.text = "Try offline commands: open app, search, call, etc. · keep-listening stopped"
                         micBtn.text = "Tap to speak"
                         isListening = false

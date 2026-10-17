@@ -68,7 +68,7 @@ object OeaImageApp {
  * the column count — and a screen that keeps that state in locals gets rebuilt by
  * its host, which is how "the app forgets where I was" bugs are born.
  */
-internal class EmageScreen(val host: Activity, palette: OeaPalette) {
+internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
 
     private val kit = OeaAppKit(host, palette)
     val root: FrameLayout = kit.overlay()
@@ -99,6 +99,14 @@ internal class EmageScreen(val host: Activity, palette: OeaPalette) {
     }
     private val scopeTitle = kit.text("", 13.5f, palette.onAccentSoft, OeaType.medium)
     private val scopeBadge = kit.badge("0", palette.withAlpha(palette.accent, 0x33), palette.accent)
+
+    /**
+     * The edge a tile is decoded at. It is a property rather than a constant because the real
+     * width is only known once the grid has been measured, and the first bind has to agree with
+     * the second one or every tile flickers twice.
+     */
+    private var tileEdge: Int =
+        (host.resources.displayMetrics.widthPixels / SPAN_DEFAULT).coerceAtLeast(kit.dp(88))
 
     private val photoGrid = kit.grid(SPAN_DEFAULT)
     private val albumGrid = kit.grid(2, kit.dp(8), kit.dp(10))
@@ -206,8 +214,6 @@ internal class EmageScreen(val host: Activity, palette: OeaPalette) {
         tileEdge = (host.resources.displayMetrics.widthPixels / columns).coerceAtLeast(kit.dp(88))
         showSurface()
     }
-
-    private var tileEdge: Int = (host.resources.displayMetrics.widthPixels / SPAN_DEFAULT).coerceAtLeast(kit.dp(88))
 
     // ------------------------------------------------------------- lifecycle
 
@@ -317,7 +323,7 @@ internal class EmageScreen(val host: Activity, palette: OeaPalette) {
         if (surface == Surface.OEA && oeaHost.childCount == 0) {
             oeaHost.addView(
                 OeaGalleryApp.build(host, palette),
-                ScrollView.LayoutParams(-1, -2)
+                FrameLayout.LayoutParams(-1, -2)
             )
         }
         tabs.root.visibility = if (surface == Surface.OEA) View.GONE else View.VISIBLE
@@ -641,10 +647,11 @@ internal class EmageScreen(val host: Activity, palette: OeaPalette) {
                     // Android 10 refuses a silent delete of another app's file and
                     // hands back the dialog that grants it. Take it seriously
                     // instead of telling the user it failed.
-                    val cause = (outcome.exceptionOrNull() as? SecurityException)?.cause
-                    if (cause is android.content.RecoverableSecurityException) {
-                        sender = cause.userAction.actionIntent.intentSender
-                    }
+                    // The framework throws it itself; some phones wrap it one deep.
+                    val error = outcome.exceptionOrNull()
+                    val recoverable = error as? android.app.RecoverableSecurityException
+                        ?: (error as? SecurityException)?.cause as? android.app.RecoverableSecurityException
+                    recoverable?.userAction?.let { sender = it }
                 }
             }
         }
@@ -667,7 +674,8 @@ internal class EmageScreen(val host: Activity, palette: OeaPalette) {
                     LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { marginEnd = kit.dp(6) }
                 )
             }
-            grid.addView(columnsRow, LinearLayout.LayoutParams(-1, -2).apply { setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12)) })
+            columnsRow.setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12))
+            grid.addView(columnsRow, LinearLayout.LayoutParams(-1, -2))
             kit.row(grid, R.drawable.oic_layers, "Tile shape", if (tileShape == 1f) "Square" else if (tileShape > 1f) "Tall (3:4)" else "Wide (4:3)", chevron = false)
             val shapes = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
             listOf(1f to "Square", 3f / 4f to "Tall", 4f / 3f to "Wide").forEach { (ratio, label) ->
@@ -679,7 +687,8 @@ internal class EmageScreen(val host: Activity, palette: OeaPalette) {
                     LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { marginEnd = kit.dp(6) }
                 )
             }
-            grid.addView(shapes, LinearLayout.LayoutParams(-1, -2).apply { setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12)) })
+            shapes.setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12))
+            grid.addView(shapes, LinearLayout.LayoutParams(-1, -2))
             val sortNames = OeaMediaLibrary.Sort.values().map { it.label() }
             kit.row(grid, R.drawable.oic_sort_by_alpha, "Order", sort.label(), chevron = true) {
                 kit.choose("Order the library by", null, sortNames, OeaMediaLibrary.Sort.values().indexOf(sort)) { index ->
@@ -788,7 +797,7 @@ internal class EmageScreen(val host: Activity, palette: OeaPalette) {
             if (viewType == TYPE_HEADER) return HeaderHolder(kit.listHeader("", null))
             val cover = kit.coverTile(-1, kit.dp(10))
             val shape = ShapeFrame(parent.context).apply {
-                addView(cover.root, LayoutParams(-1, -1))
+                addView(cover.root, FrameLayout.LayoutParams(-1, -1))
             }
             return TileHolder(cover, shape)
         }

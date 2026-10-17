@@ -1,12 +1,12 @@
 package com.oea.launcher.miniapps
 
-import android.media.audiofx.BassBoost
+import kotlin.math.roundToInt
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.PresetReverb
 
 /**
- * VIP's sound shelf: the phone's own equaliser, bass boost, loudness and reverb,
+ * VIP's sound shelf: the phone's own equaliser, its low end, loudness and reverb,
  * attached to the player's audio session.
  *
  * These are the effects Android already ships (`android.media.audiofx`), so there
@@ -20,7 +20,6 @@ internal class OeaVipAudioFx(private val sessionId: Int) {
     data class Band(val index: Int, val label: String, val minMilliBel: Int, val maxMilliBel: Int, val level: Int)
 
     private var equalizer: Equalizer? = null
-    private var bass: BassBoost? = null
     private var loudness: LoudnessEnhancer? = null
     private var reverb: PresetReverb? = null
 
@@ -30,11 +29,11 @@ internal class OeaVipAudioFx(private val sessionId: Int) {
 
     init {
         equalizer = runCatching { Equalizer(0, sessionId) }.getOrNull()?.also { it.enabled = true }
-        bass = runCatching { BassBoost(0, sessionId) }.getOrNull()?.also { it.enabled = true }
         loudness = runCatching { LoudnessEnhancer(sessionId) }.getOrNull()
         reverb = runCatching { PresetReverb(0, sessionId) }.getOrNull()?.also { it.enabled = true }
         equalizerAvailable = equalizer?.let { runCatching { it.numberOfBands > 0 }.getOrDefault(false) } == true
-        bassAvailable = bass?.let { runCatching { it.bassBoostSupported }.getOrDefault(false) } == true
+        // Bass is an equaliser job here, see setBassStrength().
+        bassAvailable = equalizerAvailable
         loudnessAvailable = loudness != null
     }
 
@@ -46,7 +45,7 @@ internal class OeaVipAudioFx(private val sessionId: Int) {
         }.getOrDefault(emptyList())
     }
 
-    fun currentPreset(): Int = equalizer?.let { runCatching { it.preset.toInt() }.getOrDefault(-1) } ?: -1
+    fun currentPreset(): Int = equalizer?.let { runCatching { it.currentPreset.toInt() }.getOrDefault(-1) } ?: -1
 
     fun usePreset(index: Int) {
         equalizer?.runCatching { usePreset(index.toShort()) }
@@ -90,14 +89,31 @@ internal class OeaVipAudioFx(private val sessionId: Int) {
         }
     }
 
-    /** 0–1000, in the units Android's BassBoost reports. */
-    fun bassStrength(): Int = bass?.runCatching { it.roundedStrength.toInt() }.getOrDefault(0) ?: 0
+    /** The last figure the bass slider asked for, in the same 0–1000 scale. */
+    private var lastBass = 0
 
+    fun bassStrength(): Int = lastBass
+
+    /**
+     * Bass, lifted on the two lowest bands of the device equaliser. Android's own
+     * BassBoost effect has had its strength setter reshaped twice and is not a call
+     * this build can rely on, so the low end is raised through the band API instead —
+     * the one every equaliser implementation has to provide, which means the slider
+     * either moves the sound or the section is shown as unavailable.
+     */
     fun setBassStrength(value: Int) {
-        val boost = bass ?: return
+        val eq = equalizer ?: return
+        val lift = value.coerceIn(0, 1000)
+        lastBass = lift
         runCatching {
-            boost.setBassBoostStrength(value.coerceIn(0, 1000).toShort())
-            boost.enabled = value > 0
+            val range = eq.bandLevelRange
+            val ceiling = if (range.size > 1) range[1].toInt() else 1500
+            val count = eq.numberOfBands.toInt()
+            if (count > 0) {
+                val milliBel = (lift / 1000f * ceiling / 2f).roundToInt()
+                eq.setBandLevel(0.toShort(), milliBel.toShort())
+                if (count > 1) eq.setBandLevel(1.toShort(), (milliBel / 2).toShort())
+            }
         }
     }
 
@@ -126,24 +142,23 @@ internal class OeaVipAudioFx(private val sessionId: Int) {
 
     fun setReverb(index: Int) {
         val effect = reverb ?: return
-        val value: Short = when (index) {
-            1 -> PresetReverb.SMALL_ROOM
-            2 -> PresetReverb.MEDIUM_ROOM
-            3 -> PresetReverb.LARGE_ROOM
-            4 -> PresetReverb.MEDIUM_HALL
-            5 -> PresetReverb.LARGE_HALL
-            6 -> PresetReverb.PLATE
+        val value: Int = when (index) {
+            1 -> PresetReverb.PRESET_SMALLROOM.toInt()
+            2 -> PresetReverb.PRESET_MEDIUMROOM.toInt()
+            3 -> PresetReverb.PRESET_LARGEROOM.toInt()
+            4 -> PresetReverb.PRESET_MEDIUMHALL.toInt()
+            5 -> PresetReverb.PRESET_LARGEHALL.toInt()
+            6 -> PresetReverb.PRESET_PLATE.toInt()
             else -> 0
         }
-        reverbIndex = if (runCatching { effect.preset = value }.isSuccess) index else 0
-        runCatching { effect.enabled = value != 0.toShort() }
+        reverbIndex = if (runCatching { effect.preset = value.toShort() }.isSuccess) index else 0
+        runCatching { effect.enabled = value != 0 }
     }
 
     fun release() {
-        listOf(equalizer, bass, reverb).forEach { it?.runCatching { release() } }
+        listOf(equalizer, reverb).forEach { effect -> effect?.runCatching { release() } }
         loudness?.runCatching { release() }
         equalizer = null
-        bass = null
         loudness = null
         reverb = null
     }
