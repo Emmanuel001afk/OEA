@@ -79,20 +79,32 @@ internal object OeaAmplifier {
             onResult(false, message)
             return
         }
+        // The builder, not a constructor: AudioTrack's public constructors are a
+        // deprecated six-argument form and an undocumented shape, and the builder is
+        // the API that is actually meant to be called.
         val track = runCatching {
-            AudioTrack(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-                AudioFormat.Builder().setSampleRate(SAMPLE_RATE).setEncoding(encoding).setChannelMask(outMask).build(),
-                frameCount * 2,
-                AudioTrack.MODE_STREAM
-            )
+            AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(SAMPLE_RATE)
+                        .setEncoding(encoding)
+                        .setChannelMask(outMask)
+                        .build()
+                )
+                .setBufferSizeInBytes(frameCount * 2)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
         }.getOrNull()
         if (track == null || track.state != AudioTrack.STATE_INITIALIZED) {
             runCatching { record.release() }
             runCatching { track?.release() }
+            if (track?.state != AudioTrack.STATE_INITIALIZED) runCatching { track?.stop() }
             val message = "This phone will not open an output stream for OEA"
             lastError = message
             onResult(false, message)
@@ -107,7 +119,8 @@ internal object OeaAmplifier {
             try {
                 record.startRecording()
                 track.play()
-                latencyMs = runCatching { track.latency / 1000 }.getOrDefault(0)
+                // getLatency() is already milliseconds.
+                latencyMs = runCatching { track.latency }.getOrDefault(0)
                 while (running) {
                     val read = record.read(buffer, 0, buffer.size)
                     if (read <= 0) {
