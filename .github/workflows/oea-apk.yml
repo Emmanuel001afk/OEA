@@ -321,29 +321,52 @@ jobs:
           set -euo pipefail
           AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          # Copied under the game's own name: the released asset has to be
+          # recognisable to the person downloading it, not to Gradle.
           check() {
-            local expected="$1" dir="$2"
+            local expected="$1" dir="$2" out="$3"
             local apk
             apk="$(find "$dir" -type f -name '*.apk' -print -quit)"
             test -n "$apk" || { echo "ERROR: no APK in $dir"; return 1; }
             "$AAPT2" dump badging "$apk" | grep -F "package: name='$expected'"
             "$APKSIGNER" verify --verbose "$apk"
             mkdir -p "$RUNNER_TEMP/games"
-            cp "$apk" "$RUNNER_TEMP/games/"
+            cp "$apk" "$RUNNER_TEMP/games/$out"
           }
-          check com.oea.runner oea-game-runner/build/outputs/apk
-          check com.oea.arena oea-game-arena/build/outputs/apk
-          check com.oea.chess oea-game-chess/build/outputs/apk
+          check com.oea.runner oea-game-runner/build/outputs/apk OEA-Endless-Days.apk
+          check com.oea.arena oea-game-arena/build/outputs/apk OEA-Send-Off.apk
+          check com.oea.chess oea-game-chess/build/outputs/apk OEA-Chess.apk
       - name: Report APK sizes
         run: |
           set -euo pipefail
-          TABLE="| App | Size |"$'\n'"| --- | --- |"
+          # Sizes come from the zip central directory, so they are what the APK
+          # costs on the wire rather than the uncompressed entry sizes.
+          TABLE="| App | Size | Native libs | Code | Resources | Assets | Other |"$'\n'"| --- | --- | --- | --- | --- | --- | --- |"
+          DETAILS=""
           TOTAL_KB=0
           for apk in oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk; do
             [ -f "$apk" ] || continue
             KB=$(du -k "$apk" | cut -f1)
             TOTAL_KB=$((TOTAL_KB + KB))
-            TABLE="$TABLE"$'\n'"| $(basename "$apk") | $((KB / 1024)).$((KB % 1024 / 100)) MB |"
+            read -r LIB DEX RES ASS OTH < <(unzip -v "$apk" | awk '
+              $1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+%$/ {
+                c = $3; n = $8
+                if (n ~ /^lib\//) lib += c
+                else if (n ~ /^classes/ || n ~ /\.dex$/) dex += c
+                else if (n ~ /^res\//) res += c
+                else if (n ~ /^assets\//) ass += c
+                else oth += c }
+              END { printf "%d %d %d %d %d\n", lib, dex, res, ass, oth }')
+            NAME=$(basename "$apk")
+            if [ "$KB" -ge 1024 ]; then
+              SIZE="$((KB / 1024)).$((KB % 1024 / 100)) MB"
+            else
+              SIZE="${KB} kB"
+            fi
+            TABLE="$TABLE"$'\n'"| $NAME | $SIZE | $((LIB / 1024))k | $((DEX / 1024))k | $((RES / 1024))k | $((ASS / 1024))k | $((OTH / 1024))k |"
+            TOP=$(unzip -v "$apk" | awk '
+              $1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+%$/ { printf "%9d  %s\n", $3, $8 }' | sort -k1 -n -r | head -12)
+            DETAILS="$DETAILS"$'\n'"<details><summary>$NAME - largest entries</summary>"$'\n\n'"\`\`\`"$'\n'"$TOP"$'\n'"\`\`\`"$'\n'"</details>"$'\n'
           done
           {
             echo "### APK sizes"
@@ -352,17 +375,14 @@ jobs:
             echo ""
             echo "Total across all apps: $((TOTAL_KB / 1024)) MB"
             echo ""
-            echo "<details><summary>Largest entries in the launcher APK</summary>"
-            echo ""
-            echo '```'
-            unzip -l "$(find oea/build/outputs/apk/release -name '*.apk' -print -quit)" | sort -k1 -n -r | head -16
-            echo '```'
-            echo "</details>"
+            echo "$DETAILS"
           } >> "$GITHUB_STEP_SUMMARY"
           {
             echo "$TABLE"
             echo ""
             echo "Total across all apps: $((TOTAL_KB / 1024)) MB"
+            echo ""
+            echo "$DETAILS"
           } > "$RUNNER_TEMP/sizes.md"
       - name: Comment APK sizes on PR
         if: github.event_name == 'pull_request'

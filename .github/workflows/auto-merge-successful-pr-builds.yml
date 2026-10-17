@@ -106,11 +106,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/games"
-          for dir in oea-game-runner oea-game-arena oea-game-chess; do
+          # Released under the game's own name, not Gradle's: the asset has to
+          # be recognisable to whoever downloads it.
+          collect() {
+            local dir="$1" out="$2"
+            local apk
             apk="$(find "$dir/build/outputs/apk" -type f -name '*.apk' -print -quit)"
-            test -n "$apk" || { echo "ERROR: no APK built for $dir"; exit 1; }
-            cp "$apk" "$RUNNER_TEMP/games/"
-          done
+            test -n "$apk" || { echo "ERROR: no APK built for $dir"; return 1; }
+            cp "$apk" "$RUNNER_TEMP/games/$out"
+          }
+          collect oea-game-runner OEA-Endless-Days.apk
+          collect oea-game-arena OEA-Send-Off.apk
+          collect oea-game-chess OEA-Chess.apk
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
