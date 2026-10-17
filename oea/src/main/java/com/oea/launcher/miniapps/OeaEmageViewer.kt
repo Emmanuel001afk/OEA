@@ -128,7 +128,7 @@ internal object OeaEmageViewer {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             )
-        }.onFailure { applyWallpaper(host, item, WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK) }
+        }.onFailure { applyWallpaper(host, item, com.oea.launcher.wallpaper.OeaWallpaperStore.Target.BOTH) }
     }
 
     /**

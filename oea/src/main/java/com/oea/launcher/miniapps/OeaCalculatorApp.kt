@@ -323,7 +323,7 @@ object OeaCalculatorApp {
                             android.widget.Toast.makeText(host, "Nothing to send — the amount is not a number", android.widget.Toast.LENGTH_SHORT).show()
                         } else {
                             val names = names(fam)
-                            expression = "1 ${names[fromIndex]} → ${names[toIndex]} (${fam.name.toLowerCase(java.util.Locale.getDefault())})"
+                            expression = "1 ${names[fromIndex]} → ${names[toIndex]} (${fam.name.lowercase(java.util.Locale.getDefault())})"
                             result = OeaUnits.show(value)
                             show()
                             renderTape()

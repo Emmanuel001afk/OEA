@@ -120,7 +120,7 @@ internal object OeaAmplifier {
                 record.startRecording()
                 track.play()
                 // getLatency() is already milliseconds.
-                latencyMs = runCatching { track.latency }.getOrDefault(0)
+                latencyMs = runCatching { track.getLatency() }.getOrDefault(0)
                 while (running) {
                     val read = record.read(buffer, 0, buffer.size)
                     if (read <= 0) {

@@ -245,7 +245,7 @@ object OeaCalendarApp {
             else -> "NONE"
         }
         val trigger = parts["TRIGGER"].orEmpty()
-        val minutes = Regex("PT(\d+)M").find(trigger)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        val minutes = Regex("PT(\\d+)M").find(trigger)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
         return Event(
             id = (parts["UID"].orEmpty().filter { it.isDigit() }.toLongOrNull() ?: System.nanoTime()) and Long.MAX_VALUE,
             year = year, month = month, day = day,

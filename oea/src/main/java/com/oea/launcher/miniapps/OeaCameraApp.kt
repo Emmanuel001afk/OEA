@@ -555,10 +555,10 @@ object OeaCameraApp {
                                 if (filtered !== snapshot && filtered !== processed) filtered.recycle()
                                 if (snapshot !== processed && snapshot !== filtered) snapshot.recycle()
                                 host.runOnUiThread {
-                                    if (isDestroyed) return@runOnUiThread
+                                    if (host.isDestroyed) return@runOnUiThread
                                     if (externalCapture) {
                                         if (saved != null && finishExternalCapture(host, captureTarget, saved, "image/jpeg")) {
-                                            if (mode != CaptureMode.PHOTO) android.widget.Toast.makeText(host, "Saved — ${mode.label.toLowerCase(java.util.Locale.getDefault())} pass applied", android.widget.Toast.LENGTH_SHORT).show()
+                                            if (mode != CaptureMode.PHOTO) android.widget.Toast.makeText(host, "Saved — ${mode.label.lowercase(java.util.Locale.getDefault())} pass applied", android.widget.Toast.LENGTH_SHORT).show()
                                         } else {
                                             saved?.delete()
                                             host.setResult(Activity.RESULT_CANCELED)

@@ -509,7 +509,7 @@ object OeaClockApp {
                 android.provider.MediaStore.Audio.Media.TITLE
             )
             host.contentResolver.query(
-                RingtoneManager.EXTERNAL_CONTENT_URI,
+                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
                 "${android.provider.MediaStore.Audio.Media.IS_ALARM} != 0",
                 null,
@@ -519,7 +519,7 @@ object OeaClockApp {
                 val titleColumn = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.TITLE)
                 while (cursor.moveToNext() && titles.size < 60) {
                     titles += cursor.getString(titleColumn)
-                    uris += android.content.ContentUris.withAppendedId(RingtoneManager.EXTERNAL_CONTENT_URI, cursor.getLong(idColumn)).toString()
+                    uris += android.content.ContentUris.withAppendedId(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cursor.getLong(idColumn)).toString()
                 }
             }
         }
