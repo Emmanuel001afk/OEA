@@ -124,7 +124,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             return
         }
         this.descriptor = descriptor
-        palette = GameColors.palette(descriptor.accent)
+        palette = GameColors.palette(
+            descriptor.accent,
+            highContrast = runCatching { OeaEngine.settings.highContrastMenus }.getOrDefault(false)
+        )
         kit = null
         GameInsets.edgeToEdge(window)
         descriptor.options.forEach { option ->
@@ -255,6 +258,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             )
         }
         actions.addView(
+            k.actionRow("◐", "Screen & access", "Menu size, high contrast, no fading") { showAccessSheet() },
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+        )
+        actions.addView(
             k.actionRow("ⓘ", "About ${d.title}", d.description.lineSequence().firstOrNull()?.take(60) ?: "What this game is") { showAboutSheet() }
         )
 
@@ -265,8 +272,12 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         )
 
         setContentView(page.root)
-        page.root.alpha = 0f
-        page.root.animate().alpha(1f).setDuration(180L).start()
+        if (toolkit().reducedMotion) {
+            page.root.alpha = 1f
+        } else {
+            page.root.alpha = 0f
+            page.root.animate().alpha(1f).setDuration(180L).start()
+        }
     }
 
     private fun optionsLine(d: GameDescriptor): String = when {
@@ -334,6 +345,39 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             }
             panel.addView(k.boundedScroll(host, 0.6f))
             panel.addView(k.buttonRow(k.primaryButton("Done") { dialog.dismiss(); showHome() }))
+        }
+    }
+
+    /**
+     * Accessibility for every game screen in this app. Three switches, all of them
+     * live: the scale re-lays the menus, contrast swaps the palette, and reduced
+     * motion takes the fades out. They are stored on the engine, so the same choices
+     * apply to the other OEA game apps on this phone.
+     */
+    private fun showAccessSheet() {
+        val k = toolkit()
+        val d = descriptor ?: return
+        val settings = OeaEngine.settings
+        var scale = settings.uiScale
+        k.sheet("Screen & access", "Applies to every OEA game on this phone") { panel, dialog ->
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            k.slider(body, "Menu size", scale, 0.85f, 1.5f, { v -> "%.0f%%".format(v * 100f) }) { value ->
+                scale = value
+                settings.uiScale = value
+            }
+            k.switchRow(body, "High contrast menus", "Black grounds, white type, hard edges — ${d.title}'s own accent stays", settings.highContrastMenus) {
+                settings.highContrastMenus = it
+                palette = GameColors.palette(d.accent, highContrast = it)
+                kit = null
+                dialog.dismiss()
+                showHome()
+            }
+            k.switchRow(body, "No fading or sliding", "Screens change at once instead of cross-fading", settings.reducedMotion) {
+                settings.reducedMotion = it
+            }
+            panel.addView(k.boundedScroll(body, 0.55f))
+            k.note(panel, "Menu size is the one that moves touch targets as well as type, so a larger menu is still a tappable one. Saved per phone, not per match.")
+            panel.addView(k.buttonRow(k.quietButton("Reset to 100%") { settings.uiScale = 1f; dialog.dismiss(); kit = null; showHome() }, k.primaryButton("Done") { dialog.dismiss(); kit = null; showHome() }))
         }
     }
 

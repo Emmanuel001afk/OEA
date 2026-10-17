@@ -33,6 +33,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import com.oea.engine.OeaEngine
 import com.oea.engine.core.GameDescriptor
 import kotlin.math.sin
 
@@ -90,12 +91,12 @@ object GameColors {
      * The dark console palette, tinted with [accent] (a game's own colour when
      * one is known, otherwise OEA's amber).
      */
-    fun palette(accent: Int = OEA_AMBER): GamePalette {
+    fun palette(accent: Int = OEA_AMBER, highContrast: Boolean = false): GamePalette {
         val base = accent.takeIf { Color.alpha(it) == 0xFF } ?: OEA_AMBER
         val background = Color.rgb(8, 9, 13)
         val card = Color.rgb(20, 22, 30)
         val onAccent = if (luminance(base) > 0.5f) Color.rgb(20, 14, 4) else Color.rgb(255, 250, 244)
-        return GamePalette(
+        val built = GamePalette(
             accent = base,
             onAccent = onAccent,
             accentSoft = blend(card, base, 0.22f),
@@ -110,6 +111,24 @@ object GameColors {
             danger = Color.rgb(255, 110, 120),
             success = Color.rgb(80, 225, 160),
             warning = Color.rgb(255, 196, 100)
+        )
+        // High contrast is a *palette*, not a brightness knob: the accent survives so
+        // a game still reads as itself, but grounds go to black and type to white,
+        // with strokes hard enough to see with a scratched screen protector.
+        if (!highContrast) return built
+        return built.copy(
+            accentSoft = blend(Color.BLACK, base, 0.55f),
+            onAccentSoft = Color.WHITE,
+            background = Color.BLACK,
+            card = Color.rgb(6, 6, 8),
+            cardHigh = Color.rgb(26, 27, 33),
+            stroke = alpha(Color.WHITE, 0x9E),
+            text = Color.WHITE,
+            textSecondary = Color.rgb(238, 240, 245),
+            textTertiary = Color.rgb(214, 218, 226),
+            danger = Color.rgb(255, 148, 158),
+            success = Color.rgb(124, 255, 198),
+            warning = Color.rgb(255, 216, 138)
         )
     }
 
@@ -178,12 +197,37 @@ object GameInsets {
  * Built from plain views so it costs nothing to inflate and cannot fail on a
  * device whose theme stack refuses to load a resource.
  */
-class GameKit(val context: Context, val palette: GamePalette = GameColors.palette()) {
+class GameKit(
+    val context: Context,
+    val palette: GamePalette = GameColors.palette(
+        highContrast = runCatching { OeaEngine.settings.highContrastMenus }.getOrDefault(false)
+    )
+) {
 
     private val density = context.resources.displayMetrics.density
 
-    fun dp(value: Int): Int = (value * density + 0.5f).toInt()
-    fun dpf(value: Float): Float = value * density
+    /**
+     * Menu scale, read once when this kit is built. Every metric in the kit goes
+     * through it, which is why a game screen enlarged here grows as a picture
+     * rather than as a column of text with buttons left at finger size.
+     */
+    var uiScale: Float = runCatching { OeaEngine.settings.uiScale }.getOrDefault(1f)
+        private set
+
+    /** True when the player asked for no animation. */
+    val reducedMotion: Boolean
+        get() = runCatching { OeaEngine.settings.reducedMotion }.getOrDefault(false)
+
+    /** Returns true when the engine's scale moved, so a caller can rebuild. */
+    fun syncAccessibility(): Boolean {
+        val now = runCatching { OeaEngine.settings.uiScale }.getOrDefault(1f)
+        val changed = now != uiScale
+        uiScale = now
+        return changed
+    }
+
+    fun dp(value: Int): Int = (value * density * uiScale + 0.5f).toInt()
+    fun dpf(value: Float): Float = value * density * uiScale
 
     // ------------------------------------------------------------------ shapes
 
@@ -216,7 +260,7 @@ class GameKit(val context: Context, val palette: GamePalette = GameColors.palett
     fun text(value: CharSequence, sizeSp: Float, color: Int, face: Typeface = GameType.regular): TextView =
         TextView(context).apply {
             text = value
-            textSize = sizeSp
+            textSize = sizeSp * uiScale
             setTextColor(color)
             typeface = face
         }
@@ -289,15 +333,17 @@ class GameKit(val context: Context, val palette: GamePalette = GameColors.palett
         background = ripple(rounded(if (highlight) palette.accentSoft else palette.card, 20), 20)
         isClickable = true
         isFocusable = true
+        // TalkBack gets the whole row as one sentence instead of reading a gear
+        // glyph, then a title, then a fragment of detail.
+        contentDescription = if (subtitle.isNullOrBlank()) title else "$title. $subtitle"
         setOnClickListener { onClick() }
-        addView(
-            glyphBadge(
-                glyph,
-                if (highlight) palette.accent else palette.cardHigh,
-                if (highlight) palette.onAccent else palette.onAccentSoft
-            ),
-            LinearLayout.LayoutParams(dp(44), dp(44))
+        val badge = glyphBadge(
+            glyph,
+            if (highlight) palette.accent else palette.cardHigh,
+            if (highlight) palette.onAccent else palette.onAccentSoft
         )
+        badge.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        addView(badge, LinearLayout.LayoutParams(dp(44), dp(44)))
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         texts.addView(
             text(title, 16f, if (highlight) palette.onAccentSoft else palette.text, GameType.medium).apply {

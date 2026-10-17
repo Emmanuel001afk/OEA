@@ -115,6 +115,14 @@ placeholder" became **OEA's own advisories**, computed from these numbers and
 labelled as not being official warnings, because there is no warning feed this
 build reads.
 
+## Voice — a meter that is really the microphone
+
+`onRmsChanged` in `OeaSpeechEngine` had an empty body and a comment saying "Could
+feed to waveform UI", while the Voice KDoc advertised a waveform. The listener now has
+a defaulted `onLevel(0..1)` fed from that callback, and the Voice screen draws a
+28-bar meter with a short tail off it, plus `onStateChanged` turning the caption into
+"listening / making sense of it / the recogniser gave up / quiet".
+
 ## Voice — no invented wake word
 
 The "offline keyword spotting fallback" does not exist and never did. In its
@@ -122,6 +130,44 @@ place: a typed command line that runs the identical parser as the chips and the
 recogniser, so a phone with no speech service still gets working commands, and a
 note that explains why no model is bundled and what continuous listening here
 actually is.
+
+## Clock — an alarm that rings, and a form you can read
+
+The alarm editor asked for "Hour (0-23)" and "Days (0=Sun,1=Mon..6=Sat comma
+separated, e.g., 1,2,3,4,5)" as **text fields**, and "Sound" as a box where you
+typed the *name* of a ringtone nobody played. It is now two `NumberPicker` wheels,
+seven day chips, four snooze chips, and a ringtone sheet built from a real query of
+`IS_ALARM` on this phone — the list is whatever the device carries, and the chosen
+URI travels with the alarm.
+
+The firing side was a plain notification, so the alarm made no more noise than a
+message. `OeaClockAlarmReceiver` now creates one notification channel per chosen
+sound (Android fixes a channel's tone at creation, so two tones need two channels),
+with `USAGE_ALARM` audio attributes, vibration per the alarm's own setting, public
+lock-screen visibility, `CATEGORY_ALARM`, `PRIORITY_MAX`, ongoing so it stays, and
+**Snooze** and **Stop** actions. `OeaClockSnoozeReceiver` was firing into a component
+that was never declared in the manifest — the buttons existed and did nothing; it is
+registered now, and "Stop" also cancels the pending alarm and snooze intents so a
+dismissed alarm stays dismissed. The notification carries a full-screen intent to
+OEA's Clock when Android grants it, and says plainly that where it does not, the
+shade notification is the mechanism — an app without the system alarm-roll privilege
+cannot simply take the speaker at 06:30.
+
+## Games — access that reaches the games' own screens
+
+`EngineSettings` gained three switches that menus actually read: `uiScale`
+(0.85–1.5), `highContrastMenus` and `reducedMotion`. `GameKit` — the games' copy of
+the launcher's visual language — now routes every metric through `uiScale`, so
+enlarging a game's menu enlarges its **touch targets** and padding as well as its
+type, rather than leaving a column of big text over buttons at finger size.
+`GameColors.palette(accent, highContrast)` returns black grounds, white type and hard
+strokes while keeping the game's own accent, and the standalone shell skips its
+cross-fade when motion is reduced.
+
+They are set in two places because both are where people look: a "Screen & access"
+row on each standalone game's front screen, and a "Reading the screen" section in
+OEA Games › Graphics & performance. `actionRow` now carries a sentence-long
+`contentDescription` and hides its decorative glyph badge from TalkBack.
 
 ## Games — three apps, each with its own front screen
 
