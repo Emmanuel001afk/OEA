@@ -74,6 +74,7 @@ object OeaWirelessPairing {
     @Volatile private var lastAutoPairAt = 0L
     @Volatile private var lastPairedKey: String? = null
     @Volatile private var nsdResolving = false
+    private val nsdPending = java.util.ArrayDeque<NsdServiceInfo>()
     private var nsdDiscovery: NsdManager.DiscoveryListener? = null
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     internal class Entry(val text: String, val top: Int, val bottom: Int)
@@ -184,24 +185,11 @@ object OeaWirelessPairing {
             override fun onDiscoveryStarted(serviceType: String?) {}
             override fun onServiceFound(info: NsdServiceInfo?) {
                 val service = info ?: return
-                if (nsdResolving || connection != null || service.serviceType?.contains("_adb-tls-connect._tcp") != true) return
-                nsdResolving = true
-                try {
-                    manager.resolveService(service, object : NsdManager.ResolveListener {
-                        override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) { nsdResolving = false }
-                        override fun onServiceResolved(serviceInfo: NsdServiceInfo?) {
-                            nsdResolving = false
-                            val resolved = serviceInfo ?: return
-                            val host = resolved.host?.hostAddress ?: return
-                            if (expectedHost != null && host != expectedHost) return
-                            if (resolved.port !in 1..65535 || connection != null) return
-                            connection = Connection(host, resolved.port, SystemClock.elapsedRealtime())
-                            OeaAssistant.notifyStateChanged()
-                            stopNsd()
-                            Thread({ finishConnect() }, "oea-adb-connect").start()
-                        }
-                    })
-                } catch (_: Exception) { nsdResolving = false }
+                if (connection != null || service.serviceType?.contains("_adb-tls-connect._tcp") != true) return
+                synchronized(nsdPending) {
+                    if (nsdPending.none { it.serviceName == service.serviceName }) nsdPending.addLast(service)
+                }
+                resolveNextService(manager, expectedHost)
             }
             override fun onServiceLost(info: NsdServiceInfo?) {}
             override fun onDiscoveryStopped(serviceType: String?) { nsdDiscovery = null }
@@ -214,9 +202,44 @@ object OeaWirelessPairing {
         mainHandler.postDelayed({ stopNsd() }, 30_000L)
     }
 
+    /** Resolve services one at a time; unrelated LAN devices must not block our target. */
+    private fun resolveNextService(manager: NsdManager, expectedHost: String?) {
+        if (nsdResolving || connection != null) return
+        val service = synchronized(nsdPending) { if (nsdPending.isEmpty()) null else nsdPending.removeFirst() } ?: return
+        nsdResolving = true
+        try {
+            manager.resolveService(service, object : NsdManager.ResolveListener {
+                override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
+                    nsdResolving = false
+                    resolveNextService(manager, expectedHost)
+                }
+                override fun onServiceResolved(serviceInfo: NsdServiceInfo?) {
+                    nsdResolving = false
+                    val resolved = serviceInfo
+                    val host = resolved?.host?.hostAddress
+                    if (resolved != null && host != null &&
+                        (expectedHost == null || host == expectedHost) &&
+                        resolved.port in 1..65535 && connection == null) {
+                        connection = Connection(host, resolved.port, SystemClock.elapsedRealtime())
+                        OeaAssistant.notifyStateChanged()
+                        stopNsd()
+                        Thread({ finishConnect() }, "oea-adb-connect").start()
+                    } else {
+                        resolveNextService(manager, expectedHost)
+                    }
+                }
+            })
+        } catch (_: Exception) {
+            nsdResolving = false
+            resolveNextService(manager, expectedHost)
+        }
+    }
+
     private fun stopNsd() {
-        val listener = nsdDiscovery ?: return
+        val listener = nsdDiscovery
         nsdDiscovery = null
+        synchronized(nsdPending) { nsdPending.clear() }
+        if (listener == null) return
         val manager = appContext?.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return
         try { manager.stopServiceDiscovery(listener) } catch (_: Exception) {}
     }
