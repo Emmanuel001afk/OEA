@@ -179,6 +179,63 @@ lists tap-then-square, drag, undo-by-retap, promotion and the 3D orbit, Send Off
 lists the two-thumb layout, jump/crouch, ADS and the corner cluster. A legend
 that is true beats a slider that is inert.
 
+## The compiler round — what a static check cannot see
+
+This module has no JDK or Android SDK where it is written, so `tools/check-kotlin.py`
+is the local gate and GitHub Actions is the first real compile. That compile was worth
+every round it took: it found seventy-five refusals across eleven files, and behind
+several of them were features that would have quietly done nothing.
+
+Names that do not exist in the SDK, and what replaced them:
+
+* `MediaExtractor` has no duration. The container keeps it per track, so the probe
+  reads `KEY_DURATION` off the track formats and quotes the longest one.
+* `View.OutlineProvider` is not a nested class — `android.view.ViewOutlineProvider`
+  is, and three rounded-corner clips were rewritten.
+* `PresetReverb.SMALL_ROOM` is `PRESET_SMALLROOM`; and `BassBoost`'s strength setter
+  is not an app-visible API on this SDK, so VIP's bass now lifts the two lowest
+  equaliser bands — the one call every EQ implementation must provide. The slider
+  either moves the sound or the section states that it cannot.
+* `RecoverableSecurityException` lives in `android.app`, and its `getUserAction()`
+  returns a `RemoteAction` whose `PendingIntent` an app may not read. EMAGE's Android 10
+  delete path therefore stops pretending: it removes what OEA created, uses Media
+  Store's own delete request from Android 11 up, and names what stayed behind.
+* `Icon.withTint()` does not exist; the notification shade tints action icons itself.
+* `LinearGradient` has no public *colour-array-plus-tilemode* constructor — the colour
+  positions slot is mandatory, so the two gradients pass `null` for it.
+* `ScrollView` has no nested `LayoutParams`, and `LinearLayout`'s third constructor
+  argument is a weight, not a gravity.
+* A `0xFFFF8A80` literal is a `Long` in Kotlin, which is why one `setColorFilter` had
+  no matching overload; a setter-only Java method is not a Kotlin property, so
+  `allCaps` became `setAllCaps(true)`.
+
+Shape faults that only a typechecker catches:
+
+* A viewer named two of its bars `top` and `bottom`, then reached for them inside
+  `FrameLayout(...).apply { addView(top, ...) }` — where `top` is the View's own
+  getter, so the call passed an `Int` to `addView`. They are `topBar` and `bottomBar`.
+* `selected = selected` inside an `apply` block assigned to the parameter: the VIP
+  sheet's icon toggles could light up nothing. It is `this.selected = selected`.
+* `var selected` on a View subclass compiles to `setSelected(boolean)`, which View
+  already owns, and `CoverTile` had a property *and* a function of that name. The
+  toggle's accessors carry their own JVM names; the tile's function is `markSelected`.
+* Subtitles' `parse` ended with `?.let { Track(...) }` after a three-branch `if`, and
+  that `let` applied only to the last branch — so a WebVTT file came back as a bare
+  cue list and every `.vtt` sidecar was silently dropped. The track is built once now.
+* A `tileEdge` assignment sat in the initialiser above its own declaration, so the
+  first screen of EMAGE tiles decoded at a guessed size; and `palette` was a
+  constructor parameter in two screens whose methods used it, which is thirty-odd
+  unresolved references in a file that looked fine.
+* `String.toLowerCase(Locale)` is an error, not a warning, in this Kotlin; and
+  `Regex("PT(\d+)M")` written into a string by a script lost its backslash, so
+  Calendar's reminder parser did not compile.
+
+The workflows learned one thing too: a failing job used to quote the tail of the
+Gradle log in its PR comment, which showed the *last* errors and hid the first ones.
+It now quotes every `e:` line, deduplicated. `:oea`, `:oea-engine` and `:oea-games`
+compile, the release APKs are assembled and signed, and 24 launcher, engine and game
+unit tests pass.
+
 ## What is deliberately *not* claimed
 
 * No QR decoder, no OCR, no on-device transcription, no depth map, no live
