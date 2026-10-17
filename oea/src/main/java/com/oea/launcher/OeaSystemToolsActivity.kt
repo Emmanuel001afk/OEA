@@ -2913,13 +2913,14 @@ open class OeaSystemToolsActivity : Activity() {
         val pairing = wp.freshPairing()
         val connection = wp.connection
         val watching = wp.isWatching()
+        wp.attach(applicationContext)
         fun ago(at: Long): String {
             val secs = ((android.os.SystemClock.elapsedRealtime() - at) / 1000).coerceAtLeast(0)
             return if (secs < 60) "${secs}s ago" else "${secs / 60}m ago"
         }
 
         kit.sectionTitle(box, "Wireless debugging")
-        kit.note(box, "OEA Assistant reads the pairing code, the pairing port and the connection port from the Wireless debugging screens by itself. You don't type them.")
+        kit.note(box, "OEA Assistant reads the pairing code and pairing port from the dialog, then pairs automatically. On XOS it separates the dialog address from the main Wireless debugging address. If the connection port is missing, OEA searches for the paired phone over local-network mDNS.")
         val group = kit.group(box)
         if (!OeaAssistant.isConnected()) {
             kit.banner(group, R.drawable.oic_accessibility_new, "Turn on OEA Assistant first",
