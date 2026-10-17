@@ -312,7 +312,7 @@ object OeaWirelessPairing {
         val entries = ArrayList<Entry>()
         collect(root, entries, 0)
         if (entries.isEmpty()) return
-        if (read(entries, now)) OeaAssistant.notifyStateChanged()
+        if (readEntries(entries, now)) OeaAssistant.notifyStateChanged()
         maybeAutoPair()
         if (pairing != null && connection != null && outcome !is Outcome.Running && outcome !is Outcome.Failed) {
             watchUntil = 0L
@@ -331,8 +331,8 @@ object OeaWirelessPairing {
         executePairing(context)
     }
 
-    internal fun read(texts: List<String>, now: Long): Boolean = read(texts.map { Entry(it, 0, 0) }, now)
-    internal fun read(entries: List<Entry>, now: Long): Boolean {
+    internal fun read(texts: List<String>, now: Long): Boolean = readEntries(texts.map { Entry(it, 0, 0) }, now)
+    internal fun readEntries(entries: List<Entry>, now: Long): Boolean {
         val codeEntry = entries.firstOrNull { codeRe.matchEntire(it.text.trim()) != null }
         val code = codeEntry?.let { codeRe.matchEntire(it.text.trim())!!.let { m -> m.groupValues[1] + m.groupValues[2] } }
         val addresses = entries.mapNotNull { e -> addressRe.find(e.text)?.let { Address(it.groupValues[1], it.groupValues[2].toInt(), e) } }
