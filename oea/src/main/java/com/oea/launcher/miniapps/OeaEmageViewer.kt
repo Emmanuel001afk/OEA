@@ -249,8 +249,8 @@ internal object OeaEmageViewer {
         private val root = FrameLayout(host).apply {
             setBackgroundColor(Color.BLACK)
             addView(pager, FrameLayout.LayoutParams(-1, -1))
-            addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-            addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            addView(top, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.TOP })
+            addView(bottom, FrameLayout.LayoutParams(-1, -2).apply { gravity = Gravity.BOTTOM })
         }
 
         private val hideChrome = Runnable { if (chromeVisible) setChrome(false) }

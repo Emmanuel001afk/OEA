@@ -21,6 +21,7 @@ import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaSpanLookup
 import com.oea.launcher.ui.OeaThumbnails
 import com.oea.launcher.ui.OeaType
 import java.text.SimpleDateFormat

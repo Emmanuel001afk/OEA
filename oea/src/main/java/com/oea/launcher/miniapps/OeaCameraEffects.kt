@@ -12,7 +12,6 @@ import android.graphics.BitmapFactory
 import android.media.FaceDetector
 import java.io.File
 import java.io.FileOutputStream
-import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
@@ -144,7 +143,7 @@ internal object OeaCameraEffects {
 
     private fun applyCurve(value: Int): Int {
         val v = value / 255f
-        val curved = if (v < 0.5f) 2f * v * v else 1f - pow((2f - 2f * v).toDouble(), 2.0).toFloat() / 2f
+        val curved = if (v < 0.5f) 2f * v * v else (1f - (2f - 2f * v) * (2f - 2f * v) / 2f)
         return (curved * 255f).toInt()
     }
 

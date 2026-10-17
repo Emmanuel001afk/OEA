@@ -44,7 +44,11 @@ internal object OeaAmplifier {
     var lastError: String? = null
         private set
 
-    /** Measured round trip, in milliseconds, once the stream is moving. */
+    /**
+     * How much audio is sitting in the output buffer, in milliseconds. That is the part of the
+     * delay this phone lets OEA choose, and it is the part you can hear, so the screen quotes
+     * it as the latency rather than guessing at the rest of the path.
+     */
     @Volatile
     var latencyMs: Int = 0
         private set
@@ -119,8 +123,7 @@ internal object OeaAmplifier {
             try {
                 record.startRecording()
                 track.play()
-                // getLatency() is already milliseconds.
-                latencyMs = runCatching { track.getLatency() }.getOrDefault(0)
+                latencyMs = frameCount * 1000 / SAMPLE_RATE
                 while (running) {
                     val read = record.read(buffer, 0, buffer.size)
                     if (read <= 0) {

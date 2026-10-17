@@ -618,7 +618,7 @@ object OeaConsoleApp {
                 onValue = { value, _ ->
                     OeaAmplifier.gain = value
                     status.text = if (OeaAmplifier.isRunning) {
-                        "Amplifying · %.1f× · about %.0f ms late".format(value, OeaAmplifier.latencyMs.toFloat())
+                        "Amplifying · %.1f× · %.0f ms of buffering".format(value, OeaAmplifier.latencyMs.toFloat())
                     } else {
                         "%.1f× · stopped".format(value)
                     }
@@ -635,7 +635,7 @@ object OeaConsoleApp {
                             OeaAmplifier.start(host) { ok, message ->
                                 host.runOnUiThread {
                                     android.widget.Toast.makeText(host, message, android.widget.Toast.LENGTH_LONG).show()
-                                    status.text = if (ok) "Amplifying · %.1f× · about %.0f ms late".format(OeaAmplifier.gain, OeaAmplifier.latencyMs.toFloat()) else (OeaAmplifier.lastError ?: message)
+                                    status.text = if (ok) "Amplifying · %.1f× · %.0f ms of buffering".format(OeaAmplifier.gain, OeaAmplifier.latencyMs.toFloat()) else (OeaAmplifier.lastError ?: message)
                                     (host as? OeaMiniAppActivity)?.refresh()
                                 }
                             }
