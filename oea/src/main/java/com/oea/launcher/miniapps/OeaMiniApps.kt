@@ -26,6 +26,21 @@ import com.oea.launcher.ui.OeaType
  */
 object OeaMiniApps {
 
+    /** How much chrome the host puts around a mini-app. */
+    enum class Style {
+        /** The title page: a large title, a subtitle, and a scrollable column. */
+        Page,
+
+        /**
+         * No page at all: the mini-app owns the whole window, its own app bar and
+         * its own scrolling. Media apps need this — a virtualised grid inside a
+         * settings ScrollView is the layout that made EMAGE and VIP feel like
+         * previews of an app rather than one, and it is also what made them stop
+         * at a few hundred items.
+         */
+        FullBleed
+    }
+
     /** One mini-app: how it is listed, the activity that owns it, and how its view is built. */
     class App(
         val id: String,
@@ -34,6 +49,8 @@ object OeaMiniApps {
         val icon: Int,
         /** The mini-app's own application entry (own icon, label and task in the manifest). */
         val activity: Class<out OeaMiniAppActivity>,
+        /** The chrome the host wraps it in. */
+        val style: Style = Style.Page,
         /** Builds the mini-app's view. [host] is the activity showing it. */
         val build: (host: Activity, palette: OeaPalette) -> View
 )
@@ -51,10 +68,12 @@ object OeaMiniApps {
             "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.ic_oea_calendar, OeaCalendarActivity::class.java
         ) { host, palette -> OeaCalendarApp.build(host, palette) },
         App(
-            "emage", "EMAGE", "Your photos and albums, the OEA pictures, favourites and wallpaper picks", R.drawable.ic_oea_image, OeaImageActivity::class.java
+            "emage", "EMAGE", "Every picture on this phone: albums, days, favourites and the OEA roll", R.drawable.ic_oea_image,
+            OeaImageActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaImageApp.build(host, palette) },
         App(
-            "vip", "VIP", "Video Instant Player • Full-screen video and audio, rotate, lock, PIP", R.drawable.ic_oea_video, OeaVipActivity::class.java
+            "vip", "VIP", "Video Instant Player • albums, playlists, subtitles, speed, PIP", R.drawable.ic_oea_video,
+            OeaVipActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaVideoApp.build(host, palette) },
         App(
             "weather", "Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.ic_oea_weather, OeaWeatherActivity::class.java
@@ -69,7 +88,8 @@ object OeaMiniApps {
             "notes", "Notes", "Notes, private notes, voice notes, search and organization", R.drawable.ic_oea_notes, OeaNotesActivity::class.java
         ) { host, palette -> OeaNotesApp.build(host, palette) },
         App(
-            "camera", "Camera", "Full-screen camera: photo, video, zoom and the modes you need", R.drawable.ic_oea_camera, OeaCameraActivity::class.java
+            "camera", "Camera", "Full-screen camera: photo, video, zoom and the modes you need", R.drawable.ic_oea_camera,
+            OeaCameraActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaCameraApp.build(host, palette) },
         App(
             "console", "Console", "Central utility: diagnostics, device info, security, command system", R.drawable.ic_oea_console, OeaConsoleActivity::class.java

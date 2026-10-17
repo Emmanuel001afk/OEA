@@ -26,10 +26,13 @@ import java.util.Locale
  * - Checklist: todo items with [ ] and [x] parsing, tap to toggle
  * - Search: by text, tag, folder, date
  * - Sort: by pinned, date, title, tag
- * - Voice: speech-to-text via RecognizerIntent, voice notes saved as text + audio path placeholder
+ * - Voice: dictated through the phone's own recogniser (speech to text). The note keeps
+ *   the words; OEA records no audio clip for notes, so there is no silent microphone here.
  * - Attachments: image attachment via MediaStore picker (URI stored)
  * - Export: share as txt, export all as JSON, backup/restore
- * - Private vault: separate prefs, protected behind App Lock PIN, encrypted? Not encrypted but private file
+ * - Private vault: its own private file, opened only behind the App Lock PIN. The text is
+ *   not ciphered at rest — a rooted or backed-up device can read it — so it hides notes
+ *   from shoulder-surfing, not from an attacker who owns the phone.
  * - Tags: multiple tags per note
  * - Colors: note color (default, yellow, green, blue, pink)
  * - Reminders: set reminder time, notification via AlarmManager (best-effort)

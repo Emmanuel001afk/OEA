@@ -73,23 +73,33 @@ data class OeaThemeSpec(
 }
 
 object OeaThemeCatalog {
-    private fun res(name: String, id: Int, title: String) = OeaImageRef.Bundled(name, id, title)
+    /**
+     * A picture in the library that OEA draws itself.
+     *
+     * These used to point at bundled bitmap files, which meant the app shipped a
+     * few megabytes of scenery and every wallpaper had one resolution. OEA's artwork
+     * is a recipe instead (see OeaArtwork), so a "photograph" here is drawn at exactly
+     * the device's pixel size, crisp on a 1080p phone and on a 1440p tablet, and the
+     * APK carries no image data at all. `resId == 0` is what tells the decoders to
+     * paint rather than open a stream.
+     */
+    private fun drawn(name: String, title: String) = OeaImageRef.Bundled(name, 0, title)
 
-    val AURORA = res("oea_theme_aurora", R.drawable.oea_theme_aurora, "Aurora lake")
-    val LIQUID_GLASS = res("oea_theme_liquid_glass", R.drawable.oea_theme_liquid_glass, "Liquid glass")
-    val MOUNTAIN = res("oea_wallpaper_mountain_dawn", R.drawable.oea_wallpaper_mountain_dawn, "Mountain dawn")
-    val FOREST = res("oea_wallpaper_forest_river", R.drawable.oea_wallpaper_forest_river, "Forest river")
-    val DESERT = res("oea_wallpaper_desert_coast", R.drawable.oea_wallpaper_desert_coast, "Desert coast")
-    val NEON_HOME = res("oea_theme_neon_home", R.drawable.oea_theme_neon_home, "Neon street")
-    val NEON_LOCK = res("oea_theme_neon_lock", R.drawable.oea_theme_neon_lock, "Neon rain")
-    val OCEAN_HOME = res("oea_theme_ocean_home", R.drawable.oea_theme_ocean_home, "Turquoise shore")
-    val OCEAN_LOCK = res("oea_theme_ocean_lock", R.drawable.oea_theme_ocean_lock, "Sunlit deep")
-    val SAKURA_HOME = res("oea_theme_sakura_home", R.drawable.oea_theme_sakura_home, "Sakura branches")
-    val SAKURA_LOCK = res("oea_theme_sakura_lock", R.drawable.oea_theme_sakura_lock, "Garden path")
-    val NEBULA_HOME = res("oea_theme_nebula_home", R.drawable.oea_theme_nebula_home, "Violet nebula")
-    val NEBULA_LOCK = res("oea_theme_nebula_lock", R.drawable.oea_theme_nebula_lock, "Ringed planet")
-    val GRAPHITE_HOME = res("oea_theme_graphite_home", R.drawable.oea_theme_graphite_home, "Graphite waves")
-    val GRAPHITE_LOCK = res("oea_theme_graphite_lock", R.drawable.oea_theme_graphite_lock, "Graphite orbits")
+    val AURORA = drawn("aurora_night", "Aurora lake")
+    val LIQUID_GLASS = drawn("glass_deep", "Liquid glass")
+    val MOUNTAIN = drawn("ridge_night", "Mountain dawn")
+    val FOREST = drawn("forest_mist", "Forest river")
+    val DESERT = drawn("dune_dusk", "Desert coast")
+    val NEON_HOME = drawn("neon_pulse", "Neon street")
+    val NEON_LOCK = drawn("lock_neon", "Neon rain")
+    val OCEAN_HOME = drawn("teal_lagoon", "Turquoise shore")
+    val OCEAN_LOCK = drawn("lock_ocean", "Sunlit deep")
+    val SAKURA_HOME = drawn("orchid_bloom", "Sakura branches")
+    val SAKURA_LOCK = drawn("bloom_night", "Garden path")
+    val NEBULA_HOME = drawn("nebula_core", "Violet nebula")
+    val NEBULA_LOCK = drawn("orbit_dawn", "Ringed planet")
+    val GRAPHITE_HOME = drawn("obsidian_mirror", "Graphite waves")
+    val GRAPHITE_LOCK = drawn("lock_noir", "Graphite orbits")
 
     // ------------------------------------------------------------- drawn artwork
     // OEA draws these itself (OeaArtwork): a lock-screen picture made for each of

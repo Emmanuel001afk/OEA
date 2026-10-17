@@ -43,6 +43,25 @@ open class OeaMiniAppActivity : Activity() {
     /** True for the plain index host (opened from Settings, not the launcher). */
     private val isIndexHost get() = appId == null && intent.getStringExtra(EXTRA_APP) == null && resolveAliasId() == null
 
+    /**
+     * A full-bleed mini-app (EMAGE, VIP, Camera) owns its window, so it keeps its
+     * own state across a system dialog instead of being rebuilt. It installs this
+     * hook to receive `onActivityResult` — Android's delete confirmation, the
+     * document picker for subtitles, the SAF tree grant — and the host hands the
+     * result to nothing else.
+     */
+    var resultHook: ((requestCode: Int, resultCode: Int, data: android.content.Intent?) -> Boolean)? = null
+
+    /**
+     * The gentle refresh path: a full-bleed app reloads its data in place when the
+     * permission or the media set changed, instead of the whole screen being
+     * rebuilt from scratch (which is what made a gallery jump back to the top).
+     */
+    var resumeHook: (() -> Unit)? = null
+
+    /** Called before [resumeHook] so an app can save what it has open. */
+    var pauseHook: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val created = OeaFaultShield.guard("miniapp:host:create") {
@@ -77,13 +96,18 @@ open class OeaMiniAppActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        // A permission just changed hands (camera, calendar, mic, SMS…): rebuild
-        // the mini-app so it picks up its new capabilities immediately instead
-        // of showing the "needs permission" card until the next visit.
-        OeaFaultShield.guard("miniapp:host:permission") { renderGuarded(keepScroll = true) }
+        // A permission just changed hands (camera, calendar, mic, SMS…): refresh
+        // the mini-app so it picks up its new capabilities immediately instead of
+        // showing the "needs permission" card until the next visit. A full-bleed
+        // app reloads its own data in place; a page-style app is rebuilt.
+        OeaFaultShield.guard("miniapp:host:permission") {
+            val hook = resumeHook
+            if (hook != null) hook() else renderGuarded(keepScroll = true)
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (resultHook?.invoke(requestCode, resultCode, data) == true) return
         if (screenId == "camera" && OeaCameraApp.handleActivityResult(this, requestCode, resultCode, data)) return
         if (requestCode == 4001 && resultCode == RESULT_OK) {
             val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
@@ -121,8 +145,15 @@ open class OeaMiniAppActivity : Activity() {
                 palette = fresh
                 kit = OeaKit(this, palette)
                 renderGuarded(keepScroll = true)
+                return@guard
             }
+            resumeHook?.let { OeaFaultShield.guard("miniapp:host:resume-data", it) }
         }
+    }
+
+    override fun onPause() {
+        runCatching { pauseHook?.invoke() }
+        super.onPause()
     }
 
     /** Renders with a containment net: a fault shows an in-app card, never a dead window. */
@@ -144,9 +175,10 @@ open class OeaMiniAppActivity : Activity() {
         currentScroll = null
         OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
         val app = OeaMiniApps.byId(screenId)
-        if (app != null && app.id == "camera") {
-            // The Camera is full-screen: its viewfinder fills the window and its
-            // controls sit over it, so it gets no title page around it.
+        if (app != null && app.style == OeaMiniApps.Style.FullBleed) {
+            // The app owns the whole window: its own app bar, its own scrolling,
+            // its own insets. Wrapping a media grid in a settings page is how you
+            // get a gallery that scrolls like one long screenshot.
             setContentView(OeaMiniApps.build(this, app.id, kit))
             return
         }

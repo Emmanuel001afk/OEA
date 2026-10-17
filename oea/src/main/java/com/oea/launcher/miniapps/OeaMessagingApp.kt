@@ -27,7 +27,9 @@ import java.util.concurrent.Executors
  * - Compose: to field with contact picker, message body, send via SmsManager, delivery report optional
  * - Search: by address, body
  * - Archive: archive threads (OEA private), block/spam list via keyword filtering
- * - Backup: export threads as JSON/txt, import placeholder
+ * - Backup: the threads export as JSON you can read into anything else. Writing
+ *   messages *into* Android's store is reserved to the default SMS app, so OEA
+ *   does not pretend to restore what it is not allowed to insert.
  * - Spam filter: keyword list (e.g., "lottery", "win") flagged as suspicious, not auto-blocked but highlighted
  * - Group messaging: MMS via intent (since direct MMS needs APN)
  * - Permissions: READ_SMS, SEND_SMS, READ_CONTACTS, default SMS role via RoleManager Android 10+ or Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT
@@ -121,8 +123,27 @@ object OeaMessagingApp {
         return list
     }
 
+    /** Filled by the compose sheet, fired when Android hands a contact back. */
+    private var contactPicked: ((String) -> Unit)? = null
+
     fun build(host: Activity, palette: OeaPalette): View {
         val kit = OeaKit(host, palette)
+        // The contact picker is the one thing here that needs an activity result.
+        host.miniResultHook = { requestCode, resultCode, data ->
+            if (requestCode != REQUEST_CONTACT || resultCode != Activity.RESULT_OK) false
+            else {
+                val number = readPickedNumber(host, data?.data)
+                val sink = contactPicked
+                contactPicked = null
+                if (number != null && sink != null) sink(number)
+                else android.widget.Toast.makeText(
+                    host,
+                    if (number == null) "That contact has no number OEA could read" else "No compose sheet is open",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                true
+            }
+        }
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         var currentTab = "all"
         var searchQuery = ""
@@ -348,15 +369,45 @@ object OeaMessagingApp {
         }
     }
 
+    /** Reads the phone number out of a picked Contacts row. */
+    private fun readPickedNumber(host: Activity, uri: Uri?): String? {
+        if (uri == null) return null
+        val projection = arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+        return runCatching {
+            host.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0).trim() else null
+            }
+        }.getOrNull() ?: runCatching {
+            // ACTION_PICK can return the contact rather than one number row.
+            host.contentResolver.query(
+                android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection,
+                "${android.provider.ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                arrayOf(uri.lastPathSegment),
+                null
+            )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).trim() else null }
+        }.getOrNull()
+    }
+
+    private const val REQUEST_CONTACT = 1003
+
     private fun composeSms(host: Activity, kit: OeaKit, address: String?, initialBody: String? = null, onSent: () -> Unit) {
         kit.sheet("New message", null) { panel, dialog ->
+            dialog.setOnDismissListener { contactPicked = null }
             val toField = kit.field("To", address ?: "")
             val bodyField = kit.field("Message", initialBody ?: "")
             val contactBtn = kit.tonalButton("Pick contact", R.drawable.oic_person) {
-                try {
-                    host.startActivityForResult(Intent(Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), 1003)
-                } catch (_: Throwable) {
-                    android.widget.Toast.makeText(host, "Contacts not available", android.widget.Toast.LENGTH_SHORT).show()
+                contactPicked = { number ->
+                    toField.setText(number)
+                    toField.setSelection(toField.text.length)
+                }
+                val picked = runCatching {
+                    host.startActivityForResult(Intent(Intent.ACTION_PICK, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI), REQUEST_CONTACT)
+                    true
+                }.getOrDefault(false)
+                if (!picked) {
+                    contactPicked = null
+                    android.widget.Toast.makeText(host, "Android would not open the contacts list", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
             panel.addView(toField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })

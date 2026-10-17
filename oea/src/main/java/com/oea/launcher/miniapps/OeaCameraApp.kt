@@ -38,7 +38,7 @@ import kotlin.math.max
  *
  * Unique features (each mini-app has own):
  * - Pro controls: ISO, exposure compensation, white balance, focus distance (where Camera2 supports)
- * - Modes: Photo, Video, Portrait (bokeh simulation), Night (multi-frame brightening), Pro, QR, Document, Time-lapse
+ * - Modes: Photo, Video, Portrait (focus-band blur), Night (shadow lift + denoise), Pro, QR, Document, Time-lapse
  * - Flash: Auto/On/Off/Torch with CameraManager torch fallback
  * - Timer: 0/3/5/10s with burst option
  * - Grid: off/3x3/4x4/golden ratio/diagonal
@@ -47,8 +47,8 @@ import kotlin.math.max
  * - Filters: None/Mono/Sepia/Vivid/Cool/Warm — applied post-capture via ColorMatrix, preview via overlay
  * - Video: MediaRecorder with Camera2, pause/resume, stabilization, mic mute
  * - QR: uses system QR scanner intent if available, else explains; result copied
- * - Document scan: edge detection placeholder with perspective crop via intent (OpenNoteScanner style fallback)
- * - Privacy blur: optional face blur post-capture (best-effort)
+ * - Document mode: hands over to the phone's own camera document mode
+ * - Privacy blur: Android's FaceDetector, then a smudge over each face it found
  * - Gallery integration: last photo thumbnail, quick open in EMAGE editor, slideshow
  * - Settings: shutter sound, location tag (EXIF), save to DCIM/OEA vs Pictures/OEA, etc.
  *
@@ -70,7 +70,22 @@ object OeaCameraApp {
     private const val KEY_SHUTTER_SOUND = "shutter_sound"
     private const val KEY_PENDING_SYSTEM_CAPTURE = "pending_system_capture"
     private const val REQUEST_SYSTEM_PHOTO = 3001
+    private var focusBandY = 0.5f
+
+    private val CAPTURE = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaCameraDevelop").apply { isDaemon = true }
+    }
+
     private const val REQUEST_QR = 3002
+    private const val TIME_LAPSE_RATE = 6f
+    private const val KEY_PRIVACY_BLUR = "privacy_blur"
+
+    /** OEA's own shutter effect: blur every face Android can find. */
+    fun privacyBlur(host: Activity): Boolean = prefs(host).getBoolean(KEY_PRIVACY_BLUR, false)
+
+    fun setPrivacyBlur(host: Activity, value: Boolean) {
+        prefs(host).edit().putBoolean(KEY_PRIVACY_BLUR, value).apply()
+    }
     private const val REQUEST_DOCUMENT = 3003
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -186,12 +201,12 @@ object OeaCameraApp {
     enum class CaptureMode(val label: String, val desc: String) {
         PHOTO("Photo", "Standard capture with HDR option"),
         VIDEO("Video", "Record with stabilization and mic control"),
-        PORTRAIT("Portrait", "Bokeh simulation — background soft blur"),
-        NIGHT("Night", "Multi-frame brightening for low light"),
+        PORTRAIT("Portrait", "Softens everything outside the band you focused on"),
+        NIGHT("Night", "Lifts shadows and calms colour noise in the dark"),
         PRO("Pro", "Manual ISO, exposure, WB, focus"),
         QR("QR", "Scan QR and barcodes"),
-        DOC("Document", "Scan documents with perspective crop"),
-        TIMELAPSE("Time-lapse", "Fast motion recording")
+        DOC("Document", "Hands over to the phone's own document mode"),
+        TIMELAPSE("Time-lapse", "Records at 6 fps, plays at 30 — five times faster")
     }
 
     /**
@@ -285,6 +300,18 @@ object OeaCameraApp {
                     focusView.alpha = 1f
                     focusView.animate().alpha(0f).setStartDelay(800).setDuration(300).withEndAction { focusView.visibility = View.GONE }.start()
                     cameraHelper?.focusAt(event.x, event.y, textureView.width, textureView.height)
+                    // The portrait pass blurs hardest away from this line, so the
+                    // band you focused on is the band the picture keeps sharp.
+                    if (textureView.height > 0) {
+                        focusBandY = (event.y / textureView.height).coerceIn(0.12f, 0.88f)
+                    }
+                    if (captureMode == CaptureMode.PORTRAIT) {
+                        android.widget.Toast.makeText(
+                            host,
+                            "Portrait will keep the ${(focusBandY * 100).toInt()}% line sharp",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
                 true
             }
@@ -457,24 +484,42 @@ object OeaCameraApp {
                 CaptureMode.PHOTO, CaptureMode.PORTRAIT, CaptureMode.NIGHT, CaptureMode.PRO -> {
                     val doCapture = {
                         val bmp = try { textureView.bitmap } catch (_: Throwable) { null }
-                        if (bmp != null) {
-                            val filtered = applyFilterToBitmap(bmp, filter)
-                            val saved = saveBitmap(host, filtered, hdr, filter, front)
-                            bmp.recycle()
-                            if (filtered != bmp) filtered.recycle()
-                            host.runOnUiThread {
-                                if (externalCapture) {
-                                    if (saved != null && finishExternalCapture(host, captureTarget, saved, "image/jpeg")) return@runOnUiThread
-                                    saved?.delete()
-                                    host.setResult(Activity.RESULT_CANCELED)
-                                    host.finish()
-                                    return@runOnUiThread
-                                }
-                                android.widget.Toast.makeText(host, if (saved != null) "Saved to ${saved.name}" else "Capture failed", android.widget.Toast.LENGTH_SHORT).show()
-                                if (saved != null) showCapturedSheet(host, kit, saved, filter)
-                            }
-                        } else {
+                        if (bmp == null) {
                             openSystemCamera(host, captureTarget, REQUEST_SYSTEM_PHOTO)
+                        } else {
+                            // The shutter must not wait on pixels: the frame is
+                            // copied, then filters, the mode's pass and the save all
+                            // happen off the main thread, and only the result comes back.
+                            val snapshot = bmp.copy(Bitmap.Config.ARGB_8888, false) ?: bmp
+                            if (snapshot !== bmp) bmp.recycle()
+                            val mode = captureMode
+                            val tone = filter
+                            val smoothFaces = privacyBlur(host)
+                            CAPTURE.execute {
+                                val filtered = applyFilterToBitmap(snapshot, tone)
+                                val processed = runCatching {
+                                    OeaCameraEffects.process(filtered, mode, smoothFaces, focusBandY)
+                                }.getOrDefault(filtered)
+                                val saved = saveBitmap(host, processed, hdr, tone, front)
+                                if (processed !== snapshot) processed.recycle()
+                                if (filtered !== snapshot && filtered !== processed) filtered.recycle()
+                                if (snapshot !== processed && snapshot !== filtered) snapshot.recycle()
+                                host.runOnUiThread {
+                                    if (isDestroyed) return@runOnUiThread
+                                    if (externalCapture) {
+                                        if (saved != null && finishExternalCapture(host, captureTarget, saved, "image/jpeg")) {
+                                            if (mode != CaptureMode.PHOTO) android.widget.Toast.makeText(host, "Saved — ${mode.label.toLowerCase(java.util.Locale.getDefault())} pass applied", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            saved?.delete()
+                                            host.setResult(Activity.RESULT_CANCELED)
+                                            host.finish()
+                                        }
+                                        return@runOnUiThread
+                                    }
+                                    android.widget.Toast.makeText(host, if (saved != null) "Saved to ${saved.name}" else "Capture failed", android.widget.Toast.LENGTH_SHORT).show()
+                                    if (saved != null) showCapturedSheet(host, kit, saved, tone)
+                                }
+                            }
                         }
                     }
                     if (timer.seconds > 0) {
@@ -486,7 +531,10 @@ object OeaCameraApp {
                     if (!isRecording) {
                         isRecording = true
                         innerCapture.background = kit.oval(Color.RED)
-                        cameraHelper?.startVideoRecording(host) { success, file ->
+                        cameraHelper?.startVideoRecording(
+                            host,
+                            if (captureMode == CaptureMode.TIMELAPSE) TIME_LAPSE_RATE else 0f
+                        ) { success, file ->
                             host.runOnUiThread {
                                 isRecording = false
                                 innerCapture.background = kit.oval(Color.WHITE)
@@ -572,18 +620,27 @@ object OeaCameraApp {
         }
     }
 
+    /**
+     * Reading a QR code needs a decoder, and OEA ships none. So the mode asks
+     * whatever scanner is already installed — the zxing contract nearly all of them
+     * answer — and copies the text back. OEA never uploads your picture to a website
+     * to find out what a code says, which is the whole point of scanning locally.
+     */
     private fun openQrScanner(host: Activity) {
-        try {
-            // Try system QR scanner via intent
-            val intent = Intent("com.google.zxing.client.android.SCAN").apply { putExtra("SCAN_MODE", "QR_CODE_MODE") }
-            host.startActivityForResult(intent, 3002)
-        } catch (_: Throwable) {
-            try {
-                // Fallback to generic
-                host.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.qrserver.com/v1/read-qr-code/")))
-            } catch (_: Throwable) {
-                android.widget.Toast.makeText(host, "QR scanner not available — install a QR scanner or use system camera", android.widget.Toast.LENGTH_LONG).show()
-            }
+        val intent = Intent("com.google.zxing.client.android.SCAN").apply {
+            putExtra("SCAN_MODE", "QR_CODE_MODE")
+            putExtra("PROMPT_MESSAGE", "Point at a QR code")
+        }
+        val started = runCatching {
+            host.startActivityForResult(intent, REQUEST_QR)
+            true
+        }.getOrDefault(false)
+        if (!started) {
+            android.widget.Toast.makeText(
+                host,
+                "No QR scanner answers on this phone. Its own camera or Lens will read it; OEA will not send your picture to a website to find out.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -722,6 +779,43 @@ object OeaCameraApp {
                     try { file.delete() } catch (_: Throwable) {}
                 }
             }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) })
+            // The modes that change pixels are also available after the fact, so a
+            // picture taken in "Photo" is not stuck being a plain picture.
+            val touchUps = kit.group(panel)
+            kit.row(touchUps, R.drawable.oic_ac_unit, "Brighten the shadows", "Night pass, on this file") {
+                val done = runCatching { OeaCameraEffects.applyToFile(file, CaptureMode.NIGHT, false) }.getOrDefault(false)
+                if (done) {
+                    iv.setImageURI(null)
+                    iv.setImageURI(fileUri)
+                    android.widget.Toast.makeText(host, "Night pass applied", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    android.widget.Toast.makeText(host, "OEA could not rewrite that file", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            kit.row(touchUps, R.drawable.oic_visibility_off, "Blur every face", "Android's own face detector, then a smudge") {
+                val done = runCatching { OeaCameraEffects.applyToFile(file, CaptureMode.PHOTO, true) }.getOrDefault(false)
+                android.widget.Toast.makeText(
+                    host,
+                    if (done) "Faces blurred" else "No face to blur, or the file would not open",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                if (done) {
+                    iv.setImageURI(null)
+                    iv.setImageURI(fileUri)
+                }
+            }
+            kit.row(touchUps, R.drawable.oic_layers, "Soften the background", "Portrait pass, on this file") {
+                val done = runCatching { OeaCameraEffects.applyToFile(file, CaptureMode.PORTRAIT, false) }.getOrDefault(false)
+                if (done) {
+                    iv.setImageURI(null)
+                    iv.setImageURI(fileUri)
+                }
+                android.widget.Toast.makeText(
+                    host,
+                    if (done) "Background softened" else "OEA could not rewrite that file",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 
@@ -729,6 +823,9 @@ object OeaCameraApp {
         kit.sheet("Camera settings", "OEA's own camera preferences") { panel, _ ->
             val p = prefs(host)
             val group = kit.group(panel)
+            kit.switchRow(group, R.drawable.oic_visibility_off, "Blur faces on every shot", "OEA smudges each face it can find before saving", privacyBlur(host)) {
+                setPrivacyBlur(host, it)
+            }
             kit.switchRow(group, R.drawable.oic_volume_up, "Shutter sound", "Play sound on capture", p.getBoolean(KEY_SHUTTER_SOUND, true)) {
                 p.edit().putBoolean(KEY_SHUTTER_SOUND, it).apply()
             }
@@ -904,7 +1001,12 @@ object OeaCameraApp {
             createSession()
         }
 
-        fun startVideoRecording(ctx: Context, onResult: (Boolean, File?) -> Unit) {
+        /** [captureRateHz] below the frame rate is what makes a time-lapse fast. */
+        fun startVideoRecording(
+            ctx: Context,
+            captureRateHz: Float = 0f,
+            onResult: (Boolean, File?) -> Unit
+        ) {
             try {
                 val dir = File(ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES), "OEA")
                 dir.mkdirs()
@@ -920,6 +1022,12 @@ object OeaCameraApp {
                     if (audioEnabled) setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                     setVideoSize(1280, 720)
                     setVideoFrameRate(30)
+                    if (captureRateHz > 0f) {
+                        // The documented time-lapse pair: the encoder is told frames
+                        // arrive at captureRateHz while the track is stamped at the
+                        // normal frame rate, so the file plays back accelerated.
+                        runCatching { setCaptureRate(captureRateHz.toDouble()) }
+                    }
                     setOutputFile(recordingFile!!.absolutePath)
                     prepare()
                 }
@@ -938,6 +1046,19 @@ object OeaCameraApp {
                 val req = device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD).apply {
                     addTarget(previewSurface)
                     addTarget(recorderSurface)
+                    if (captureRateHz > 0f) {
+                        // Ask the sensor for the low rate too, or the camera keeps
+                        // pushing 30 frames a second and nothing is accelerated.
+                        runCatching {
+                            set(
+                                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                android.util.Range(
+                                    captureRateHz.toInt().coerceAtLeast(1),
+                                    captureRateHz.toInt().coerceAtLeast(1)
+                                )
+                            )
+                        }
+                    }
                 }
                 device.createCaptureSession(listOf(previewSurface, recorderSurface), object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
                     override fun onConfigured(s: android.hardware.camera2.CameraCaptureSession) {

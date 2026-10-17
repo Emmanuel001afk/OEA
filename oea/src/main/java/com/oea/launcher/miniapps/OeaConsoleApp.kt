@@ -42,7 +42,7 @@ import java.util.concurrent.Executors
  * - Security analysis and antivirus-style checks (confirmed threat vs suspicious vs legit)
  * - Storage cleanup and maintenance (real measurements)
  * - Memory, battery, temperature, performance (real BatteryManager, ActivityManager, PowerManager)
- * - Sound amplifier (via AudioManager and mic routing)
+ * - Sound amplifier: real mic → earphone loopback with gain and a feedback limiter
  * - Other advanced utilities
  *
  * ADB-inspired system research (summarized):
@@ -98,7 +98,7 @@ object OeaConsoleApp {
             "security" to "Security • Suspicious apps & permissions",
             "storage" to "Storage • Cleanup & maintenance",
             "performance" to "Performance • Memory, battery, temperature, ultra saving",
-            "sound" to "Sound Amplifier • Boost audio",
+            "sound" to "Sound Amplifier • Room sound to the earphones",
             "adb" to "Command System • Our own ADB-inspired build (comprehensive)",
             "privileges" to "Privileges • Overlay, suspension, multitasking",
             "lowmode" to "LOW Mode • Ultra Power Saving (launcher's own)"
@@ -577,9 +577,10 @@ object OeaConsoleApp {
 
     // ------------------------------------------------------------------ sound amplifier
 
+    private const val REQUEST_AMPLIFIER = 3012
+
     private fun showSoundAmplifier(host: Activity, kit: OeaKit) {
-        kit.sheet("Sound Amplifier", "Uses supported Android audio capabilities, honest about limits") { panel, _ ->
-            kit.note(panel, "OEA's sound amplifier boosts media volume and can use microphone for amplification where supported. Uses AudioManager and MediaRecorder APIs, not fabricated processing. For hearing assistance, use Android's Sound Amplifier accessibility service if available.")
+        kit.sheet("Sound Amplifier", "Room sound to the earphones, and the volume controls around it") { panel, _ ->
             val audio = host.getSystemService(android.media.AudioManager::class.java)
             val g = kit.group(panel)
             if (audio != null) {
@@ -595,18 +596,65 @@ object OeaConsoleApp {
                     } catch (_: Throwable) {}
                 }, LinearLayout.LayoutParams(-1, kit.dp(50)).apply { topMargin = kit.dp(12) })
             }
-            kit.sectionTitle(panel, "Microphone amplifier (experimental)")
-            kit.note(panel, "Uses microphone to amplify surrounding sound to headphones. Requires RECORD_AUDIO permission and headphones. Legitimate accessibility feature using AudioTrack routing. Implementation needs AudioRecord + AudioTrack loopback.")
-            panel.addView(kit.tonalButton("Start amplifier (needs permission)", R.drawable.oic_mic) {
-                if (host.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                    try { host.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 3002) } catch (_: Throwable) {}
-                    android.widget.Toast.makeText(host, "Grant microphone permission", android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    android.widget.Toast.makeText(host, "Amplifier routing mic to headphones — best-effort via AudioManager. For full, OEA would use AudioRecord (MIC) → AudioTrack (MUSIC) with low latency.", android.widget.Toast.LENGTH_LONG).show()
+            kit.sectionTitle(panel, "Amplify the room into your ears")
+            kit.note(
+                panel,
+                "OEA reads the microphone, makes it louder and writes it to the earphones, buffer by buffer, on its own thread. Headphones or earpieces only: a speaker and a microphone in the same room with gain on will squeal. OEA pulls the gain back when it hears that happen, but the physics is yours to respect."
+            )
+            val status = android.widget.TextView(host).apply {
+                text = if (OeaAmplifier.isRunning) "Amplifying · %.1f×".format(OeaAmplifier.gain) else "Stopped"
+                setTextColor(kit.palette.textSecondary)
+                textSize = 12.5f
+                setPadding(kit.dp(2), kit.dp(2), kit.dp(2), kit.dp(4))
+            }
+            panel.addView(status, LinearLayout.LayoutParams(-1, -2))
+            val gainSlider = com.oea.launcher.ui.OeaSlider(host).apply {
+                minValue = 0.5f
+                maxValue = 6f
+                steps = 11
+                value = OeaAmplifier.gain
+                format = { "%.1f×".format(it) }
+                setColors(kit.palette, onDark = false)
+                onValue = { value, _ ->
+                    OeaAmplifier.gain = value
+                    status.text = if (OeaAmplifier.isRunning) {
+                        "Amplifying · %.1f× · about %.0f ms late".format(value, OeaAmplifier.latencyMs.toFloat())
+                    } else {
+                        "%.1f× · stopped".format(value)
+                    }
                 }
-            }, LinearLayout.LayoutParams(-1, kit.dp(50)))
+            }
+            panel.addView(gainSlider, LinearLayout.LayoutParams(-1, kit.dp(44)))
+            panel.addView(
+                kit.buttonRow(
+                    kit.primaryButton("Start") {
+                        if (host.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                            runCatching { host.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQUEST_AMPLIFIER) }
+                            android.widget.Toast.makeText(host, "OEA needs the microphone — allow it, then press Start again", android.widget.Toast.LENGTH_LONG).show()
+                        } else {
+                            OeaAmplifier.start(host) { ok, message ->
+                                host.runOnUiThread {
+                                    android.widget.Toast.makeText(host, message, android.widget.Toast.LENGTH_LONG).show()
+                                    status.text = if (ok) "Amplifying · %.1f× · about %.0f ms late".format(OeaAmplifier.gain, OeaAmplifier.latencyMs.toFloat()) else (OeaAmplifier.lastError ?: message)
+                                    (host as? OeaMiniAppActivity)?.refresh()
+                                }
+                            }
+                        }
+                    },
+                    kit.tonalButton("Stop") {
+                        OeaAmplifier.stop()
+                        status.text = "Stopped"
+                        (host as? OeaMiniAppActivity)?.refresh()
+                    }
+                ),
+                LinearLayout.LayoutParams(-1, kit.dp(50)).apply { topMargin = kit.dp(8) }
+            )
+            kit.note(
+                panel,
+                "Android takes the microphone away from an app that is no longer in front, so this stops the moment you leave OEA — it is not a hearing-aid service and it does not run in your pocket. If you need one that does, Android's own Sound Amplifier (Settings → Accessibility → Sound amplifier) is the feature for that, and OEA will not pretend to replace it."
+            )
             kit.sectionTitle(panel, "Equalizer & Bass")
-            kit.note(panel, "Bass boost and equalizer via AudioManager and Equalizer API where supported. Requires audio session ID from playing media.")
+            kit.note(panel, "The equaliser OEA can reach is the one attached to a media session it owns — the VIP player's own bands, in its audio sheet. A system-wide bass knob is not something an app is handed, so OEA offers the volume controls above and leaves the rest to the phone.")
             panel.addView(kit.tonalButton("Open system sound settings", R.drawable.oic_settings) {
                 try { host.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) } catch (_: Throwable) {}
             }, LinearLayout.LayoutParams(-1, kit.dp(48)))

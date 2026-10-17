@@ -19,7 +19,10 @@ import com.oea.launcher.voice.OeaSpeechEngine
  * - Own UI: waveform, partial results, command chips, not Google's UI
  * - Own command grammar: 50+ launcher commands parsed on-device (open app, search, call, message, alarm, timer, play music, navigate, flashlight, DND, low mode, change mode/wallpaper/theme, take photo/video, open settings)
  * - Prefers offline: EXTRA_PREFER_OFFLINE true, works without internet if offline pack installed
- * - Offline keyword spotting fallback when SpeechRecognizer not available
+ * - No recognizer on the phone (some stripped ROMs)? The same grammar runs from a
+ *   typed command line, so the launcher's commands never depend on Google's speech
+ *   service being installed. OEA does not do its own wake-word spotting — that needs
+ *   a model it refuses to bundle, and it says so rather than faking one.
  * - Integrated with OEA search, phone, messaging, modes, wallpaper, themes, calculator, camera, etc.
  * - TTS feedback via TextToSpeech
  * - Continuous listening option (respects battery, stops in LOW mode)
@@ -38,7 +41,7 @@ object OeaVoiceApp {
         header.addView(kit.iconBadge(R.drawable.oic_mic, palette.accentSoft, palette.onAccentSoft, 40))
         column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
 
-        kit.note(column, "OEA's own speech recognizer — built for launcher, competes with Google's. Own UI, own command grammar, prefers offline, integrates with OEA search, phone, messaging, modes, wallpaper, themes, calculator, camera. No data leaves device unless you search web. If Google app not available, offline keyword spotting still handles launcher commands.")
+        kit.note(column, "OEA's own voice screen: it drives Android's speech recogniser with its own UI and its own grammar of launcher commands, and prefers the offline recogniser when the phone has one. Nothing is uploaded unless the command is a web search. No recogniser on this phone? Type the command below — the same grammar answers.")
 
         // Status
         val statusCard = LinearLayout(host).apply {
@@ -48,9 +51,9 @@ object OeaVoiceApp {
         }
         val available = OeaSpeechEngine.isAvailable(host)
         val hasPerm = OeaSpeechEngine.hasPermission(host)
-        statusCard.addView(kit.text("Recognizer: ${if (available) "Available" else "Not available — offline fallback"}", 13f, palette.textSecondary))
+        statusCard.addView(kit.text("Recognizer: ${if (available) "Android's, in use" else "None on this phone — the typed line below runs the same grammar"}", 13f, palette.textSecondary))
         statusCard.addView(kit.text("Permission: ${if (hasPerm) "Granted" else "Not granted — tap mic to request"}", 13f, palette.textSecondary).apply { setPadding(0, kit.dp(4), 0, 0) })
-        statusCard.addView(kit.text("Mode: ${if (available) "Online + offline (prefers offline)" else "Offline keyword spotting only"} • Language: ${java.util.Locale.getDefault().displayLanguage}", 12f, palette.textTertiary).apply { setPadding(0, kit.dp(4), 0, 0) })
+        statusCard.addView(kit.text("Mode: ${if (available) "Offline preferred, online when it must" else "Text only"} • Language: ${java.util.Locale.getDefault().displayLanguage}", 12f, palette.textTertiary).apply { setPadding(0, kit.dp(4), 0, 0) })
         column.addView(statusCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
 
         // Result area
@@ -90,6 +93,36 @@ object OeaVoiceApp {
                 }
             }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
         }
+
+        // The same grammar, from the keyboard. This is not a demo box: every chip
+        // above and every line typed here goes through the identical parser, so
+        // "call mom" works whether it was said or typed.
+        kit.sectionTitle(column, "Type a command instead")
+        val typeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+        val typedField = kit.field("open camera · search cats · call mom · 10 minute timer", "")
+        typeRow.addView(typedField, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+        typeRow.addView(
+            kit.tonalButton("Run", R.drawable.oic_check) {
+                val raw = typedField.text.toString().trim()
+                if (raw.isEmpty()) {
+                    android.widget.Toast.makeText(host, "Nothing to run", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    val cmd = OeaSpeechEngine.parseCommand(host, raw)
+                    resultView.text = raw
+                    if (cmd == null) {
+                        commandView.text = "Command: none matched — OEA will not guess"
+                        android.widget.Toast.makeText(host, "That is not one of OEA's commands", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        val executed = OeaSpeechEngine.executeCommand(host, cmd)
+                        commandView.text = "Command: ${cmd.type} • ${cmd.query} • ${if (executed) "Run ✓" else "Nothing on this phone answered"}"
+                        if (executed) OeaSpeechEngine.speak(host, "Done")
+                    }
+                    kit.hideKeyboard(typedField)
+                }
+            },
+            LinearLayout.LayoutParams(-2, -2)
+        )
+        column.addView(typeRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
 
         // Listener
         var isListening = false
@@ -160,7 +193,7 @@ object OeaVoiceApp {
             OeaSpeechEngine.speak(host, "OEA Voice is ready. Try saying open calculator or search cats.")
         }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
 
-        kit.note(column, "OEA Voice competitive vs Google: own UI (not Google's), own grammar (50+ launcher commands), prefers offline (EXTRA_PREFER_OFFLINE), offline fallback keyword spotting when no recognizer, integrated with OEA (search, phone, messaging, modes, wallpaper, themes, calculator, camera, etc.), TTS feedback, continuous listening option (respects LOW mode), no data leaves device unless web search. Limits: full speech-to-text without Google needs offline language pack or on-device ML model (OEA doesn't bundle large model to keep APK small, but uses Android offline if available). If no recognizer, explains and offers text input.")
+        kit.note(column, "What OEA Voice is: its own screen, its own command grammar, the phone's recogniser underneath, and a preference for whatever offline recogniser the device offers. What it is not: a wake-word engine. Continuous listening here is a loop that restarts after each command while this screen is open and stops in LOW mode — the microphone is never held while OEA is in your pocket, because Android takes it back from a backgrounded app and OEA will not pretend otherwise. Bundling a speech model would add tens of megabytes to the APK for something the platform already has, so this build asks the platform instead and keeps the typed path as the honest fallback.")
 
         // Integration with search
         kit.sectionTitle(column, "Integrated with Search")

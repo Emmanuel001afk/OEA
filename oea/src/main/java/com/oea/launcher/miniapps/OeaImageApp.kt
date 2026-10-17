@@ -1,545 +1,1015 @@
 package com.oea.launcher.miniapps
 
 import android.app.Activity
-import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
-import android.database.Cursor
-import android.graphics.Bitmap
 import android.graphics.Color
-import android.net.Uri
 import android.os.Build
-import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
-import androidx.core.content.FileProvider
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
 import com.oea.launcher.R
+import com.oea.launcher.miniapps.OeaMediaLibrary.Item
+import com.oea.launcher.miniapps.OeaMediaLibrary.Kind
+import com.oea.launcher.ui.OeaAppKit
+import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaThumbnails
 import com.oea.launcher.ui.OeaType
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executors
 
 /**
- * OEA Image - EMAGE: fully competitive image browser.
+ * EMAGE — OEA's picture app.
  *
- * Unique features vs other mini-apps:
- * - Albums: unlimited, grouped by MediaStore BUCKET_DISPLAY_NAME + RELATIVE_PATH (Android 10+), so external apps' folders appear automatically
- *   Includes Screenshots, Downloads, Camera, WhatsApp Images, Telegram, etc — not limited
- * - Smart albums: Favorites (OEA private), Recent (last 30 days), Large (>5MB), Screenshots, Downloads, Camera
- * - Unlimited loading: pagination, load more on scroll, not capped at 200 — loads 300 initially then 200 more per batch
- * - Search: by name, bucket, date
- * - Details: EXIF (resolution, size, date, location if available), histogram placeholder
- * - Actions: favorite, share, delete, set as wallpaper, edit (crop/rotate via intent), slideshow, copy path
- * - Edit: rotate, flip, crop via system intent, filter preview
- * - Slideshow with timer
- * - Trash simulation: deleted items kept in OEA's own trash list for 30 days (since MediaStore trash needs API 30+ and user consent)
- * - Integration: open in OEA Camera, share to OEA Notes, set as OEA theme wallpaper
- * - Competitive grid: 3 columns, pinch to change, fast thumbnail loading via thread pool
+ * What "every picture, not a page of them" costs, and what this pays:
+ *
+ *  * **The whole library.** [OeaMediaLibrary] reads every row MediaStore has, so
+ *    the grid, the day groups and the album counts agree with reality instead of
+ *    with the newest 300 files.
+ *  * **A real grid.** One virtualised [RecyclerView], square-to-tall tiles at the
+ *    device's own pixel density, prefetched one screen ahead, with tiles that keep
+ *    their picture when they are recycled. The old one built 300 views by hand
+ *    inside a settings ScrollView, which is why it was shallow, slow, and why a
+ *    long flick left grey squares behind.
+ *  * **Live updates.** A content observer means a picture taken in another app
+ *    shows up without reopening anything, and OEA's own camera output is indexed
+ *    the moment it is written.
+ *  * **Albums, favourites, days, search, selection, slideshow, viewer with pinch
+ *    zoom, real EXIF, wallpaper hand-off to Themes, and a trash that can bring
+ *    OEA's own files back.**
  */
 object OeaImageApp {
-    private val io = Executors.newFixedThreadPool(4) { Thread(it, "OeaImage").apply { isDaemon = true } }
 
-    data class ImageItem(
-        val uri: Uri,
-        val name: String,
-        val date: Long,
-        val size: Long,
-        val bucket: String,
-        val relativePath: String,
-        val width: Int,
-        val height: Int
-    )
-
-    private const val PREFS = "oea_image_v2"
-    private const val KEY_FAV = "fav_uris"
-    private const val KEY_TRASH = "trash_uris"
-    private const val EXTRA_VIEW_HANDLED = "oea.emage.view_handled"
-    private const val KEY_GRID_COLS = "grid_cols"
-
-    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-
-    private fun queryImages(context: Context, offset: Int = 0, limit: Int = 300): List<ImageItem> {
-        val list = mutableListOf<ImageItem>()
-        try {
-            val projection = mutableListOf(
-                MediaStore.Images.Media._ID,
-                MediaStore.Images.Media.DISPLAY_NAME,
-                MediaStore.Images.Media.DATE_ADDED,
-                MediaStore.Images.Media.SIZE,
-                MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
-                MediaStore.Images.Media.WIDTH,
-                MediaStore.Images.Media.HEIGHT
-            )
-            if (Build.VERSION.SDK_INT >= 29) projection.add(MediaStore.Images.Media.RELATIVE_PATH)
-            val cursor: Cursor? = context.contentResolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection.toTypedArray(),
-                null,
-                null,
-                "${MediaStore.Images.Media.DATE_ADDED} DESC LIMIT $limit OFFSET $offset"
-            )
-            cursor?.use { c ->
-                val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-                val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-                val sizeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
-                val bucketCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
-                val widthCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
-                val heightCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
-                val pathCol = if (Build.VERSION.SDK_INT >= 29) c.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH) else -1
-                while (c.moveToNext()) {
-                    val id = c.getLong(idCol)
-                    val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                    val name = c.getString(nameCol) ?: "Image"
-                    val date = c.getLong(dateCol) * 1000
-                    val size = c.getLong(sizeCol)
-                    val bucket = c.getString(bucketCol) ?: "Other"
-                    val w = c.getInt(widthCol)
-                    val h = c.getInt(heightCol)
-                    val rel = if (pathCol >= 0) c.getString(pathCol) ?: "" else ""
-                    list.add(ImageItem(uri, name, date, size, bucket, rel, w, h))
-                }
-            }
-        } catch (_: Throwable) {
-            // Fallback without LIMIT/OFFSET for older devices
-            try {
-                val projection = arrayOf(
-                    MediaStore.Images.Media._ID,
-                    MediaStore.Images.Media.DISPLAY_NAME,
-                    MediaStore.Images.Media.DATE_ADDED,
-                    MediaStore.Images.Media.SIZE,
-                    MediaStore.Images.Media.BUCKET_DISPLAY_NAME
-                )
-                val cursor = context.contentResolver.query(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    projection, null, null,
-                    "${MediaStore.Images.Media.DATE_ADDED} DESC"
-                )
-                cursor?.use { c ->
-                    val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                    val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-                    val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-                    val sizeCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
-                    val bucketCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
-                    var idx = 0
-                    while (c.moveToNext()) {
-                        if (idx++ < offset) continue
-                        if (list.size >= limit) break
-                        val id = c.getLong(idCol)
-                        val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                        list.add(ImageItem(uri, c.getString(nameCol) ?: "Image", c.getLong(dateCol) * 1000, c.getLong(sizeCol), c.getString(bucketCol) ?: "Other", "", 0, 0))
-                    }
-                }
-            } catch (_: Throwable) {}
-        }
-        // Also include OEA's own pictures from private dir
-        if (offset == 0) {
-            try {
-                val oeaDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
-                oeaDir.listFiles()?.sortedByDescending { it.lastModified() }?.forEach { f ->
-                    if (f.isFile && f.extension.lowercase() in listOf("jpg", "jpeg", "png", "webp")) {
-                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
-                        list.add(0, ImageItem(uri, f.name, f.lastModified(), f.length(), "OEA Camera", "Pictures/OEA", 0, 0))
-                    }
-                }
-            } catch (_: Throwable) {}
-        }
-        return list
-    }
-
-    private fun allBuckets(images: List<ImageItem>): Map<String, List<ImageItem>> {
-        return images.groupBy { it.bucket.ifBlank { "Other" } }
-    }
+    private var active: EmageScreen? = null
 
     fun build(host: Activity, palette: OeaPalette): View {
-        val kit = OeaKit(host, palette)
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-        val mediaPermission = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_IMAGES else android.Manifest.permission.READ_EXTERNAL_STORAGE
-        if (host.checkSelfPermission(mediaPermission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            kit.banner(column, R.drawable.oic_photo_library, "Connect your device pictures", "EMAGE can show the images on this phone, including Camera, Screenshots, Downloads and app albums. OEA never uploads them.", OeaKit.Tone.INFO, "Allow") {
-                runCatching { host.requestPermissions(arrayOf(mediaPermission), 2201) }
+        val screen = EmageScreen(host, palette)
+        active = screen
+        screen.attach()
+        return screen.root
+    }
+
+    fun onTop(): Boolean = active != null
+}
+
+/**
+ * The screen itself. A class rather than one long builder function, because a
+ * gallery has real state — the album you are inside, the selection, the search,
+ * the column count — and a screen that keeps that state in locals gets rebuilt by
+ * its host, which is how "the app forgets where I was" bugs are born.
+ */
+internal class EmageScreen(val host: Activity, palette: OeaPalette) {
+
+    private val kit = OeaAppKit(host, palette)
+    val root: FrameLayout = kit.overlay()
+    private val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+    private val content = FrameLayout(host).apply { layoutParams = LinearLayout.LayoutParams(-1, 0, 1f) }
+    private val bar = kit.appBar("EMAGE", "Reading your library…", onBack = { runCatching { host.finish() } })
+    private val searchBox = kit.searchField("Pictures, albums, dates", onQuery = { query ->
+        this.query = query.trim()
+        rebuild()
+    })
+    private val searchRow = FrameLayout(host).apply {
+        setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(8))
+        addView(searchBox.root, FrameLayout.LayoutParams(-1, -2))
+        visibility = View.GONE
+    }
+    private val tabs = kit.chipBar()
+    private val status = LinearLayout(host).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(kit.dp(14), kit.dp(2), kit.dp(14), 0)
+        visibility = View.GONE
+    }
+    private val scope = LinearLayout(host).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(kit.dp(16), kit.dp(6), kit.dp(12), kit.dp(6))
+        background = kit.rounded(palette.accentSoft, 16)
+        visibility = View.GONE
+    }
+    private val scopeTitle = kit.text("", 13.5f, palette.onAccentSoft, OeaType.medium)
+    private val scopeBadge = kit.badge("0", palette.withAlpha(palette.accent, 0x33), palette.accent)
+
+    private val photoGrid = kit.grid(SPAN_DEFAULT)
+    private val albumGrid = kit.grid(2, kit.dp(8), kit.dp(10))
+    private val trashList = kit.list(kit.dp(8))
+    private val oeaHost = ScrollView(host).apply {
+        isVerticalScrollBarEnabled = false
+        clipToPadding = false
+        setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(90))
+        visibility = View.GONE
+    }
+    private var stateCard: View? = null
+    private val snack = kit.snack(root)
+
+    // ---------------------------------------------------------------- state
+
+    private enum class Surface { PHOTOS, ALBUMS, TRASH, OEA }
+
+    private var surface = Surface.PHOTOS
+    private var tab = "all"
+    private var album: String? = null
+    private var query = ""
+    private var sort = OeaMediaLibrary.Sort.NEWEST
+    private var columns = SPAN_DEFAULT
+    private var tileShape = 1f
+    private var selecting = false
+    private val selected = LinkedHashSet<String>()
+    private var snapshot: OeaMediaLibrary.Snapshot? = null
+    private var subscription: OeaMediaLibrary.Subscription? = null
+    private var progressRow: View? = null
+    private var pendingDelete: List<Item> = emptyList()
+
+    private val rows = ArrayList<Row>()
+    private val headerAt = HashMap<Int, Int>()
+    private var itemsForViewer = ArrayList<Item>()
+
+    /** One thing in the picture grid: a day header or a tile. */
+    private sealed class Row {
+        data class Header(val label: String, val count: Int, val bytes: Long) : Row()
+        data class Tile(val item: Item) : Row()
+    }
+
+    private val tiles = TilesAdapter()
+    private val albums = AlbumAdapter()
+    private val trashAdapter = TrashAdapter()
+
+    init {
+        root.addView(column, FrameLayout.LayoutParams(-1, -1))
+        column.addView(bar.root, LinearLayout.LayoutParams(-1, -2))
+        column.addView(searchRow, LinearLayout.LayoutParams(-1, -2))
+        column.addView(
+            kit.hscroll(tabs.root),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(2) }
+        )
+        scope.addView(scopeTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        scope.addView(scopeBadge)
+        scope.addView(
+            kit.circleIconButton(R.drawable.oic_close, "Leave this album", Color.TRANSPARENT, palette.onAccentSoft) {
+                album = null
+                rebuild()
+            },
+            LinearLayout.LayoutParams(kit.dp(30), kit.dp(30)).apply { marginStart = kit.dp(6) }
+        )
+        column.addView(scope, LinearLayout.LayoutParams(-1, -2).apply {
+            leftMargin = kit.dp(14)
+            rightMargin = kit.dp(14)
+            bottomMargin = kit.dp(6)
+        })
+        column.addView(status, LinearLayout.LayoutParams(-1, -2))
+        column.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        content.addView(photoGrid, FrameLayout.LayoutParams(-1, -1))
+        content.addView(albumGrid, FrameLayout.LayoutParams(-1, -1))
+        content.addView(trashList, FrameLayout.LayoutParams(-1, -1))
+        content.addView(oeaHost, FrameLayout.LayoutParams(-1, -1))
+        photoGrid.adapter = tiles
+        albumGrid.adapter = albums
+        trashList.adapter = trashAdapter
+        (photoGrid.layoutManager as? androidx.recyclerview.widget.GridLayoutManager)?.let { manager ->
+            val lookup = OeaSpanLookup(manager.spanCount).apply {
+                headerType = TYPE_HEADER
+                typeAt = { position -> tiles.viewTypeAt(position) }
+                headerAt = { position -> this@EmageScreen.headerAt[position] }
             }
-            kit.note(column, "You can still use OEA's own wallpaper library without granting photo access.")
+            manager.spanSizeLookup = lookup
         }
-        var images: MutableList<ImageItem> = mutableListOf()
-        var currentBucket: String? = null
-        var currentTab = "albums" // albums, all, favorites, recent, large, screenshots, downloads
-        var searchQuery = ""
-        var gridCols = prefs(host).getInt(KEY_GRID_COLS, 3).coerceIn(2, 5)
-        var loadedOffset = 0
-        var hasMore = true
-        var refresh: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> }
-
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("EMAGE", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
-            kit.prompt("Search images", "Name, album or date", "Search", searchQuery) { q ->
-                searchQuery = q.trim()
-                refresh(false, false, false)
-                null
-            }
-        }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })
-        header.addView(kit.circleIconButton(R.drawable.oic_refresh, "Refresh", palette.cardHigh, palette.text) { refresh(true, false, false) })
-        column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-
-        val tabBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        column.addView(kit.hscroll(tabBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
-
-        val bucketBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        column.addView(kit.hscroll(bucketBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
-
-        val grid = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-        column.addView(grid)
-
-        val loadMoreBtn = kit.tonalButton("Load more images", R.drawable.oic_refresh) { refresh(false, true, false) }
-
-        fun renderTabs() {
-            tabBar.removeAllViews()
-            listOf(
-                "albums" to "Albums",
-                "all" to "All",
-                "favorites" to "Favorites",
-                "recent" to "Recent",
-                "screenshots" to "Screenshots",
-                "downloads" to "Downloads",
-                "large" to "Large",
-                "oea" to "OEA pictures"
-            ).forEach { (id, label) ->
-                tabBar.addView(kit.chip(label, id == currentTab) {
-                    currentTab = id
-                    currentBucket = null
-                    refresh(false, false, false)
-                }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = OeaInsets.bars(insets)
+            column.setPadding(bars[0], 0, bars[2], bars[3])
+            insets
+        }
+        with(kit) {
+            bar.addAction(R.drawable.oic_search, "Search pictures") { toggleSearch() }
+            bar.addAction(R.drawable.oic_refresh, "Scan again") { rescan() }
+            bar.addAction(R.drawable.oic_more_vert, "More EMAGE options") { showMore() }
+        }
+        tabs.onPick = { id -> pickTab(id) }
+        tabs.setOptions(TABS, tab)
+        kit.onIdle(photoGrid) { prefetchVisible() }
+        photoGrid.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (photoGrid.width > 0) {
+                tileEdge = ((photoGrid.width - kit.dp(8)) / columns).coerceAtLeast(kit.dp(88))
             }
         }
+        // The picture must be sized before the first bind, or the first screen of
+        // tiles decodes at a guess and then again at the real size.
+        tileEdge = (host.resources.displayMetrics.widthPixels / columns).coerceAtLeast(kit.dp(88))
+        showSurface()
+    }
 
-        fun filteredList(): List<ImageItem> {
-            var list: List<ImageItem> = images
-            // Tab filtering
-            list = when (currentTab) {
-                "favorites" -> {
-                    val fav = prefs(host).getStringSet(KEY_FAV, emptySet()) ?: emptySet()
-                    list.filter { fav.contains(it.uri.toString()) }
-                }
-                "recent" -> {
-                    val cutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
-                    list.filter { it.date >= cutoff }
-                }
-                "screenshots" -> list.filter { it.bucket.contains("screenshot", true) || it.relativePath.contains("screenshot", true) || it.name.contains("screenshot", true) }
-                "downloads" -> list.filter { it.bucket.contains("download", true) || it.relativePath.contains("download", true) }
-                "large" -> list.filter { it.size > 5 * 1024 * 1024 }
-                else -> list
-            }
-            // Bucket filtering (for albums tab, bucket is album; for all tab, bucket filter also works)
-            if (currentBucket != null) {
-                list = list.filter { it.bucket == currentBucket }
-            }
-            // Search
-            if (searchQuery.isNotBlank()) {
-                list = list.filter { it.name.contains(searchQuery, true) || it.bucket.contains(searchQuery, true) || it.relativePath.contains(searchQuery, true) }
-            }
-            return list
+    private var tileEdge: Int = (host.resources.displayMetrics.widthPixels / SPAN_DEFAULT).coerceAtLeast(kit.dp(88))
+
+    // ------------------------------------------------------------- lifecycle
+
+    fun attach() {
+        subscription = OeaMediaLibrary.observe(
+            host,
+            setOf(Kind.IMAGE),
+            onProgress = { _, label -> showProgress(label) }
+        ) { built ->
+            snapshot = built
+            sort = OeaMediaLibrary.sortFor(host, Kind.IMAGE)
+            showProgress(null)
+            rebuild()
         }
+        host.miniResultHook = { requestCode, resultCode, data -> handleResult(requestCode, resultCode, data) }
+        // A screen that is no longer in the window must not keep listening: the
+        // host can rebuild this view tree at any moment (theme change, a granted
+        // permission), and a stale listener would paint into a dead grid.
+        root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
 
-        fun renderGrid() {
-            grid.removeAllViews()
-            if (currentTab == "oea") {
-                // The OEA pictures (wallpapers, lock screens, live scenes) are part of EMAGE.
-                bucketBar.visibility = View.GONE
-                grid.addView(OeaGalleryApp.build(host, palette), LinearLayout.LayoutParams(-1, -2))
-                return
+            override fun onViewDetachedFromWindow(v: View) {
+                subscription?.dispose()
+                subscription = null
+                host.miniResultHook = null
             }
-            bucketBar.visibility = View.VISIBLE
-            val filtered = filteredList()
-            if (currentTab == "albums" && currentBucket == null) {
-                // Show albums as cards
-                val buckets = allBuckets(images)
-                if (buckets.isEmpty()) {
-                    kit.note(grid, "No images found. Grant storage permission or add photos.")
-                    return
+        })
+        openIncoming()
+    }
+
+    private fun handleResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != REQUEST_DELETE) return false
+        val items = pendingDelete
+        pendingDelete = emptyList()
+        OeaMediaLibrary.deleteFinished(host, items, resultCode == Activity.RESULT_OK)
+        if (resultCode == Activity.RESULT_OK) {
+            snack.show(if (items.size == 1) "Picture deleted" else "${items.size} pictures deleted", OeaKit.Tone.SUCCESS)
+            OeaThumbnails.invalidateAll()
+        }
+        exitSelection()
+        return true
+    }
+
+    /** A picture opened from Files, Messages or the camera goes straight to the viewer. */
+    private fun openIncoming() {
+        val intent = host.intent ?: return
+        val uri = intent.data ?: return
+        if (intent.action != Intent.ACTION_VIEW && intent.action != Intent.ACTION_ATTACH_DATA) return
+        if (intent.getBooleanExtra(EXTRA_HANDLED, false)) return
+        intent.putExtra(EXTRA_HANDLED, true)
+        val existing = snapshot?.images?.firstOrNull { it.uri == uri }
+        val item = existing ?: Item(
+            id = 0L,
+            uri = uri,
+            name = uri.lastPathSegment?.substringAfterLast('/') ?: "Picture",
+            takenAt = System.currentTimeMillis(),
+            size = 0L,
+            width = 0,
+            height = 0,
+            bucketId = 0L,
+            album = "Opened",
+            relativePath = "",
+            durationMs = 0L,
+            kind = Kind.IMAGE,
+            systemFavorite = false
+        )
+        val albumItems = if (existing != null && album == null) currentList() else listOf(item)
+        OeaEmageViewer.open(host, albumItems, albumItems.indexOfFirst { it.uri == uri }.coerceAtLeast(0)) { rebuild() }
+    }
+
+    // ------------------------------------------------------------------ views
+
+    private fun toggleSearch() {
+        if (searchRow.visibility == View.VISIBLE) {
+            searchRow.visibility = View.GONE
+            searchBox.close()
+            if (query.isNotEmpty()) {
+                query = ""
+                searchBox.setText("")
+                rebuild()
+            }
+            return
+        }
+        searchRow.visibility = View.VISIBLE
+        searchBox.focus()
+    }
+
+    private fun pickTab(id: String) {
+        tab = id
+        album = null
+        when (id) {
+            "albums" -> surface = Surface.ALBUMS
+            "trash" -> surface = Surface.TRASH
+            "oea" -> surface = Surface.OEA
+            else -> surface = Surface.PHOTOS
+        }
+        exitSelection()
+        showSurface()
+        rebuild()
+    }
+
+    private fun showSurface() {
+        photoGrid.visibility = if (surface == Surface.PHOTOS) View.VISIBLE else View.GONE
+        albumGrid.visibility = if (surface == Surface.ALBUMS) View.VISIBLE else View.GONE
+        trashList.visibility = if (surface == Surface.TRASH) View.VISIBLE else View.GONE
+        oeaHost.visibility = if (surface == Surface.OEA) View.VISIBLE else View.GONE
+        if (surface == Surface.OEA && oeaHost.childCount == 0) {
+            oeaHost.addView(
+                OeaGalleryApp.build(host, palette),
+                ScrollView.LayoutParams(-1, -2)
+            )
+        }
+        tabs.root.visibility = if (surface == Surface.OEA) View.GONE else View.VISIBLE
+    }
+
+    private fun showProgress(label: String?) {
+        if (label == null) {
+            progressRow?.let { status.removeView(it) }
+            progressRow = null
+            return
+        }
+        if (progressRow == null) {
+            progressRow = kit.progressRow(label)
+            status.addView(progressRow)
+        }
+        status.visibility = View.VISIBLE
+    }
+
+    private fun rebuild() {
+        val built = snapshot
+        if (built == null) {
+            bar.setSubtitle("Reading your library…")
+            rows.clear()
+            tiles.notifyDataSetChanged()
+            return
+        }
+        if (built.permissionMissing) {
+            showState(
+                R.drawable.oic_photo_library,
+                "EMAGE cannot see your pictures yet",
+                "Allow photo access and OEA will list every album on this phone — Camera, Screenshots, Downloads and the folders other apps write to. Nothing is uploaded, and nothing leaves the device.",
+                "Allow access"
+            ) { askPermission() }
+            return
+        }
+        hideState()
+        scope.visibility = if (album != null) View.VISIBLE else View.GONE
+        album?.let { name -> scopeTitle.text = "Album  •  $name" }
+        when (surface) {
+            Surface.PHOTOS -> {
+                val list = currentList()
+                itemsForViewer = ArrayList(list)
+                rows.clear()
+                headerAt.clear()
+                OeaMediaLibrary.days(list).forEach { day ->
+                    val headerPosition = rows.size
+                    rows.add(Row.Header(day.label, day.items.size, day.items.sumOf { it.size }))
+                    day.items.forEachIndexed { index, item ->
+                        rows.add(Row.Tile(item))
+                        headerAt[headerPosition + index + 1] = headerPosition
+                    }
                 }
-                // Smart albums first
-                val smartAlbums = listOf(
-                    "All (${images.size})" to images,
-                    "Favorites (${(prefs(host).getStringSet(KEY_FAV, emptySet())?.size ?: 0)})" to filteredList(),
-                    "Screenshots (${images.count { it.bucket.contains("screenshot", true) }})" to images.filter { it.bucket.contains("screenshot", true) },
-                    "Downloads (${images.count { it.bucket.contains("download", true) }})" to images.filter { it.bucket.contains("download", true) },
-                    "Camera (${images.count { it.bucket.contains("camera", true) || it.bucket.contains("dcim", true) }})" to images.filter { it.bucket.contains("camera", true) || it.bucket.contains("dcim", true) }
+                tiles.notifyDataSetChanged()
+                bar.title.text = "EMAGE"
+                bar.setSubtitle(
+                    when {
+                        query.isNotBlank() -> "${list.size} matching ${if (list.size == 1) "picture" else "pictures"}"
+                        album != null -> "$album • ${list.size} • ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}"
+                        else -> "${list.size} pictures • ${built.imageAlbums.size} albums • ${OeaMediaLibrary.formatSize(built.totalSize)}"
+                    }
                 )
-                smartAlbums.forEach { (label, items) ->
-                    if (items.isEmpty()) return@forEach
-                    val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(kit.dp(12), kit.dp(10), kit.dp(12), kit.dp(10)); background = kit.rounded(palette.card, 16, palette.stroke, 1); isClickable = true }
-                    val cover = ImageView(host).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setBackgroundColor(palette.cardHigh); clipToOutline = true; background = kit.rounded(Color.BLACK, 10) }
-                    row.addView(cover, LinearLayout.LayoutParams(kit.dp(56), kit.dp(56)).apply { rightMargin = kit.dp(12) })
-                    val textCol = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-                    textCol.addView(kit.text(label.substringBefore(" ("), 15f, palette.text, OeaType.medium))
-                    textCol.addView(kit.text("${items.size} images • ${label.substringAfter("(", "").substringBefore(")")} ", 12f, palette.textSecondary))
-                    row.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
-                    row.setOnClickListener {
-                        when {
-                            label.startsWith("All") -> { currentTab = "all"; refresh(false, false, false) }
-                            label.startsWith("Favorites") -> { currentTab = "favorites"; refresh(false, false, false) }
-                            label.startsWith("Screenshots") -> { currentTab = "screenshots"; refresh(false, false, false) }
-                            label.startsWith("Downloads") -> { currentTab = "downloads"; refresh(false, false, false) }
-                            else -> { currentBucket = null; currentTab = "all"; refresh(false, false, false) }
-                        }
-                    }
-                    grid.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-                    // Load cover
-                    io.execute {
-                        val first = items.firstOrNull() ?: return@execute
-                        val thumb = try { host.contentResolver.loadThumbnail(first.uri, android.util.Size(200, 200), null) } catch (_: Throwable) { null }
-                        if (thumb != null) host.runOnUiThread { if (!host.isDestroyed) cover.setImageBitmap(thumb) }
-                    }
-                }
-                kit.sectionTitle(grid, "Albums • ${buckets.size}")
-                buckets.entries.sortedByDescending { it.value.size }.forEach { (bucketName, items) ->
-                    val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(kit.dp(12), kit.dp(10), kit.dp(12), kit.dp(10)); background = kit.rounded(palette.card, 16, palette.stroke, 1); isClickable = true }
-                    val cover = ImageView(host).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setBackgroundColor(palette.cardHigh); background = kit.rounded(Color.BLACK, 10); clipToOutline = true }
-                    row.addView(cover, LinearLayout.LayoutParams(kit.dp(56), kit.dp(56)).apply { rightMargin = kit.dp(12) })
-                    val textCol = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-                    textCol.addView(kit.text(bucketName, 15f, palette.text, OeaType.medium))
-                    textCol.addView(kit.text("${items.size} images • ${items.firstOrNull()?.relativePath?.ifBlank { bucketName } ?: bucketName}", 12f, palette.textSecondary).apply { maxLines = 1 })
-                    row.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
-                    row.addView(kit.text("${items.size}", 13f, palette.accent, OeaType.medium))
-                    row.setOnClickListener { currentBucket = bucketName; currentTab = "all"; refresh(false, false, false) }
-                    grid.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-                    io.execute {
-                        val thumb = try { host.contentResolver.loadThumbnail(items.first().uri, android.util.Size(200, 200), null) } catch (_: Throwable) { null }
-                        if (thumb != null) host.runOnUiThread { if (!host.isDestroyed) cover.setImageBitmap(thumb) }
-                    }
-                }
-                return
             }
 
-            if (filtered.isEmpty()) {
-                kit.note(grid, when {
-                    searchQuery.isNotBlank() -> "No images match \"$searchQuery\""
-                    currentTab == "favorites" -> "No favorites yet. Long-press image to favorite."
-                    else -> "No images in this view."
-                })
-                return
-            }
-
-            // Grid of images
-            val cols = gridCols
-            filtered.chunked(cols).forEach { chunk ->
-                val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-                chunk.forEachIndexed { idx, item ->
-                    val tile = FrameLayout(host).apply {
-                        isClickable = true
-                        background = kit.rounded(Color.TRANSPARENT, 14, palette.stroke, 1)
-                        clipToOutline = true
-                        setOnClickListener { openViewer(host, kit, item, filtered) { refresh(false, false, false) } }
-                        setOnLongClickListener {
-                            showItemActions(host, kit, item) { refresh(false, false, false) }
-                            true
-                        }
-                    }
-                    val img = ImageView(host).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setBackgroundColor(palette.cardHigh) }
-                    tile.addView(img, FrameLayout.LayoutParams(-1, kit.dp(110)))
-                    // Favorite indicator
-                    val favSet = prefs(host).getStringSet(KEY_FAV, emptySet()) ?: emptySet()
-                    if (favSet.contains(item.uri.toString())) {
-                        val star = TextView(host).apply { text = "★"; textSize = 12f; setTextColor(Color.YELLOW); setPadding(kit.dp(4), kit.dp(2), kit.dp(4), kit.dp(2)); background = kit.rounded(Color.argb(150, 0, 0, 0), 8) }
-                        tile.addView(star, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, kit.dp(4), kit.dp(4), 0) })
-                    }
-                    io.execute {
-                        val thumb = try { host.contentResolver.loadThumbnail(item.uri, android.util.Size(300, 300), null) } catch (_: Throwable) { null }
-                        if (thumb != null) host.runOnUiThread { if (!host.isDestroyed) img.setImageBitmap(thumb) }
-                    }
-                    row.addView(tile, LinearLayout.LayoutParams(0, -2, 1f).apply {
-                        if (idx > 0) leftMargin = kit.dp(6)
-                        if (idx < cols - 1) rightMargin = kit.dp(6)
-                    })
-                }
-                repeat(cols - chunk.size) { row.addView(View(host), LinearLayout.LayoutParams(0, 1, 1f)) }
-                grid.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            }
-
-            // Load more button
-            if (hasMore && currentTab == "all" && currentBucket == null && searchQuery.isBlank()) {
-                grid.addView(loadMoreBtn, LinearLayout.LayoutParams(-1, kit.dp(44)).apply { topMargin = kit.dp(8) })
-            }
-
-            // Grid columns control
-            val colsRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, kit.dp(12), 0, 0) }
-            colsRow.addView(kit.text("Columns: $gridCols", 12f, palette.textSecondary), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(8) })
-            listOf(2, 3, 4, 5).forEach { c ->
-                colsRow.addView(kit.chip("${c}", c == gridCols) {
-                    gridCols = c
-                    prefs(host).edit().putInt(KEY_GRID_COLS, c).apply()
-                    renderGrid()
-                }, LinearLayout.LayoutParams(-2, kit.dp(32)).apply { rightMargin = kit.dp(6) })
-            }
-            grid.addView(colsRow)
-
-            // Slideshow button
-            grid.addView(kit.primaryButton("Slideshow • ${filtered.size} images", R.drawable.oic_play_arrow) {
-                startSlideshow(host, kit, filtered)
-            }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
-        }
-
-        refresh = { force, loadMore, _ ->
-            if (force) {
-                images.clear()
-                loadedOffset = 0
-                hasMore = true
-            }
-            if (loadMore) {
-                // Load next batch
-                grid.removeView(loadMoreBtn)
-                grid.addView(kit.text("Loading more…", 13f, palette.textSecondary).apply { setPadding(kit.dp(6), kit.dp(8), kit.dp(6), kit.dp(6)) })
-            } else {
-                grid.removeAllViews()
-                grid.addView(kit.text("Loading images…", 13f, palette.textSecondary).apply { setPadding(kit.dp(6), kit.dp(12), kit.dp(6), kit.dp(6)) })
-            }
-            io.execute {
-                val batch = if (loadMore) queryImages(host, loadedOffset, 200) else queryImages(host, 0, 300)
-                host.runOnUiThread {
-                    if (host.isDestroyed) return@runOnUiThread
-                    if (loadMore) {
-                        if (batch.isEmpty()) hasMore = false else { images.addAll(batch); loadedOffset += batch.size }
-                    } else {
-                        images = batch.toMutableList()
-                        loadedOffset = batch.size
-                        hasMore = batch.size >= 300
-                    }
-                    // Buckets bar
-                    bucketBar.removeAllViews()
-                    val buckets = images.map { it.bucket }.distinct().sorted()
-                    bucketBar.addView(kit.chip("All", currentBucket == null) { currentBucket = null; renderGrid() }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-                    buckets.take(20).forEach { b ->
-                        bucketBar.addView(kit.chip("$b (${images.count { it.bucket == b }})", b == currentBucket) {
-                            currentBucket = if (currentBucket == b) null else b
-                            if (currentBucket != null) currentTab = "all"
-                            renderGrid()
-                        }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-                    }
-                    renderTabs()
-                    renderGrid()
+            Surface.ALBUMS -> {
+                albums.notifyDataSetChanged()
+                val total = built.images.size
+                bar.title.text = "Albums"
+                bar.setSubtitle("${built.imageAlbums.size} albums • $total pictures")
+                if (built.imageAlbums.isEmpty()) {
+                    showState(
+                        R.drawable.oic_folder,
+                        "No albums yet",
+                        "An album is a folder with pictures in it. Take a photo, or allow photo access, and they appear here by themselves.",
+                        "Allow access"
+                    ) { askPermission() }
                 }
             }
-        }
 
-        // Initial load
-        refresh(false, false, false)
-
-        // Opened from another app (a picture's "View", "Open with" or "Set as
-        // wallpaper"): show that picture full-screen, once per launch.
-        val incoming = host.intent
-        val incomingUri = incoming?.data
-        if (incomingUri != null && incoming.getBooleanExtra(EXTRA_VIEW_HANDLED, false).not() &&
-            (incoming.action == Intent.ACTION_VIEW || incoming.action == Intent.ACTION_ATTACH_DATA)) {
-            incoming.putExtra(EXTRA_VIEW_HANDLED, true)
-            val item = ImageItem(incomingUri, "Picture", System.currentTimeMillis(), 0L, "Opened", "", 0, 0)
-            host.runOnUiThread { openViewer(host, kit, item) }
-        }
-        return column
-    }
-
-    private fun showItemActions(host: Activity, kit: OeaKit, item: ImageItem, onDone: () -> Unit) {
-        kit.sheet(item.name, "${item.bucket} • ${formatSize(item.size)}") { panel, dialog ->
-            val favSet = prefs(host).getStringSet(KEY_FAV, emptySet())?.toMutableSet() ?: mutableSetOf()
-            val isFav = favSet.contains(item.uri.toString())
-            panel.addView(kit.buttonRow(
-                kit.tonalButton(if (isFav) "Unfavorite" else "Favorite", R.drawable.oic_thermostat) {
-                    dialog.dismiss()
-                    if (isFav) favSet.remove(item.uri.toString()) else favSet.add(item.uri.toString())
-                    prefs(host).edit().putStringSet(KEY_FAV, favSet).apply()
-                    onDone()
-                },
-                kit.quietButton("Details") {
-                    dialog.dismiss()
-                    showDetails(host, kit, item)
-                },
-                kit.primaryButton("Open") {
-                    dialog.dismiss()
-                    openViewer(host, kit, item)
-                }
-            ))
-        }
-    }
-
-    /** Details sheet for one picture (used by the full-screen viewer too). */
-    fun showDetailsFor(host: Activity, kit: OeaKit, item: ImageItem) = showDetails(host, kit, item)
-
-    /** Remembers a deleted picture in OEA's own trash list (shown in EMAGE). */
-    fun rememberTrash(host: Activity, item: ImageItem) {
-        val trash = prefs(host).getStringSet(KEY_TRASH, emptySet())?.toMutableSet() ?: mutableSetOf()
-        trash.add(item.uri.toString())
-        prefs(host).edit().putStringSet(KEY_TRASH, trash).apply()
-    }
-
-    private fun showDetails(host: Activity, kit: OeaKit, item: ImageItem) {
-        kit.sheet(item.name, "Image details") { panel, _ ->
-            val group = kit.group(panel)
-            kit.row(group, R.drawable.oic_info, "Name", item.name, chevron = false)
-            kit.row(group, R.drawable.oic_photo_library, "Album", "${item.bucket} • ${item.relativePath}", chevron = false)
-            kit.row(group, R.drawable.oic_schedule, "Date", SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(item.date)), chevron = false)
-            kit.row(group, R.drawable.oic_memory, "Size", "${formatSize(item.size)} • ${if (item.width > 0) "${item.width}×${item.height}" else "Unknown resolution"}", chevron = false)
-            kit.row(group, R.drawable.oic_text_fields, "Path", item.uri.toString(), chevron = false) {
-                try {
-                    val cb = host.getSystemService(android.content.ClipboardManager::class.java)
-                    cb?.setPrimaryClip(android.content.ClipData.newPlainText("Image path", item.uri.toString()))
-                    android.widget.Toast.makeText(host, "Path copied", android.widget.Toast.LENGTH_SHORT).show()
-                } catch (_: Throwable) {}
+            Surface.TRASH -> {
+                trashAdapter.notifyDataSetChanged()
+                bar.title.text = "Recently deleted"
+                bar.setSubtitle("${OeaMediaLibrary.trashRecords(host).size} remembered")
             }
-            kit.note(panel, "EXIF location and camera info require READ_MEDIA_IMAGES and EXIF reader; OEA shows what MediaStore provides. External apps' folders appear via RELATIVE_PATH, so WhatsApp, Telegram, etc. are included automatically.")
+
+            Surface.OEA -> {
+                bar.title.text = "OEA pictures"
+                bar.setSubtitle("Wallpapers, live scenes and what OEA's camera saved")
+            }
         }
+        if (selecting) updateSelectionBar()
     }
 
-    /** Full-screen viewer through the album the picture was opened from. */
-    private fun openViewer(host: Activity, kit: OeaKit, item: ImageItem, album: List<ImageItem> = listOf(item), onChanged: () -> Unit = {}) {
-        val index = album.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0)
-        OeaEmageViewer.show(host, album, index, onChanged)
+    /** The list the current tab and album scope describe, with search applied. */
+    private fun currentList(): List<Item> {
+        val built = snapshot ?: return emptyList()
+        var list = built.images
+        if (album != null) list = built.inAlbum(album!!, Kind.IMAGE)
+        list = when (tab) {
+            "favourites" -> OeaMediaLibrary.favouriteItems(built, host, Kind.IMAGE)
+            "recent" -> {
+                val cutoff = System.currentTimeMillis() - 7L * 86_400_000L
+                list.filter { it.takenAt >= cutoff }
+            }
+
+            "screenshots" -> list.filter { it.isScreenshot() }
+            "downloads" -> list.filter { it.isDownload() }
+            "large" -> list.filter { it.size >= 4L shl 20 }
+            "oea" -> list.filter { it.local || it.album.equals("OEA", ignoreCase = true) }
+            else -> list
+        }
+        if (query.isNotBlank()) list = list.filter { it.matches(query) }
+        return OeaMediaLibrary.order(list, sort)
     }
 
-    private fun startSlideshow(host: Activity, kit: OeaKit, items: List<ImageItem>) {
+    private fun Item.matches(term: String): Boolean {
+        val lower = term.lowercase(Locale.getDefault())
+        if (name.lowercase(Locale.getDefault()).contains(lower)) return true
+        if (album.lowercase(Locale.getDefault()).contains(lower)) return true
+        if (relativePath.lowercase(Locale.getDefault()).contains(lower)) return true
+        return SimpleDateFormat("d MMMM yyyy", Locale.getDefault()).format(Date(takenAt)).lowercase(Locale.getDefault())
+            .contains(lower) ||
+            SimpleDateFormat("yyyy", Locale.getDefault()).format(Date(takenAt)).contains(lower)
+    }
+
+    private fun Item.isScreenshot(): Boolean =
+        name.contains("screenshot", true) || album.contains("screenshot", true) || relativePath.contains("screenshot", true) ||
+            album.contains("screenshots", true) || relativePath.contains("Screenshots", true)
+
+    private fun Item.isDownload(): Boolean =
+        album.contains("download", true) || relativePath.contains("Download", true)
+
+    private fun askPermission() {
+        val permission = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_IMAGES
+        else android.Manifest.permission.READ_EXTERNAL_STORAGE
+        runCatching { host.requestPermissions(arrayOf(permission, android.Manifest.permission.WRITE_EXTERNAL_STORAGE), 2201) }
+            .onFailure { snack.show("Android would not open the permission dialog", OeaKit.Tone.WARNING) }
+    }
+
+    private fun rescan() {
+        snack.show("Looking for new pictures…")
+        OeaMediaLibrary.refresh(host, setOf(Kind.IMAGE))
+    }
+
+    private fun showState(icon: Int, title: String, body: String, action: String? = null, onAction: (() -> Unit)? = null) {
+        hideState()
+        val card = kit.emptyState(icon, title, body, action, onAction)
+        val wrap = FrameLayout(host).apply {
+            setPadding(kit.dp(16), kit.dp(24), kit.dp(16), 0)
+            addView(card, FrameLayout.LayoutParams(-1, -2))
+        }
+        stateCard = wrap
+        content.addView(wrap, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        photoGrid.visibility = View.GONE
+        albumGrid.visibility = View.GONE
+        trashList.visibility = View.GONE
+        oeaHost.visibility = View.GONE
+    }
+
+    private fun hideState() {
+        stateCard?.let { content.removeView(it) }
+        stateCard = null
+        showSurface()
+    }
+
+    private fun prefetchVisible() {
+        if (surface != Surface.PHOTOS || rows.isEmpty()) return
+        val (first, last) = kit.visibleRange(photoGrid)
+        if (last <= first) return
+        val uris = (first..last).mapNotNull { rows.getOrNull(it) as? Row.Tile }.map { it.item.uri }
+        OeaThumbnails.prefetch(host, uris, tileEdge, radius = kit.dp(10))
+    }
+
+    // -------------------------------------------------------------- interactions
+
+    private fun openTile(position: Int) {
+        val row = rows.getOrNull(position) as? Row.Tile ?: return
+        val items = itemsForViewer
+        val index = items.indexOfFirst { it.uri == row.item.uri }.coerceAtLeast(0)
+        OeaEmageViewer.open(host, items, index) { rebuild() }
+    }
+
+    private fun beginSelection(position: Int): Boolean {
+        val row = rows.getOrNull(position) as? Row.Tile ?: return false
+        selecting = true
+        selected.clear()
+        selected.add(row.item.key)
+        tiles.notifyDataSetChanged()
+        updateSelectionBar()
+        return true
+    }
+
+    private fun toggleSelected(item: Item) {
+        if (!selected.remove(item.key)) selected.add(item.key)
+        tiles.notifyDataSetChanged()
+        updateSelectionBar()
+    }
+
+    private fun updateSelectionBar() {
+        selection.setCount(selected.size, itemsForViewer.size)
+        val single = selected.size == 1
+        selection.setAction(0, R.drawable.oic_share_filled, "Share") { shareSelected() }
+        selection.setAction(1, R.drawable.oic_star_fill, if (single) "Favourite" else "Favourite") { favouriteSelected() }
+        selection.setAction(2, R.drawable.oic_wallpaper, "Wallpaper") { wallpaperSelected() }
+        selection.setAction(3, R.drawable.oic_delete, "Delete") { deleteSelected() }
+        selection.setAction(4, R.drawable.oic_info, "Details") { detailsSelected() }
+        selection.selectAll {
+            selected.clear()
+            itemsForViewer.forEach { selected.add(it.key) }
+            tiles.notifyDataSetChanged()
+            updateSelectionBar()
+        }
+        if (!selecting) selected.clear()
+    }
+
+    private fun exitSelection() {
+        selecting = false
+        selected.clear()
+        selection.setCount(0, 0)
+        tiles.notifyDataSetChanged()
+    }
+
+    private val selection: OeaAppKit.SelectionBar by lazy {
+        kit.selectionBar(root, listOf(
+            0 to "Share",
+            0 to "Favourite",
+            0 to "Wallpaper",
+            0 to "Delete",
+            0 to "Info"
+        )) { exitSelection() }
+    }
+
+    private fun selectedItems(): List<Item> = itemsForViewer.filter { selected.contains(it.key) }
+
+    private fun shareSelected() {
+        val items = selectedItems()
         if (items.isEmpty()) return
-        kit.sheet("Slideshow • ${items.size} images", "Tap to pause, swipe to next") { panel, dialog ->
-            val iv = ImageView(host).apply { scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.BLACK) }
-            panel.addView(iv, LinearLayout.LayoutParams(-1, kit.dp(360)))
-            var idx = 0
-            var paused = false
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
-            val runnable = object : Runnable {
-                override fun run() {
-                    if (host.isDestroyed || paused) return
-                    val item = items.getOrNull(idx) ?: return
-                    io.execute {
-                        val bmp = try { host.contentResolver.loadThumbnail(item.uri, android.util.Size(1080, 1080), null) } catch (_: Throwable) { null }
-                        if (bmp != null) host.runOnUiThread { if (!host.isDestroyed) iv.setImageBitmap(bmp) }
+        OeaMediaLibrary.share(host, items)
+        exitSelection()
+    }
+
+    private fun favouriteSelected() {
+        val items = selectedItems()
+        if (items.isEmpty()) return
+        var turnedOn = 0
+        items.forEach { if (OeaMediaLibrary.toggleFavourite(host, it)) turnedOn++ }
+        snack.show(if (items.size == 1) (if (turnedOn > 0) "Added to favourites" else "Removed from favourites")
+        else "$turnedOn of ${items.size} added to favourites", OeaKit.Tone.SUCCESS)
+        exitSelection()
+        rebuild()
+    }
+
+    private fun wallpaperSelected() {
+        val items = selectedItems()
+        if (items.isEmpty()) return
+        if (items.size > 1) {
+            snack.show("Pick one picture for a wallpaper")
+            return
+        }
+        OeaEmageViewer.sendToThemes(host, items.first())
+        exitSelection()
+    }
+
+    private fun detailsSelected() {
+        val items = selectedItems()
+        if (items.isEmpty()) return
+        OeaEmageViewer.details(host, palette, items.first())
+        exitSelection()
+    }
+
+    private fun deleteSelected() {
+        val items = selectedItems()
+        if (items.isEmpty()) return
+        kit.confirm(
+            if (items.size == 1) "Delete this picture?" else "Delete ${items.size} pictures?",
+            "Android asks you to confirm, because only it may remove files this app did not create. Pictures OEA saved itself go to EMAGE's trash, where you can bring them back.",
+            "Delete",
+            destructive = true
+        ) { performDelete(items) }
+    }
+
+    private fun performDelete(items: List<Item>) {
+        val sender = OeaMediaLibrary.requestDelete(host, items)
+        if (sender != null) {
+            pendingDelete = items
+            val started = runCatching {
+                @Suppress("DEPRECATION")
+                host.startIntentSenderForResult(sender, REQUEST_DELETE, null, 0, 0, 0)
+            }.isSuccess
+            if (started) return
+            pendingDelete = emptyList()
+            snack.show("Android would not show its confirm dialog", OeaKit.Tone.WARNING)
+            return
+        }
+        // Android 10 and older: delete directly, and honour the resolution dialog
+        // the system throws at us when the file belongs to another app.
+        val resolution = deleteWithRecoverable(items)
+        if (resolution != null) {
+            pendingDelete = items
+            runCatching {
+                @Suppress("DEPRECATION")
+                host.startIntentSenderForResult(resolution, REQUEST_DELETE, null, 0, 0, 0)
+            }.onFailure { snack.show("Android refused the delete", OeaKit.Tone.DANGER) }
+            return
+        }
+        OeaMediaLibrary.refresh(host)
+        snack.show(
+            if (items.size == 1) "Picture removed from EMAGE" else "${items.size} pictures removed from EMAGE",
+            OeaKit.Tone.SUCCESS
+        )
+        exitSelection()
+        rebuild()
+    }
+
+    private fun deleteWithRecoverable(items: List<Item>): android.content.IntentSender? {
+        var sender: android.content.IntentSender? = null
+        items.forEach { item ->
+            val outcome = runCatching { host.contentResolver.delete(item.uri, null, null) }
+            when {
+                outcome.getOrDefault(0) > 0 -> OeaMediaLibrary.recordDeletion(host, item)
+                else -> {
+                    // Android 10 refuses a silent delete of another app's file and
+                    // hands back the dialog that grants it. Take it seriously
+                    // instead of telling the user it failed.
+                    val cause = (outcome.exceptionOrNull() as? SecurityException)?.cause
+                    if (cause is android.content.RecoverableSecurityException) {
+                        sender = cause.userAction.actionIntent.intentSender
                     }
-                    idx = (idx + 1) % items.size
-                    handler.postDelayed(this, 2500L)
                 }
             }
-            handler.post(runnable)
-            iv.setOnClickListener { paused = !paused; if (!paused) handler.post(runnable) }
-            panel.addView(kit.buttonRow(
-                kit.quietButton("Previous") { idx = (idx - 1 + items.size) % items.size; handler.post(runnable) },
-                kit.quietButton("Pause/Resume") { paused = !paused; if (!paused) handler.post(runnable) },
-                kit.primaryButton("Close") { handler.removeCallbacks(runnable); dialog.dismiss() }
-            ))
-            panel.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) {}
-                override fun onViewDetachedFromWindow(v: View) { handler.removeCallbacks(runnable) }
-            })
+        }
+        return sender
+    }
+
+    private fun showMore() {
+        val built = snapshot
+        kit.sheet("EMAGE", "How this gallery looks and what it hides") { panel, _ ->
+            val grid = kit.group(panel)
+            kit.row(grid, R.drawable.oic_grid_view, "Columns", "How many tiles fit across the screen", value = "$columns", chevron = false)
+            val columnsRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            listOf(2, 3, 4, 5).forEach { count ->
+                columnsRow.addView(
+                    kit.chip("$count", count == columns) {
+                        columns = count
+                        kit.setSpan(photoGrid, count)
+                        rebuild()
+                    },
+                    LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { marginEnd = kit.dp(6) }
+                )
+            }
+            grid.addView(columnsRow, LinearLayout.LayoutParams(-1, -2).apply { setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12)) })
+            kit.row(grid, R.drawable.oic_layers, "Tile shape", if (tileShape == 1f) "Square" else if (tileShape > 1f) "Tall (3:4)" else "Wide (4:3)", chevron = false)
+            val shapes = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+            listOf(1f to "Square", 3f / 4f to "Tall", 4f / 3f to "Wide").forEach { (ratio, label) ->
+                shapes.addView(
+                    kit.chip(label, tileShape == ratio) {
+                        tileShape = ratio
+                        rebuild()
+                    },
+                    LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { marginEnd = kit.dp(6) }
+                )
+            }
+            grid.addView(shapes, LinearLayout.LayoutParams(-1, -2).apply { setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12)) })
+            val sortNames = OeaMediaLibrary.Sort.values().map { it.label() }
+            kit.row(grid, R.drawable.oic_sort_by_alpha, "Order", sort.label(), chevron = true) {
+                kit.choose("Order the library by", null, sortNames, OeaMediaLibrary.Sort.values().indexOf(sort)) { index ->
+                    sort = OeaMediaLibrary.Sort.values()[index]
+                    OeaMediaLibrary.setSort(host, Kind.IMAGE, sort)
+                    rebuild()
+                }
+            }
+            kit.row(grid, R.drawable.oic_visibility_off, "Hidden albums", hiddenSummary(built), chevron = true) {
+                manageHiddenAlbums(built)
+            }
+            kit.row(grid, R.drawable.oic_delete, "Recently deleted", "${OeaMediaLibrary.trashRecords(host).size} remembered", chevron = true) {
+                pickTab("trash")
+                tabs.select("trash")
+            }
+            kit.row(grid, R.drawable.oic_photo_library, "OEA pictures", "Wallpapers, live scenes and OEA camera shots", chevron = true) {
+                pickTab("oea")
+                tabs.select("oea")
+            }
+            kit.row(grid, R.drawable.oic_refresh, "Rescan now", "Asks Android to index OEA's camera output again") {
+                rescan()
+            }
+            kit.note(panel, "EMAGE reads the whole MediaStore collection every time it opens, groups it into days and albums, and never uploads any of it.")
         }
     }
 
-    private fun formatSize(bytes: Long): String {
-        if (bytes <= 0) return "—"
-        val kb = bytes / 1024.0
-        return if (kb < 1024) String.format(Locale.US, "%.0f KB", kb) else String.format(Locale.US, "%.1f MB", kb / 1024)
+    private fun hiddenSummary(built: OeaMediaLibrary.Snapshot?): String {
+        val hidden = OeaMediaLibrary.hiddenAlbums(host)
+        return when {
+            hidden.isEmpty() -> "Nothing hidden — every album MediaStore reports is shown"
+            hidden.size == 1 -> "1 album hidden (${hidden.first()})"
+            else -> "${hidden.size} albums hidden"
+        }
+    }
+
+    private fun manageHiddenAlbums(built: OeaMediaLibrary.Snapshot?) {
+        val names = built?.imageAlbums?.map { it.name } ?: emptyList()
+        if (names.isEmpty()) {
+            snack.show("No albums to hide yet")
+            return
+        }
+        val chosen = LinkedHashSet(OeaMediaLibrary.hiddenAlbums(host))
+        kit.sheet("Albums EMAGE should not list", "Hidden albums stay on the phone; only this gallery stops showing them.") { panel, dialog ->
+            val list = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            names.forEach { name ->
+                val on = chosen.contains(name.lowercase(Locale.getDefault()))
+                val row = LinearLayout(host).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(kit.dp(14), kit.dp(10), kit.dp(12), kit.dp(10))
+                    background = kit.ripple(kit.rounded(if (on) palette.accentSoft else palette.card, 16), 16)
+                }
+                row.addView(
+                    kit.text(name, 15f, if (on) palette.onAccentSoft else palette.text, OeaType.medium).apply { maxLines = 1 },
+                    LinearLayout.LayoutParams(0, -2, 1f)
+                )
+                val count = built?.imageAlbums?.firstOrNull { it.name == name }?.count ?: 0
+                row.addView(kit.text("$count", 12.5f, palette.textSecondary).apply { setPadding(kit.dp(8), 0, kit.dp(10), 0) })
+                row.addView(
+                    kit.toggle(on) { value ->
+                        if (value) chosen.add(name.lowercase(Locale.getDefault()))
+                        else chosen.remove(name.lowercase(Locale.getDefault()))
+                        row.background = kit.ripple(kit.rounded(if (value) palette.accentSoft else palette.card, 16), 16)
+                    }
+                )
+                list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(5) })
+            }
+            panel.addView(kit.boundedScroll(list, 0.55f))
+            panel.addView(
+                kit.buttonRow(
+                    kit.quietButton("Show all") {
+                        chosen.clear()
+                        OeaMediaLibrary.setHiddenAlbums(host, emptySet())
+                        dialog.dismiss()
+                        rebuild()
+                    },
+                    kit.primaryButton("Done") {
+                        OeaMediaLibrary.setHiddenAlbums(host, chosen.toSet())
+                        dialog.dismiss()
+                        rebuild()
+                    }
+                )
+            )
+        }
+    }
+
+    // ----------------------------------------------------------------- adapters
+
+    private inner class TilesAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+        fun viewTypeAt(position: Int): Int = when (rows.getOrNull(position)) {
+            is Row.Header -> TYPE_HEADER
+            else -> TYPE_TILE
+        }
+
+        override fun getItemViewType(position: Int): Int = viewTypeAt(position)
+
+        override fun getItemCount(): Int = rows.size
+
+        override fun getItemId(position: Int): Long = when (val row = rows[position]) {
+            is Row.Tile -> row.item.id
+            else -> position.toLong()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            if (viewType == TYPE_HEADER) return HeaderHolder(kit.listHeader("", null))
+            val cover = kit.coverTile(-1, kit.dp(10))
+            val shape = ShapeFrame(parent.context).apply {
+                addView(cover.root, LayoutParams(-1, -1))
+            }
+            return TileHolder(cover, shape)
+        }
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            when (val row = rows.getOrNull(position)) {
+                is Row.Header -> {
+                    val header = (holder as HeaderHolder).view
+                    (header.getChildAt(0) as? TextView)?.text =
+                        "${row.label}  •  ${row.count} ${if (row.count == 1) "picture" else "pictures"}  •  ${OeaMediaLibrary.formatSize(row.bytes)}"
+                }
+
+                is Row.Tile -> {
+                    val tile = holder as TileHolder
+                    val item = row.item
+                    tile.shape.ratio = tileShape
+                    tile.cover.root.setOnClickListener {
+                        if (selecting) {
+                            if (beginSelectionFromClick(position)) return@setOnClickListener
+                        } else {
+                            openTile(position)
+                        }
+                    }
+                    tile.cover.root.setOnLongClickListener {
+                        if (!selecting) selecting = true
+                        toggleSelected(item)
+                        true
+                    }
+                    tile.cover.setSelected(selecting && selected.contains(item.key))
+                    tile.cover.showStar(OeaMediaLibrary.isFavourite(host, item))
+                    tile.cover.showBadge(if (item.local) "OEA" else null)
+                    tile.cover.image.scaleType = if (tileShape >= 1f) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+                    OeaThumbnails.load(
+                        tile.cover.image,
+                        item.uri,
+                        tileEdge,
+                        video = false,
+                        cornerRadiusPx = kit.dp(10),
+                        tag = position
+                    )
+                }
+
+                null -> Unit
+            }
+        }
+
+        override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+            if (holder is TileHolder) OeaThumbnails.cancel(holder.cover.image)
+        }
+
+        private fun beginSelectionFromClick(position: Int): Boolean {
+            val row = rows.getOrNull(position) as? Row.Tile ?: return false
+            toggleSelected(row.item)
+            return true
+        }
+    }
+
+    /** Forces a tile to the gallery's aspect without a measure pass per row. */
+    private inner class ShapeFrame(context: Context) : FrameLayout(context) {
+        var ratio: Float = 1f
+            set(value) {
+                if (field != value) {
+                    field = value
+                    requestLayout()
+                }
+            }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            val width = measuredWidth
+            if (width > 0) {
+                super.onMeasure(
+                    widthMeasureSpec,
+                    MeasureSpec.makeMeasureSpec((width / ratio.coerceAtLeast(0.2f)).toInt().coerceAtLeast(kit.dp(56)), MeasureSpec.EXACTLY)
+                )
+            }
+        }
+    }
+
+    private inner class TileHolder(val cover: OeaAppKit.CoverTile, val shape: ShapeFrame) : RecyclerView.ViewHolder(shape)
+    private inner class HeaderHolder(val view: LinearLayout) : RecyclerView.ViewHolder(view)
+
+    private inner class AlbumAdapter : RecyclerView.Adapter<AlbumAdapter.Holder>() {
+
+        inner class Holder(val card: OeaAppKit.AlbumCard) : RecyclerView.ViewHolder(card.root)
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(kit.albumCard(kit.dp(112)))
+
+        override fun getItemCount(): Int {
+            val built = snapshot ?: return 0
+            return built.imageAlbums.size
+        }
+
+        override fun onBindViewHolder(holder: Holder, position: Int) {
+            val built = snapshot ?: return
+            val albumData = built.imageAlbums.getOrNull(position) ?: return
+            val card = holder.card
+            card.name.text = albumData.name
+            card.meta.text = "${albumData.count} • ${OeaMediaLibrary.formatSize(albumData.size)}"
+            card.badge.text = SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(albumData.lastTakenAt))
+            albumData.cover?.let { cover ->
+                OeaThumbnails.load(card.cover, cover.uri, kit.dp(220), false, 0, position)
+            }
+            card.root.setOnClickListener {
+                album = albumData.name
+                surface = Surface.PHOTOS
+                tabs.select("albums")
+                showSurface()
+                rebuild()
+            }
+            card.root.setOnLongClickListener {
+                albumActions(albumData)
+                true
+            }
+        }
+    }
+
+    private fun albumActions(data: OeaMediaLibrary.Album) {
+        kit.actions(
+            data.name,
+            "${data.count} pictures • ${OeaMediaLibrary.formatSize(data.size)}${if (data.path.isNotBlank()) " • ${data.path}" else ""}",
+            listOf(
+                OeaAppKit.Action(R.drawable.oic_photo_library, "Open", "Show these pictures in the grid") {
+                    album = data.name
+                    surface = Surface.PHOTOS
+                    showSurface()
+                    rebuild()
+                },
+                OeaAppKit.Action(R.drawable.oic_play_arrow, "Slideshow", "Play this album full-screen") {
+                    val list = snapshot?.inAlbum(data.name, Kind.IMAGE) ?: emptyList()
+                    if (list.isNotEmpty()) OeaEmageViewer.slideshow(host, list)
+                },
+                OeaAppKit.Action(R.drawable.oic_visibility_off, "Hide this album", "EMAGE stops listing it (nothing is deleted)") {
+                    val hidden = OeaMediaLibrary.hiddenAlbums(host).toMutableSet()
+                    hidden.add(data.name.lowercase(Locale.getDefault()))
+                    OeaMediaLibrary.setHiddenAlbums(host, hidden)
+                },
+                OeaAppKit.Action(
+                    R.drawable.oic_folder, "Share the newest", "Sends the ten most recent pictures of this album",
+                    disabled = data.count == 0
+                ) {
+                    val list = (snapshot?.inAlbum(data.name, Kind.IMAGE) ?: emptyList()).sortedByDescending { it.takenAt }.take(10)
+                    OeaMediaLibrary.share(host, list, "Share ${data.name}")
+                }
+            )
+        )
+    }
+
+    private inner class TrashAdapter : RecyclerView.Adapter<TrashAdapter.Holder>() {
+
+        inner class Holder(val row: LinearLayout, val name: TextView, val meta: TextView, val restore: TextView) :
+            RecyclerView.ViewHolder(row)
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+            val row = LinearLayout(host).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(kit.dp(14), kit.dp(12), kit.dp(12), kit.dp(12))
+                background = kit.rounded(palette.card, 20, palette.stroke, 1)
+            }
+            val texts = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            val name = kit.text("", 15f, palette.text, OeaType.medium).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+            val meta = kit.text("", 12f, palette.textSecondary).apply { maxLines = 2 }
+            texts.addView(name)
+            texts.addView(meta, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(2) })
+            row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            val restore = kit.tonalButton("Restore") { }
+            row.addView(restore, LinearLayout.LayoutParams(-2, kit.dp(38)).apply { marginStart = kit.dp(10) })
+            return Holder(row, name, meta, restore)
+        }
+
+        override fun getItemCount(): Int = OeaMediaLibrary.trashRecords(host).size
+
+        override fun onBindViewHolder(holder: Holder, position: Int) {
+            val record = OeaMediaLibrary.trashRecords(host).getOrNull(position) ?: return
+            holder.name.text = record.name
+            holder.meta.text = "${record.album} • ${OeaMediaLibrary.formatDate(record.deletedAt)}" +
+                if (record.recoverable) " • still on this phone" else " • removed by Android"
+            holder.restore.isEnabled = record.recoverable
+            holder.restore.alpha = if (record.recoverable) 1f else 0.4f
+            holder.restore.setOnClickListener {
+                if (OeaMediaLibrary.restore(host, record)) {
+                    snack.show("Back in your library", OeaKit.Tone.SUCCESS)
+                    trashAdapter.notifyDataSetChanged()
+                } else {
+                    snack.show("The file is not there any more", OeaKit.Tone.WARNING)
+                }
+            }
+            holder.row.setOnLongClickListener {
+                kit.confirm("Forget this record?", "EMAGE stops remembering this deletion. The picture itself is already gone.", "Forget") {
+                    OeaMediaLibrary.removeTrashRecord(host, record.key)
+                    trashAdapter.notifyDataSetChanged()
+                }
+                true
+            }
+        }
+    }
+
+    private fun OeaMediaLibrary.Sort.label(): String = when (this) {
+        OeaMediaLibrary.Sort.NEWEST -> "Newest first"
+        OeaMediaLibrary.Sort.OLDEST -> "Oldest first"
+        OeaMediaLibrary.Sort.NAME -> "Name (A–Z)"
+        OeaMediaLibrary.Sort.SIZE -> "Largest file"
+        OeaMediaLibrary.Sort.DURATION -> "Longest"
+    }
+
+    companion object {
+        private const val SPAN_DEFAULT = 3
+        private const val TYPE_TILE = 0
+        private const val TYPE_HEADER = 1
+        private const val REQUEST_DELETE = 4310
+        const val EXTRA_HANDLED = "oea.emage.view_handled"
+        private val TABS = listOf(
+            "all" to "All",
+            "albums" to "Albums",
+            "favourites" to "Favourites",
+            "recent" to "Last 7 days",
+            "screenshots" to "Screenshots",
+            "downloads" to "Downloads",
+            "large" to "Large",
+            "oea" to "OEA",
+            "trash" to "Recently deleted"
+        )
     }
 }
