@@ -32,8 +32,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Competitive features vs Google:
  * - Launcher commands (open app by name, fuzzy match installed apps)
- * - Offline keyword spotting for 50+ commands without internet
- * - Continuous listening option (like "Hey OEA" — best-effort via always-on, respects battery)
+ * - The command grammar itself is fully on-device: parsing, fuzzy app matching and
+ *   execution never touch the network
+ * - Continuous listening: the Voice screen reopens the recogniser after each command
+ *   while it is in front. Not a wake word — no always-on microphone exists here.
  * - On-device preference: prefers offline, works without Google app
  * - Integrated with OEA's search, phone, messaging, calendar, etc.
  * - No data leaves device unless user explicitly searches web
