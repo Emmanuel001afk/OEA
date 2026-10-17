@@ -337,20 +337,46 @@ jobs:
       - name: Report APK sizes
         run: |
           set -euo pipefail
+          TABLE="| App | Size |"$'\n'"| --- | --- |"
+          TOTAL_KB=0
+          for apk in oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk; do
+            [ -f "$apk" ] || continue
+            KB=$(du -k "$apk" | cut -f1)
+            TOTAL_KB=$((TOTAL_KB + KB))
+            TABLE="$TABLE"$'\n'"| $(basename "$apk") | $((KB / 1024)).$((KB % 1024 / 100)) MB |"
+          done
           {
             echo "### APK sizes"
             echo ""
-            echo "| App | Size |"
-            echo "| --- | --- |"
-            for apk in oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk; do
-              [ -f "$apk" ] || continue
-              echo "| $(basename "$apk") | $(du -h "$apk" | cut -f1) |"
-            done
-            TOTAL_KB=$(du -ck oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk 2>/dev/null | tail -1 | cut -f1)
+            echo "$TABLE"
             echo ""
-            echo "Total across all four apps: $((TOTAL_KB / 1024)) MB"
+            echo "Total across all apps: $((TOTAL_KB / 1024)) MB"
+            echo ""
+            echo "<details><summary>Largest entries in the launcher APK</summary>"
+            echo ""
+            echo '```'
+            unzip -l "$(find oea/build/outputs/apk/release -name '*.apk' -print -quit)" | sort -k1 -n -r | head -16
+            echo '```'
+            echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
-          du -h oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk
+          {
+            echo "$TABLE"
+            echo ""
+            echo "Total across all apps: $((TOTAL_KB / 1024)) MB"
+          } > "$RUNNER_TEMP/sizes.md"
+      - name: Comment APK sizes on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### APK sizes from this build"
+            echo ""
+            cat "$RUNNER_TEMP/sizes.md"
+          } > "$RUNNER_TEMP/comment.md"
+          gh pr comment "$PR" --repo "${{ github.repository }}" --body-file "$RUNNER_TEMP/comment.md" || true
       - name: Upload launcher APK
         uses: actions/upload-artifact@v4
         with:

@@ -368,6 +368,33 @@ def check_app_registration() -> list[str]:
         m = re.search(r"val builtInIds: List<String> = listOf\(([^)]*)\)", gsrc)
         if m:
             known_ids = {x.strip().strip('"') for x in m.group(1).split(",") if x.strip()}
+    # 4. The launcher's hand-off map agrees with the modules' applicationIds.
+    rescue = os.path.join(ROOT, "oea", "src", "main", "java", "com", "oea", "launcher", "perf", "OeaGameRescue.kt")
+    app_ids = {}
+    for mod in ("oea-game-arena", "oea-game-chess", "oea-game-runner"):
+        g = os.path.join(ROOT, mod, "build.gradle")
+        if os.path.exists(g):
+            m = re.search(r"applicationId\s+\"([^\"]+)\"", open(g, encoding="utf-8").read())
+            if m:
+                app_ids[mod] = m.group(1)
+    if os.path.exists(rescue):
+        rsrc = open(rescue, encoding="utf-8").read()
+        m = re.search(r"private val standalonePackages = mapOf\((.*?)\)", rsrc, re.S)
+        if m:
+            mapped = dict(re.findall(r'"(\w+)"\s+to\s+"([\w\.]+)"', m.group(1)))
+            for game_id, pkg in sorted(mapped.items()):
+                if known_ids and game_id not in known_ids:
+                    problems.append(f"OeaGameRescue: '{game_id}' is not a built-in game id {sorted(known_ids)}")
+                if app_ids and pkg not in app_ids.values():
+                    problems.append(
+                        f"OeaGameRescue: '{game_id}' hands off to {pkg}, which is not any game module's "
+                        f"applicationId {sorted(app_ids.values())}"
+                    )
+            if app_ids:
+                missing = set(app_ids.values()) - set(mapped.values())
+                if missing:
+                    problems.append(f"OeaGameRescue: no game id maps to {sorted(missing)}")
+
     for mod, _ in (("oea-game-arena", "arena"), ("oea-game-chess", "chess"), ("oea-game-runner", "runner")):
         act = glob_module_activity(mod)
         if not act:

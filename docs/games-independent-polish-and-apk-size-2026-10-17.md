@@ -211,7 +211,9 @@ the build on:
 * **a mini-app listed in `OeaMiniApps` but not declared in the manifest**;
 * **a game entry activity missing from `oeaGameEntryScreens`** (the exact
   regression from #60/#63);
-* a standalone app whose `standaloneGameId` is not a built-in game.
+* a standalone app whose `standaloneGameId` is not a built-in game;
+* **`OeaGameRescue.standalonePackages` drifting from the game modules' `applicationId`** - a renamed or mistyped package means OEA hands off to an app that does not exist, and the game looks dead;
+* a field access such as `opt.description` on a data class that has no such member - the compile error CI caught on the first run of this work.
 
 Both were verified against deliberate breakage before being trusted.
 
@@ -228,3 +230,38 @@ Both were verified against deliberate breakage before being trusted.
 * the re-encoded wallpapers at full screen brightness (they are visually
   equivalent at q82, but "equivalent" is a judgement);
 * the real APK size figures from the first CI build after this merge.
+
+---
+
+## 7. Second pass: making the game APKs actually shippable
+
+The merge of #65 was green but incomplete - three faults surfaced from its own
+build output, all of them invisible without a device:
+
+1. **The release game APKs were unsigned.** The three `oea-game-*/build.gradle`
+   files turned `minifyEnabled` on for `release` but never gave that build type
+   a `signingConfig`, so the APKs AGP produced could not be installed on any
+   phone. The `Verify game APK identity` step caught it. Fixed with
+   `signingConfig signingConfigs.debug` in each - these are CI-built test
+   builds, not Play releases.
+2. **The static checker could not see the fault it exists to catch.** The first
+   CI run failed compiling `opt.description`; `GameOption` has no
+   `description`, only `Choice` does. The checker now models `data class`
+   members and flags accesses to members that do not exist, and it was verified
+   by injecting that exact fault back into the source.
+3. **Shipping the games still has to be proved with numbers.** `oea-apk.yml`
+   now writes the measured APK sizes into the job summary *and* posts them as a
+   PR comment, together with the sixteen largest entries inside the launcher
+   APK, so the next cut reports a real size and shows where the remaining
+   megabytes are.
+
+### What is still open
+
+* `:oea-games` exposes `api project(":oea-engine")`, which puts the engine's
+  WebRTC native libraries on the compile classpath of every game and ships them
+  in all three game APKs. Switching it to
+  `compileOnly project(":oea-engine")` (each game already declares its own
+  implementation dependency on the engine) is the largest remaining size win,
+  and it needs a real build to measure.
+* No per-game trimming: each standalone APK still packages all four games plus
+  the engine lab, because they are compiled in rather than feature-delivered.
