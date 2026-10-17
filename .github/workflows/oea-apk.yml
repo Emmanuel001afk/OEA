@@ -321,19 +321,21 @@ jobs:
           set -euo pipefail
           AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          # Copied under the game's own name: the released asset has to be
+          # recognisable to the person downloading it, not to Gradle.
           check() {
-            local expected="$1" dir="$2"
+            local expected="$1" dir="$2" out="$3"
             local apk
             apk="$(find "$dir" -type f -name '*.apk' -print -quit)"
             test -n "$apk" || { echo "ERROR: no APK in $dir"; return 1; }
             "$AAPT2" dump badging "$apk" | grep -F "package: name='$expected'"
             "$APKSIGNER" verify --verbose "$apk"
             mkdir -p "$RUNNER_TEMP/games"
-            cp "$apk" "$RUNNER_TEMP/games/"
+            cp "$apk" "$RUNNER_TEMP/games/$out"
           }
-          check com.oea.runner oea-game-runner/build/outputs/apk
-          check com.oea.arena oea-game-arena/build/outputs/apk
-          check com.oea.chess oea-game-chess/build/outputs/apk
+          check com.oea.runner oea-game-runner/build/outputs/apk OEA-Endless-Days.apk
+          check com.oea.arena oea-game-arena/build/outputs/apk OEA-Send-Off.apk
+          check com.oea.chess oea-game-chess/build/outputs/apk OEA-Chess.apk
       - name: Report APK sizes
         run: |
           set -euo pipefail
