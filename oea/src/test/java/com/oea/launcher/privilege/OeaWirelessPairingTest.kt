@@ -33,7 +33,7 @@ class OeaWirelessPairingTest {
             OeaWirelessPairing.Entry("955 806", 970, 1030),
             OeaWirelessPairing.Entry("IP address and port", 1030, 1060),
             OeaWirelessPairing.Entry("10.213.122.13:39345", 1060, 1100))
-        assertTrue(OeaWirelessPairing.read(entries, 4_000L))
+        assertTrue(OeaWirelessPairing.readEntries(entries, 4_000L))
         val p = OeaWirelessPairing.pairing
         assertNotNull(p); assertEquals("955806", p!!.code); assertEquals(39345, p.port); assertEquals("10.213.122.13", p.host)
         val c = OeaWirelessPairing.connection
@@ -46,7 +46,7 @@ class OeaWirelessPairingTest {
             OeaWirelessPairing.Entry("066 520", 70, 130),
             OeaWirelessPairing.Entry("IP address and port", 130, 160),
             OeaWirelessPairing.Entry("192.168.43.215:44963", 160, 200))
-        assertTrue(OeaWirelessPairing.read(entries, 5_000L))
+        assertTrue(OeaWirelessPairing.readEntries(entries, 5_000L))
         val p = OeaWirelessPairing.pairing
         assertNotNull(p); assertEquals("066520", p!!.code); assertEquals("192.168.43.215", p.host); assertEquals(44963, p.port)
     }
