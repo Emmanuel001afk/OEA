@@ -28,6 +28,10 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), rootProject.file("gradle/proguard-game.pro")
+            // Signed with the debug key, like the launcher. Without this the
+            // release APK is unsigned, so Android refuses to install it — the
+            // game builds, gets published, and cannot be opened.
+            signingConfig signingConfigs.debug
         }
     }
     compileOptions {
