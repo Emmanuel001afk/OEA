@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Every OEA game app — the standalone installs and the launcher's own
+         game entries — opens on this theme, so the window is already dark and
+         edge to edge before the game shell paints its first frame. Without it
+         Android shows the platform's light window background for a beat and
+         the game's own UI has to hide it. -->
+    <style name="OeaStandaloneGameTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/oea_game_window_background</item>
+        <item name="android:colorBackground">@color/oea_game_window_background</item>
+        <item name="android:colorAccent">@color/oea_game_accent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+</resources>

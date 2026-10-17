@@ -16,6 +16,21 @@ import com.oea.games.OeaStandaloneGameActivity
  * screen (same hook the in-hub player uses).
  */
 
+/**
+ * Every OEA screen one of the built-in games can play on.
+ *
+ * Game Boost watches the foreground window to know when a session has ended,
+ * and it must count these activities as "still in the game". The list lives
+ * next to the classes themselves so a new entry cannot silently fall out of
+ * it — which is exactly what happened when the games became standalone apps
+ * and the detection still only knew the old hub and the shared shell.
+ */
+val oeaGameEntryScreens: List<String> = listOf(
+    OeaEndlessDaysActivity::class.java.name,
+    OeaSendOffActivity::class.java.name,
+    OeaChessGameActivity::class.java.name,
+)
+
 /** Endless Days — the train-yard runner. */
 class OeaEndlessDaysActivity : OeaStandaloneGameActivity() {
     override val standaloneGameId: String = "runner"

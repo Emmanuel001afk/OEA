@@ -33,6 +33,12 @@ jobs:
           cache: gradle
       - name: Make Gradle executable
         run: chmod +x ./gradlew
+      - name: Static check (Kotlin structure, app registration, manifests)
+        # Catches the class of fault a compile cannot see here: a mini-app or a
+        # game that is listed in Kotlin but missing from the manifest, or a game
+        # entry Game Boost does not recognise. Runs before the build so the
+        # failure is readable.
+        run: python3 tools/check-kotlin.py
       - name: Use the stable OEA signing key (optional)
         # Without this, every runner creates a new random debug key, so each
         # APK has a different signature and cannot update the previous one
@@ -223,6 +229,20 @@ jobs:
           grep -q "OeaGameLiveState" $L/workspace/OeaDynamicIslandView.kt
           grep -q "OeaLauncherIslandHost" $L/OeaApplication.kt
           grep -q "com.oea.launcher.games.OeaGamesActivity" oea/src/main/AndroidManifest.xml
+          # The games are standalone: each launcher entry is the game's own
+          # activity, Game Boost knows all of them, and the shared game shell
+          # has its own UI kit (so the installed apps look like OEA, not like a
+          # stack of platform dialogs).
+          test -f $G/ui/GameUi.kt
+          grep -q "class OeaEndlessDaysActivity : OeaStandaloneGameActivity" $L/games/OeaGameEntries.kt
+          grep -q "class OeaSendOffActivity : OeaStandaloneGameActivity" $L/games/OeaGameEntries.kt
+          grep -q "class OeaChessGameActivity : OeaStandaloneGameActivity" $L/games/OeaGameEntries.kt
+          grep -q "oeaGameEntryScreens" $L/games/OeaGameEntries.kt
+          grep -q "oeaGameScreens" $L/gameboost/OeaGameBoostService.kt
+          # APK size controls must not be switched off by accident.
+          grep -q "minifyEnabled true" oea/build.gradle
+          grep -q "minifyEnabled true" oea-game-arena/build.gradle
+          grep -q "abiFilters" oea-game-runner/build.gradle
           # Online play only ever uses the user's own STUN/TURN servers: no public ones may be hardcoded.
           if grep -rEn "stun:[a-z0-9.-]+[.](com|org|net|io)|google[.]com:19302" oea-engine/src/main oea-games/src/main oea/src/main; then
             echo "ERROR: a public STUN/TURN server is hardcoded."
@@ -296,12 +316,60 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
-      - name: Upload APK
+      - name: Verify game APK identity
+        run: |
+          set -euo pipefail
+          AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          check() {
+            local expected="$1" dir="$2"
+            local apk
+            apk="$(find "$dir" -type f -name '*.apk' -print -quit)"
+            test -n "$apk" || { echo "ERROR: no APK in $dir"; return 1; }
+            "$AAPT2" dump badging "$apk" | grep -F "package: name='$expected'"
+            "$APKSIGNER" verify --verbose "$apk"
+            mkdir -p "$RUNNER_TEMP/games"
+            cp "$apk" "$RUNNER_TEMP/games/"
+          }
+          check com.oea.runner oea-game-runner/build/outputs/apk
+          check com.oea.arena oea-game-arena/build/outputs/apk
+          check com.oea.chess oea-game-chess/build/outputs/apk
+      - name: Report APK sizes
+        run: |
+          set -euo pipefail
+          {
+            echo "### APK sizes"
+            echo ""
+            echo "| App | Size |"
+            echo "| --- | --- |"
+            for apk in oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk; do
+              [ -f "$apk" ] || continue
+              echo "| $(basename "$apk") | $(du -h "$apk" | cut -f1) |"
+            done
+            TOTAL_KB=$(du -ck oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk 2>/dev/null | tail -1 | cut -f1)
+            echo ""
+            echo "Total across all four apps: $((TOTAL_KB / 1024)) MB"
+          } >> "$GITHUB_STEP_SUMMARY"
+          du -h oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk
+      - name: Upload launcher APK
         uses: actions/upload-artifact@v4
         with:
           name: oea-launcher-apk
           path: oea/build/outputs/apk/**/*.apk
-          retention-days: 1
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload game APKs
+        # The games are separate, installable apps: if these are not published
+        # they can never be installed, which is exactly how a "standalone game"
+        # ends up looking inactive.
+        uses: actions/upload-artifact@v4
+        with:
+          name: oea-game-apks
+          path: |
+            oea-game-arena/build/outputs/apk/**/*.apk
+            oea-game-chess/build/outputs/apk/**/*.apk
+            oea-game-runner/build/outputs/apk/**/*.apk
+          retention-days: 7
           if-no-files-found: error
       - name: Publish latest APK release
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -309,10 +377,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The three games ship next to the launcher: they are independent
+          # apps, and a release that only contains the launcher leaves them
+          # uninstallable.
+          ASSETS=("$RUNNER_TEMP/OEA-latest.apk" "$RUNNER_TEMP"/games/*.apk)
           if gh release view oea-latest >/dev/null 2>&1; then
             # --clobber replaces the old asset. This job is serialized above to
             # prevent another push from deleting the asset during this upload.
-            gh release upload oea-latest "$RUNNER_TEMP/OEA-latest.apk" --clobber
+            gh release upload oea-latest "${ASSETS[@]}" --clobber
           else
-            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --title "OEA Latest" --notes "Latest standalone OEA Launcher build from main."
+            gh release create oea-latest "${ASSETS[@]}" --title "OEA Latest" \
+              --notes "Latest OEA Launcher and OEA game builds from main. OEA-latest.apk is the launcher; the game APKs (Endless Days, Send Off, Chess) install as independent apps."
           fi
