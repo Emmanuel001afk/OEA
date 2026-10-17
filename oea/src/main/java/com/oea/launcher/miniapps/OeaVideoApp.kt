@@ -722,7 +722,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 if (!selecting) beginSelection(item) else toggleSelected(item)
                 true
             }
-            cover.setSelected(selecting && selected.contains(item.key))
+            cover.markSelected(selecting && selected.contains(item.key))
         }
 
         override fun onViewRecycled(holder: Holder) {

@@ -561,7 +561,12 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
     ) {
         var selected: Boolean = false
 
-        fun setSelected(on: Boolean) {
+        /**
+         * Puts the tile in or out of the selection. Not called setSelected: a property
+         * of that name already compiles to a setter with the same JVM signature, and two
+         * of them in one class is a declaration clash rather than an overload.
+         */
+        fun markSelected(on: Boolean) {
             selected = on
             check.visibility = if (on) View.VISIBLE else View.GONE
             check.background = oval(if (on) palette.accent else Color.TRANSPARENT, if (on) palette.accent else Color.WHITE, 2)

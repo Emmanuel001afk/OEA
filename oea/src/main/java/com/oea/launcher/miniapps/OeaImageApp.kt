@@ -806,7 +806,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                         toggleSelected(item)
                         true
                     }
-                    tile.cover.setSelected(selecting && selected.contains(item.key))
+                    tile.cover.markSelected(selecting && selected.contains(item.key))
                     tile.cover.showStar(OeaMediaLibrary.isFavourite(host, item))
                     tile.cover.showBadge(if (item.local) "OEA" else null)
                     tile.cover.image.scaleType = if (tileShape >= 1f) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER

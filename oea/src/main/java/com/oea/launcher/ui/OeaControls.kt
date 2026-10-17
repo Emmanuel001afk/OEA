@@ -447,6 +447,13 @@ class OeaIconToggle(context: Context) : View(context) {
     var selectedBg: Int = 0xFF8AB4F8.toInt()
     var idleBg: Int = Color.argb(0x33, 255, 255, 255)
 
+    /**
+     * Whether this control is the one the user is on. The JVM names are moved aside
+     * because View already owns setSelected(boolean): the Kotlin call sites stay exactly
+     * as they read, and the clash stops being an accidental override.
+     */
+    @get:JvmName("isToggleSelected")
+    @set:JvmName("setToggleSelected")
     var selected: Boolean = false
         set(v) {
             if (field == v) return
