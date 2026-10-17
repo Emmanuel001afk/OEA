@@ -617,47 +617,25 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             snack.show("Android would not show its confirm dialog", OeaKit.Tone.WARNING)
             return
         }
-        // Android 10 and older: delete directly, and honour the resolution dialog
-        // the system throws at us when the file belongs to another app.
-        val resolution = deleteWithRecoverable(items)
-        if (resolution != null) {
-            pendingDelete = items
-            runCatching {
-                @Suppress("DEPRECATION")
-                host.startIntentSenderForResult(resolution, REQUEST_DELETE, null, 0, 0, 0)
-            }.onFailure { snack.show("Android refused the delete", OeaKit.Tone.DANGER) }
-            return
-        }
+        // Android 10 and older: the pictures OEA made itself can be removed here and
+        // nothing else can. MediaStore.createDeleteRequest is an Android 11 API, and the
+        // dialog Android 10 offers arrives as an action whose intent an app is not
+        // allowed to read — so rather than reporting a delete that did not happen, EMAGE
+        // says which pictures stayed and why.
+        val owned = OeaMediaLibrary.deleteOwnedNow(host, items)
+        val left = items.size - owned
         OeaMediaLibrary.refresh(host)
         snack.show(
-            if (items.size == 1) "Picture removed from EMAGE" else "${items.size} pictures removed from EMAGE",
-            OeaKit.Tone.SUCCESS
+            when {
+                left == 0 && owned == 1 -> "Picture removed from EMAGE"
+                left == 0 -> "$owned pictures removed from EMAGE"
+                owned == 0 -> "Android will not let OEA delete another app's picture"
+                else -> "$owned removed, $left left: another app owns them"
+            },
+            if (left == 0) OeaKit.Tone.SUCCESS else OeaKit.Tone.WARNING
         )
         exitSelection()
         rebuild()
-    }
-
-    private fun deleteWithRecoverable(items: List<Item>): android.content.IntentSender? {
-        var sender: android.content.IntentSender? = null
-        items.forEach { item ->
-            val outcome = runCatching { host.contentResolver.delete(item.uri, null, null) }
-            when {
-                outcome.getOrDefault(0) > 0 -> OeaMediaLibrary.recordDeletion(host, item)
-                else -> {
-                    // Android 10 refuses a silent delete of another app's file and
-                    // hands back the dialog that grants it. Take it seriously
-                    // instead of telling the user it failed.
-                    // The framework throws it itself; some phones wrap it one deep.
-                    val error = outcome.exceptionOrNull()
-                    val recoverable = error as? android.app.RecoverableSecurityException
-                        ?: (error as? SecurityException)?.cause as? android.app.RecoverableSecurityException
-                    // getUserAction() hands back a RemoteAction, whose pending intent is
-                    // the dialog Android wants shown.
-                    recoverable?.userAction?.intent?.let { sender = it.intentSender }
-                }
-            }
-        }
-        return sender
     }
 
     private fun showMore() {
