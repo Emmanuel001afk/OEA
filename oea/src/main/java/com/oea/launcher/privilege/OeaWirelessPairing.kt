@@ -1,6 +1,11 @@
 package com.oea.launcher.privilege
 
 import android.content.Context
+import android.graphics.Rect
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import com.oea.launcher.assistant.OeaAssistant
@@ -64,6 +69,15 @@ object OeaWirelessPairing {
     @Volatile private var adbKeys: AdbKeys? = null
     @Volatile private var adbSession: AdbConnection? = null
     @Volatile private var adbSessionAt = 0L
+    @Volatile private var appContext: Context? = null
+    @Volatile private var lastAutoPairKey: String? = null
+    @Volatile private var lastAutoPairAt = 0L
+    @Volatile private var lastPairedKey: String? = null
+    @Volatile private var nsdResolving = false
+    private var nsdDiscovery: NsdManager.DiscoveryListener? = null
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+    internal class Entry(val text: String, val top: Int, val bottom: Int)
+    private class Address(val host: String, val port: Int, val entry: Entry)
 
     private const val CONNECT_TIMEOUT_MS = 5_000
     private const val SOCKET_TIMEOUT_MS = 15_000
@@ -89,8 +103,11 @@ object OeaWirelessPairing {
      * port is known — the TLS ADB connection. Safe to call twice; runs on its
      * own thread and reports through [outcome].
      */
+    fun attach(context: Context) { appContext = context.applicationContext }
+
     @Synchronized
     fun executePairing(context: Context) {
+        attach(context)
         val target = freshPairing() ?: run {
             outcome = Outcome.Failed("No pairing code has been read yet", SystemClock.elapsedRealtime())
             OeaAssistant.notifyStateChanged()
@@ -108,14 +125,21 @@ object OeaWirelessPairing {
                     socket.soTimeout = SOCKET_TIMEOUT_MS
                     val pairingConnection = PairingConnection(socket, keys, target.code)
                     val device = pairingConnection.pair()
+                    lastPairedKey = "${target.code}:${target.host}:${target.port}"
                     outcome = Outcome.Paired(device, SystemClock.elapsedRealtime())
                 }
-                // 2) the TLS ADB connection on the connection port
-                connectAdb()
+                OeaAssistant.notifyStateChanged()
+                if (connection != null) finishConnect() else discoverConnectionPort()
             } catch (e: Exception) {
-                outcome = Outcome.Failed(e.message ?: e.javaClass.simpleName, SystemClock.elapsedRealtime())
+                val raw = e.message ?: e.javaClass.simpleName
+                val message = when {
+                    raw.contains("ECONNREFUSED", true) || raw.contains("Connection refused", true) -> "Pairing dialog closed. Reopen it; OEA will retry automatically."
+                    raw.contains("timeout", true) || raw.contains("ETIMEDOUT", true) -> "No response from ${target.host}:${target.port}. Keep the pairing dialog open and use the same Wi-Fi network."
+                    else -> raw
+                }
+                outcome = Outcome.Failed(message, SystemClock.elapsedRealtime())
+                OeaAssistant.notifyStateChanged()
             }
-            OeaAssistant.notifyStateChanged()
         }, "oea-wireless-pairing").start()
     }
 
@@ -137,9 +161,64 @@ object OeaWirelessPairing {
         adbSession = adb
         adbSessionAt = SystemClock.elapsedRealtime()
         outcome = Outcome.Connected(
-            (outcome as? Outcome.Paired)?.device ?: "",
+            (outcome as? Outcome.Paired)?.device ?: (outcome as? Outcome.Connected)?.device ?: "",
             "v${banner.version shr 24}.${banner.version and 0xFFFFFF}, ${banner.maxPayload / 1024} KiB",
             adbSessionAt)
+        OeaAssistant.notifyStateChanged()
+    }
+
+    private fun finishConnect() {
+        try { connectAdb() } catch (e: Exception) {
+            outcome = Outcome.Failed("Paired, but ADB connection failed: ${e.message ?: e.javaClass.simpleName}", SystemClock.elapsedRealtime())
+            OeaAssistant.notifyStateChanged()
+        }
+    }
+
+    fun discoverConnectionPort() {
+        val context = appContext ?: return
+        if (connection != null) { finishConnect(); return }
+        if (nsdDiscovery != null) return
+        val manager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return
+        val expectedHost = pairing?.host
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String?) {}
+            override fun onServiceFound(info: NsdServiceInfo?) {
+                val service = info ?: return
+                if (nsdResolving || connection != null || service.serviceType?.contains("_adb-tls-connect._tcp") != true) return
+                nsdResolving = true
+                try {
+                    manager.resolveService(service, object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) { nsdResolving = false }
+                        override fun onServiceResolved(serviceInfo: NsdServiceInfo?) {
+                            nsdResolving = false
+                            val resolved = serviceInfo ?: return
+                            val host = resolved.host?.hostAddress ?: return
+                            if (expectedHost != null && host != expectedHost) return
+                            if (resolved.port !in 1..65535 || connection != null) return
+                            connection = Connection(host, resolved.port, SystemClock.elapsedRealtime())
+                            OeaAssistant.notifyStateChanged()
+                            stopNsd()
+                            Thread({ finishConnect() }, "oea-adb-connect").start()
+                        }
+                    })
+                } catch (_: Exception) { nsdResolving = false }
+            }
+            override fun onServiceLost(info: NsdServiceInfo?) {}
+            override fun onDiscoveryStopped(serviceType: String?) { nsdDiscovery = null }
+            override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) { nsdDiscovery = null }
+            override fun onStopDiscoveryFailed(serviceType: String?, errorCode: Int) { nsdDiscovery = null }
+        }
+        nsdDiscovery = listener
+        try { manager.discoverServices("_adb-tls-connect._tcp.", NsdManager.PROTOCOL_DNS_SD, listener) }
+        catch (_: Exception) { nsdDiscovery = null; return }
+        mainHandler.postDelayed({ stopNsd() }, 30_000L)
+    }
+
+    private fun stopNsd() {
+        val listener = nsdDiscovery ?: return
+        nsdDiscovery = null
+        val manager = appContext?.getSystemService(Context.NSD_SERVICE) as? NsdManager ?: return
+        try { manager.stopServiceDiscovery(listener) } catch (_: Exception) {}
     }
 
     /** Runs a shell command on the phone over the connected ADB session. */
@@ -176,6 +255,9 @@ object OeaWirelessPairing {
         connection = null
         closeAdb()
         outcome = Outcome.Idle
+        lastAutoPairKey = null
+        lastPairedKey = null
+        stopNsd()
         OeaAssistant.notifyStateChanged()
     }
 
@@ -203,59 +285,67 @@ object OeaWirelessPairing {
         val now = SystemClock.elapsedRealtime()
         if (now - lastScan < SCAN_GAP_MS) return
         lastScan = now
-        // Only Settings screens: the values live there, nothing else is read.
         if (packageName == null || !packageName.contains("settings", ignoreCase = true)) return
-
-        val texts = ArrayList<String>()
-        collect(root, texts, 0)
-        if (texts.isEmpty()) return
-        val changed = read(texts, now)
-        if (changed) OeaAssistant.notifyStateChanged()
-        if (pairing != null && connection != null) {
-            // Both values are in hand: stop watching so nothing else is read.
+        val entries = ArrayList<Entry>()
+        collect(root, entries, 0)
+        if (entries.isEmpty()) return
+        if (read(entries, now)) OeaAssistant.notifyStateChanged()
+        maybeAutoPair()
+        if (pairing != null && connection != null && outcome !is Outcome.Running && outcome !is Outcome.Failed) {
             watchUntil = 0L
             OeaAssistant.refreshEventMask()
         }
     }
 
-    /** Pure parsing step (no Android types), so it can be unit-tested on the JVM. */
-    internal fun read(texts: List<String>, now: Long): Boolean {
-        val code = texts.firstNotNullOfOrNull { t -> codeRe.matchEntire(t.trim())?.let { it.groupValues[1] + it.groupValues[2] } }
-        val addresses = texts.mapNotNull { t -> addressRe.find(t)?.let { m -> m.groupValues[1] to m.groupValues[2].toInt() } }
-        // The pairing dialog is its own window, so it does not contain the screen's
-        // "Wireless debugging" title. The main screen always does, and shows the
-        // connection address; its "Pair device with pairing code" row is not a code.
-        val mainScreen = texts.any { it.equals("Wireless debugging", ignoreCase = true) }
-        var changed = false
+    private fun maybeAutoPair() {
+        val context = appContext ?: return
+        val p = freshPairing() ?: return
+        val key = "${p.code}:${p.host}:${p.port}"
+        if (key == lastPairedKey || outcome is Outcome.Running || outcome is Outcome.Paired || outcome is Outcome.Connected) return
+        if (key == lastAutoPairKey && SystemClock.elapsedRealtime() - lastAutoPairAt < 5_000L) return
+        lastAutoPairKey = key
+        lastAutoPairAt = SystemClock.elapsedRealtime()
+        executePairing(context)
+    }
 
-        if (code != null && addresses.isNotEmpty()) {
-            // The pairing dialog shows the code together with the pairing address.
-            val (host, port) = addresses.first()
-            val current = pairing
-            if (current == null || current.code != code || current.host != host || current.port != port) {
-                pairing = Pairing(code, host, port, now)
-                changed = true
+    internal fun read(texts: List<String>, now: Long): Boolean = read(texts.map { Entry(it, 0, 0) }, now)
+    internal fun read(entries: List<Entry>, now: Long): Boolean {
+        val codeEntry = entries.firstOrNull { codeRe.matchEntire(it.text.trim()) != null }
+        val code = codeEntry?.let { codeRe.matchEntire(it.text.trim())!!.let { m -> m.groupValues[1] + m.groupValues[2] } }
+        val addresses = entries.mapNotNull { e -> addressRe.find(e.text)?.let { Address(it.groupValues[1], it.groupValues[2].toInt(), e) } }
+        val mainScreen = entries.any { it.text.equals("Wireless debugging", ignoreCase = true) }
+        var changed = false
+        if (code != null) {
+            val chosen = when {
+                addresses.isEmpty() -> null
+                addresses.size == 1 -> addresses[0]
+                else -> addresses.minByOrNull { distance(it.entry, codeEntry!!) }
             }
-        }
-        if (mainScreen && code == null && addresses.isNotEmpty()) {
-            // The Wireless debugging screen shows the connection address and port.
-            val (host, port) = addresses.first()
-            val current = connection
-            if (current == null || current.port != port || current.host != host) {
-                connection = Connection(host, port, now)
-                changed = true
+            if (chosen != null) {
+                val p = pairing
+                if (p == null || p.code != code || p.host != chosen.host || p.port != chosen.port) { pairing = Pairing(code, chosen.host, chosen.port, now); changed = true }
+                if (mainScreen && addresses.size > 1) {
+                    val other = addresses.firstOrNull { it !== chosen && (it.host != chosen.host || it.port != chosen.port) }
+                    if (other != null) {
+                        val c = connection
+                        if (c == null || c.host != other.host || c.port != other.port) { connection = Connection(other.host, other.port, now); changed = true }
+                    }
+                }
             }
+        } else if (mainScreen && addresses.isNotEmpty()) {
+            val first = addresses.first()
+            val c = connection
+            if (c == null || c.host != first.host || c.port != first.port) { connection = Connection(first.host, first.port, now); changed = true }
         }
         return changed
     }
 
-    private fun collect(node: AccessibilityNodeInfo, out: MutableList<String>, depth: Int) {
+    private fun distance(a: Entry, b: Entry): Int = kotlin.math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2)
+    private fun collect(node: AccessibilityNodeInfo, out: MutableList<Entry>, depth: Int) {
         if (depth > 24 || out.size > 400) return
-        node.text?.toString()?.takeIf { it.isNotBlank() }?.let { out += it }
-        node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { out += it }
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            collect(child, out, depth + 1)
-        }
+        val rect = Rect(); node.getBoundsInScreen(rect)
+        node.text?.toString()?.takeIf { it.isNotBlank() }?.let { out += Entry(it, rect.top, rect.bottom) }
+        node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { out += Entry(it, rect.top, rect.bottom) }
+        for (i in 0 until node.childCount) { val child = node.getChild(i) ?: continue; collect(child, out, depth + 1) }
     }
 }
