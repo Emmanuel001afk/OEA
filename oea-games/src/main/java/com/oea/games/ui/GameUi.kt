@@ -603,8 +603,8 @@ class GameKit(val context: Context, val palette: GamePalette = GameColors.palett
         negative: String = "Cancel",
         destructive: Boolean = false,
         onConfirm: () -> Unit
-    ) {
-        sheet(title, message) { panel, dialog ->
+    ): Dialog {
+        return sheet(title, message) { panel, dialog ->
             panel.addView(
                 buttonRow(
                     quietButton(negative) { dialog.dismiss() },

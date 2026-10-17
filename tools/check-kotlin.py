@@ -392,6 +392,168 @@ def glob_module_activity(mod: str):
     return None
 
 
+# ------------------------------------------------------- lightweight typing
+
+DATA_CLASS_RE = re.compile(r"(?:^|\n)\s*(?:public |internal |data )*data class\s+(\w+)\s*\(")
+PARAM_RE = re.compile(r"(?:^|\n)\s*(?:val|var)\s+(\w+)\s*:\s*[\w\.<>,\s\?]+?(?=[,)=\n])", re.M)
+CLASS_VAR_RE = re.compile(r"(?:^|\n)\s{4}(?:var|val)\s+(\w+)\s*:")
+
+
+def class_body(src: str, header_end: int) -> str:
+    """Return the text of the class body that starts at or after [header_end]."""
+    i, n, depth = header_end, len(src), 0
+    in_str = False
+    raw = False
+    while i < n:
+        c = src[i]
+        if in_str:
+            if raw and src.startswith('"""', i):
+                in_str = False
+                i += 3
+                continue
+            if not raw and c == "\\":
+                i += 2
+                continue
+            if not raw and c == '"':
+                in_str = False
+            elif raw is False and c == "'":
+                pass
+            i += 1
+            continue
+        if src.startswith('"""', i):
+            in_str, raw = True, True
+            i += 3
+            continue
+        if c == '"':
+            in_str, raw = True, False
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif c == "{" and depth == 0:
+            # Found the body: brace-match it.
+            j, d = i, 0
+            while j < n:
+                if src[j] == "{":
+                    d += 1
+                elif src[j] == "}":
+                    d -= 1
+                    if d == 0:
+                        return src[i + 1:j]
+                j += 1
+            return src[i + 1:]
+        i += 1
+    return ""
+
+
+def build_type_model(files) -> dict[str, set[str]]:
+    """
+    Model the project's own types well enough to catch `opt.description`.
+
+    A compiler rejects a member access that does not exist; without one that is
+    the single most likely mistake to survive a review, so the model is built
+    from the declarations themselves — constructor `val`s, body `val`/`var`s
+    and body functions — rather than from a hand-written list that goes stale.
+    """
+    model: dict[str, set[str]] = {}
+
+    def add(cls, names):
+        if names:
+            model.setdefault(cls, set()).update(names)
+
+    for f in files:
+        src = open(f, encoding="utf-8").read()
+        for cm in re.finditer(r"(?:^|\n)\s*(?:public |internal |open |sealed |abstract )*data class\s+(\w+)", src):
+            cls = cm.group(1)
+            header_end = cm.end()
+            # constructor parameter properties
+            if src.startswith("(", header_end) or re.match(r"\s*(?:internal\s+)?constructor\s*\(", src[header_end:header_end + 40]):
+                i = src.index("(", header_end)
+                depth, j = 0, i
+                while j < len(src):
+                    if src[j] == "(":
+                        depth += 1
+                    elif src[j] == ")":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    j += 1
+                params = src[i + 1:j]
+                for line in params.split("\n"):
+                    pm = re.match(r"\s*(?:val|var)\s+(\w+)\s*:", line.strip().rstrip(","))
+                    if pm:
+                        add(cls, {pm.group(1)})
+            # Body members too (data classes are small and their bodies rarely
+            # contain a brace inside a string, which is what defeats the
+            # brace-matching used for ordinary classes).
+            limit = len(src)
+            nm = re.search(r"(?:^|\n)(?:@\w+\s+)*(?:public |internal |open |sealed |abstract |data |enum )*(?:class|object|interface|fun)\s", src[header_end:])
+            if nm:
+                limit = header_end + nm.start()
+            body = class_body(src[:limit], header_end)
+            if body:
+                add(cls, {m.group(1) for m in re.finditer(r"(?:^|\n)\s{4}(?:@\w+\s+)*(?:val|var)\s+(\w+)\s*[:=]", body)})
+                add(cls, {m.group(1) for m in re.finditer(r"(?:^|\n)\s{4}(?:open |override |internal |private |protected |public |suspend |inline |operator )*fun\s+(\w+)", body)})
+    return model
+
+
+def check_field_access(rel: str, src: str, model: dict[str, set[str]], strict_files: set[str]) -> list[str]:
+    if rel not in strict_files:
+        return []
+    src = strip_comments(src)
+
+    # Collect every binding of a name to a modelled type. A name bound to two
+    # different types in the same file is ambiguous (a lambda parameter
+    # shadowing a field, most often), so it is left alone.
+    bindings: dict[str, set[str]] = {}
+
+    def note(name: str, type_name: str):
+        type_name = type_name.rstrip("?").split(".")[-1]
+        if type_name in model:
+            bindings.setdefault(name, set()).add(type_name)
+
+    for m in re.finditer(r"(?:val|var)\s+(\w+)\s*:\s*([\w\.]+)", src):
+        note(m.group(1), m.group(2))
+    for m in re.finditer(r"\bfun\s+\w+\s*(?:<[^>]*>)?\s*\(([^)]*)\)", src):
+        for param in m.group(1).split(","):
+            pm = re.match(r"\s*(?:val|var)?\s*(\w+)\s*:\s*([\w\.<>]+)", param)
+            if pm:
+                note(pm.group(1), pm.group(2))
+    for m in re.finditer(r"(?:val|var)\s+(\w+)\s*=\s*(\w+)\s*\?:", src):
+        for t in bindings.get(m.group(2), ()):
+            note(m.group(1), t)
+
+    shadowed = set()
+    for m in re.finditer(r"\{([^{}]*?)->", src):
+        for part in m.group(1).split(","):
+            pm = re.match(r"\s*(\w+)\s*$", part)
+            if pm:
+                shadowed.add(pm.group(1))
+    typed = {
+        name: next(iter(types))
+        for name, types in bindings.items()
+        if len(types) == 1 and name not in shadowed
+    }
+
+    problems = []
+    for m in re.finditer(r"(?<![\w\.'])(\w+)\.(\w+)", src):
+        var, field = m.group(1), m.group(2)
+        type_name = typed.get(var)
+        if not type_name:
+            continue
+        allowed = model.get(type_name)
+        if not allowed or field in allowed:
+            continue
+        line = src[: m.start()].count("\n") + 1
+        problems.append(
+            f"{rel}:{line}: '{var}.{field}' — {type_name} has no member '{field}' "
+            f"(has: {', '.join(sorted(allowed)[:12])})"
+        )
+    return problems
+
+
 # ----------------------------------------------------------------------- main
 
 def main() -> int:
@@ -410,12 +572,14 @@ def main() -> int:
         "oea/src/main/java/com/oea/launcher/games/OeaGameEntries.kt",
     }
     table = build_symbol_table(files)
+    type_model = build_type_model(files)
 
     for f in files:
         src = open(f, encoding="utf-8").read()
         rel = os.path.relpath(f, ROOT)
         problems += check_balance(rel, src)
         problems += check_symbols(rel, src, table, strict)
+        problems += check_field_access(rel, src, type_model, strict)
 
     # GameKit usage inside the standalone shell.
     ui = os.path.join(ROOT, "oea-games", "src", "main", "java", "com", "oea", "games", "ui", "GameUi.kt")

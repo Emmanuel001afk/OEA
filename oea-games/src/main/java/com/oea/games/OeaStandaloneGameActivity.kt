@@ -125,9 +125,9 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         palette = GameColors.palette(descriptor.accent)
         kit = null
         GameInsets.edgeToEdge(window)
-        descriptor.options.forEach { opt ->
-            chosenOptions[opt.id] = OeaEngine.settings.lastOption(descriptor.id, opt.id)
-                ?.takeIf { v -> opt.choices.any { it.value == v } } ?: opt.default
+        descriptor.options.forEach { option ->
+            chosenOptions[option.id] = OeaEngine.settings.lastOption(descriptor.id, option.id)
+                ?.takeIf { v -> option.choices.any { it.value == v } } ?: option.default
         }
         if (Build.VERSION.SDK_INT >= 33) {
             try {
@@ -275,9 +275,9 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         }
         k.sheet("Match setup", "Mode: ${chosenMode.label}. Your choices are remembered for the next match.") { panel, dialog ->
             val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            d.options.forEachIndexed { index, opt ->
+            d.options.forEachIndexed { index, option ->
                 list.addView(
-                    k.optionRow(opt.label, optionSummary(opt), false) {
+                    k.optionRow(option.label, optionSummary(option), false) {
                         dialog.dismiss()
                         showOptionPicker(index)
                     },
@@ -292,11 +292,11 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     private fun showOptionPicker(index: Int) {
         val d = descriptor ?: return
         val k = toolkit()
-        val opt = d.options.getOrNull(index) ?: return showMatchSetup()
+        val opt: com.oea.engine.core.GameOption = d.options.getOrNull(index) ?: return showMatchSetup()
         val labels = opt.choices.map { it.label }
         val descriptions = opt.choices.map { it.description }
         val current = opt.choices.indexOfFirst { it.value == (chosenOptions[opt.id] ?: opt.default) }.coerceAtLeast(0)
-        k.choose(opt.label, opt.description, labels, current, descriptions) { pick ->
+        k.choose(opt.label, opt.choices.getOrNull(current)?.description, labels, current, descriptions) { pick ->
             val choice = opt.choices[pick]
             chosenOptions[opt.id] = choice.value
             OeaEngine.settings.setLastOption(d.id, opt.id, choice.value)
