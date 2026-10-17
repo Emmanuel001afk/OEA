@@ -21,7 +21,11 @@ import java.util.Locale
  * - Standard: basic arithmetic with tape, history, memory, percentage, brackets
  * - Scientific: sin/cos/tan/log/ln/sqrt/power/factorial/pi/e, hyperbolic, inverse, degrees/radians, constants
  * - Programmer: binary/hex/octal/decimal, bitwise AND/OR/XOR/NOT, shifts
- * - Converter: length, weight, temperature, area, volume, speed, time, data, currency (offline cached rates + online fetch placeholder)
+ * - Converter: ten families (length, mass, temperature, area, volume, speed, time,
+ *   data, pressure, energy) as exact factors against one base unit each, live as you
+ *   type, with swap and a send-to-display. Currency is a family of its own whose
+ *   numbers you set and OEA keeps on the phone — no fetch is attempted, so nothing on
+ *   screen pretends to be today's rate.
  * - Graphing: simple y=f(x) plotter with Canvas
  *
  * Unique:
