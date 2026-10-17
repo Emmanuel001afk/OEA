@@ -3,7 +3,6 @@ package com.oea.launcher.miniapps
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
@@ -71,7 +70,6 @@ internal object OeaAmplifier {
         // One buffer both sides can live with, doubled so the loop is never chasing it.
         val frameCount = maxOf(minIn, minOut) / 2 * 2
         val record = runCatching {
-            @Suppress("MissingPermission")
             AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE, inMask, encoding, frameCount * 2)
         }.getOrNull()
         if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
