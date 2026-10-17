@@ -71,6 +71,20 @@ class OeaAssistantService : AccessibilityService() {
     }
 
     private var lastWindowKey: String? = null
+    private var pairingTickScheduled = false
+    private fun ensurePairingTick() {
+        if (pairingTickScheduled) return
+        pairingTickScheduled = true
+        handler.post(object : Runnable {
+            override fun run() {
+                if (!com.oea.launcher.privilege.OeaWirelessPairing.isWatching()) { pairingTickScheduled = false; return }
+                val root = rootInActiveWindow
+                runCatching { com.oea.launcher.privilege.OeaWirelessPairing.scan(root, root?.packageName?.toString()) }
+                    .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:pairing-tick", it) }
+                handler.postDelayed(this, 1_200L)
+            }
+        })
+    }
     private var lastFrozenBlockAt = 0L
     private var lastFrozenPackage: String? = null
     /** A frozen-app interception that is currently playing out; kept apart from the user's own force-stop job. */
@@ -84,6 +98,7 @@ class OeaAssistantService : AccessibilityService() {
             if (com.oea.launcher.privilege.OeaWirelessPairing.isWatching()) {
                 runCatching { com.oea.launcher.privilege.OeaWirelessPairing.scan(rootInActiveWindow, event?.packageName?.toString()) }
                     .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:pairing", it) }
+                ensurePairingTick()
             }
             if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 val changed = event.packageName?.toString()
