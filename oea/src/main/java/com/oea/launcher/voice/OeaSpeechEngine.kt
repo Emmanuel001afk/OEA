@@ -25,14 +25,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - Fallback: own AudioRecord + energy detection for keyword spotting when Google not available (offline, no GMS).
  * - Launcher commands: parses "open X", "search X", "call X", "message X", "set alarm", "turn on/off flashlight", "play X", "navigate to X", etc.
  * - Integration: with OeaSearchController for web/app/contact search, with OeaAppFreezer, OeaModes, OeaLowMode, etc.
- * - Own UI: waveform visualization via amplitude, partial results, error handling.
+ * - Own UI: waveform fed by the recogniser's own amplitude callback, partial
+ *   results, error handling.
  * - TTS feedback: optional spoken confirmation via TextToSpeech.
  * - Permissions: RECORD_AUDIO, handles denial gracefully.
  *
  * Competitive features vs Google:
  * - Launcher commands (open app by name, fuzzy match installed apps)
- * - Offline keyword spotting for 50+ commands without internet
- * - Continuous listening option (like "Hey OEA" — best-effort via always-on, respects battery)
+ * - The command grammar itself is fully on-device: parsing, fuzzy app matching and
+ *   execution never touch the network
+ * - Continuous listening: the Voice screen reopens the recogniser after each command
+ *   while it is in front. Not a wake word — no always-on microphone exists here.
  * - On-device preference: prefers offline, works without Google app
  * - Integrated with OEA's search, phone, messaging, calendar, etc.
  * - No data leaves device unless user explicitly searches web
@@ -52,6 +55,14 @@ object OeaSpeechEngine {
         fun onResult(text: String, command: LauncherCommand?)
         fun onError(message: String)
         fun onStateChanged(state: State)
+
+        /**
+         * Loudness while you speak, 0..1, straight from the recogniser's own
+         * `onRmsChanged`. Defaulted so a caller that does not draw a meter can ignore
+         * it — and implemented by the one that does, which is why the level callback is
+         * here instead of another polling microphone stream.
+         */
+        fun onLevel(level: Float) = Unit
     }
 
     data class LauncherCommand(
@@ -125,7 +136,9 @@ object OeaSpeechEngine {
                     }
                     override fun onBeginningOfSpeech() {}
                     override fun onRmsChanged(rmsdB: Float) {
-                        // Could feed to waveform UI
+                        // Speech sits roughly between 0 and 12 dB of RMS headroom in
+                        // what the recogniser reports; that range becomes the meter.
+                        listener.onLevel((rmsdB / 12f).coerceIn(0f, 1f))
                     }
                     override fun onBufferReceived(buffer: ByteArray?) {}
                     override fun onEndOfSpeech() {

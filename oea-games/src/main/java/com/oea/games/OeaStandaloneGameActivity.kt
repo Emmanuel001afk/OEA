@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
@@ -45,7 +46,9 @@ import com.oea.games.ui.GameType
  *  - a real front screen: cover art, title, the match summary and the actions
  *    (Play, Match setup, Play with friends, Controls & aim, About) as OEA rows;
  *  - match setup over the game's own options, remembered per game;
- *  - look / ADS sensitivity, invert-Y and a turn-speed limit, tuned live;
+ *  - look / ADS sensitivity, invert-Y and a turn-speed limit, tuned live — offered
+ *    only to games you look around inside, with each game's own gesture legend for
+ *    the rest;
  *  - its own multiplayer: host on Wi-Fi or with an online code, join nearby
  *    games or with a code — no launcher, no hub required;
  *  - direct launch with extras (from the OEA Games hub or shortcuts).
@@ -122,7 +125,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             return
         }
         this.descriptor = descriptor
-        palette = GameColors.palette(descriptor.accent)
+        palette = GameColors.palette(
+            descriptor.accent,
+            highContrast = runCatching { OeaEngine.settings.highContrastMenus }.getOrDefault(false)
+        )
         kit = null
         GameInsets.edgeToEdge(window)
         descriptor.options.forEach { option ->
@@ -237,8 +243,23 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
                 LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
             )
         }
+        // Aim sliders only mean something to a game you look around inside. Showing
+        // them on a chess app is a control that does nothing, so each game is asked
+        // what its own fingers do and gets that screen instead.
+        if (d.dimension == com.oea.engine.core.GameDimension.D3 || d.dimension == com.oea.engine.core.GameDimension.D4) {
+            actions.addView(
+                k.actionRow("🎯", "Controls & aim", "Look and ADS sensitivity, turn limit, invert Y") { showControlsSheet() },
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+            )
+        }
+        if (controlLegend.isNotEmpty()) {
+            actions.addView(
+                k.actionRow("✳", "How you play ${d.title}", "This game's own inputs, on one screen") { showLegendSheet() },
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+            )
+        }
         actions.addView(
-            k.actionRow("🎯", "Controls & aim", "Look and ADS sensitivity, turn limit, invert Y") { showControlsSheet() },
+            k.actionRow("◐", "Screen & access", "Menu size, high contrast, no fading") { showAccessSheet() },
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
         )
         actions.addView(
@@ -252,8 +273,12 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         )
 
         setContentView(page.root)
-        page.root.alpha = 0f
-        page.root.animate().alpha(1f).setDuration(180L).start()
+        if (toolkit().reducedMotion) {
+            page.root.alpha = 1f
+        } else {
+            page.root.alpha = 0f
+            page.root.animate().alpha(1f).setDuration(180L).start()
+        }
     }
 
     private fun optionsLine(d: GameDescriptor): String = when {
@@ -323,6 +348,76 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             panel.addView(k.buttonRow(k.primaryButton("Done") { dialog.dismiss(); showHome() }))
         }
     }
+
+    /**
+     * Accessibility for every game screen in this app. Three switches, all of them
+     * live: the scale re-lays the menus, contrast swaps the palette, and reduced
+     * motion takes the fades out. They are stored on the engine, so the same choices
+     * apply to the other OEA game apps on this phone.
+     */
+    private fun showAccessSheet() {
+        val k = toolkit()
+        val d = descriptor ?: return
+        val settings = OeaEngine.settings
+        var scale = settings.uiScale
+        k.sheet("Screen & access", "Applies to every OEA game on this phone") { panel, dialog ->
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            k.slider(body, "Menu size", scale, 0.85f, 1.5f, { v -> "%.0f%%".format(v * 100f) }) { value ->
+                scale = value
+                settings.uiScale = value
+            }
+            k.switchRow(body, "High contrast menus", "Black grounds, white type, hard edges — ${d.title}'s own accent stays", settings.highContrastMenus) {
+                settings.highContrastMenus = it
+                palette = GameColors.palette(d.accent, highContrast = it)
+                kit = null
+                dialog.dismiss()
+                showHome()
+            }
+            k.switchRow(body, "No fading or sliding", "Screens change at once instead of cross-fading", settings.reducedMotion) {
+                settings.reducedMotion = it
+            }
+            panel.addView(k.boundedScroll(body, 0.55f))
+            k.note(panel, "Menu size is the one that moves touch targets as well as type, so a larger menu is still a tappable one. Saved per phone, not per match.")
+            panel.addView(k.buttonRow(k.quietButton("Reset to 100%") { settings.uiScale = 1f; dialog.dismiss(); kit = null; showHome() }, k.primaryButton("Done") { dialog.dismiss(); kit = null; showHome() }))
+        }
+    }
+
+    /**
+     * What the fingers do, per game. The shared shell cannot know this — a runner
+     * swipes, a board taps — so each standalone app answers for itself.
+     */
+    open val controlLegend: List<Pair<String, String>> get() = emptyList()
+
+    private fun showLegendSheet() {
+        val d = descriptor ?: return
+        val k = toolkit()
+        k.sheet("How you play ${d.title}", "${controlLegend.size} gestures, and the keys that mirror them") { panel, dialog ->
+            val group = k.group(panel)
+            controlLegend.forEachIndexed { index, (glyph, meaning) ->
+                if (index > 0) k.rowDivider(group)
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(k.dp(2), k.dp(10), k.dp(2), k.dp(10))
+                }
+                row.addView(k.glyphBadge(glyph, palette.cardHigh, palette.accent, 36), LinearLayout.LayoutParams(k.dp(36), k.dp(36)))
+                row.addView(
+                    k.text(meaning, 13.5f, palette.text).apply { setPadding(k.dp(14), 0, 0, 0) },
+                    LinearLayout.LayoutParams(0, -2, 1f)
+                )
+                group.addView(row, LinearLayout.LayoutParams(-1, -2))
+            }
+            if (!keyLegend.isEmpty()) {
+                k.sectionTitle(panel, "Keyboard & gamepad")
+                k.note(panel, keyLegend.joinToString(" · "))
+            }
+            k.note(panel, "OEA shows you this instead of a wall of sliders that would do nothing in ${d.title}.")
+            panel.addView(k.buttonRow(k.primaryButton("Done") { dialog.dismiss() }))
+        }
+    }
+
+    /** Physical inputs, for the games that have them. */
+    open val keyLegend: List<String> get() = emptyList()
 
     // ================================================================ play with friends
 

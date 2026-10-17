@@ -87,7 +87,13 @@ class OeaThemeStore private constructor(context: Context) {
     private fun imageB64(ref: OeaImageRef): String? = runCatching {
         val bytes: ByteArray = when (ref) {
             is OeaImageRef.Imported -> File(ref.path).takeIf { it.isFile }?.readBytes()
-            is OeaImageRef.Bundled -> app.resources.openRawResource(ref.resId)?.use { it.readBytes() }
+            is OeaImageRef.Bundled -> if (ref.resId == 0) {
+                val bmp = com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, 720, 1280) ?: return null
+                val out = java.io.ByteArrayOutputStream()
+                bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                bmp.recycle()
+                out.toByteArray()
+            } else app.resources.openRawResource(ref.resId)?.use { it.readBytes() }
             is OeaImageRef.Generated -> {
                 val bmp = com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, 720, 1280) ?: return null
                 val out = java.io.ByteArrayOutputStream()
@@ -262,7 +268,8 @@ object OeaThemeImages {
      * drawn — so callers that need pixels use [thumbnail] or [renderForWallpaper].
      */
     fun stream(context: Context, ref: OeaImageRef): InputStream? = when (ref) {
-        is OeaImageRef.Bundled -> context.resources.openRawResource(ref.resId)
+        // A drawn picture has no bytes; callers ask thumbnail()/renderForWallpaper().
+        is OeaImageRef.Bundled -> if (ref.resId == 0) null else context.resources.openRawResource(ref.resId)
         is OeaImageRef.Imported -> File(ref.path).takeIf { it.isFile }?.inputStream()
         // Generated pictures are drawn, not decoded; callers that need pixels use
         // thumbnail(), and the wallpaper applier draws them itself.
@@ -273,8 +280,9 @@ object OeaThemeImages {
     fun thumbnail(context: Context, ref: OeaImageRef, maxW: Int = 360, maxH: Int = 780): Bitmap? {
         val key = "${ref.key}@$maxW"
         cache.get(key)?.let { return it }
-        val bitmap = when (ref) {
-            is OeaImageRef.Generated -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, maxW, maxH)
+        val bitmap = when {
+            ref is OeaImageRef.Generated -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, maxW, maxH)
+            ref is OeaImageRef.Bundled && ref.resId == 0 -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, maxW, maxH)
             else -> runCatching { OeaThemeStore.decodeScaled(maxW, maxH) { stream(context, ref) } }.getOrNull()
         } ?: return null
         cache.put(key, bitmap)
@@ -286,8 +294,9 @@ object OeaThemeImages {
      * Android's decoder; generated artwork is drawn at exactly this size, which is
      * why the wallpaper applier asks here instead of opening a stream.
      */
-    fun renderForWallpaper(context: Context, ref: OeaImageRef, width: Int, height: Int): Bitmap? = when (ref) {
-        is OeaImageRef.Generated -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, width, height)
+    fun renderForWallpaper(context: Context, ref: OeaImageRef, width: Int, height: Int): Bitmap? = when {
+        ref is OeaImageRef.Generated -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, width, height)
+        ref is OeaImageRef.Bundled && ref.resId == 0 -> com.oea.launcher.wallpaper.OeaArtwork.render(ref.name, width, height)
         else -> runCatching { OeaThemeStore.decodeScaled(width, height) { stream(context, ref) } }.getOrNull()
     }
 

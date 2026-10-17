@@ -65,6 +65,12 @@ dependencies {
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
 
+    // EMAGE and VIP show your whole library, not a page of it, so their grids are
+    // virtualised (recyclerview) and a picture's details are read from the file
+    // itself (exifinterface) instead of being described as a placeholder.
+    implementation libs.androidx.recyclerview
+    implementation libs.androidx.exifinterface
+
     // The stability rules (fault policy), the theme catalogue, the wave detector
     // and the bundled-wallpaper model are pure Kotlin, so they are covered by
     // fast JVM tests rather than a device.

@@ -20,9 +20,9 @@ import java.util.Locale
  * - Views: Month, Week, Day, Agenda, Year
  * - Events: title, time, location, description, category (Work/Personal/Study/Health/Other), color, reminder (none/5m/15m/30m/1h/1d), recurring (none/daily/weekly/monthly/yearly), all-day
  * - Search events
- * - Import/export via share (ICS placeholder) and JSON backup
+ * - Backup and restore: OEA's own JSON, or a real .ics file both ways
  * - Categories with colors, filter
- * - Lunar calendar optional display (best-effort)
+ * - Moon phase for the selected day, from the synodic cycle
  * - Week start: Sunday/Monday setting
  * - Integration with OEA modes: Focus shows only Work, Study shows Study, etc.
  * - Widgets: calendar widget shows today's events
@@ -33,7 +33,6 @@ object OeaCalendarApp {
     private const val KEY_EVENTS = "events_v2"
     private const val KEY_VIEW = "view_mode"
     private const val KEY_WEEK_START = "week_start_monday"
-    private const val KEY_LUNAR = "show_lunar"
     private const val SEP_ROW = "\u001E"
     private const val SEP_FIELD = "\u001F"
 
@@ -121,6 +120,191 @@ object OeaCalendarApp {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    private const val REQUEST_IMPORT = 1005
+
+    /** Set while the file picker is open: what to report once the file is read. */
+    private var pendingImport: ((added: Int, skipped: Int) -> Unit)? = null
+
+    /**
+     * The one activity result the calendar needs: the imported file. Everything
+     * else about a picked document happens here so no screen has to remember it.
+     */
+    internal fun handleResult(host: Activity, requestCode: Int, resultCode: Int, data: android.content.Intent?): Boolean {
+        val pending = pendingImport ?: return false
+        if (requestCode != REQUEST_IMPORT) return false
+        pendingImport = null
+        if (resultCode != Activity.RESULT_OK) return true
+        val uri = data?.data ?: return true
+        java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+            val text = runCatching {
+                host.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()
+            val parsed = text?.let { if (it.contains("BEGIN:VCALENDAR")) fromIcs(it) else decode(it) } ?: emptyList()
+            val existing = decode(prefs(host).getString(KEY_EVENTS, ""))
+            val identity = { e: Event -> "${e.year}-${e.month}-${e.day}|${e.title.lowercase(Locale.getDefault())}|${e.time}" }
+            val known = existing.map(identity).toSet()
+            val fresh = parsed.filter { !known.contains(identity(it)) }
+            val skipped = parsed.size - fresh.size
+            val withTimes = ArrayList(fresh)
+            // Same title and day but a different time is a second occurrence, not a
+            // duplicate; a clash on the id would corrupt the store, so re-stamp them.
+            withTimes.replaceAll { it.copy(id = System.nanoTime() + (it.hashCode().toLong() and 0xFFFF)) }
+            prefs(host).edit().putString(KEY_EVENTS, encode(existing + withTimes)).apply()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                runCatching { pending(withTimes.size, skipped) }
+            }
+        }
+        return true
+    }
+
+    /** Writes the visible events out as an iCalendar file, other apps' format. */
+    internal fun toIcs(events: List<Event>): String = buildString {
+        appendLine("BEGIN:VCALENDAR")
+        appendLine("VERSION:2.0")
+        appendLine("PRODID:-//OEA//Calendar//EN")
+        appendLine("CALSCALE:GREGORIAN")
+        appendLine("METHOD:PUBLISH")
+        events.forEach { event ->
+            appendLine("BEGIN:VEVENT")
+            appendLine("UID:oea-${event.id}@local")
+            appendLine("DTSTAMP:${stamp()}")
+            val day = "%04d%02d%02d".format(event.year, event.month + 1, event.day)
+            if (event.allDay || event.time.isBlank()) {
+                appendLine("DTSTART;VALUE=DATE:$day")
+                appendLine("DTEND;VALUE=DATE:$day")
+            } else {
+                appendLine("DTSTART:${day}T${event.time.replace(":", "")}00")
+                appendLine(if (event.endTime.isBlank()) "DTEND:${day}T${event.time.replace(":", "")}00" else "DTEND:${day}T${event.endTime.replace(":", "")}00")
+            }
+            appendLine("SUMMARY:${escapeIcs(event.title)}")
+            if (event.location.isNotBlank()) appendLine("LOCATION:${escapeIcs(event.location)}")
+            if (event.desc.isNotBlank()) appendLine("DESCRIPTION:${escapeIcs(event.desc)}")
+            when (event.recurrence.uppercase(Locale.getDefault())) {
+                "DAILY" -> appendLine("RRULE:FREQ=DAILY")
+                "WEEKLY" -> appendLine("RRULE:FREQ=WEEKLY")
+                "MONTHLY" -> appendLine("RRULE:FREQ=MONTHLY")
+                "YEARLY" -> appendLine("RRULE:FREQ=YEARLY")
+                else -> Unit
+            }
+            if (event.reminderMin > 0) {
+                appendLine("BEGIN:VALARM")
+                appendLine("ACTION:DISPLAY")
+                appendLine("DESCRIPTION:${escapeIcs(event.title)}")
+                appendLine("TRIGGER:-PT${event.reminderMin}M")
+                appendLine("END:VALARM")
+            }
+            appendLine("END:VEVENT")
+        }
+        appendLine("END:VCALENDAR")
+    }
+
+    /** Reads an iCalendar file. Only the properties OEA can actually show are taken. */
+    internal fun fromIcs(text: String): List<Event> {
+        val unfolded = text.replace("\r\n[ \t]".toRegex(), "").replace("\n[ \t]".toRegex(), "")
+        val out = ArrayList<Event>()
+        var block: Map<String, String>? = null
+        val builder = LinkedHashMap<String, String>()
+        unfolded.lineSequence().forEach { rawLine ->
+            val line = rawLine.trim()
+            when {
+                line == "BEGIN:VEVENT" -> builder.clear()
+                line == "END:VEVENT" -> {
+                    if (builder.containsKey("SUMMARY") || builder.containsKey("DTSTART")) out += toEvent(HashMap(builder))
+                    builder.clear()
+                }
+                line.contains(":") && builder.isNotEmpty() -> {
+                    val key = line.substringBefore(':').substringBefore(';').uppercase(Locale.getDefault())
+                    val value = line.substringAfter(':')
+                    if (builder[key] == null) builder[key] = value
+                }
+                line.startsWith("BEGIN:VTIMEZONE") -> builder.clear()
+            }
+        }
+        return out
+    }
+
+    private fun toEvent(parts: Map<String, String>): Event {
+        val start = parts["DTSTART"].orEmpty()
+        val datePart = start.substringBefore('T').filter { it.isDigit() }
+        val year = datePart.take(4).toIntOrNull() ?: 1970
+        val month = (datePart.drop(4).take(2).toIntOrNull() ?: 1) - 1
+        val day = datePart.drop(6).take(2).toIntOrNull() ?: 1
+        val allDay = !start.contains('T') || start.contains("VALUE=DATE")
+        val time = if (allDay) "" else start.substringAfter('T', "").take(4).let {
+            if (it.length == 4) "${it.substring(0, 2)}:${it.substring(2)}" else ""
+        }
+        val endTime = parts["DTEND"].orEmpty().substringAfter('T', "").take(4).let {
+            if (it.length == 4 && !allDay) "${it.substring(0, 2)}:${it.substring(2)}" else ""
+        }
+        val rrule = parts["RRULE"].orEmpty().uppercase(Locale.getDefault())
+        val recurrence = when {
+            "FREQ=DAILY" in rrule -> "DAILY"
+            "FREQ=WEEKLY" in rrule -> "WEEKLY"
+            "FREQ=MONTHLY" in rrule -> "MONTHLY"
+            "FREQ=YEARLY" in rrule -> "YEARLY"
+            else -> "NONE"
+        }
+        val trigger = parts["TRIGGER"].orEmpty()
+        val minutes = Regex("PT(\\d+)M").find(trigger)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        return Event(
+            id = (parts["UID"].orEmpty().filter { it.isDigit() }.toLongOrNull() ?: System.nanoTime()) and Long.MAX_VALUE,
+            year = year, month = month, day = day,
+            title = unescapeIcs(parts["SUMMARY"].orEmpty().ifBlank { "Event" }),
+            time = time, endTime = endTime,
+            location = unescapeIcs(parts["LOCATION"].orEmpty()),
+            desc = unescapeIcs(parts["DESCRIPTION"].orEmpty()),
+            category = "OTHER", reminderMin = minutes, recurrence = recurrence, allDay = allDay
+        )
+    }
+
+    private fun escapeIcs(value: String): String = value
+        .replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\n", "\\n")
+
+    private fun unescapeIcs(value: String): String = value
+        .replace("\\n", "\n")
+        .replace("\\,", ",")
+        .replace("\\;", ";")
+        .replace("\\\\", "\\")
+
+    private fun stamp(): String {
+        val format = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US)
+        return format.format(java.util.Date())
+    }
+
+    /**
+     * The moon for one day, from the synodic cycle. It is arithmetic against a known
+     * new moon rather than an ephemeris, so it is within a day — which is all a
+     * calendar row can show anyway.
+     */
+    private fun moonPhase(cal: Calendar): String {
+        val knownNewMoon = 946147200000L // 31 Dec 1999 23:14 UTC
+        val synodic = 29.530588853f * 24f * 60f * 60f * 1000f
+        val days = cal.timeInMillis - knownNewMoon
+        val cycle = ((days % synodic) / synodic).let { if (it < 0f) it + 1f else it }
+        return when {
+            cycle < 0.033f || cycle > 0.967f -> "🌑 new moon"
+            cycle < 0.22f -> "🌒 waxing crescent"
+            cycle < 0.28f -> "🌓 first quarter"
+            cycle < 0.47f -> "🌔 waxing gibbous"
+            cycle < 0.53f -> "🌕 full moon"
+            cycle < 0.72f -> "🌖 waning gibbous"
+            cycle < 0.78f -> "🌗 last quarter"
+            else -> "🌘 waning crescent"
+        }
+    }
+
+    private fun shareText(host: Activity, type: String, name: String, body: String) {
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND)
+            .setType(type)
+            .putExtra(android.content.Intent.EXTRA_SUBJECT, name)
+            .putExtra(android.content.Intent.EXTRA_TEXT, body)
+        runCatching { host.startActivity(android.content.Intent.createChooser(intent, "Share $name")) }
+            .onFailure { android.widget.Toast.makeText(host, "Nothing here accepts text", android.widget.Toast.LENGTH_SHORT).show() }
+    }
+
     private fun decode(raw: String?): List<Event> {
         if (raw.isNullOrBlank()) return emptyList()
         return raw.split(SEP_ROW).mapNotNull { row ->
@@ -149,6 +333,7 @@ object OeaCalendarApp {
 
     fun build(host: Activity, palette: OeaPalette): View {
         val kit = OeaKit(host, palette)
+        host.miniResultHook = { requestCode, resultCode, data -> handleResult(host, requestCode, resultCode, data) }
         val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         var currentCal = Calendar.getInstance()
         var selectedCal = Calendar.getInstance()
@@ -180,7 +365,7 @@ object OeaCalendarApp {
                     events += Event(
                         System.currentTimeMillis(),
                         calStart.get(Calendar.YEAR), calStart.get(Calendar.MONTH), calStart.get(Calendar.DAY_OF_MONTH),
-                        title, time, endTime, location, desc, "Event", 15, "None", allDay
+                        title, time, endTime, location, desc, "OTHER", 15, "NONE", allDay
                     )
                     prefs(host).edit().putString(KEY_EVENTS, encode(events)).apply()
                     selectedCal = calStart
@@ -429,7 +614,11 @@ object OeaCalendarApp {
 
             // Events for selected day (except agenda)
             if (viewMode != ViewMode.AGENDA) {
-                kit.sectionTitle(eventsHost, "Events • ${SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(selectedCal.time)} • ${filteredEvents.count { it.year == selectedCal.get(Calendar.YEAR) && it.month == selectedCal.get(Calendar.MONTH) && it.day == selectedCal.get(Calendar.DAY_OF_MONTH) }}")
+                val countDay = filteredEvents.count { it.year == selectedCal.get(Calendar.YEAR) && it.month == selectedCal.get(Calendar.MONTH) && it.day == selectedCal.get(Calendar.DAY_OF_MONTH) }
+                kit.sectionTitle(
+                    eventsHost,
+                    "Events • ${SimpleDateFormat("EEE d MMM yyyy", Locale.getDefault()).format(selectedCal.time)} • $countDay • ${moonPhase(selectedCal)}"
+                )
                 val dayEvents = filteredEvents.filter { it.year == selectedCal.get(Calendar.YEAR) && it.month == selectedCal.get(Calendar.MONTH) && it.day == selectedCal.get(Calendar.DAY_OF_MONTH) }
                 if (dayEvents.isEmpty()) {
                     kit.note(eventsHost, "No events for this day. Tap Add event.")
@@ -453,25 +642,49 @@ object OeaCalendarApp {
                 selectedCal = Calendar.getInstance()
                 refresh()
             }, LinearLayout.LayoutParams(-2, kit.dp(44)).apply { rightMargin = kit.dp(8) })
-            actions.addView(kit.quietButton("Export") {
+            actions.addView(kit.quietButton("Backup") {
                 val json = encode(filteredEvents)
-                kit.sheet("Export events", "${filteredEvents.size} events") { panel, _ ->
-                    kit.note(panel, json.take(8000))
-                    panel.addView(kit.buttonRow(
-                        kit.quietButton("Copy") {
-                            val cb = host.getSystemService(android.content.ClipboardManager::class.java) as android.content.ClipboardManager
-                            cb.setPrimaryClip(android.content.ClipData.newPlainText("OEA calendar", json))
-                            android.widget.Toast.makeText(host, "Copied", android.widget.Toast.LENGTH_SHORT).show()
-                        },
-                        kit.primaryButton("Share") {
-                            try { host.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, json), "Share calendar")) } catch (_: Throwable) {}
+                kit.sheet("Backup and import", "${filteredEvents.size} events in this view") { panel, _ ->
+                    val group = kit.group(panel)
+                    kit.row(group, R.drawable.oic_file_copy, "Copy the JSON", "OEA's own compact format") {
+                        runCatching {
+                            host.getSystemService(android.content.ClipboardManager::class.java)
+                                ?.setPrimaryClip(android.content.ClipData.newPlainText("OEA calendar", json))
+                            android.widget.Toast.makeText(host, "Calendar copied", android.widget.Toast.LENGTH_SHORT).show()
                         }
-                    ))
+                    }
+                    kit.row(group, R.drawable.oic_share_filled, "Share as .ics", "Google Calendar, Thunderbird and Apple Calendar read it") {
+                        shareText(host, "text/calendar", "oea-calendar.ics", toIcs(filteredEvents))
+                    }
+                    kit.row(group, R.drawable.oic_share_filled, "Share as JSON", "Read back into OEA anywhere") {
+                        shareText(host, "text/plain", "oea-calendar.json", json)
+                    }
+                    kit.row(group, R.drawable.oic_file_download, "Import a file", "Pick an .ics or an OEA JSON backup", chevron = true) {
+                        pendingImport = { added, skipped ->
+                            android.widget.Toast.makeText(
+                                host,
+                                if (added > 0) "$added event(s) added" + if (skipped > 0) ", $skipped already there" else ""
+                                else "That file had no events OEA could read",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                            refresh()
+                        }
+                        runCatching {
+                            host.startActivityForResult(
+                                android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                                    addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                                    type = "*/*"
+                                },
+                                REQUEST_IMPORT
+                            )
+                        }.onFailure { android.widget.Toast.makeText(host, "Android would not open the file picker", android.widget.Toast.LENGTH_SHORT).show() }
+                    }
+                    kit.note(panel, "Import keeps your existing events and skips anything that is already there by title, date and time. Device-calendar events are read from Android and never written back, so they are not part of a backup.")
                 }
             }, LinearLayout.LayoutParams(-2, kit.dp(44)))
             eventsHost.addView(actions)
 
-            kit.note(eventsHost, "OEA Calendar unique: 5 views (Month/Week/Day/Agenda/Year), categories with colors, reminders, recurring, search, import/export, lunar optional. Integration with OEA Modes: Focus shows Work only, Study shows Study. Widget shows today's events.")
+            kit.note(eventsHost, "Five views, categories with their own colour, reminders, repeating events, search, a backup you can read, .ics both ways and the moon phase of the day you selected. OEA's Modes narrow it: Focus shows Work, Study shows Study.")
         }
         refresh()
         return column

@@ -132,6 +132,25 @@ class EngineSettings internal constructor(context: Context) {
         set(v) = prefs.edit().putFloat("volume", v.coerceIn(0f, 1f)).apply()
 
     /**
+     * Menu and HUD scale, 0.85 to 1.5. Type, padding and touch targets grow
+     * together on purpose: a layout that enlarges only its text ends up with the
+     * buttons moved out from under the thumb that was aiming at them.
+     */
+    var uiScale: Float
+        get() = prefs.getFloat("ui_scale", 1f).coerceIn(0.85f, 1.5f)
+        set(v) = prefs.edit().putFloat("ui_scale", v.coerceIn(0.85f, 1.5f)).apply()
+
+    /** Pure-black grounds, white type and hard strokes for low-vision reading. */
+    var highContrastMenus: Boolean
+        get() = prefs.getBoolean("hc_menus", false)
+        set(v) = prefs.edit().putBoolean("hc_menus", v).apply()
+
+    /** No cross-fades, no slides — the screen just changes. */
+    var reducedMotion: Boolean
+        get() = prefs.getBoolean("reduced_motion", false)
+        set(v) = prefs.edit().putBoolean("reduced_motion", v).apply()
+
+    /**
      * Extra multiplier applied only while aiming down sights. Below 1 slows the
      * view down for precision; 1 keeps hip-fire feel.
      */

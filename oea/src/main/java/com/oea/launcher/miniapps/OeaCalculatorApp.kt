@@ -21,7 +21,11 @@ import java.util.Locale
  * - Standard: basic arithmetic with tape, history, memory, percentage, brackets
  * - Scientific: sin/cos/tan/log/ln/sqrt/power/factorial/pi/e, hyperbolic, inverse, degrees/radians, constants
  * - Programmer: binary/hex/octal/decimal, bitwise AND/OR/XOR/NOT, shifts
- * - Converter: length, weight, temperature, area, volume, speed, time, data, currency (offline cached rates + online fetch placeholder)
+ * - Converter: ten families (length, mass, temperature, area, volume, speed, time,
+ *   data, pressure, energy) as exact factors against one base unit each, live as you
+ *   type, with swap and a send-to-display. Currency is a family of its own whose
+ *   numbers you set and OEA keeps on the phone — no fetch is attempted, so nothing on
+ *   screen pretends to be today's rate.
  * - Graphing: simple y=f(x) plotter with Canvas
  *
  * Unique:
@@ -230,60 +234,123 @@ object OeaCalculatorApp {
                 kit.note(content, "Programmer mode: supports BIN (0b), HEX (0x), OCT (0o), DEC. Bitwise ops work on integers.")
             }
             CalcMode.CONVERTER -> {
-                val converters = listOf(
-                    "Length" to listOf("m→ft" to 3.28084, "km→mi" to 0.621371, "cm→in" to 0.393701),
-                    "Weight" to listOf("kg→lb" to 2.20462, "g→oz" to 0.035274),
-                    "Temperature" to listOf("C→F" to 0.0, "F→C" to 0.0),
-                    "Data" to listOf("MB→GB" to 0.001, "GB→MB" to 1000.0)
-                )
-                converters.forEach { (cat, units) ->
-                    kit.sectionTitle(content, cat)
-                    val g = kit.group(content)
-                    units.forEach { (conv, factor) ->
-                        kit.row(g, R.drawable.oic_calculate, conv, "Factor $factor") {
-                            kit.prompt("Convert $conv", "Enter value", "Value") { input ->
-                                val v = input.toDoubleOrNull() ?: return@prompt "Invalid number"
-                                val res = when {
-                                    conv == "C→F" -> v * 9/5 + 32
-                                    conv == "F→C" -> (v - 32) * 5/9
-                                    else -> v * factor
-                                }
-                                expression = "$v $conv"
-                                result = format(res)
-                                show()
-                                renderTape()
-                                null
-                            }
-                        }
+                // One family at a time, one multiply against the family's base unit.
+                // Currency is in the same list but its factors are the user's numbers,
+                // because OEA has no network in this mode and will not pretend otherwise.
+                var fam = OeaUnits.LENGTH
+                var fromIndex = 1
+                var toIndex = 0
+
+                val amount = kit.field("Amount", "1", numeric = true)
+                val out = android.widget.TextView(host).apply {
+                    textSize = 30f
+                    setTextColor(palette.text)
+                    setPadding(kit.dp(2), kit.dp(6), kit.dp(2), kit.dp(2))
+                }
+                val body = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+
+                fun names(f: OeaUnits.Family): List<String> =
+                    if (OeaUnits.isCurrency(f)) OeaUnits.CURRENCY_CODES else f.all.map { it.symbol }
+
+                fun convert(): Double? {
+                    val value = amount.text.toString().replace(',', '.').toDoubleOrNull() ?: return null
+                    val names = names(fam)
+                    return when {
+                        OeaUnits.isCurrency(fam) ->
+                            OeaUnits.convertCurrency(host, names[fromIndex], names[toIndex], value)
+                        OeaUnits.isTemperature(fam) ->
+                            OeaUnits.temperature(value, names[fromIndex], names[toIndex])
+                        else -> value * fam.all[fromIndex].toBase / fam.all[toIndex].toBase
                     }
                 }
-                content.addView(kit.primaryButton("Currency converter (online)", R.drawable.oic_public) {
-                    kit.sheet("Currency", "Offline cached rates, online fetch when internet available") { panel, _ ->
-                        kit.note(panel, "Currency needs internet. OEA caches last rates. Enter amount and select pair.")
-                        val amountField = kit.field("Amount", "1")
-                        val fromField = kit.field("From (e.g., USD)", "USD")
-                        val toField = kit.field("To (e.g., EUR)", "EUR")
-                        panel.addView(amountField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-                        panel.addView(fromField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-                        panel.addView(toField, LinearLayout.LayoutParams(-1, -2))
-                        panel.addView(kit.primaryButton("Convert") {
-                            val amt = amountField.text.toString().toDoubleOrNull() ?: 1.0
-                            val from = fromField.text.toString().trim().uppercase()
-                            val to = toField.text.toString().trim().uppercase()
-                            // Fake offline conversion with placeholder rates
-                            val rates = mapOf("USD" to 1.0, "EUR" to 0.92, "GBP" to 0.79, "NGN" to 1550.0, "JPY" to 149.0)
-                            val fromRate = rates[from] ?: 1.0
-                            val toRate = rates[to] ?: 1.0
-                            val res = amt / fromRate * toRate
-                            expression = "$amt $from → $to"
-                            result = format(res)
+
+                fun label(): String {
+                    val value = convert() ?: return "Enter a number"
+                    val names = names(fam)
+                    return "${OeaUnits.show(value)} ${names[toIndex]}"
+                }
+
+                fun refresh() {
+                    out.text = label()
+                }
+
+                fun pick(which: Int) {
+                    val names = names(fam)
+                    val chosen = if (which == 0) fromIndex else toIndex
+                    kit.choose(
+                        if (which == 0) "Convert from" else "Convert to",
+                        fam.name,
+                        names,
+                        chosen.coerceIn(0, names.size - 1)
+                    ) { index ->
+                        if (which == 0) fromIndex = index else toIndex = index
+                        refresh()
+                    }
+                }
+
+                fun build() {
+                    body.removeAllViews()
+                    val chips = LinearLayout(host).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(0, kit.dp(2), 0, kit.dp(6))
+                    }
+                    OeaUnits.families.forEach { f ->
+                        chips.addView(
+                            kit.chip(f.name, f.name == fam.name) {
+                                fam = f
+                                fromIndex = if (OeaUnits.isCurrency(f)) 0 else 1
+                                toIndex = 0
+                                build()
+                            },
+                            LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(6) }
+                        )
+                    }
+                    body.addView(kit.hscroll(chips))
+                    body.addView(amount, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+                    body.addView(out, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(4) })
+                    val group = kit.group(body)
+                    kit.row(group, R.drawable.oic_arrow_back, "From", fam.name, value = names(fam)[fromIndex.coerceIn(0, names(fam).lastIndex)]) { pick(0) }
+                    kit.row(group, R.drawable.oic_chevron_right, "To", fam.name, value = names(fam)[toIndex.coerceIn(0, names(fam).lastIndex)]) { pick(1) }
+                    kit.row(group, R.drawable.oic_splitscreen, "Swap the pair", "Same family, other direction", chevron = false) {
+                        val t = fromIndex
+                        fromIndex = toIndex
+                        toIndex = t
+                        build()
+                    }
+                    kit.row(group, R.drawable.oic_calculate, "Send to the display", "Puts the answer where the keypad is", chevron = false) {
+                        val value = convert()
+                        if (value == null) {
+                            android.widget.Toast.makeText(host, "Nothing to send — the amount is not a number", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            val names = names(fam)
+                            expression = "1 ${names[fromIndex]} → ${names[toIndex]} (${fam.name.lowercase(java.util.Locale.getDefault())})"
+                            result = OeaUnits.show(value)
                             show()
                             renderTape()
-                            android.widget.Toast.makeText(host, "$amt $from = ${format(res)} $to (offline rates)", android.widget.Toast.LENGTH_LONG).show()
-                        }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
-                        kit.note(panel, "Offline rates are approximate. For real rates, internet needed — OEA would fetch from exchangerate-api.com with API key, cached 1h.")
+                        }
                     }
-                }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
+                    if (OeaUnits.isCurrency(fam)) {
+                        kit.row(group, R.drawable.oic_tune, "Set your own rates", "OEA stores these; it never fetches them", chevron = false) {
+                            editCurrencyRates(host, kit, palette)
+                            build()
+                        }
+                        kit.note(
+                            body,
+                            "Rates are the numbers you left in this screen (or OEA's rounded approximations if you changed none). They are held on the phone, not looked up, so they will not move with the market — update them when your bank does."
+                        )
+                    } else {
+                        kit.note(body, "${fam.name} converts against one base unit (${fam.base.label}), exactly. Temperature is the only family with an offset, and it is computed as one.")
+                    }
+                    refresh()
+                }
+
+                amount.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                    override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                    override fun afterTextChanged(t: android.text.Editable?) = refresh()
+                })
+                content.addView(body)
+                build()
             }
             CalcMode.GRAPHING -> {
                 val graphView = GraphView(host, palette)
@@ -378,6 +445,59 @@ object OeaCalculatorApp {
                 Evaluator.evaluate(expr, true)
             } catch (_: Throwable) { null }
         }
+    }
+
+    /**
+     * Currency editor. Every number here is one the user typed and OEA kept, and
+     * the screen says so: this build has no network call for rates, so it would be
+     * a lie to show a "live" figure. Pick the base, then set what one unit of it
+     * buys in each other currency.
+     */
+    private fun editCurrencyRates(host: Activity, kit: OeaKit, palette: OeaPalette) {
+        fun showRates() {
+            val rates = OeaUnits.rates(host)
+            val base = OeaUnits.base(host)
+            kit.sheet("Currency rates", "One $base = … · kept on this phone") { panel, _ ->
+                kit.note(panel, "Nothing is fetched. These are the figures stored here — set them from your bank or a rate you trust, and they stay until you change them.")
+                kit.row(kit.group(panel), R.drawable.oic_public, "Base currency", "Everything is measured against this", value = base, chevron = false) {
+                    kit.choose("Base currency", null, OeaUnits.CURRENCY_CODES, OeaUnits.CURRENCY_CODES.indexOf(base).coerceAtLeast(0)) { index ->
+                        val newBase = OeaUnits.CURRENCY_CODES[index]
+                        val perOld = rates[base] ?: 1.0
+                        val perNew = rates[newBase] ?: 1.0
+                        OeaUnits.CURRENCY_CODES.forEach { code ->
+                            OeaUnits.setRate(host, code, (rates[code] ?: perOld) / perOld * perNew)
+                        }
+                        OeaUnits.setBase(host, newBase)
+                        showRates()
+                    }
+                }
+                val group = kit.group(panel)
+                OeaUnits.CURRENCY_CODES.forEach { code ->
+                    val value = rates[code] ?: 1.0
+                    kit.row(
+                        group,
+                        if (code == base) R.drawable.oic_star_fill else R.drawable.oic_circle,
+                        code,
+                        if (code == base) "the base — always 1" else "per $base",
+                        value = if (code == base) "1" else OeaUnits.show(value),
+                        chevron = false
+                    ) {
+                        if (code == base) {
+                            android.widget.Toast.makeText(host, "$code is the base", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            kit.prompt("One $base in $code", "Set the rate you want OEA to use", "$code per $base", if (code == base) "1" else OeaUnits.show(value), numeric = true) { input ->
+                                val parsed = input.replace(",", ".").toDoubleOrNull()
+                                if (parsed == null || parsed <= 0.0) "That is not a rate" else {
+                                    OeaUnits.setRate(host, code, parsed)
+                                    null
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        showRates()
     }
 
     private fun keyButton(host: Activity, kit: OeaKit, key: String, small: Boolean = false, onClick: () -> Unit): View {

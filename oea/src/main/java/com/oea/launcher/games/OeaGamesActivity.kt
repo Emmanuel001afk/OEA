@@ -819,7 +819,17 @@ open class OeaGamesActivity : Activity(), SessionListener {
         kit.stepperRow(g, R.drawable.oic_gesture, "Aim sensitivity", "Send Off and other shooters", (s.lookSensitivity * 10f).toInt(), 2, 30, { String.format(java.util.Locale.US, "%.1f×", it / 10f) }) { s.lookSensitivity = it / 10f }
         kit.stepperRow(g, R.drawable.oic_gesture, "ADS sensitivity", "Extra multiplier while aiming down sights", (s.adsSensitivity * 10f).toInt(), 3, 15, { String.format(java.util.Locale.US, "%.0f%%", it * 10f) }) { s.adsSensitivity = it / 10f }
         kit.stepperRow(g, R.drawable.oic_tune, "Turn speed limit", "Caps how fast the view can turn — glitch-proof aiming", (s.turnSpeedLimit / 10f).toInt(), 0, 36, { if (it == 0) "Off" else String.format(java.util.Locale.US, "%d°/s", it * 10) }) { s.turnSpeedLimit = it * 10f }
-        kit.note(box, "Thermal protection steps quality down before your phone throttles, and Android's Game Mode (battery or performance) is respected. Changes apply the next time a game starts.")
+        // ------------------------------------------------------------ reading the screen
+        // Accessibility that changes what the games themselves draw, so it lives with
+        // the other engine settings rather than inside one game's menu.
+        kit.sectionTitle(box, "Reading the screen")
+        val access = kit.group(box)
+        kit.stepperRow(access, R.drawable.oic_format_size, "Menu size", "Type, padding and touch targets in the games' screens", (s.uiScale * 100).toInt(), 85, 150, { "$it%" }) {
+            s.uiScale = it / 100f
+        }
+        kit.switchRow(access, R.drawable.oic_contrast, "High contrast menus", "Black grounds, white type, hard edges — a game's own accent survives", s.highContrastMenus) { s.highContrastMenus = it }
+        kit.switchRow(access, R.drawable.oic_animation, "No fading or sliding", "Screens change at once; nothing cross-fades under your finger", s.reducedMotion) { s.reducedMotion = it }
+        kit.note(box, "These three reach the games' own screens — the menus and sheets inside Send Off, Chess and Endless Days, including the versions installed as separate apps. Android's system font scale still applies on top for OEA's launcher, and nothing here changes how a game plays: aim, quality and frame rate stay where they are above. Thermal protection steps quality down before your phone throttles, and Android's Game Mode (battery or performance) is respected; those apply the next time a game starts.")
 
         // ------------------------------------------------------------ diagnosis
         // Everything needed to explain "a game will not start", in one place and
