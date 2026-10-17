@@ -14,10 +14,44 @@ android {
         // WebRTC ships native code; every current phone is covered by these two ABIs.
         ndk { abiFilters.addAll(["arm64-v8a", "armeabi-v7a"]) }
     }
-    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.debug } }
+    buildTypes {
+        release {
+            // R8 removes the code and resources nothing reaches any more, and
+            // the rules in proguard-rules.pro keep every name OEA reports or
+            // stores intact. This is the single largest APK win after the
+            // wallpapers; see docs/apk-size-and-game-independence-2026-10-17.md.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            signingConfig signingConfigs.debug
+        }
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
+    }
+    packaging {
+        // Native libraries are compressed in the APK instead of being stored
+        // page-aligned. Android extracts them on install, so the download is
+        // much smaller (WebRTC is by far the biggest thing OEA ships).
+        jniLibs { useLegacyPackaging = true }
+        resources {
+            // Kotlin metadata, tooling files and duplicate licences are dead
+            // weight in a shipped APK.
+            excludes += [
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/*.kotlin_module",
+                "/META-INF/*.version",
+                "/META-INF/DEPENDENCIES",
+                "/META-INF/NOTICE",
+                "/META-INF/NOTICE.txt",
+                "/META-INF/LICENSE",
+                "/META-INF/LICENSE.txt",
+                "/META-INF/services/javax.annotation.processing.Processor",
+                "DebugProbesKt.bin",
+                "kotlin-tooling-metadata.json",
+            ]
+        }
     }
     // Pure-logic unit tests (wave detector, theme catalogue) never call real
     // Android code; framework stubs return defaults instead of throwing.

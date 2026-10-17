@@ -16,12 +16,12 @@ Modules:
 
 - `oea` — the launcher (`com.oea.launcher`), including the games hub that sits behind the game entries.
 - `oea-engine` — the OEA Game Engine (`com.oea.engine`), with no launcher dependency.
-- `oea-games` — first-party games (`com.oea.games`), written only against the engine's public API.
+- `oea-games` — first-party games (`com.oea.games`), written only against the engine's public API, plus `com.oea.games.ui` (the games' own copy of the launcher's visual language, so an installed game looks like OEA without depending on it).
 - `oea-game-arena`, `oea-game-chess`, `oea-game-runner` — separate, complete game apps (own launcher icon, own task, Android Game category, front menu, match setup, controls & aim settings, and their own multiplayer host/join). They reuse `oea-games` and the engine and never need the launcher to run a match.
 
 ## OEA Games and the OEA Game Engine
 
-OEA ships its own game engine and games. **Send Off, Chess and Endless Days live as independent apps** (`com.oea.arena`, `com.oea.chess`, `com.oea.runner`; the package and protocol ids stay stable for existing installs): tapping their icon opens a real game app with its own front menu (Play, Match setup, Play with friends, Controls & aim, About), its own multiplayer (host on Wi-Fi/hotspot or with an online code, join nearby or with a code) and its own settings. Send Off now also exposes a live **Character Studio** and a shared physics-driven VFX pipeline: modular face/body/clothing specs apply to the mesh in real time, fluid gas carries smoke/fog/fire around terrain and walls, sparks collide, weather changes the character and dynamic point lights reach skin and clothing. Each game also has its own launcher entry inside OEA (Endless Days, Send Off, Chess), which opens that game's front menu; Game Boost finds all three through the engine registry. The shared games hub sits behind these entries. The installed app is used for solo and same-device play; if the app is missing it says so and only runs a match inside OEA Games after an explicit choice. Hub-hosted networked lobbies keep running in the hub process. Build the games with `:oea-game-arena:assembleDebug`, `:oea-game-chess:assembleDebug` and `:oea-game-runner:assembleDebug`. See [OEA Game Engine](docs/oea-game-engine.md) for the architecture, API, multiplayer protocol and a step-by-step guide to writing new games, and [Games independent, Send Off competitive](docs/games-independent-and-competitive-2026-10-16.md) for the latest restructuring and public game branding.
+OEA ships its own game engine and games. **Send Off, Chess and Endless Days live as independent apps** (`com.oea.arena`, `com.oea.chess`, `com.oea.runner`; the package and protocol ids stay stable for existing installs): tapping their icon opens a real game app with its own front menu (Play, Match setup, Play with friends, Controls & aim, About), its own multiplayer (host on Wi-Fi/hotspot or with an online code, join nearby or with a code) and its own settings. Send Off now also exposes a live **Character Studio** and a shared physics-driven VFX pipeline: modular face/body/clothing specs apply to the mesh in real time, fluid gas carries smoke/fog/fire around terrain and walls, sparks collide, weather changes the character and dynamic point lights reach skin and clothing. Each game also has its own launcher entry inside OEA (Endless Days, Send Off, Chess), which is that game's own activity; Game Boost finds all three through the engine registry, and its list of game screens is generated from those classes so the two cannot drift apart. Each installed app registers only its own game with the engine. The shared games hub sits behind these entries. The installed app is used for solo and same-device play; if the app is missing it says so and only runs a match inside OEA Games after an explicit choice. Hub-hosted networked lobbies keep running in the hub process. Build the games with `:oea-game-arena:assembleDebug`, `:oea-game-chess:assembleDebug` and `:oea-game-runner:assembleDebug`. See [OEA Game Engine](docs/oea-game-engine.md) for the architecture, API, multiplayer protocol and a step-by-step guide to writing new games, and [Games independent, Send Off competitive](docs/games-independent-and-competitive-2026-10-16.md) for the latest restructuring and public game branding.
 
 - **Engine**: OpenGL ES 3 renderer with automatic instancing, frustum culling, sun shadow maps, procedural sky, bloom, FXAA, dynamic resolution and supersampling; sprites, fonts and an immediate-mode HUD; particles; touch gestures, virtual joystick/buttons/look pad, gamepad and keyboard; synthesised sound effects and music; physics with ray casts, terrain and a character controller; ECS; deterministic RNG and noise; N-dimensional geometry for 4D+ (rotations in any plane, projection to 3D).
 - **Performance**: highest display refresh rate, Android ADPF hint sessions, device tiering, thermal and Game Mode awareness, optional FPS overlay.
@@ -76,10 +76,17 @@ OEA does not build, run, or import Launcher3/Lawnchair source code. The reposito
 
 `./gradlew :oea:assembleRelease`
 
+The three games are separate apps: `./gradlew :oea-game-runner:assembleRelease :oea-game-arena:assembleRelease :oea-game-chess:assembleRelease`
+(`com.oea.runner`, `com.oea.arena`, `com.oea.chess`). CI builds all four and attaches them to the `oea-latest` release, so the games can actually be installed.
+
 Unit tests: `./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTest :oea:testDebugUnitTest`
 (the launcher's tests cover the stability rules in `OeaFaultPolicy`, the wave detector and the theme catalogue, which are pure Kotlin)
 
+Static check: `python3 tools/check-kotlin.py` — bracket balance over a real Kotlin lexer, toolkit call resolution, OEA symbol resolution, and the registration invariants that a compiler cannot see (a mini-app or game listed in Kotlin but missing from the manifest, a game entry Game Boost does not recognise). It runs as the first step of both APK workflows.
+
 The resulting application ID is `com.oea.launcher`.
+
+Release builds run R8 (`minifyEnabled` + `shrinkResources`) with the rules in `oea/proguard-rules.pro` and `gradle/proguard-game.pro`, ship only the `arm64-v8a` and `armeabi-v7a` native libraries, and store native libraries compressed. Every CI run prints the resulting APK sizes in the workflow summary. See [Independent games, same polish, smaller APKs](docs/games-independent-polish-and-apk-size-2026-10-17.md).
 
 ### Updating without losing your Home
 

@@ -58,6 +58,8 @@ jobs:
           cache: gradle
       - name: Make Gradle executable
         run: chmod +x ./gradlew
+      - name: Static check (Kotlin structure, app registration, manifests)
+        run: python3 tools/check-kotlin.py
       - name: Use the stable OEA signing key (optional)
         # Without this, every runner creates a new random debug key, so each
         # APK has a different signature and cannot update the previous one
@@ -85,7 +87,7 @@ jobs:
           grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
-      - name: Build standalone OEA Launcher APK
+      - name: Build OEA Launcher and game APKs
         run: ./gradlew :oea:assembleRelease :oea-game-arena:assembleRelease :oea-game-chess:assembleRelease :oea-game-runner:assembleRelease --stacktrace
       - name: Verify APK identity
         run: |
@@ -100,12 +102,28 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
+      - name: Collect the game APKs
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/games"
+          for dir in oea-game-runner oea-game-arena oea-game-chess; do
+            apk="$(find "$dir/build/outputs/apk" -type f -name '*.apk' -print -quit)"
+            test -n "$apk" || { echo "ERROR: no APK built for $dir"; exit 1; }
+            cp "$apk" "$RUNNER_TEMP/games/"
+          done
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: oea-launcher-apk-after-merge
           path: ${{ runner.temp }}/OEA-latest.apk
-          retention-days: 1
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload game APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: oea-game-apks-after-merge
+          path: ${{ runner.temp }}/games/*.apk
+          retention-days: 7
           if-no-files-found: error
       - name: Publish latest APK release
         env:
@@ -113,8 +131,9 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+          ASSETS=("$RUNNER_TEMP/OEA-latest.apk" "$RUNNER_TEMP"/games/*.apk)
           if gh release view oea-latest --repo "$REPOSITORY" >/dev/null 2>&1; then
-            gh release upload oea-latest "$RUNNER_TEMP/OEA-latest.apk" --repo "$REPOSITORY" --clobber
+            gh release upload oea-latest "${ASSETS[@]}" --repo "$REPOSITORY" --clobber
           else
-            gh release create oea-latest "$RUNNER_TEMP/OEA-latest.apk" --repo "$REPOSITORY" --title "OEA Latest" --notes "Latest standalone OEA Launcher build from main."
+            gh release create oea-latest "${ASSETS[@]}" --repo "$REPOSITORY" --title "OEA Latest" --notes "Latest OEA Launcher and OEA game builds from main."
           fi

@@ -1,18 +1,17 @@
 package com.oea.games
 
 import android.app.Activity
-import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Intent
-import android.os.Bundle
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.widget.CheckBox
-import android.widget.EditText
+import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import com.oea.engine.OeaEngine
@@ -32,22 +31,33 @@ import com.oea.engine.net.session.NetSession
 import com.oea.engine.net.session.OnlineInvite
 import com.oea.engine.net.session.SessionListener
 import com.oea.engine.net.session.SessionPhase
+import com.oea.games.ui.GameColors
+import com.oea.games.ui.GameCoverDrawable
+import com.oea.games.ui.GameInsets
+import com.oea.games.ui.GameKit
+import com.oea.games.ui.GamePalette
+import com.oea.games.ui.GameType
 
 /**
  * The heart of every standalone OEA game app. Each game subclasses this once
  * with a fixed game id; the app is then complete on its own:
  *
- *  - a front menu (Play, Match setup, Play with friends, Controls & aim, About);
+ *  - a real front screen: cover art, title, the match summary and the actions
+ *    (Play, Match setup, Play with friends, Controls & aim, About) as OEA rows;
  *  - match setup over the game's own options, remembered per game;
  *  - look / ADS sensitivity, invert-Y and a turn-speed limit, tuned live;
  *  - its own multiplayer: host on Wi-Fi or with an online code, join nearby
  *    games or with a code — no launcher, no hub required;
  *  - direct launch with extras (from the OEA Games hub or shortcuts).
  *
- * Nothing here depends on `com.oea.launcher`.
+ * Nothing here depends on `com.oea.launcher`. The chrome comes from
+ * [com.oea.games.ui.GameKit], the games' own copy of the launcher's visual
+ * language, so a separately installed game looks like OEA rather than like a
+ * stack of platform dialogs over an empty window.
  */
 open class OeaStandaloneGameActivity : Activity(), HostUi {
     protected open val standaloneGameId: String = ""
+
     private var host: GameHost? = null
     private val main = Handler(Looper.getMainLooper())
 
@@ -59,62 +69,91 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     /** True when the hub/automation launched us with extras: exit then finishes. */
     private var directLaunch = false
 
+    /** The palette and toolkit, tinted with this game's accent. */
+    private var palette: GamePalette = GameColors.palette()
+    private var kit: GameKit? = null
+
     // Multiplayer state (one session at a time, like the engine itself).
     private var browser: LanBrowser? = null
-    private var nearbyDialog: AlertDialog? = null
-    private var lobbyDialog: AlertDialog? = null
+    private var nearbyDialog: Dialog? = null
+    private var nearbyList: LinearLayout? = null
+    private var lobbyDialog: Dialog? = null
     private var lobbyStatus: TextView? = null
-    private var onlineInvite: OnlineInvite? = null
-    private var inviteDialog: AlertDialog? = null
+    private var inviteDialog: Dialog? = null
     private var lobbyMode = PlayMode.LAN
     private var pendingStart = false
+
+    private fun toolkit(): GameKit = kit ?: GameKit(this, palette).also { kit = it }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
             prepare()
         } catch (t: Throwable) {
-            try { Toast.makeText(this, "Game could not start: ${t.javaClass.simpleName}", Toast.LENGTH_LONG).show() } catch (_: Throwable) {}
-            try { finish() } catch (_: Throwable) {}
+            try {
+                Toast.makeText(this, "Game could not start: ${t.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            } catch (_: Throwable) {
+            }
+            try {
+                finish()
+            } catch (_: Throwable) {
+            }
         }
     }
 
     private fun prepare() {
-        try { OeaEngine.init(applicationContext) } catch (_: Throwable) {}
-        OeaGames.registerBuiltIns(applicationContext)
+        try {
+            OeaEngine.init(applicationContext)
+        } catch (_: Throwable) {
+        }
         val id = intent.getStringExtra(EXTRA_GAME_ID)?.takeIf { it.isNotBlank() } ?: standaloneGameId
-        val descriptor = try { OeaEngine.registry.find(id) } catch (_: Throwable) { null }
+        // This app is one game. Register just it, so the engine's registry (and
+        // therefore every "which games exist?" answer in this app) matches what
+        // the icon on the home screen promised.
+        OeaGames.registerBuiltIns(applicationContext, only = id.takeIf { it.isNotBlank() }?.let { listOf(it) })
+        val descriptor = try {
+            OeaEngine.registry.find(id)
+        } catch (_: Throwable) {
+            null
+        }
         if (descriptor == null) {
             Toast.makeText(this, "This game isn't available in this build.", Toast.LENGTH_LONG).show()
             finish()
             return
         }
         this.descriptor = descriptor
+        palette = GameColors.palette(descriptor.accent)
+        kit = null
+        GameInsets.edgeToEdge(window)
         descriptor.options.forEach { opt ->
-            chosenOptions[opt.id] = OeaEngine.settings.lastOption(descriptor.id, opt.id)?.takeIf { v -> opt.choices.any { it.value == v } } ?: opt.default
+            chosenOptions[opt.id] = OeaEngine.settings.lastOption(descriptor.id, opt.id)
+                ?.takeIf { v -> opt.choices.any { it.value == v } } ?: opt.default
         }
         if (Build.VERSION.SDK_INT >= 33) {
             try {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
                 ) { handleBack() }
-            } catch (_: Throwable) {}
+            } catch (_: Throwable) {
+            }
         }
         // Direct launch (hub, shortcut, automation): start the match at once.
         if (intent.hasExtra(EXTRA_GAME_ID) || intent.hasExtra(EXTRA_GAME_SEED) || intent.hasExtra(EXTRA_AUTO_START)) {
             directLaunch = true
-            val mode = runCatching { PlayMode.valueOf(intent.getStringExtra(EXTRA_GAME_MODE) ?: "SOLO") }.getOrDefault(PlayMode.SOLO)
+            val mode = runCatching { PlayMode.valueOf(intent.getStringExtra(EXTRA_GAME_MODE) ?: "SOLO") }
+                .getOrDefault(PlayMode.SOLO)
             val options = LinkedHashMap(chosenOptions)
             try {
                 intent.getBundleExtra(EXTRA_GAME_OPTIONS)?.let { bundle ->
                     bundle.keySet().forEach { key -> bundle.getString(key)?.let { options[key] = it } }
                 }
-            } catch (_: Throwable) {}
+            } catch (_: Throwable) {
+            }
             val players = parsePlayers(intent.getStringExtra(EXTRA_GAME_PLAYERS), descriptor)
             val session = NetSession.current?.takeIf { it.descriptor.id == descriptor.id && it.phase == SessionPhase.PLAYING }
             beginMatch(mode, options, intent.getLongExtra(EXTRA_GAME_SEED, System.nanoTime()), players, session)
         } else {
-            showFrontMenu()
+            showHome()
         }
     }
 
@@ -125,141 +164,199 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         return names.take(4).mapIndexed { i, n -> LocalPlayer(n, colors[i % colors.size]) }
     }
 
-    // ================================================================ front menu
-
-    private fun showFrontMenu() {
-        val d = descriptor ?: return
-        val items = arrayOf(
-            "Play",
-            "Match setup",
-            if (d.maxPlayers > 1) "Play with friends" else null,
-            "Controls & aim",
-            "About ${d.title}",
-        ).filterNotNull().toTypedArray()
-        val builder = AlertDialog.Builder(this)
-            .setTitle(d.title)
-            .setMessage(d.tagline)
-            .setItems(items) { _, which ->
-                when (items[which]) {
-                    "Play" -> beginMatch(PlayMode.SOLO, chosenOptions, System.nanoTime(), parsePlayers(null, d), null)
-                    "Match setup" -> showMatchSetup()
-                    "Play with friends" -> showFriendsMenu()
-                    "Controls & aim" -> showControlsDialog()
-                    else -> AlertDialog.Builder(this).setTitle(d.title).setMessage(d.description)
-                        .setPositiveButton("Back") { _, _ -> showFrontMenu() }
-                        .setOnCancelListener { showFrontMenu() }
-                        .show()
-                }
-            }
-            .setCancelable(true)
-        builder.setOnCancelListener { finish() }
-        builder.show()
+    /** Current value of one option, as a label. */
+    private fun optionSummary(opt: com.oea.engine.core.GameOption): String {
+        val v = chosenOptions[opt.id] ?: opt.default
+        return opt.choices.firstOrNull { it.value == v }?.label ?: v
     }
 
-    /** Match setup: one screen per option, values remembered for the next match. */
+    /** One line describing the match that Play will start. */
+    private fun matchSummary(d: GameDescriptor): String {
+        val bits = mutableListOf<String>()
+        bits += if (d.maxPlayers > 1) "${d.minPlayers}–${d.maxPlayers} players" else "Single player"
+        bits += d.dimension.label
+        bits += d.modes.joinToString(" · ") { it.label }
+        return bits.joinToString("  ·  ")
+    }
+
+    // ================================================================ front screen
+
+    /**
+     * The game's home screen. Before this existed the front menu was a platform
+     * dialog floating over an activity with no content view at all, which is why
+     * the standalone apps looked like a system popup on a black background.
+     */
+    private fun showHome() {
+        val d = descriptor ?: return
+        val k = toolkit()
+        val page = k.page(padBottomDp = 30)
+        val content = page.content
+
+        val cover = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setImageDrawable(GameCoverDrawable(d, k.dpf(24f)))
+        }
+        content.addView(cover, LinearLayout.LayoutParams(-1, k.dp(168)))
+
+        content.addView(
+            k.text(d.title, 30f, palette.text, GameType.bold).apply {
+                setPadding(k.dp(4), k.dp(18), k.dp(4), 0)
+                letterSpacing = -0.015f
+            }
+        )
+        content.addView(
+            k.text(d.tagline, 14.5f, palette.textSecondary).apply {
+                setPadding(k.dp(4), k.dp(6), k.dp(4), 0)
+                setLineSpacing(k.dpf(2f), 1f)
+            }
+        )
+        content.addView(
+            k.text(matchSummary(d), 12f, palette.textTertiary, GameType.medium).apply {
+                setPadding(k.dp(4), k.dp(10), k.dp(4), 0)
+                letterSpacing = 0.04f
+            }
+        )
+
+        val play = k.primaryButton("Play") {
+            beginMatch(PlayMode.SOLO, chosenOptions, System.nanoTime(), parsePlayers(null, d), null)
+        }
+        play.textSize = 16.5f
+        play.letterSpacing = 0.02f
+        content.addView(play, LinearLayout.LayoutParams(-1, k.dp(56)).apply { topMargin = k.dp(20) })
+
+        k.sectionTitle(content, "Before you start")
+
+        val actions = k.group(content)
+        actions.addView(
+            k.actionRow("⚙", "Match setup", optionsLine(d), highlight = false) { showMatchSetup() },
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+        )
+        if (d.maxPlayers > 1) {
+            actions.addView(
+                k.actionRow("👥", "Play with friends", "Host on Wi-Fi or with an online code, or join one") { showFriendsMenu() },
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+            )
+        }
+        actions.addView(
+            k.actionRow("🎯", "Controls & aim", "Look and ADS sensitivity, turn limit, invert Y") { showControlsSheet() },
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+        )
+        actions.addView(
+            k.actionRow("ⓘ", "About ${d.title}", d.description.lineSequence().firstOrNull()?.take(60) ?: "What this game is") { showAboutSheet() }
+        )
+
+        k.note(
+            content,
+            "This is the full game, not a demo: matches, settings and multiplayer all run inside this app. " +
+                "Nothing else needs to be installed."
+        )
+
+        setContentView(page.root)
+        page.root.alpha = 0f
+        page.root.animate().alpha(1f).setDuration(180L).start()
+    }
+
+    private fun optionsLine(d: GameDescriptor): String = when {
+        d.options.isEmpty() -> "Nothing to set — start playing"
+        else -> d.options.joinToString(" · ") { "${it.label}: ${optionSummary(it)}" }.take(90)
+    }
+
+    // ================================================================ match setup
+
+    /** Match setup: one sheet of options, each opening its own picker. */
     private fun showMatchSetup() {
         val d = descriptor ?: return
-        val labels = d.options.map { opt ->
-            val v = chosenOptions[opt.id] ?: opt.default
-            "${opt.label} · ${opt.choices.firstOrNull { it.value == v }?.label ?: v}"
-        }.toTypedArray()
-        val builder = AlertDialog.Builder(this)
-            .setTitle("Match setup")
-            .setItems(labels) { _, which ->
-                val opt = d.options[which]
-                val names = opt.choices.map { c -> c.description?.let { "${c.label} — $it" } ?: c.label }.toTypedArray()
-                val current = opt.choices.indexOfFirst { it.value == (chosenOptions[opt.id] ?: opt.default) }.coerceAtLeast(0)
-                AlertDialog.Builder(this)
-                    .setTitle(opt.label)
-                    .setSingleChoiceItems(names, current) { dialog, pick ->
-                        chosenOptions[opt.id] = opt.choices[pick].value
-                        OeaEngine.settings.setLastOption(d.id, opt.id, opt.choices[pick].value)
-                        dialog.dismiss()
-                        showMatchSetup()
-                    }
-                    .setNegativeButton("Back") { _, _ -> showMatchSetup() }
-                    .setOnCancelListener { showMatchSetup() }
-                    .show()
+        val k = toolkit()
+        if (d.options.isEmpty()) {
+            k.sheet("Match setup", "This game has nothing to configure.") { panel, _ ->
+                panel.addView(k.quietButton("Back") { showHome() })
             }
-            .setNegativeButton("Back") { _, _ -> showFrontMenu() }
-            .setOnCancelListener { showFrontMenu() }
-        builder.show()
+            return
+        }
+        k.sheet("Match setup", "Mode: ${chosenMode.label}. Your choices are remembered for the next match.") { panel, dialog ->
+            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            d.options.forEachIndexed { index, opt ->
+                list.addView(
+                    k.optionRow(opt.label, optionSummary(opt), false) {
+                        dialog.dismiss()
+                        showOptionPicker(index)
+                    },
+                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
+                )
+            }
+            panel.addView(k.boundedScroll(list, 0.62f))
+            panel.addView(k.buttonRow(k.quietButton("Back") { dialog.dismiss(); showHome() }))
+        }
+    }
+
+    private fun showOptionPicker(index: Int) {
+        val d = descriptor ?: return
+        val k = toolkit()
+        val opt = d.options.getOrNull(index) ?: return showMatchSetup()
+        val labels = opt.choices.map { it.label }
+        val descriptions = opt.choices.map { it.description }
+        val current = opt.choices.indexOfFirst { it.value == (chosenOptions[opt.id] ?: opt.default) }.coerceAtLeast(0)
+        k.choose(opt.label, opt.description, labels, current, descriptions) { pick ->
+            val choice = opt.choices[pick]
+            chosenOptions[opt.id] = choice.value
+            OeaEngine.settings.setLastOption(d.id, opt.id, choice.value)
+            showMatchSetup()
+        }
     }
 
     // ================================================================ controls & aim
 
-    private fun showControlsDialog() {
+    private fun showControlsSheet() {
         val settings = OeaEngine.settings
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad / 2, pad, pad)
-        }
-
-        fun slider(label: String, value: Float, min: Float, max: Float, onDone: (Float) -> Unit) {
-            val text = TextView(this)
-            val seek = SeekBar(this)
-            val span = (max - min).coerceAtLeast(0.01f)
-            seek.max = 100
-            seek.progress = (((value - min) / span) * 100f).toInt().coerceIn(0, 100)
-            fun refresh() {
-                val v = min + span * (seek.progress / 100f)
-                text.text = String.format(java.util.Locale.US, "%s · %.2f", label, v)
-                onDone(v)
+        val k = toolkit()
+        k.sheet("Controls & aim", "Applied to every OEA game on this phone, live — no restart.") { panel, dialog ->
+            val host = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            k.slider(host, "Look sensitivity", settings.lookSensitivity, 0.2f, 3f) { settings.lookSensitivity = it }
+            k.slider(host, "ADS sensitivity", settings.adsSensitivity, 0.3f, 1.5f) { settings.adsSensitivity = it }
+            k.slider(host, "Turn limit (0 = off)", settings.turnSpeedLimit, 0f, 360f, { v ->
+                if (v <= 0.5f) "off" else "${v.toInt()}°/s"
+            }) { settings.turnSpeedLimit = it }
+            k.switchRow(host, "Invert vertical look", "Moves the view the other way when you drag up", settings.invertLookY) {
+                settings.invertLookY = it
             }
-            text.setPadding(0, (10 * resources.displayMetrics.density).toInt(), 0, 0)
-            panel.addView(text, LinearLayout.LayoutParams(-1, -2))
-            panel.addView(seek, LinearLayout.LayoutParams(-1, -2))
-            refresh()
-            seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) = refresh()
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
-            })
+            panel.addView(k.boundedScroll(host, 0.6f))
+            panel.addView(k.buttonRow(k.primaryButton("Done") { dialog.dismiss(); showHome() }))
         }
-
-        slider("Look sensitivity", settings.lookSensitivity, 0.2f, 3f) { settings.lookSensitivity = it }
-        slider("ADS sensitivity", settings.adsSensitivity, 0.3f, 1.5f) { settings.adsSensitivity = it }
-        slider("Turn limit (0 = off, °/s)", settings.turnSpeedLimit, 0f, 360f) { settings.turnSpeedLimit = it }
-        val invert = CheckBox(this).apply {
-            text = "Invert vertical look"
-            isChecked = settings.invertLookY
-            setPadding(0, (12 * resources.displayMetrics.density).toInt(), 0, 0)
-            setOnCheckedChangeListener { _, checked -> settings.invertLookY = checked }
-        }
-        panel.addView(invert, LinearLayout.LayoutParams(-1, -2))
-
-        AlertDialog.Builder(this)
-            .setTitle("Controls & aim")
-            .setView(panel)
-            .setPositiveButton("Done") { _, _ -> showFrontMenu() }
-            .setOnCancelListener { showFrontMenu() }
-            .show()
     }
 
     // ================================================================ play with friends
 
     private fun showFriendsMenu() {
         val d = descriptor ?: return
-        val items = arrayOf(
-            "Host on Wi-Fi / hotspot",
-            "Host online with a code",
-            "Join nearby",
-            "Join with a code",
-        )
-        AlertDialog.Builder(this)
-            .setTitle("Play with friends")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> hostSession(lan = true)
-                    1 -> hostSession(lan = false)
-                    2 -> showNearbyBrowser()
-                    3 -> promptJoinCode()
+        val k = toolkit()
+        k.sheet("Play with friends", "Up to ${d.maxPlayers} players. Everyone needs the same game and version.") { panel, dialog ->
+            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            list.addView(
+                k.actionRow("📶", "Host on Wi-Fi / hotspot", "People on the same network join with the code you get") {
+                    dialog.dismiss(); hostSession(lan = true)
+                },
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+            )
+            list.addView(
+                k.actionRow("🌐", "Host online with a code", "Share an invite code; your friend replies with theirs") {
+                    dialog.dismiss(); hostSession(lan = false)
+                },
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+            )
+            list.addView(
+                k.actionRow("🔎", "Join nearby", "Look for games already open on this network") {
+                    dialog.dismiss(); showNearbyBrowser()
+                },
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
+            )
+            list.addView(
+                k.actionRow("🔑", "Join with a code", "Paste an invite, reply or Wi-Fi code") {
+                    dialog.dismiss(); promptJoinCode()
                 }
-            }
-            .setNegativeButton("Back") { _, _ -> showFrontMenu() }
-            .setOnCancelListener { showFrontMenu() }
-            .show()
+            )
+            panel.addView(list)
+            panel.addView(k.buttonRow(k.quietButton("Back") { dialog.dismiss(); showHome() }))
+        }
     }
 
     private fun hostSession(lan: Boolean) {
@@ -274,7 +371,6 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             }
         } else {
             val invite = s.createOnlineInvite()
-            onlineInvite = invite
             showLobby(joined = false, extra = "Creating your invite…")
             showInviteSheet(invite)
         }
@@ -282,38 +378,34 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
 
     private fun showInviteSheet(invite: OnlineInvite) {
         inviteDialog?.dismiss()
-        val status = TextView(this)
-        val codeView = TextView(this).apply {
+        val k = toolkit()
+        val status = k.text("", 13.5f, palette.textSecondary, GameType.medium)
+        val codeView = k.text("", 14f, palette.text, GameType.medium).apply {
             setTextIsSelectable(true)
-            textSize = 14f
-            setPadding(0, 12, 0, 12)
+            setPadding(0, k.dp(10), 0, k.dp(10))
+            setLineSpacing(k.dpf(2f), 1f)
         }
-        val reply = EditText(this).apply { hint = "Paste your friend's reply code (OEA-…)" }
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad / 2, pad, pad)
-            addView(status)
-            addView(codeView)
-            addView(reply, LinearLayout.LayoutParams(-1, -2))
-        }
+        val reply = k.field("Paste your friend's reply code (OEA-…)")
         fun refresh() {
             status.text = invite.status.label + (if (invite.message.isNotBlank()) " — ${invite.message}" else "")
             val code = invite.code
-            if (code != null && codeView.text.isEmpty()) codeView.text = "Invite code (share this):\n$code"
+            if (code != null && codeView.text.isEmpty()) codeView.text = "Invite code (share this):\n\n$code"
         }
         invite.onChange = { main.post { refresh() } }
         refresh()
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Invite a friend online")
-            .setView(panel)
-            .setPositiveButton("Connect") { _, _ -> invite.acceptReply(reply.text.toString())?.let { toast(it) } }
-            .setNeutralButton("Share invite") { _, _ ->
-                invite.code?.let { share(it, "OEA invite code") }
-            }
-            .setNegativeButton("Close", null)
-            .setOnDismissListener { invite.onChange = null }
-            .show()
+        val dialog = k.sheet("Invite a friend online", "Send your code, then paste the reply you get back.") { panel, d ->
+            panel.addView(status)
+            panel.addView(codeView)
+            panel.addView(reply, LinearLayout.LayoutParams(-1, -2).apply { topMargin = k.dp(6) })
+            panel.addView(
+                k.buttonRow(
+                    k.quietButton("Share") { invite.code?.let { share(it, "OEA invite code") } },
+                    k.primaryButton("Connect") { invite.acceptReply(reply.text.toString())?.let { toast(it) } }
+                )
+            )
+            panel.addView(k.quietButton("Close") { d.dismiss() }, LinearLayout.LayoutParams(-1, -2))
+        }
+        dialog.setOnDismissListener { invite.onChange = null }
         inviteDialog = dialog
     }
 
@@ -321,53 +413,108 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         val d = descriptor ?: return
         toast("Looking for games on this network…")
         browser?.stop()
+        nearbyList = null
+        nearbyDialog?.dismiss()
+        nearbyDialog = null
         browser = LanBrowser(this, d.id) { games -> main.post { presentNearby(games) } }.also { it.start() }
+        showNearbySheet(emptyList())
+    }
+
+    /** The nearby picker: one sheet that refreshes itself as beacons arrive. */
+    private fun showNearbySheet(games: List<LanGame>) {
+        val k = toolkit()
+        val open = games.filter { it.compatible && !it.isFull && it.inLobby }
+        val list = nearbyList
+        if (list != null) {
+            renderNearbyRows(list, open)
+            return
+        }
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        nearbyList = container
+        renderNearbyRows(container, open)
+        k.sheet("Join nearby", if (open.isEmpty()) "Looking…" else "${open.size} game(s) on this network") { panel, dialog ->
+            panel.addView(k.boundedScroll(container, 0.6f))
+            panel.addView(
+                k.buttonRow(
+                    k.quietButton("Stop") {
+                        browser?.stop(); browser = null
+                        nearbyDialog = null; nearbyList = null
+                        dialog.dismiss(); showHome()
+                    }
+                )
+            )
+        }.also { dialog ->
+            nearbyDialog = dialog
+            dialog.setOnDismissListener {
+                if (nearbyDialog === dialog) {
+                    nearbyDialog = null
+                    nearbyList = null
+                }
+            }
+        }
+    }
+
+    private fun renderNearbyRows(container: LinearLayout, games: List<LanGame>) {
+        val k = toolkit()
+        container.removeAllViews()
+        if (games.isEmpty()) {
+            container.addView(
+                k.text("No open games yet. Ask the host to open Play with friends › Host on Wi-Fi.", 13f, palette.textSecondary).apply {
+                    setPadding(k.dp(6), k.dp(10), k.dp(6), k.dp(10))
+                    setLineSpacing(k.dpf(2f), 1f)
+                }
+            )
+            return
+        }
+        games.forEach { g ->
+            container.addView(
+                k.actionRow("📶", g.roomName, "${g.players}/${g.maxPlayers} · ${g.hostName}") {
+                    browser?.stop(); browser = null
+                    nearbyDialog?.dismiss(); nearbyDialog = null; nearbyList = null
+                    val d = descriptor ?: return@actionRow
+                    val s = NetSession.joinLan(this, d, g.address, g.port, lobbyListener)
+                    lobbyMode = PlayMode.LAN
+                    showLobby(joined = true, extra = "Connecting to ${g.roomName}…")
+                    s.setReady(true)
+                },
+                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
+            )
+        }
     }
 
     private fun presentNearby(games: List<LanGame>) {
-        if (isFinishing) return
-        val open = games.filter { it.compatible && !it.isFull && it.inLobby }
-        if (open.isEmpty()) return
-        // Beacons arrive continuously: one picker at a time, never stacked.
-        if (nearbyDialog?.isShowing == true) return
-        val names = open.map { "${it.roomName} · ${it.players}/${it.maxPlayers} · ${it.hostName}" }.toTypedArray()
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Join nearby")
-            .setItems(names) { _, which ->
-                val g = open[which]
-                browser?.stop(); browser = null
-                val s = NetSession.joinLan(this, descriptor ?: return@setItems, g.address, g.port, lobbyListener)
-                lobbyMode = PlayMode.LAN
-                showLobby(joined = true, extra = "Connecting to ${g.roomName}…")
-                s.setReady(true)
-            }
-            .setNegativeButton("Cancel") { _, _ -> browser?.stop(); browser = null; showFrontMenu() }
-            .setOnCancelListener { browser?.stop(); browser = null; showFrontMenu() }
-            .show()
-        nearbyDialog = dialog
+        if (isFinishing || isDestroyed) return
+        val list = nearbyList ?: return showNearbySheet(games)
+        main.post { renderNearbyRows(list, games.filter { it.compatible && !it.isFull && it.inLobby }) }
     }
 
     private fun promptJoinCode() {
-        val input = EditText(this).apply { hint = "OEA-… invite, reply or Wi-Fi code" }
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad / 2, pad, pad)
-            addView(input, LinearLayout.LayoutParams(-1, -2))
+        val k = toolkit()
+        val input = k.field("OEA-… invite, reply or Wi-Fi code")
+        k.sheet("Join with a code", "Any OEA code works: an online invite, a reply, or a Wi-Fi code.") { panel, dialog ->
+            panel.addView(input, LinearLayout.LayoutParams(-1, -2))
+            panel.addView(
+                k.buttonRow(
+                    k.quietButton("Back") { dialog.dismiss(); showHome() },
+                    k.primaryButton("Join") { dialog.dismiss(); joinWithCode(input.text.toString()) }
+                )
+            )
         }
-        AlertDialog.Builder(this)
-            .setTitle("Join with a code")
-            .setView(panel)
-            .setPositiveButton("Join") { _, _ -> joinWithCode(input.text.toString()) }
-            .setNegativeButton("Back") { _, _ -> showFrontMenu() }
-            .setOnCancelListener { showFrontMenu() }
-            .show()
+        input.post {
+            input.requestFocus()
+            getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                ?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
     private fun joinWithCode(text: String) {
         val d = descriptor ?: return
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) { toast("Paste a code first."); promptJoinCode(); return }
+        if (trimmed.isEmpty()) {
+            toast("Paste a code first.")
+            promptJoinCode()
+            return
+        }
         if (LanJoinCode.isLanCode(trimmed)) {
             val target = LanJoinCode.decode(trimmed).getOrElse {
                 toast(it.message ?: "That code doesn't work.")
@@ -383,10 +530,23 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         val s = NetSession.joinOnline(this, d, trimmed) { code, err ->
             if (err != null) {
                 toast(err)
-                main.post { showLobby(joined = true, extra = err) }
+                main.post {
+                    if (lobbyStatus == null) showLobby(joined = true, extra = err) else refreshLobby(err)
+                    // The reply code only exists once the connection attempt has
+                    // been answered, so it is appended to the lobby text.
+                    lobbyStatus?.let { status ->
+                        if (code != null && !status.text.contains(code)) {
+                            status.text = status.text.toString() + "\n\nSend this reply code to the host:\n$code"
+                        }
+                    }
+                }
             } else if (code != null) {
                 main.post {
-                    lobbyDialog?.setMessage("Send this reply code back to the host:\n\n$code")
+                    lobbyStatus?.let { status ->
+                        if (!status.text.contains(code)) {
+                            status.text = status.text.toString() + "\n\nSend this reply code to the host:\n$code"
+                        }
+                    }
                 }
             }
         }
@@ -397,36 +557,69 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         }
     }
 
-    /** One compact lobby dialog for hosting and joining; it updates itself. */
+    // ================================================================ about
+
+    private fun showAboutSheet() {
+        val d = descriptor ?: return
+        val k = toolkit()
+        k.sheet(d.title, d.tagline) { panel, dialog ->
+            panel.addView(
+                k.text(d.description, 14f, palette.textSecondary).apply {
+                    setLineSpacing(k.dpf(2f), 1f)
+                    setPadding(0, 0, 0, k.dp(10))
+                }
+            )
+            panel.addView(
+                k.text(
+                    "Players: ${if (d.maxPlayers > 1) "${d.minPlayers}–${d.maxPlayers}" else "1"}\n" +
+                        "Modes: ${d.modes.joinToString(", ") { it.label }}\n" +
+                        "Rendering: ${d.dimension.label}\n" +
+                        "Engine: OEA Engine ${com.oea.engine.OeaEngine.VERSION}",
+                    12.5f,
+                    palette.textTertiary
+                ).apply { setLineSpacing(k.dpf(3f), 1f) }
+            )
+            panel.addView(k.buttonRow(k.primaryButton("Close") { dialog.dismiss() }))
+        }
+    }
+
+    // ================================================================ lobby
+
+    /** One compact lobby sheet for hosting and joining; it updates itself. */
     private fun showLobby(joined: Boolean, extra: String?) {
         val s = NetSession.current ?: return
         s.removeListener(lobbyListener)
         s.addListener(lobbyListener)
         lobbyDialog?.dismiss()
-        val status = TextView(this).apply { setPadding(0, 8, 0, 8); textSize = 14f }
+        val k = toolkit()
+        val status = k.text("", 14f, palette.text, GameType.regular).apply {
+            setLineSpacing(k.dpf(3f), 1f)
+            setPadding(0, k.dp(4), 0, k.dp(8))
+        }
         lobbyStatus = status
-        val builder = AlertDialog.Builder(this)
-            .setTitle(s.roomName.ifBlank { "Lobby" })
-            .setView(status)
-            .setNegativeButton(if (joined) "Leave" else "Cancel") { _, _ ->
+        val dialog = k.sheet(s.roomName.ifBlank { "Lobby" }, if (joined) "You are in." else "Waiting for players.") { panel, d ->
+            panel.addView(k.boundedScroll(status, 0.5f))
+            val buttons = mutableListOf<View>()
+            if (!joined && s.isHost) {
+                buttons += k.primaryButton("Start match") {
+                    s.startMatch(LinkedHashMap(chosenOptions))
+                }
+            }
+            buttons += k.quietButton(if (joined) "Leave" else "Cancel") {
                 lobbyDialog = null
+                lobbyStatus = null
+                d.dismiss()
                 s.close("Left the lobby")
-                showFrontMenu()
+                if (!directLaunch) showHome()
             }
-        if (!joined && s.isHost) {
-            builder.setPositiveButton("Start match") { _, _ ->
-                val settings = LinkedHashMap(chosenOptions)
-                s.startMatch(settings)
+            panel.addView(k.buttonRow(*buttons.toTypedArray()))
+        }
+        dialog.setOnDismissListener {
+            if (lobbyDialog === dialog) {
+                lobbyDialog = null
+                lobbyStatus = null
             }
         }
-        builder.setOnCancelListener {
-            lobbyDialog = null
-            if (s.phase == SessionPhase.LOBBY || s.phase == SessionPhase.CONNECTING) {
-                s.close("Left the lobby")
-            }
-            showFrontMenu()
-        }
-        val dialog = builder.show()
         lobbyDialog = dialog
         refreshLobby(extra)
     }
@@ -453,9 +646,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
 
     private val lobbyListener = object : SessionListener {
         override fun onSessionUpdate(session: NetSession) {
-            main.post {
-                if (lobbyDialog?.isShowing == true) refreshLobby()
-            }
+            main.post { if (lobbyDialog?.isShowing == true) refreshLobby() }
         }
 
         override fun onMatchStart(session: NetSession) {
@@ -479,7 +670,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
                 inviteDialog?.dismiss(); inviteDialog = null
                 if (hadDialog && host == null && !isFinishing && !pendingStart) {
                     toast(reason)
-                    showFrontMenu()
+                    if (!directLaunch) showHome()
                 }
             }
         }
@@ -491,10 +682,12 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         val d = descriptor ?: return
         if (!d.supports(mode)) {
             Toast.makeText(this, "This build doesn't support ${mode.label}.", Toast.LENGTH_LONG).show()
-            showFrontMenu()
+            if (!directLaunch) showHome()
             return
         }
-        val problem = try { OeaEngine.surfaceProblem() } catch (e: Throwable) {
+        val problem = try {
+            OeaEngine.surfaceProblem()
+        } catch (e: Throwable) {
             e.message
         }
         if (problem != null) {
@@ -514,7 +707,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             GameHost(this, d, launch, this)
         } catch (e: Throwable) {
             Toast.makeText(this, "${d.title} could not start on this device (${e.javaClass.simpleName})", Toast.LENGTH_LONG).show()
-            showFrontMenu()
+            if (!directLaunch) showHome()
             return
         }
         host = gameHost
@@ -543,18 +736,33 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
 
     override fun onResume() {
         super.onResume()
-        try { host?.onResume() } catch (_: Throwable) {}
+        try {
+            host?.onResume()
+        } catch (_: Throwable) {
+        }
     }
 
     override fun onPause() {
-        try { host?.onPause() } catch (_: Throwable) {}
+        try {
+            host?.onPause()
+        } catch (_: Throwable) {
+        }
         super.onPause()
     }
 
     override fun onDestroy() {
-        try { browser?.stop() } catch (_: Throwable) {}
+        try {
+            browser?.stop()
+        } catch (_: Throwable) {
+        }
         browser = null
-        try { host?.onDestroy() } catch (_: Throwable) {}
+        nearbyDialog = null
+        lobbyDialog = null
+        inviteDialog = null
+        try {
+            host?.onDestroy()
+        } catch (_: Throwable) {
+        }
         host = null
         // A standalone activity owns its lobby/session. Do not leave sockets,
         // multicast locks or an orphaned host running after the user leaves.
@@ -566,7 +774,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        try { host?.onWindowFocusChanged(hasFocus) } catch (_: Throwable) {}
+        try {
+            host?.onWindowFocusChanged(hasFocus)
+        } catch (_: Throwable) {
+        }
     }
 
     @Deprecated("Back is routed to the game first")
@@ -575,24 +786,24 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     private fun handleBack() {
         val currentHost = host
         if (currentHost == null) {
-            // In the front menu, Back leaves the app instead of looping dialogs.
-            lobbyDialog?.let { if (it.isShowing) { it.getButton(AlertDialog.BUTTON_NEGATIVE)?.performClick(); return } }
-            inviteDialog?.let { if (it.isShowing) { it.dismiss(); return } }
+            // On the front screen, Back leaves the app instead of looping sheets.
             finish()
             return
         }
         try {
             currentHost.onBackPressed {
-                confirm("Leave the game?", "Your progress in this round will be lost.", "Leave", "Stay") { leave ->
-                    if (leave) {
-                        host = null
-                        runCatching { currentHost.onDestroy() }
-                        runCatching {
-                            NetSession.current?.takeIf { it.phase != SessionPhase.CLOSED }?.close("Left the match")
-                        }
-                        setContentView(LinearLayout(this))
-                        if (directLaunch) finish() else showFrontMenu()
+                toolkit().confirm(
+                    "Leave the game?",
+                    "Your progress in this round will be lost.",
+                    "Leave",
+                    "Stay"
+                ) {
+                    host = null
+                    runCatching { currentHost.onDestroy() }
+                    runCatching {
+                        NetSession.current?.takeIf { it.phase != SessionPhase.CLOSED }?.close("Left the match")
                     }
+                    if (directLaunch) finish() else showHome()
                 }
             }
         } catch (e: Throwable) {
@@ -609,7 +820,11 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     override fun onGenericMotionEvent(event: MotionEvent): Boolean =
         host?.dispatchGenericMotionEvent(event) == true || super.onGenericMotionEvent(event)
 
-    override fun toast(message: String) = runCatching { Toast.makeText(this, message, Toast.LENGTH_SHORT).show() }.let { }
+    // ---------------------------------------------------------------- HostUi
+
+    override fun toast(message: String) = runCatching {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }.let { }
 
     override fun share(text: String, title: String) {
         runCatching {
@@ -619,60 +834,79 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
 
     override fun menu(title: String, subtitle: String?, items: List<MenuItem>, onPick: (String?) -> Unit) {
         try {
-            val labels = items.map { it.label }.toTypedArray()
-            val builder = AlertDialog.Builder(this).setTitle(title).setItems(labels) { _, which -> onPick(items[which].id) }
-            if (!subtitle.isNullOrBlank()) builder.setMessage(subtitle)
-            builder.setOnCancelListener { onPick(null) }
-            builder.show()
-        } catch (_: Throwable) { onPick(null) }
+            val k = toolkit()
+            var picked = false
+            val descriptions = items.map { it.description }
+            val labels = items.map { it.label }
+            k.sheet(title, subtitle) { panel, dialog ->
+                val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                labels.forEachIndexed { index, label ->
+                    list.addView(
+                        k.optionRow(label, descriptions.getOrNull(index), false) {
+                            picked = true
+                            dialog.dismiss()
+                            onPick(items[index].id)
+                        },
+                        LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
+                    )
+                }
+                panel.addView(k.boundedScroll(list, 0.62f))
+            }.setOnDismissListener { if (!picked) onPick(null) }
+        } catch (_: Throwable) {
+            onPick(null)
+        }
     }
 
     override fun confirm(title: String, message: String, positive: String, negative: String, onResult: (Boolean) -> Unit) {
         try {
-            AlertDialog.Builder(this)
-                .setTitle(title)
-                .setMessage(message)
-                .setPositiveButton(positive) { _, _ -> onResult(true) }
-                .setNegativeButton(negative) { _, _ -> onResult(false) }
-                .setOnCancelListener { onResult(false) }
-                .show()
-        } catch (_: Throwable) { onResult(false) }
+            var answered = false
+            toolkit().confirm(title, message, positive, negative) { answered = true; onResult(true) }
+                .setOnDismissListener { if (!answered) onResult(false) }
+        } catch (_: Throwable) {
+            onResult(false)
+        }
     }
 
     override fun prompt(title: String, hint: String, initial: String, onResult: (String?) -> Unit) {
         try {
-            val input = EditText(this).apply {
-                this.hint = hint
-                setText(initial)
-                setSelection(text.length)
+            val k = toolkit()
+            val input = k.field(hint, initial)
+            var answered = false
+            k.sheet(title, null) { panel, dialog ->
+                panel.addView(input, LinearLayout.LayoutParams(-1, -2))
+                panel.addView(
+                    k.buttonRow(
+                        k.quietButton("Cancel") { answered = true; dialog.dismiss(); onResult(null) },
+                        k.primaryButton("OK") { answered = true; dialog.dismiss(); onResult(input.text?.toString()) }
+                    )
+                )
+            }.setOnDismissListener { if (!answered) onResult(null) }
+            input.post {
+                input.requestFocus()
+                getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                    ?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
             }
-            AlertDialog.Builder(this)
-                .setTitle(title)
-                .setView(input)
-                .setPositiveButton("OK") { _, _ -> onResult(input.text?.toString()) }
-                .setNegativeButton("Cancel") { _, _ -> onResult(null) }
-                .setOnCancelListener { onResult(null) }
-                .show()
-        } catch (_: Throwable) { onResult(null) }
+        } catch (_: Throwable) {
+            onResult(null)
+        }
     }
 
     override fun exit(result: GameResult?) {
         val currentHost = host ?: run { finish(); return }
         host = null
         runCatching { currentHost.onDestroy() }
-        runCatching { setContentView(LinearLayout(this)) }
         pendingStart = false
         runCatching {
             NetSession.current?.takeIf { it.phase != SessionPhase.CLOSED }?.close("Left the match")
         }
+        result?.summary?.let { toast(it) }
         if (isFinishing || directLaunch) {
-            result?.summary?.let { toast(it) }
             finish()
             return
         }
-        result?.summary?.let { toast(it) }
-        showFrontMenu()
+        showHome()
     }
+
 
     companion object {
         const val EXTRA_GAME_ID = "com.oea.games.extra.GAME_ID"

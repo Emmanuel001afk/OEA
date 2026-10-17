@@ -9,7 +9,7 @@
         android:icon="@mipmap/ic_game_arena"
         android:label="Send Off"
         android:resizeableActivity="true"
-        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        android:theme="@style/OeaStandaloneGameTheme">
         <activity
             android:name=".ArenaActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"

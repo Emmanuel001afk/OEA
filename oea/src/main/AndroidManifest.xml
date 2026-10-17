@@ -448,7 +448,7 @@
             android:roundIcon="@drawable/ic_oea_game_runner"
             android:taskAffinity="com.oea.launcher.game.runner"
             android:launchMode="singleTask"
-            android:theme="@style/OeaGameBoostTheme"
+            android:theme="@style/OeaGameTheme"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
@@ -464,7 +464,7 @@
             android:roundIcon="@drawable/ic_oea_game_arena"
             android:taskAffinity="com.oea.launcher.game.arena"
             android:launchMode="singleTask"
-            android:theme="@style/OeaGameBoostTheme"
+            android:theme="@style/OeaGameTheme"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
@@ -480,7 +480,7 @@
             android:roundIcon="@drawable/ic_oea_game_chess"
             android:taskAffinity="com.oea.launcher.game.chess"
             android:launchMode="singleTask"
-            android:theme="@style/OeaGameBoostTheme"
+            android:theme="@style/OeaGameTheme"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>

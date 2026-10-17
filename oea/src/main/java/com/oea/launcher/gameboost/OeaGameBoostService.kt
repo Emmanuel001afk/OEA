@@ -531,6 +531,10 @@ class OeaGameBoostService : Service() {
                     // A session for a game running inside OEA: the game's own
                     // screen means "still playing"; the hub (or any other OEA
                     // screen, after the launch grace) means the user left it.
+                    // Usage access often names OEA's package without naming an
+                    // activity — incomplete evidence, so it never ends a
+                    // session on its own. OEA Home ends one authoritatively.
+                    OeaGameBoostStore.isOeaGameKey(active) && className == null -> cancelLeave()
                     OeaGameBoostStore.isOeaGameKey(active) && isOeaGameScreen(className) -> {
                         cancelLeave()
                         applyGameDndPreference()
@@ -683,11 +687,20 @@ class OeaGameBoostService : Service() {
         return ime != null && packageName == ime
     }
 
+    /**
+     * The screens an OEA-hosted game actually plays on: the in-hub player, the
+     * shared standalone shell, and the launcher's own game icons (Endless Days,
+     * Send Off, Chess). The last group is read from the classes themselves so
+     * the detection can never drift away from the entries again.
+     */
+    private val oeaGameScreens: Set<String> = buildSet {
+        add("com.oea.launcher.games.OeaGameActivity")
+        add(com.oea.games.OeaStandaloneGameActivity::class.java.name)
+        addAll(com.oea.launcher.games.oeaGameEntryScreens)
+    }
+
     /** True when [className] is one of the screens an OEA-hosted game actually plays on. */
-    private fun isOeaGameScreen(className: String?): Boolean = className != null && (
-        className.startsWith("com.oea.launcher.games.OeaGameActivity") ||
-            className.startsWith("com.oea.games.OeaStandaloneGameActivity")
-)
+    private fun isOeaGameScreen(className: String?): Boolean = className != null && className in oeaGameScreens
 
     /**
      * OEA surfaces that legally appear over a running OEA-hosted game: the

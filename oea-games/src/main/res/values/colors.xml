@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The OEA Games dark console palette, kept here so the window theme and
+         com.oea.games.ui.GameColors start from the same numbers. -->
+    <color name="oea_game_window_background">#08090D</color>
+    <color name="oea_game_accent">#FFA53D</color>
+</resources>

@@ -49,7 +49,7 @@ open class OeaMiniAppActivity : Activity() {
             palette = OeaTheme.resolve(this)
             kit = OeaKit(this, palette)
             screenId = resolveScreenId()
-            renderGuarded()
+            renderGuarded(keepScroll = false)
         }
         if (!created) showFatalFallback()
     }
@@ -61,7 +61,7 @@ open class OeaMiniAppActivity : Activity() {
         OeaFaultShield.guard("miniapp:host:intent") {
             setIntent(intent)
             screenId = resolveScreenId()
-            renderGuarded()
+            renderGuarded(keepScroll = false)
         }
     }
 
@@ -80,7 +80,7 @@ open class OeaMiniAppActivity : Activity() {
         // A permission just changed hands (camera, calendar, mic, SMS…): rebuild
         // the mini-app so it picks up its new capabilities immediately instead
         // of showing the "needs permission" card until the next visit.
-        OeaFaultShield.guard("miniapp:host:permission") { renderGuarded() }
+        OeaFaultShield.guard("miniapp:host:permission") { renderGuarded(keepScroll = true) }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
@@ -113,25 +113,35 @@ open class OeaMiniAppActivity : Activity() {
             if (!::palette.isInitialized) {
                 palette = OeaTheme.resolve(this)
                 kit = OeaKit(this, palette)
-                renderGuarded()
+                renderGuarded(keepScroll = false)
                 return@guard
             }
             val fresh = OeaTheme.resolve(this)
             if (fresh != palette) {
                 palette = fresh
                 kit = OeaKit(this, palette)
-                renderGuarded()
+                renderGuarded(keepScroll = true)
             }
         }
     }
 
     /** Renders with a containment net: a fault shows an in-app card, never a dead window. */
-    private fun renderGuarded() {
-        val ok = OeaFaultShield.guard("miniapp:host:render") { render() }
+    private fun renderGuarded(keepScroll: Boolean = true) {
+        val ok = OeaFaultShield.guard("miniapp:host:render") { render(keepScroll) }
         if (!ok) showRenderFallback()
     }
 
-    private fun render() {
+    /**
+     * Rebuilding a mini-app is how it refreshes itself, so the page must come
+     * back where the reader left it. Without this, saving a note, ticking a
+     * reminder or sending a message threw the list back to the top.
+     */
+    private var lastScrollY = 0
+    private var currentScroll: android.widget.ScrollView? = null
+
+    private fun render(keepScroll: Boolean) {
+        if (keepScroll) currentScroll?.let { lastScrollY = it.scrollY } else lastScrollY = 0
+        currentScroll = null
         OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
         val app = OeaMiniApps.byId(screenId)
         if (app != null && app.id == "camera") {
@@ -172,6 +182,18 @@ open class OeaMiniAppActivity : Activity() {
             page.content.addView(body, LinearLayout.LayoutParams(-1, -2))
         }
         setContentView(page.root)
+        currentScroll = page.scroll
+        if (lastScrollY > 0) page.scroll.post { page.scroll.scrollTo(0, lastScrollY) }
+        // A short rise-and-fade: the rebuild is how a mini-app applies a change,
+        // and an instant swap reads as a flicker.
+        page.root.alpha = 0f
+        page.root.translationY = kit.dpf(10f)
+        page.root.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(200L)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+            .start()
     }
 
     /**
@@ -228,7 +250,7 @@ open class OeaMiniAppActivity : Activity() {
     /** Opens another mini-app (or the index) without stacking activities. Used by the index host only. */
     fun show(id: String?) {
         screenId = id
-        runCatching { renderGuarded() }.onFailure { OeaFaultShield.note("miniapp:host", it) }
+        runCatching { renderGuarded(keepScroll = false) }.onFailure { OeaFaultShield.note("miniapp:host", it) }
     }
 
     /** A toast that never throws (a dying activity must not shadow the real error). */
