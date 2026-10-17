@@ -64,8 +64,9 @@ object OeaSubtitles {
     }.getOrNull()
 
     fun loadFile(file: File): Track? = try {
-        // A plain try/catch rather than runCatching: the result of parsing is already
-        // nullable, and Result<Track?>.getOrNull() widens that to Any?.
+        // A file that cannot be read is simply no subtitles, the same quiet answer
+        // [load] gives, because VIP asks about this one in passing and a dialog in the
+        // middle of a film would be worse than none at all.
         parse(file.name, file.readText())
     } catch (error: Throwable) {
         null
@@ -74,13 +75,19 @@ object OeaSubtitles {
     /** Parses SRT/VTT (and only strips the tags SSA/ASS would need, refusing the rest). */
     fun parse(name: String, raw: String): Track? {
         val normalised = raw.replace("\r\n", "\n").replace("\r", "\n")
-        return if (name.lowercase(Locale.getDefault()).endsWith(".vtt") || normalised.startsWith("WEBVTT")) {
+        // The cue list and the track have to be built in one place: the old shape put
+        // `?.let` on the last branch only, so a WebVTT file returned a bare cue list
+        // and the caller never saw a track at all.
+        val cues = if (name.lowercase(Locale.getDefault()).endsWith(".vtt") || normalised.startsWith("WEBVTT")) {
             parseVtt(normalised)
         } else if (name.lowercase(Locale.getDefault()).endsWith(".ass") || name.lowercase(Locale.getDefault()).endsWith(".ssa")) {
-            null // VIP says plainly that styled ASS is not supported, rather than guessing.
+            // VIP says plainly that styled ASS is not supported, rather than guessing.
+            null
         } else {
             parseSrt(normalised)
-        }?.let { Track(name.substringAfterLast('/').substringBeforeLast('.'), it) }
+        } ?: return null
+        if (cues.isEmpty()) return null
+        return Track(name.substringAfterLast('/').substringBeforeLast('.'), cues)
     }
 
     private fun parseSrt(text: String): List<Cue> {

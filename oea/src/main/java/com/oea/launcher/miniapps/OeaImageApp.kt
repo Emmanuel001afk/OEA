@@ -651,7 +651,9 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                     val error = outcome.exceptionOrNull()
                     val recoverable = error as? android.app.RecoverableSecurityException
                         ?: (error as? SecurityException)?.cause as? android.app.RecoverableSecurityException
-                    recoverable?.userAction?.let { sender = it }
+                    // getUserAction() hands back a RemoteAction, whose pending intent is
+                    // the dialog Android wants shown.
+                    recoverable?.userAction?.intent?.let { sender = it.intentSender }
                 }
             }
         }
