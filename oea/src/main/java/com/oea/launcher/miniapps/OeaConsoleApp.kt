@@ -1065,14 +1065,31 @@ Examples:
                 "status" -> {
                     val freeform = com.oea.launcher.multitask.OeaMultitaskLauncher.freeformEnabled(ctx)
                     val split = "Split-screen: supported on Android 7+ via ActivityManager, but OEM and app can restrict. OEA uses split-screen via intent and verifies with Assistant."
-                    "Freeform (floating windows): ${if (freeform) "enabled" else "disabled"}\n$split\nPIP: ${if (Build.VERSION.SDK_INT >= 26) "supported (Android 8+)" else "not supported"}\nAuthorize freeform: Developer options › Enable freeform windows + Force resizable, reboot"
+                    val window = "OEA floating window: ${if (com.oea.launcher.multitask.OeaFloatingWindows.enabled(ctx)) "on" else "off"} (overlay container; works without freeform)"
+                    "Freeform (floating windows): ${if (freeform) "enabled" else "disabled"}\n$split\n$window\nPIP: ${if (Build.VERSION.SDK_INT >= 26) "supported (Android 8+)" else "not supported"}\nAuthorize freeform: Developer options › Enable freeform windows + Force resizable, reboot"
+                }
+                "window" -> {
+                    val svc = com.oea.launcher.multitask.OeaFloatingWindows
+                    when (parts.getOrNull(2)?.lowercase()) {
+                        "on" -> if (svc.isAccessibilityEnabled(ctx)) {
+                            svc.setEnabled(ctx, true)
+                            "OEA floating window: on • a draggable, resizable container appears over the next app"
+                        } else {
+                            "OEA floating window needs Accessibility first: Settings › Accessibility › OEA Floating Window"
+                        }
+                        "off" -> {
+                            svc.setEnabled(ctx, false)
+                            "OEA floating window: off"
+                        }
+                        else -> "OEA floating window: ${if (svc.enabled(ctx)) "on" else "off"} • accessibility: ${if (svc.isAccessibilityEnabled(ctx)) "granted" else "not granted"}\nUsage: multitask window on|off"
+                    }
                 }
                 "split" -> {
                     if (parts.size < 4) return "Usage: multitask split <pkg1> <pkg2> OR split <pkg1> <pkg2> (alias)"
                     val result = com.oea.launcher.split.OeaSplitLauncher.launchPair(ctx, parts[2], parts[3])
                     "Split result: ${result.message} • success=${result.success}\nWhat it does: requests Android split-screen with two apps side-by-side\nWhy might fail: OEM disables split, app opts out, not in foreground\nConfirm: check recents for split divider"
                 }
-                else -> "Usage: multitask status|split <pkg1> <pkg2>"
+                else -> "Usage: multitask status|split <pkg1> <pkg2>|window on|off"
             }
 
             "split" -> {
@@ -1085,7 +1102,7 @@ Examples:
                 if (parts.size < 2) return "Usage: float <package>"
                 val app = com.oea.launcher.model.OeaAppInfo(parts[1], "", parts[1])
                 val result = com.oea.launcher.multitask.OeaMultitaskLauncher.launchFloating(ctx, app)
-                "Floating result: ${result.message}\nWhat it does: launches app as freeform window (floating)\nNeeds: freeform enabled in Developer options\nConfirm: window appears movable/resizable if granted"
+                "Floating result: ${result.message}\nWhat it does: launches app as freeform window (floating)\nNeeds: freeform enabled in Developer options\nAlternative on phones without freeform: multitask window on\nConfirm: window appears movable/resizable if granted"
             }
 
             "pip" -> {

@@ -441,7 +441,10 @@ class OeaGameBoostService : Service() {
         updateOverlay()
         updateSessionNotification()
         handler.removeCallbacks(tick)
-        if (screenInteractive) handler.postDelayed(tick, pollIntervalMs())
+        // The first check runs almost immediately so a missing or
+        // damaged overlay is repaired within a blink of entering
+        // the game; later checks keep the normal interval.
+        if (screenInteractive) handler.postDelayed(tick, FIRST_TICK_DELAY_MS)
     }
 
     /** Ends the session, removes every overlay, restores DND and stops the service. */
@@ -901,77 +904,31 @@ class OeaGameBoostService : Service() {
                 y = 0
             }
         }
-        runCatching {
-            wm.addView(root, params)
+        attachOverlay(wm, root, params, packageName, handle, panel)
+    }
+
+    /**
+     * Attaches the in-game overlay window, retrying briefly when
+     * Android transiently refuses it (a busy SurfaceFlinger, window
+     * throttling, or a permission check racing the grant). This is
+     * what makes the floating RAM control appear the moment a game
+     * comes to the front, instead of sometimes only after the next
+     * monitor tick repairs a missing window.
+     */
+    private fun attachOverlay(
+        wm: WindowManager,
+        root: View,
+        params: WindowManager.LayoutParams,
+        game: String,
+        handle: View,
+        panel: View,
+        attempt: Int = 0
+    ) {
+        runCatching { wm.addView(root, params) }.onSuccess {
             overlay = root
-            diagnostic(android.util.Log.INFO, "overlay added game=$packageName rootAttached=${root.parent != null} handleVisibility=${handle.visibility} handleAlpha=${handle.alpha} paramsType=${params.type} flags=${params.flags}")
+            diagnostic(android.util.Log.INFO, "overlay added game=$game attempt=$attempt rootAttached=${root.parent != null} handleVisibility=${handle.visibility} handleAlpha=${handle.alpha} paramsType=${params.type} flags=${params.flags}")
 
-            val dragListener = object : View.OnTouchListener {
-                private var downRawX = 0f
-                private var downRawY = 0f
-                private var startX = 0
-                private var startY = 0
-                private var downTime = 0L
-                private var dragging = false
-
-                override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
-                    when (event.actionMasked) {
-                        android.view.MotionEvent.ACTION_DOWN -> {
-                            downTime = event.eventTime
-                            downRawX = event.rawX
-                            downRawY = event.rawY
-                            val current = root.layoutParams as? WindowManager.LayoutParams ?: return false
-                            startX = current.x
-                            startY = current.y
-                            dragging = false
-                            return true
-                        }
-                        android.view.MotionEvent.ACTION_MOVE -> {
-                            val dx = event.rawX - downRawX
-                            val dy = event.rawY - downRawY
-                            if (!dragging && (kotlin.math.abs(dx) > dp(6) || kotlin.math.abs(dy) > dp(6))) {
-                                dragging = true
-                                // Once movement crosses the drag threshold, ACTION_UP must not click.
-                                handle.animate().cancel()
-                                handle.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90L).start()
-                            }
-                            if (dragging) {
-                                val next = root.layoutParams as? WindowManager.LayoutParams ?: return true
-                                val bounds = screenBounds(root)
-                                next.gravity = Gravity.TOP or Gravity.START
-                                next.x = (startX + dx.toInt()).coerceIn(bounds[0], bounds[2])
-                                next.y = (startY + dy.toInt()).coerceIn(bounds[1], bounds[3])
-                                runCatching { wm.updateViewLayout(root, next) }.onFailure { error -> diagnostic(android.util.Log.ERROR, "handle drag updateViewLayout failed=${error.javaClass.name}:${error.message} attached=${root.parent != null}") }
-                                syncPanelToHandle(root)
-                            }
-                            return true
-                        }
-                        android.view.MotionEvent.ACTION_UP -> {
-                            if (dragging) {
-                                snapHandleToEdge(root, handle, wm)
-                            } else {
-                                // The touch listener owns this gesture, so dispatch exactly one click.
-                                handle.performClick()
-                            }
-                            dragging = false
-                            return true
-                        }
-                        android.view.MotionEvent.ACTION_CANCEL -> {
-                            // A cancelled gesture is not a tap. Never synthesize
-                            // clicks here: that could count a drag/window transition
-                            // as the second tap needed to close the panel.
-                            if (dragging) {
-                                handle.animate().cancel()
-                                handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
-                            }
-                            dragging = false
-                            return true
-                        }
-                    }
-                    return false
-                }
-            }
-            handle.setOnTouchListener(dragListener)
+            handle.setOnTouchListener(buildHandleDragListener(root, handle))
             handle.alpha = 0f
             handle.translationX = dp(10).toFloat()
             handle.animate().alpha(1f).translationX(0f).setDuration(260L)
@@ -980,7 +937,87 @@ class OeaGameBoostService : Service() {
             applyPanelPalette(panel)
             startRainbowAnimation()
             updateOverlay()
-        }.onFailure { error -> diagnostic(android.util.Log.ERROR, "overlay creation failed game=$packageName error=${error.javaClass.name}:${error.message} stack=${android.util.Log.getStackTraceString(error).take(1800)}") }
+        }.onFailure { error ->
+            if (attempt < OVERLAY_ATTACH_ATTEMPTS) {
+                diagnostic(android.util.Log.WARN, "overlay attach refused, retrying game=$game attempt=$attempt error=${error.javaClass.simpleName}:${error.message}")
+                handler.postDelayed(
+                    { attachOverlay(wm, root, params, game, handle, panel, attempt + 1) },
+                    overlayRetryDelayMs(attempt)
+                )
+            } else {
+                diagnostic(android.util.Log.ERROR, "overlay creation failed game=$game error=${error.javaClass.name}:${error.message} stack=${android.util.Log.getStackTraceString(error).take(1800)}")
+            }
+        }
+    }
+
+    /** Drag physics for the floating RAM handle itself. */
+    private fun buildHandleDragListener(root: View, handle: View): View.OnTouchListener {
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        return object : View.OnTouchListener {
+            private var downRawX = 0f
+            private var downRawY = 0f
+            private var startX = 0
+            private var startY = 0
+            private var downTime = 0L
+            private var dragging = false
+
+            override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        downTime = event.eventTime
+                        downRawX = event.rawX
+                        downRawY = event.rawY
+                        val current = root.layoutParams as? WindowManager.LayoutParams ?: return false
+                        startX = current.x
+                        startY = current.y
+                        dragging = false
+                        return true
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - downRawX
+                        val dy = event.rawY - downRawY
+                        if (!dragging && (kotlin.math.abs(dx) > dp(6) || kotlin.math.abs(dy) > dp(6))) {
+                            dragging = true
+                            // Once movement crosses the drag threshold, ACTION_UP must not click.
+                            handle.animate().cancel()
+                            handle.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90L).start()
+                        }
+                        if (dragging) {
+                            val next = root.layoutParams as? WindowManager.LayoutParams ?: return true
+                            val bounds = screenBounds(root)
+                            next.gravity = Gravity.TOP or Gravity.START
+                            next.x = (startX + dx.toInt()).coerceIn(bounds[0], bounds[2])
+                            next.y = (startY + dy.toInt()).coerceIn(bounds[1], bounds[3])
+                            runCatching { wm.updateViewLayout(root, next) }.onFailure { error -> diagnostic(android.util.Log.ERROR, "handle drag updateViewLayout failed=${error.javaClass.name}:${error.message} attached=${root.parent != null}") }
+                            syncPanelToHandle(root)
+                        }
+                        return true
+                    }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        if (dragging) {
+                            snapHandleToEdge(root, handle, wm)
+                        } else {
+                            // The touch listener owns this gesture, so dispatch exactly one click.
+                            handle.performClick()
+                        }
+                        dragging = false
+                        return true
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        // A cancelled gesture is not a tap. Never synthesize
+                        // clicks here: that could count a drag/window transition
+                        // as the second tap needed to close the panel.
+                        if (dragging) {
+                            handle.animate().cancel()
+                            handle.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+                        }
+                        dragging = false
+                        return true
+                    }
+                }
+                return false
+            }
+        }
     }
 
     private fun ensureWakeOverlay() {
@@ -1247,12 +1284,13 @@ class OeaGameBoostService : Service() {
         val next = !OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
         OeaGameBoostStore.prefs(this).edit().putBoolean("dnd", next).apply()
         if (activeGame != null) {
+            // Inside a game session the change applies at once.
             applyGameDndPreference()
-        } else {
-            // The setting is a per-game policy, not a request to leave system
-            // DND enabled while the user is outside a selected game.
-            runCatching { nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL) }
         }
+        // Outside a game the preference is only a policy for the
+        // next session: it must never touch the system's own DND
+        // state, so a Do Not Disturb the user switched on manually
+        // stays exactly as they set it.
         updateDndButton(button)
     }
 
@@ -2072,6 +2110,17 @@ class OeaGameBoostService : Service() {
         private const val SESSION_GRACE_MS = 4_000L
         /** Another app must stay in front a little longer (interruptions while a game loads). */
         private const val OTHER_APP_CONFIRM_MS = 3_500L
+        /** Overlay attach attempts before the monitor tick takes over the repair. */
+        private const val OVERLAY_ATTACH_ATTEMPTS = 3
+        /** First session check: near-instant overlay repair on entering a game. */
+        private const val FIRST_TICK_DELAY_MS = 400L
+
+        /** Delay before the [attempt] overlay attach retry; backs off gently. */
+        private fun overlayRetryDelayMs(attempt: Int): Long = when (attempt) {
+            0 -> 250L
+            1 -> 500L
+            else -> 900L
+        }
 
         /**
          * Short-lived surfaces that appear over a game without the user leaving

@@ -31,6 +31,7 @@ import com.oea.launcher.applock.OeaAppLockStore
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.model.OeaAppInfo
+import com.oea.launcher.multitask.OeaFloatingWindows
 import com.oea.launcher.multitask.OeaMultitaskLauncher
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaTheme
@@ -726,11 +727,20 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
     private fun floating(app: OeaAppInfo) {
         if (!OeaMultitaskLauncher.freeformEnabled(context)) {
             val k = activityKit() ?: return
-            k.sheet("Floating windows are off", "Android keeps floating (freeform) windows behind a developer switch on phones. Turn on Developer options › \"Enable freeform windows\", then restart your phone.") { panel, dialog ->
+            k.sheet("Floating windows are off", "Android keeps floating (freeform) windows behind a developer switch on phones. Turn on Developer options › \"Enable freeform windows\", then restart your phone. On phones where that switch does not exist, OEA's own floating window works instead: a draggable, resizable container that stays above any app.") { panel, dialog ->
                 panel.addView(k.buttonRow(
                     k.quietButton("Try anyway") {
                         dialog.dismiss()
                         w.toast(OeaMultitaskLauncher.launchFloating(context, app).message)
+                    },
+                    k.quietButton("OEA floating window") {
+                        dialog.dismiss()
+                        if (OeaFloatingWindows.isAccessibilityEnabled(context)) {
+                            OeaFloatingWindows.setEnabled(context, true)
+                            w.toast("The OEA floating window appears over the next app you open.")
+                        } else {
+                            OeaFloatingWindows.openSetup(context)
+                        }
                     },
                     k.primaryButton("Developer options") {
                         dialog.dismiss()

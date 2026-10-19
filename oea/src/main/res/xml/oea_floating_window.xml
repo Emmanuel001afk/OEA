@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OEA Floating Window accessibility configuration.
+
+  flagRequestFilterKeyEvents lets the service see hardware key
+  events (so the floating window can react to them without the
+  game underneath losing its input).
+  flagIncludeNotImportantViews exposes the overlay's own view
+  tree to accessibility, so TalkBack users can operate the
+  floating window's browser and keyboard slots.
+  flagRetrieveInteractiveWindows + canRetrieveWindowContent let
+  the service notice which window is in front, which keeps the
+  floating container above games without polling.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/oea_floating_window_description"
+    android:summary="@string/oea_floating_window_summary"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRequestFilterKeyEvents|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="100" />
