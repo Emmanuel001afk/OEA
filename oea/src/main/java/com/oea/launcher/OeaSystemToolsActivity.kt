@@ -421,7 +421,7 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_ac_unit, "Freezer", freezerStatus()) { openActivity(OeaFreezerActivity::class.java) }
         group = kit.group(box)
         kit.row(group, R.drawable.oic_splitscreen, "Multitasking", "Overview, split screen and floating windows") { navigate("multitasking") }
-        kit.row(group, R.drawable.oic_sports_esports, "Game Boost", if (OeaGameBoostStore.enabled(this)) "On • ${OeaGameBoostStore.games(this).size} games" else "Off") { openActivity(OeaGameBoostActivity::class.java) }
+        kit.row(group, R.drawable.oic_sports_esports, "Game Boost", if (OeaGameBoostStore.enabled(this)) "On • ${OeaGameBoostStore.activeGameCount(this)} games" else "Off") { openActivity(OeaGameBoostActivity::class.java) }
         kit.row(group, R.drawable.oic_apps, "Mini-apps", "${OeaMiniAppSwitches.countOn(this)} of ${com.oea.launcher.miniapps.OeaMiniApps.all.size} on • turn each one on or off") { navigate("miniapps") }
         kit.row(group, R.drawable.oic_call, "Phone", "OEA dialer, contacts and in-call screen") { openActivity(OeaPhoneActivity::class.java) }
         kit.row(group, R.drawable.oic_block, "Call Blocker", "Blocked numbers, allow list, rules and history") { openActivity(OeaCallBlockerActivity::class.java) }

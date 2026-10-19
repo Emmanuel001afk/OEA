@@ -456,7 +456,13 @@ internal class ArenaSim(
             else -> 5.4f * weight
         }
         p.ctrl.height = if (p.crouching) 1.2f else 1.8f
-        p.ctrl.move(map.physics, dirX * speed, dirZ * speed, if (inp.jump && !p.crouching) 7.4f else 0f, dt)
+        // Vault assist: jumping while pressed against an obstacle (a low wall,
+        // a crate, a window sill) gives extra lift so the jump actually clears
+        // it instead of bouncing off — this is what makes windows and ledges
+        // climbable rather than decorative. Only applies from the ground, so
+        // it cannot be chained into an infinite climb.
+        val vaultBoost = if (p.ctrl.hitWall && p.ctrl.grounded) 2.6f else 0f
+        p.ctrl.move(map.physics, dirX * speed, dirZ * speed, if (inp.jump && !p.crouching) 7.4f + vaultBoost else 0f, dt)
         return true
     }
 

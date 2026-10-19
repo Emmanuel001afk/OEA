@@ -65,9 +65,10 @@ internal class OeaNetworkQualityReader(context: Context) {
             score = if (score < 0) signalScore else minOf(score, signalScore)
         }
         if (score < 0) {
-            // Conservative fallback: don't call an unknown link "fast". Strong
-            // Ethernet and Wi-Fi estimates are classified above when available.
-            score = if (link == "Ethernet") 2 else 1
+            // Unknown bandwidth with no signal hint: treat as constrained rather
+            // than optimistic — games feel "fast" only when we have evidence.
+            // Ethernet stays fast only when it advertised a real estimate above.
+            score = 0
         }
 
         when (score) {
@@ -80,10 +81,10 @@ internal class OeaNetworkQualityReader(context: Context) {
     }
 
     private companion object {
-        const val FAST_BANDWIDTH_KBPS = 10_000
-        const val MEDIUM_BANDWIDTH_KBPS = 1_500
-        const val STRONG_SIGNAL_DBM = -62
-        const val FAIR_SIGNAL_DBM = -78
+        const val FAST_BANDWIDTH_KBPS = 12_000
+        const val MEDIUM_BANDWIDTH_KBPS = 2_500
+        const val STRONG_SIGNAL_DBM = -60
+        const val FAIR_SIGNAL_DBM = -75
         const val COLOR_FAST = 0xFF6BE6A5.toInt()
         const val COLOR_MEDIUM = 0xFFFFC96B.toInt()
         const val COLOR_SLOW = 0xFFFF7B7B.toInt()

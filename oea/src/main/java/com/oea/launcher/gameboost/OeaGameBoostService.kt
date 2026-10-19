@@ -2116,10 +2116,11 @@ object OeaGameBoostStore {
 
     fun oeaGameId(key: String) = key.removePrefix(OEA_PREFIX)
 
-    /** id -> title of the games the engine currently provides (empty when the engine is not up). */
+    /** id -> title of the games the engine currently provides (stable fallback while the engine is still warming). */
     fun oeaGameTitles(): Map<String, String> = runCatching {
-        com.oea.engine.OeaEngine.registry.all().associate { it.id to it.title }
-    }.getOrDefault(emptyMap())
+        val all = com.oea.engine.OeaEngine.registry.all()
+        if (all.isEmpty()) mapOf("runner" to "Endless Days", "arena" to "Send Off", "chess" to "Chess") else all.associate { it.id to it.title }
+    }.getOrDefault(mapOf("runner" to "Endless Days", "arena" to "Send Off", "chess" to "Chess"))
 
     /** Game entries shaped like installed apps, so every picker/list in Game Boost can show them uniformly. */
     fun oeaGameEntries(): List<com.oea.launcher.model.OeaAppInfo> = oeaGameTitles().map { (id, title) ->
@@ -2142,28 +2143,27 @@ object OeaGameBoostStore {
     }
     fun dismissedGames(context: Context) = prefs(context).getStringSet("dismissed_games", emptySet()).orEmpty()
     /**
-     * True when [packageName] should get a Game Boost session. This runs on
-     * every foreground report, so it checks one package (cached) instead of
-     * scanning every installed app as before. A newly installed game that
-     * Android categorises as a game joins the list automatically unless the
-     * user removed it earlier.
+     * True when [packageName] should get a Game Boost session.
+     *
+     * OEA's own games (oeagame/<id>) are recognised by the engine registry
+     * alone — they never need to be "added" to Game Boost and never sit in the
+     * persisted selection.  They have their own identity as games and Game Boost
+     * simply assists them.  The same is true for any installed app that Android
+     * already declares as CATEGORY_GAME: it is a game by identity, not because
+     * it was dragged into Game Boost's list.  Only in "Auto + manual" may the
+     * user add a non-game app; those manual picks are the only entries that
+     * live in the persisted [games] set.
      */
     fun isGame(context: Context, packageName: String): Boolean {
-        val selected = games(context)
         if (isOeaGameKey(packageName)) {
-            // OEA's own games: a selected key always counts (it is registered
-            // as a game by definition); an unknown id (registry not ready) never does.
             if (!oeaGameTitles().containsKey(oeaGameId(packageName))) return false
-            if (packageName in selected) return true
             if (packageName in dismissedGames(context)) return false
-            setGames(context, selected + packageName)
             return true
         }
-        val manual = mode(context) == "manual_automatic"
-        if (packageName in selected) return manual || isCategoryGame(context, packageName)
-        if (packageName in dismissedGames(context) || !isCategoryGame(context, packageName)) return false
-        setGames(context, selected + packageName)
-        return true
+        if (packageName in dismissedGames(context)) return false
+        if (isCategoryGame(context, packageName)) return true
+        // Non-game app that the user explicitly added in manual+auto.
+        return mode(context) == "manual_automatic" && packageName in games(context)
     }
 
     private val categoryCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
@@ -2224,11 +2224,16 @@ object OeaGameBoostStore {
     }
 
     fun syncDetectedGames(context: Context): Set<String> {
+        // Automatic games are recognised by identity (Android category or engine
+        // registry) and must not be forced into the persisted manual selection.
+        // This sync now only prunes dismissed entries from any legacy persisted
+        // set and returns the live detected set for the UI.
         val detected = detectedGames(context)
         val dismissed = dismissedGames(context)
-        val merged = games(context).toMutableSet().apply { addAll(detected.filterNot(dismissed::contains)) }
-        setGames(context, merged)
-        return merged
+        val legacy = games(context)
+        val pruned = legacy.filterNot { it in dismissed && isCategoryGame(context, it) }.toSet()
+        if (pruned.size != legacy.size) setGames(context, pruned)
+        return detected.filterNot(dismissed::contains).toSet()
     }
 
     fun removeGame(context: Context, packageName: String) {
@@ -2238,5 +2243,19 @@ object OeaGameBoostStore {
 
     fun restoreGame(context: Context, packageName: String) {
         prefs(context).edit().putStringSet("dismissed_games", dismissedGames(context).toMutableSet().apply { remove(packageName) }).apply()
+    }
+
+    /**
+     * How many games Game Boost currently recognises by identity: Android's
+     * own declared games, OEA's own games, and (in Auto + manual) any extra
+     * apps the user explicitly added. Used for the one-line summary in
+     * Settings so it always agrees with what "Your games" shows.
+     */
+    fun activeGameCount(context: Context): Int {
+        val dismissed = dismissedGames(context)
+        val oea = oeaGameTitles().keys.map { OEA_PREFIX + it }.filterNot { it in dismissed }
+        val detected = detectedGames(context).filterNot { it in dismissed }
+        val manual = if (mode(context) == "manual_automatic") games(context).filterNot { it in dismissed } else emptyList()
+        return (oea + detected + manual).distinct().size
     }
 }
