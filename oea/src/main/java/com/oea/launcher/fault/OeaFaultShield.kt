@@ -34,6 +34,18 @@ import java.util.concurrent.atomic.AtomicLong
  *    blocked content provider) is recorded with its stack instead of showing
  *    Android's "OEA Launcher isn't responding" dialog.
  *
+ * A fault that reaches the main thread's own uncaught-exception handler has
+ * already unwound `Looper.loop()`, so merely posting a recovery Runnable would
+ * never run — nothing pumps that queue once the loop has returned. When the
+ * fault belongs to a game (or any other OEA screen) rather than Home itself,
+ * [onUncaught] handles it and then resumes the very same Looper in place
+ * (its `MessageQueue` was never destroyed, only the pump loop returned). That
+ * is what actually keeps OEA alive and the default launcher unchanged instead
+ * of the whole process dying — which is what used to carry the user out of
+ * OEA and back to Android's "set default launcher" prompt. Repeated crashes in
+ * a short window still fall through to a real process restart rather than
+ * looping forever.
+ *
  * Nothing here is a substitute for fixing the fault; the point is that a fault
  * in one part of OEA must never be visible as a launcher crash.
  */
@@ -226,18 +238,55 @@ object OeaFaultShield {
 
     // ------------------------------------------------------------- fault intake
 
+    /** How many times in a row we have resumed the main Looper after a game-screen fault. */
+    private val consecutiveMainResumes = AtomicInteger()
+
     private fun onUncaught(thread: Thread, error: Throwable) {
         val kind = OeaFaultPolicy.classify(thread, mainThread, frontIsGame)
         val subsystem = subsystemOf(thread, error)
-        // An uncaught fault on the main thread has already unwound Looper.loop():
-        // the message queue is dead even though the process is still alive. A
-        // "contained" main-thread fault therefore does NOT keep Home running —
-        // it leaves a zombie process whose last window stays on the screen
-        // (black or frozen), ignoring Home, Recents and touches until the whole
-        // phone is rebooted. The only safe recovery is to record the fault and
-        // hand the thread back to Android so the process dies and Home restarts
-        // cleanly (Android relaunches the default launcher in a fresh process).
+        // An uncaught fault on the main thread has already unwound Looper.loop(),
+        // which stops the message queue from being pumped — merely posting a
+        // "close the screen" Runnable at this point would never run, and the
+        // process is a zombie until Android kills it. The only way to actually
+        // keep Home alive is to resume pumping that same Looper ourselves right
+        // here, after handling the fault, instead of letting the thread finish
+        // and the process die. This only applies while a game or other OEA
+        // screen (not Home itself) was in front: Home's own main-thread faults
+        // keep going through [escalate], exactly as before.
         if (thread === mainThread) {
+            if (kind == ThreadKind.MAIN_SCREEN && frontScreen != null && homeRendered &&
+                consecutiveMainResumes.get() < MAX_CONSECUTIVE_RESUMES
+            ) {
+                consecutiveMainResumes.incrementAndGet()
+                val seen = runCatching { countRecent(subsystem) }.getOrDefault(1)
+                val input = FaultInput(
+                    kind = kind, subsystem = subsystem, repeats = seen, windowMs = OeaFaultPolicy.WINDOW_MS,
+                    fatalError = OeaFaultPolicy.isFatalError(error), stackOverflow = OeaFaultPolicy.isStackOverflow(error),
+                    alreadyInSafeMode = safeMode, homeRendered = homeRendered, onOeaScreen = true
+                )
+                val decision = OeaFaultPolicy.decide(input)
+                val record = OeaFaultRecord.of(kind, thread, subsystem, error, decision.action, decision.reason, seen, processName())
+                runCatching { OeaFaultLog.record(record) }
+                publish(record)
+                // The crashed call stack has already unwound; nothing it held is
+                // still running, so acting now (closing the game's activity) is safe.
+                runCatching { act(decision.action) }
+                // Repeated crashes in a short window fall through to a real
+                // process restart instead of resuming forever; once this session
+                // has gone 15s without another main-thread game fault, forgive it.
+                main.postDelayed({ consecutiveMainResumes.set(0) }, 15_000L)
+                // Resume the SAME Looper (its MessageQueue was never destroyed,
+                // only the pump loop returned): this is what actually prevents
+                // the process from dying and Android from forgetting OEA is the
+                // default launcher. If resuming itself faults again, handle that
+                // fault the same way (it still counts against the limit above).
+                try {
+                    Looper.loop()
+                } catch (inner: Throwable) {
+                    onUncaught(thread, inner)
+                }
+                return
+            }
             val seen = runCatching { countRecent(subsystem) }.getOrDefault(1)
             runCatching {
                 OeaFaultLog.record(
@@ -501,4 +550,6 @@ object OeaFaultShield {
 
     private const val TICK_MS = 1_000L
     private const val STALL_TICKS = 6L
+    /** Consecutive main-thread game faults resumed in place before a real process restart is used instead. */
+    private const val MAX_CONSECUTIVE_RESUMES = 5
 }

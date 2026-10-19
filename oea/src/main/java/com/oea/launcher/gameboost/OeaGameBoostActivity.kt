@@ -241,11 +241,18 @@ class OeaGameBoostActivity : Activity() {
         }
 
     private fun selectedGames(): List<OeaAppInfo> {
-        val games = OeaGameBoostStore.games(this)
-        val manual = OeaGameBoostStore.mode(this) == "manual_automatic"
-        val installed = installedApps.filter { it.packageName in games && (manual || !loaded || it.packageName in detected) }
-        // OEA's own games are not packages, so they join from the engine registry.
-        val oea = OeaGameBoostStore.oeaGameEntries().filter { it.packageName in games }
+        // "Your games" now shows every game recognised by identity: Android's
+        // declared game category plus OEA's own engine games (unless dismissed).
+        // Manual picks appear only in Auto+manual.  This keeps automatic mode truly
+        // automatic while preserving the ability to boost a non-game app when the
+        // user explicitly asked for it.
+        val dismissed = OeaGameBoostStore.dismissedGames(this)
+        val modeManual = OeaGameBoostStore.mode(this) == "manual_automatic"
+        val installed = installedApps.filter { app ->
+            app.packageName !in dismissed && (OeaGameBoostStore.isCategoryGame(this, app.packageName) ||
+                (modeManual && app.packageName in OeaGameBoostStore.games(this)))
+        }
+        val oea = OeaGameBoostStore.oeaGameEntries().filter { it.packageName !in dismissed }
         return (installed + oea).sortedBy { it.label.lowercase() }
     }
 
