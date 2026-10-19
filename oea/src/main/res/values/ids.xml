@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- OEA Floating Window: the content area and the resize handle. -->
+    <item name="oea_floating_content_slot" type="id" />
+    <item name="oea_floating_resize_handle" type="id" />
+</resources>

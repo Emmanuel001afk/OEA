@@ -43,6 +43,7 @@ import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.freezer.OeaFreezerActivity
 import com.oea.launcher.gameboost.OeaGameBoostActivity
 import com.oea.launcher.gameboost.OeaGameBoostStore
+import com.oea.launcher.multitask.OeaFloatingWindows
 import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.model.OeaAppModel
@@ -3051,6 +3052,29 @@ open class OeaSystemToolsActivity : Activity() {
                 requestPrivilege(privilege, grant)
             }
         }
+        kit.sectionTitle(box, "Floating multitask window")
+        val floating = kit.group(box)
+        kit.switchRow(
+            floating, R.drawable.oic_select_window,
+            "Floating window",
+            "A draggable, resizable container above other apps, for devices whose split screen is switched off",
+            OeaFloatingWindows.enabled(this)
+        ) { on ->
+            if (on && !OeaFloatingWindows.isAccessibilityEnabled(this)) {
+                // The container is drawn by an accessibility service,
+                // so Android's own switch must come on first.
+                kit.confirm(
+                    "Enable in Accessibility",
+                    "The floating window is hosted by an accessibility service so it can stay above games. Switch on \"OEA Floating Window\" on the next page, then turn this row on again.",
+                    "Open settings"
+                ) { OeaFloatingWindows.openSetup(this) }
+            } else {
+                OeaFloatingWindows.setEnabled(this, on)
+                if (on) toast("The floating window appears over the next app you open.")
+            }
+            rerender()
+        }
+        kit.note(box, "The window has a title bar you drag to move it and a corner handle you drag to resize it. It never takes focus or touches away from the app underneath, outside its own bounds.")
         if (OeaAssistant.needsRestrictedSettingsHint() && !OeaAssistant.isEnabled(this)) kit.note(box, OeaAssistant.RESTRICTED_SETTINGS_HINT)
         if (!shell && !owner) {
             kit.note(box, "Two permissions can only be given by Android itself: \"Display over other apps\" and \"Usage access\". The pages above open exactly there, and OEA verifies the result when you come back. A helper app such as Shizuku would not change that — Android reserves these to the user, though root or device owner lets OEA do it alone.")
