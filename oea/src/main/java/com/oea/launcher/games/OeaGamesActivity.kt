@@ -2,7 +2,6 @@ package com.oea.launcher.games
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -47,7 +46,6 @@ import com.oea.engine.net.session.SessionListener
 import com.oea.engine.net.session.SessionPhase
 import com.oea.engine.perf.QualityTier
 import com.oea.games.OeaGames
-import com.oea.games.OeaStandaloneGameActivity
 import com.oea.games.lab.EngineLab
 import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
@@ -335,48 +333,14 @@ open class OeaGamesActivity : Activity(), SessionListener {
     }
 
     private fun launchGame(d: GameDescriptor, mode: PlayMode, options: Map<String, String>, players: List<LocalPlayer> = emptyList(), session: NetSession? = null) {
-        // OEA's own games ship as independent apps (own icon, own task, own
-        // Android Game category). Solo and same-device play ALWAYS goes through
-        // that app when it is installed — the launcher never runs those matches
-        // itself. Networked matches stay here only while a hub lobby holds the
-        // live session; the standalone apps can host and join on their own too.
-        val standalonePackage = OeaGameRescue.standaloneFor(d.id)
-        if (session == null && standalonePackage != null && (mode == PlayMode.SOLO || mode == PlayMode.SAME_DEVICE)) {
-            val external = runCatching { packageManager.getLaunchIntentForPackage(standalonePackage) }.getOrNull()
-            if (external != null) {
-                val optionBundle = android.os.Bundle().apply { options.forEach { (key, value) -> putString(key, value) } }
-                val playerCsv = players.joinToString(";") { it.name }
-                runCatching {
-                    startActivity(external
-                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_ID, d.id)
-                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_MODE, mode.name)
-                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_OPTIONS, optionBundle)
-                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_PLAYERS, playerCsv)
-                        .putExtra(OeaStandaloneGameActivity.EXTRA_GAME_SEED, System.nanoTime()))
-                }.onSuccess {
-                    // The standalone game app is a real package with Android's game
-                    // category; report its launch so a Game Boost session starts even
-                    // without the assistant watching windows.
-                    runCatching { com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(applicationContext, standalonePackage) }
-                    return
-                }
-                    .onFailure { toast("Opening ${d.title}'s own app failed.") }
-            } else {
-                // Not installed: say so plainly, and only run inside OEA if the
-                // user explicitly chooses to — never silently.
-                AlertDialog.Builder(this)
-                    .setTitle("${d.title} has its own app")
-                    .setMessage("${d.title} is an independent app ($standalonePackage) with its own icon, settings and multiplayer. Install it for the full experience — or run this match inside OEA just this once.")
-                    .setPositiveButton("Run inside OEA") { _, _ -> startInHub(d, mode, options, players, session) }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-                return
-            }
-        }
+        // OEA's games live inside the launcher, each with its own
+        // identity (icon, label, task and front menu). Every match
+        // runs here; a hub lobby keeps the live session for
+        // networked play.
         startInHub(d, mode, options, players, session)
     }
 
-    /** The in-hub engine path: used for hub-hosted networked matches and Lab. */
+    /** The in-hub engine path for every match (solo, same-device and networked). */
     private fun startInHub(d: GameDescriptor, mode: PlayMode, options: Map<String, String>, players: List<LocalPlayer>, session: NetSession?) {
         val launch = GameLaunch(mode, options, session?.seed ?: System.nanoTime(), players, session)
         OeaGameLauncher.start(this, d.id, launch)
@@ -444,15 +408,6 @@ open class OeaGamesActivity : Activity(), SessionListener {
                 val cleared = OeaGameRescue.clearSaveData(this, d.id)
                 toast(if (cleared) "${d.title}'s data was reset." else "There was nothing saved to reset.")
                 render()
-            }
-        }
-        val standalone = OeaGameRescue.standaloneFor(d.id)
-        if (standalone != null && OeaGameRescue.launchable(this, standalone)) {
-            kit.row(group, R.drawable.oic_open_in_new, "Play in its own app", "${d.title} also ships as a separate app, which runs outside OEA entirely") {
-                runCatching { packageManager.getLaunchIntentForPackage(standalone) }
-                    .getOrNull()
-                    ?.let { startActivity(it) }
-                    ?: toast("That app is not installed any more.")
             }
         }
         kit.note(box, "Nothing is lost by trying these: OEA keeps your workspace, apps and settings, and the game's own save data is only cleared if you ask for it.")
@@ -829,7 +784,7 @@ open class OeaGamesActivity : Activity(), SessionListener {
         }
         kit.switchRow(access, R.drawable.oic_contrast, "High contrast menus", "Black grounds, white type, hard edges — a game's own accent survives", s.highContrastMenus) { s.highContrastMenus = it }
         kit.switchRow(access, R.drawable.oic_animation, "No fading or sliding", "Screens change at once; nothing cross-fades under your finger", s.reducedMotion) { s.reducedMotion = it }
-        kit.note(box, "These three reach the games' own screens — the menus and sheets inside Send Off, Chess and Endless Days, including the versions installed as separate apps. Android's system font scale still applies on top for OEA's launcher, and nothing here changes how a game plays: aim, quality and frame rate stay where they are above. Thermal protection steps quality down before your phone throttles, and Android's Game Mode (battery or performance) is respected; those apply the next time a game starts.")
+        kit.note(box, "These three reach the games' own screens — the menus and sheets inside Send Off, Chess and Endless Days, Android's system font scale still applies on top for OEA's launcher, and nothing here changes how a game plays: aim, quality and frame rate stay where they are above. Thermal protection steps quality down before your phone throttles, and Android's Game Mode (battery or performance) is respected; those apply the next time a game starts.")
 
         // ------------------------------------------------------------ diagnosis
         // Everything needed to explain "a game will not start", in one place and

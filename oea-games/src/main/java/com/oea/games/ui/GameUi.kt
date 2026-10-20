@@ -40,12 +40,12 @@ import kotlin.math.sin
 /**
  * The visual language of OEA's games, in one file that belongs to the games.
  *
- * `:oea-games` is shared by two very different hosts: the OEA launcher (which
- * has its own `OeaKit`) and the separately installed game apps (`com.oea.runner`,
- * `com.oea.arena`, `com.oea.chess`). A game app must never depend on the
- * launcher, so it cannot use `OeaKit` — and before this existed it fell back to
- * stock `AlertDialog`s over an empty window, which is why the standalone apps
- * looked nothing like OEA.
+ * `:oea-games` is hosted by the OEA launcher (which has its own
+ * `OeaKit`), and the games ship inside the launcher's single APK. A
+ * game must never depend on the launcher, so it cannot use `OeaKit` —
+ * and before this existed it fell back to stock `AlertDialog`s over
+ * an empty window, which is why the game screens looked nothing like
+ * OEA.
  *
  * Everything a game shell needs lives here and matches the launcher's kit one
  * for one: the same dark console palette, the same 20–30 dp radii, the same

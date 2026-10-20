@@ -499,6 +499,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         sleepPill = pill("Sleep", R.drawable.oic_timer, null) { showSleepSheet() }
         bar.addView(sleepPill, LinearLayout.LayoutParams(-2, dp(32)).apply { marginStart = dp(4) })
         if (!isAudio) bar.addView(iconButton(R.drawable.ic_vip_pip, "Picture in picture") { enterPip() }, buttonSize())
+        // Rotation lives up here, not buried in a sheet: tilting the phone
+        // is how people expect a video to turn, and this is the one-tap
+        // answer when it does not.
+        bar.addView(iconButton(R.drawable.ic_vip_rotate, "Screen rotation") { cycleRotation() }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_lock, "Lock the screen controls") { setLocked(true) }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_more_vert, "Everything else") { showMoreSheet() }, buttonSize())
         return bar
@@ -1653,9 +1657,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 showDetails()
             })
             panel.row(info, R.drawable.oic_share_filled, "Share the file", onClick = { shareCurrent() })
-            panel.row(info, R.drawable.oic_open_in_new, "Open with another app", onClick = {
-                current()?.let { openExternally(it.uri) }
-            })
+            panel.row(info, R.drawable.oic_open_in_new, "Play with the phone's player",
+                "The device's own video app takes over, the way the phone plays video anywhere else", onClick = {
+                    current()?.let { openExternally(it.uri) }
+                })
             panel.switch(info, R.drawable.oic_music_note, "Audio keeps playing", "Music continues when you leave VIP",
                 OeaVipStore.backgroundAudio(this)) { value ->
                 OeaVipStore.setBackgroundAudio(this, value)
@@ -1718,8 +1723,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT to "portrait",
             ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE to "upside down"
         )
-        val at = modes.indexOfFirst { it.first == requestedOrientation }.let { if (it < 0) 0 else it }
-        val next = modes[(at + 1) % modes.size]
+        val at = modes.indexOfFirst { it.first == requestedOrientation }
+        val next = modes[(at + 1 + modes.size) % modes.size]
         requestedOrientation = next.first
         flash("Rotation: ${next.second}")
     }

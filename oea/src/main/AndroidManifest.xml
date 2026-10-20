@@ -307,6 +307,7 @@
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
             android:theme="@style/OeaFullscreenAppTheme"
+            android:screenOrientation="fullSensor"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaWeatherActivity"

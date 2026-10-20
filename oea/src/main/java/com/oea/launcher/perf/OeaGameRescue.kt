@@ -1,7 +1,6 @@
 package com.oea.launcher.perf
 
 import android.content.Context
-import android.content.Intent
 import java.io.File
 import kotlin.math.min
 import com.oea.engine.OeaEngine
@@ -31,13 +30,6 @@ object OeaGameRescue {
         /** True when the action needs a fresh game process (i.e. a retry). */
         val restart: Boolean,
         val run: () -> Unit
-)
-
-    /** The standalone APKs OEA can hand a game over to — full process isolation. */
-    private val standalonePackages = mapOf(
-        "arena" to "com.oea.arena",
-        "chess" to "com.oea.chess",
-        "runner" to "com.oea.runner"
 )
 
     fun options(context: Context, gameId: String, error: Throwable?): List<Option> {
@@ -72,16 +64,6 @@ object OeaGameRescue {
                     val target = OeaEngine.settings.fpsTarget
                     OeaEngine.settings.fpsTarget = min(target.takeIf { it > 0 } ?: 120, 60)
                     OeaEngine.settings.adaptiveResolution = true
-                }
-)
-        }
-        val standalone = standalonePackages[gameId]
-        if (standalone != null && launchable(context, standalone)) {
-            out += Option(
-                "Open as its own app", R.drawable.oic_open_in_new, restart = false,
-                run = {
-                    context.packageManager.getLaunchIntentForPackage(standalone)
-                        ?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
 )
         }
@@ -135,13 +117,6 @@ object OeaGameRescue {
         runCatching { OeaDataStore.get(context).markUnstable(gameId, false) }
         return cleared
     }
-
-    /** Whether the standalone build of this game is installed and can be launched. */
-    fun launchable(context: Context, pkg: String): Boolean = runCatching {
-        context.packageManager.getLaunchIntentForPackage(pkg) != null
-    }.getOrDefault(false)
-
-    fun standaloneFor(gameId: String): String? = standalonePackages[gameId]
 
     /** True when the game keeps stopping and the hub should lead with a repair. */
     fun isUnstable(context: Context, gameId: String): Boolean = runCatching {

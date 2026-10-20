@@ -9,6 +9,8 @@ import android.graphics.Typeface
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.VelocityTracker
@@ -18,6 +20,7 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.TextView
 import com.oea.launcher.R
 import kotlin.math.abs
@@ -78,6 +81,10 @@ class OeaFloatingWindowService : AccessibilityService() {
 
     /** True while a drag or resize gesture is recognised (not a tap). */
     private var dragging = false
+
+    /** Last tap on the title bar / handle, for double-tap gestures. */
+    private var lastTitleTap = 0L
+    private var lastHandleTap = 0L
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -320,12 +327,45 @@ class OeaFloatingWindowService : AccessibilityService() {
         root.addView(handle, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.END or Gravity.BOTTOM))
         resizeHandle = handle
 
+        // ---- title-bar actions: collapse and close ------------------
+        // Two small round buttons at the end of the title bar. They
+        // share nothing: each gets its own LayoutParams, because a
+        // single shared instance would move both views at once.
+        val collapseBtn = iconButton(
+            R.drawable.oic_expand_more,
+            "Collapse the floating window"
+        ) { collapse() }
+        titleLayout.addView(collapseBtn, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.END or Gravity.CENTER_VERTICAL).apply {
+            marginEnd = dp(42)
+        })
+        val closeBtn = iconButton(
+            R.drawable.oic_close,
+            "Close the floating window until it is turned on again"
+        ) { closeWindow() }
+        titleLayout.addView(closeBtn, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.END or Gravity.CENTER_VERTICAL).apply {
+            marginEnd = dp(2)
+        })
+
         // Wire the physics: title bar moves the window, the corner
         // handle resizes it.
         titleLayout.setOnTouchListener(TitleDragTouchListener(root))
         handle.setOnTouchListener(ResizeTouchListener(root))
 
         return root
+    }
+
+    private fun iconButton(res: Int, description: String, onClick: () -> Unit): ImageView = ImageView(this).apply {
+        setImageResource(res)
+        setColorFilter(0xFFF1F8FF.toInt())
+        contentDescription = description
+        scaleType = ImageView.ScaleType.CENTER_INSIDE
+        setPadding(dp(6), dp(6), dp(6), dp(6))
+        isClickable = true
+        background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(0x33FFFFFF)
+        }
+        setOnClickListener { haptic(); runCatching { onClick() } }
     }
 
     // ------------------------------------------------------------------ drag physics (title bar)
@@ -360,6 +400,7 @@ class OeaFloatingWindowService : AccessibilityService() {
                     velocity?.addMovement(event)
                     dragging = false
                     root.animate().cancel()
+                    haptic()
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -385,6 +426,19 @@ class OeaFloatingWindowService : AccessibilityService() {
                         val vx = velocity?.xVelocity ?: 0f
                         val vy = velocity?.yVelocity ?: 0f
                         flingWindow(root, vx, vy)
+                    } else {
+                        // A clean lift: two of these inside the
+                        // double-tap window collapse the floating
+                        // window, the way the title bar's own
+                        // button does.
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (now - lastTitleTap < DOUBLE_TAP_MS) {
+                            lastTitleTap = 0L
+                            haptic()
+                            collapse()
+                        } else {
+                            lastTitleTap = now
+                        }
                     }
                     velocity?.recycle()
                     velocity = null
@@ -459,6 +513,7 @@ class OeaFloatingWindowService : AccessibilityService() {
         private var downRawY = 0f
         private var startWidth = 0
         private var startHeight = 0
+        private var resizing = false
         private val touchSlop = ViewConfiguration.get(this@OeaFloatingWindowService).scaledTouchSlop
 
         override fun onTouch(v: View, event: MotionEvent): Boolean {
@@ -468,13 +523,16 @@ class OeaFloatingWindowService : AccessibilityService() {
                     downRawY = event.rawY
                     startWidth = root.width
                     startHeight = root.height
+                    resizing = false
                     root.animate().cancel()
+                    haptic()
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - downRawX
                     val dy = event.rawY - downRawY
-                    if (abs(dx) < touchSlop && abs(dy) < touchSlop) return true
+                    if (!resizing && (abs(dx) >= touchSlop || abs(dy) >= touchSlop)) resizing = true
+                    if (!resizing) return true
                     val lp = root.layoutParams as? WindowManager.LayoutParams ?: return true
                     val metrics = resources.displayMetrics
                     val newWidth = (startWidth + dx).toInt()
@@ -497,6 +555,20 @@ class OeaFloatingWindowService : AccessibilityService() {
                     windowWidth = root.width
                     windowHeight = root.height
                     OeaFloatingWindows.saveSize(this@OeaFloatingWindowService, windowWidth, windowHeight)
+                    if (!resizing) {
+                        // Two taps on the corner put the box back to
+                        // the size it starts at: 60% × 45% of the
+                        // screen, the comfortable default on Go devices.
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (now - lastHandleTap < DOUBLE_TAP_MS) {
+                            lastHandleTap = 0L
+                            haptic()
+                            resetSize()
+                        } else {
+                            lastHandleTap = now
+                        }
+                    }
+                    resizing = false
                     return true
                 }
             }
@@ -531,6 +603,41 @@ class OeaFloatingWindowService : AccessibilityService() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
+    // ------------------------------------------------------------------ gestures
+
+    /**
+     * Back to the starting size: 60% of the screen wide, 45% tall.
+     * Reached by double-tapping the resize handle; the window is
+     * re-clamped to the screen and the new size is remembered.
+     */
+    private fun resetSize() {
+        val root = windowRoot ?: return
+        val lp = root.layoutParams as? WindowManager.LayoutParams ?: return
+        val metrics = resources.displayMetrics
+        windowWidth = (metrics.widthPixels * 0.60f).toInt()
+        windowHeight = (metrics.heightPixels * 0.45f).toInt()
+        lp.width = windowWidth
+        lp.height = windowHeight
+        val bounds = screenBounds(root)
+        lp.x = lp.x.coerceIn(bounds[0], bounds[2])
+        lp.y = lp.y.coerceIn(bounds[1], bounds[3])
+        updateWindow(root, lp)
+        OeaFloatingWindows.saveSize(this, windowWidth, windowHeight)
+    }
+
+    /** A short tick, so gestures and buttons confirm themselves. */
+    private fun haptic() {
+        runCatching {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+            if (Build.VERSION.SDK_INT >= 26) {
+                vibrator.vibrate(VibrationEffect.createOneShot(8, 40))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(12)
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ public API
 
     /** Collapse (hide) the floating window; the service stays alive. */
@@ -539,11 +646,25 @@ class OeaFloatingWindowService : AccessibilityService() {
     /** Expand (show) the floating window. */
     fun expand() = showWindow(animate = true)
 
+    /**
+     * Close the window and switch the feature off, so it stays
+     * closed until the user turns it back on in OEA Settings.
+     * The accessibility service itself stays enabled — that is
+     * Android's switch, not OEA's.
+     */
+    fun closeWindow() {
+        OeaFloatingWindows.setEnabled(this, false)
+        collapse()
+    }
+
     fun isWindowShowing(): Boolean = windowRoot?.parent != null
 
     companion object {
         private const val FLING_MIN_VELOCITY = 240f // dp/sec
         private const val FLING_DURATION_MS = 220L
+
+        /** Two taps this far apart count as a double-tap. */
+        private const val DOUBLE_TAP_MS = 300L
 
         /**
          * The bound service, or null while Android has not bound it

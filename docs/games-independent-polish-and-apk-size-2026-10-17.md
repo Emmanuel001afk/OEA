@@ -82,6 +82,11 @@ system popup on it. That is why the installed game apps looked nothing like
 OEA, and it is the direct cause of the "the independent apps don't look like
 the launcher" complaint.
 
+> **Update (2026-10-19):** OEA now ships **one APK**. The games live inside the
+> launcher, each with its own icon, label, task and front menu (see
+> `oeaGameEntries` / the launcher manifest). The standalone game modules are
+> gone; build with `./gradlew :oea:assembleRelease` only.
+
 **Fixed.** The shell now renders a real home screen (see §2).
 
 ### Root cause 3 — the game APKs were built but never shipped
@@ -93,7 +98,7 @@ game APKs were compiled, verified by nobody, and thrown away when the job
 ended. Nothing in the `oea-latest` release ever contained a game, so the
 "independent apps" could not be installed at all.
 
-**Fixed.** Game APKs are now verified (`aapt2 dump badging` for
+**Fixed (superseded by the single-APK change).** Game APKs are now verified (`aapt2 dump badging` for
 `com.oea.runner` / `com.oea.arena` / `com.oea.chess`, plus `apksigner verify`),
 uploaded as the `oea-game-apks` artifact, and attached to the `oea-latest`
 release next to the launcher.

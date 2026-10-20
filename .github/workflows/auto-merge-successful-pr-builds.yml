@@ -87,8 +87,8 @@ jobs:
           grep -Fq "SELECT VISIBLE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "REFRESH STATE" oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
           grep -Fq "QUERY_ALL_PACKAGES" oea/src/main/AndroidManifest.xml
-      - name: Build OEA Launcher and game APKs
-        run: ./gradlew :oea:assembleRelease :oea-game-arena:assembleRelease :oea-game-chess:assembleRelease :oea-game-runner:assembleRelease --stacktrace
+      - name: Build the single OEA APK (launcher and games)
+        run: ./gradlew :oea:assembleRelease --stacktrace
       - name: Verify APK identity
         run: |
           APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"
@@ -102,34 +102,11 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
-      - name: Collect the game APKs
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/games"
-          # Released under the game's own name, not Gradle's: the asset has to
-          # be recognisable to whoever downloads it.
-          collect() {
-            local dir="$1" out="$2"
-            local apk
-            apk="$(find "$dir/build/outputs/apk" -type f -name '*.apk' -print -quit)"
-            test -n "$apk" || { echo "ERROR: no APK built for $dir"; return 1; }
-            cp "$apk" "$RUNNER_TEMP/games/$out"
-          }
-          collect oea-game-runner OEA-Endless-Days.apk
-          collect oea-game-arena OEA-Send-Off.apk
-          collect oea-game-chess OEA-Chess.apk
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: oea-launcher-apk-after-merge
           path: ${{ runner.temp }}/OEA-latest.apk
-          retention-days: 7
-          if-no-files-found: error
-      - name: Upload game APK artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: oea-game-apks-after-merge
-          path: ${{ runner.temp }}/games/*.apk
           retention-days: 7
           if-no-files-found: error
       - name: Publish latest APK release
