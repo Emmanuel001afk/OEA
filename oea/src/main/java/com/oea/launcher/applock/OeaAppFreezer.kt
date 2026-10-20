@@ -106,7 +106,7 @@ object OeaAppFreezer {
 
     /** SYSTEM when Android grants real package suspension, otherwise OEA Freeze. */
     fun mode(context: Context): Mode = when (backend(context)) {
-        Backend.DEVICE_OWNER, Backend.ROOT -> Mode.SYSTEM
+        Backend.DEVICE_OWNER, Backend.ROOT, Backend.ADB -> Mode.SYSTEM
         Backend.DEVICE_ADMIN, Backend.NONE -> Mode.OEA
     }
 
@@ -141,6 +141,18 @@ object OeaAppFreezer {
             }
             Backend.ROOT -> {
                 val (success, dump) = runShell("dumpsys package")
+                if (!success || !dump.contains("Package [")) return
+                val blocks = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""").findAll(dump).toList()
+                if (blocks.isEmpty()) return
+                blocks.filter { match ->
+                    match.groupValues[1] in candidates &&
+                        Regex("""(?m)^\s*User 0:.*\bsuspended=true\b""").containsMatchIn(match.groupValues[2])
+                }.mapTo(mutableSetOf()) { it.groupValues[1] }
+            }
+            Backend.ADB -> {
+                // The OEA Authority shell reads the same dumpsys output
+                // the root path parses, through the paired connection.
+                val (success, dump) = com.oea.launcher.privilege.OeaAdbAuthority.runShell("dumpsys package")
                 if (!success || !dump.contains("Package [")) return
                 val blocks = Regex("""(?ms)^Package \[([^\]]+)](.*?)(?=^Package \[|\z)""").findAll(dump).toList()
                 if (blocks.isEmpty()) return
