@@ -266,10 +266,6 @@ class OeaAuthorityActivity : Activity() {
         }
     }
 
-    /**
-     * A successful pairing is not proof that later privileged operations work.
-     * Run a fresh, read-only shell identity probe and show its actual output.
-     */
     /** Live capability discovery; shows what this device actually permits. */
     private fun scanAuthorityCapabilities() {
         setBusy(true, "Probing OEA Authority capabilities on this device…")
@@ -300,6 +296,10 @@ class OeaAuthorityActivity : Activity() {
         }
     }
 
+    /**
+     * A successful pairing is not proof that later privileged operations work.
+     * Run a fresh, read-only shell identity probe and show its actual output.
+     */
     private fun testAuthority() {
         if (!OeaAdbAuthority.isSessionReady()) {
             refreshStatus("Test blocked: the shell session is not currently connected. Tap Reconnect first.")
