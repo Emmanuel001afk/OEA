@@ -308,6 +308,7 @@ internal object OeaEmageViewer {
             action(R.drawable.oic_share_filled, "Share") {
                 OeaMediaLibrary.share(host, listOf(current()))
             }
+            action(R.drawable.oic_edit, "Edit") { editCurrent() }
             action(R.drawable.oic_wallpaper, "Wallpaper") { wallpaperMenu() }
             action(R.drawable.oic_info, "Details") {
                 setChrome(true)
@@ -417,24 +418,102 @@ internal object OeaEmageViewer {
 
         private fun editCurrent() {
             val item = current()
-            val started = runCatching {
-                host.startActivity(
-                    Intent(Intent.ACTION_EDIT).apply {
-                        setDataAndType(item.uri, "image/*")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            kit.sheet("Edit", item.name) { panel, dialog ->
+                val group = kit.group(panel)
+                kit.row(group, R.drawable.oic_refresh, "Rotate right", "Saved into the picture itself") {
+                    dialog.dismiss()
+                    rotateAndSave(item)
+                }
+                kit.row(group, R.drawable.oic_open_in_new, "Open in an editor", "The phone's own editor, with crop and filters") {
+                    dialog.dismiss()
+                    val started = runCatching {
+                        host.startActivity(
+                            Intent(Intent.ACTION_EDIT).apply {
+                                setDataAndType(item.uri, "image/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            }
+                        )
+                    }.isSuccess
+                    if (!started) OeaMediaLibrary.toast(host, "This phone has no editor for pictures")
+                }
+                kit.row(group, R.drawable.oic_open_in_full, "Set as wallpaper", "Android crops that to fit by itself") {
+                    dialog.dismiss()
+                    wallpaperMenu()
+                }
+                kit.note(panel, "EMAGE saves a rotation straight into the file, so every app sees it turned. For crop and filters, the phone's own editor does it best — EMAGE sends the picture there unchanged.")
+            }
+        }
+
+        /**
+         * Rotates the picture 90° and writes it back into the file
+         * itself. Where Android will not let EMAGE overwrite the
+         * original (a read-only grant from another app), a rotated
+         * copy is published into Pictures instead — a real result,
+         * never a silent failure.
+         */
+        private fun rotateAndSave(item: OeaMediaLibrary.Item) {
+            OeaMediaLibrary.toast(host, "Rotating…")
+            WALLPAPER_WORKER.execute {
+                val outcome = runCatching {
+                    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    host.contentResolver.openInputStream(item.uri)?.use {
+                        android.graphics.BitmapFactory.decodeStream(it, null, bounds)
                     }
-                )
-            }.isSuccess
-            if (!started) {
-                kit.sheet("No editor on this phone", item.name) { panel, _ ->
-                    kit.note(panel, "EMAGE does not ship a crop tool of its own, so there is nothing to open here. Two things still work without one:")
-                    val group = kit.group(panel)
-                    kit.row(group, R.drawable.oic_refresh, "Rotate in place", "Turns the copy EMAGE shows you") {
+                    var sample = 1
+                    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 4096) sample *= 2
+                    val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                    val src = host.contentResolver.openInputStream(item.uri)?.use {
+                        android.graphics.BitmapFactory.decodeStream(it, null, opts)
+                    } ?: return@runCatching false
+                    val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+                    val rotated = android.graphics.Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
+                    if (rotated !== src) src.recycle()
+                    val isPng = item.name.substringAfterLast('.', "").lowercase() == "png"
+                    val format = if (isPng) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG
+                    val overwritten = runCatching {
+                        host.contentResolver.openOutputStream(item.uri)?.use { out ->
+                            rotated.compress(format, 95, out)
+                        } ?: false
+                    }.getOrDefault(false)
+                    if (!overwritten) {
+                        val ext = item.name.substringAfterLast('.', "jpg")
+                        val values = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME,
+                                item.name.substringBeforeLast('.') + "_rotated." + ext)
+                            put(android.provider.MediaStore.Images.Media.MIME_TYPE,
+                                if (isPng) "image/png" else "image/jpeg")
+                            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                                    android.os.Environment.DIRECTORY_PICTURES)
+                            }
+                        }
+                        val copy = host.contentResolver.insert(
+                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                        val saved = copy?.let { uri ->
+                            host.contentResolver.openOutputStream(uri)?.use { out ->
+                                rotated.compress(format, 95, out)
+                            } ?: false
+                        } ?: false
+                        if (!saved) return@runCatching false
+                    }
+                    rotated.recycle()
+                    OeaThumbnails.invalidate(item.uri)
+                    true
+                }
+                val ok = outcome.getOrDefault(false)
+                host.runOnUiThread {
+                    if (ok) {
+                        // The file itself now carries the turn, so
+                        // the on-screen one goes back to straight.
+                        currentZoomView()?.rotation = 0f
+                        OeaMediaLibrary.toast(host, "Rotated and saved")
+                    } else {
+                        // No write access: still turn the view, and
+                        // say plainly that the file is untouched.
                         rotateInPlace(item)
+                        OeaMediaLibrary.toast(host, "Rotated the view only — Android would not let EMAGE save over that file")
                     }
-                    kit.row(group, R.drawable.oic_open_in_full, "Set as wallpaper instead", "Android crops that to fit by itself") {
-                        wallpaperMenu()
-                    }
+                    onChanged()
                 }
             }
         }

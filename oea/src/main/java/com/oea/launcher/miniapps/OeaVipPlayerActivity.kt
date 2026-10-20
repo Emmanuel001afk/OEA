@@ -740,6 +740,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             prepared = true
             durationMs = runCatching { mp.duration.toLong() }.getOrDefault(durationMs).coerceAtLeast(0L)
             scrub.durationMs = durationMs
+            maybeShowGestureHint()
             if (resumeAt > 3_000L && durationMs > resumeAt + 15_000L) {
                 runCatching { mp.seekTo(resumeAt.toInt()) }
                 positionMs = resumeAt
@@ -905,6 +906,22 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         row.addView(pill("Dismiss", 0, null) { errorCard.visibility = View.GONE }, LinearLayout.LayoutParams(-2, dp(38)))
         errorCard.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
         errorCard.visibility = View.VISIBLE
+    }
+
+    /**
+     * The controls are gestures as much as buttons, and a
+     * player whose best features are invisible is a player
+     * people call "horrible". Say them once, on the first
+     * clip, then never again.
+     */
+    private fun maybeShowGestureHint() {
+        val prefs = getSharedPreferences("oea_vip", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("hint_gestures", false)) return
+        prefs.edit().putBoolean("hint_gestures", true).apply()
+        handler.postDelayed({
+            flash("Slide left = brightness • right = volume • double-tap = seek • hold = 2×")
+            handler.postDelayed({ flash("Tap once for controls • lock keeps them still") }, 2600L)
+        }, 900L)
     }
 
     private fun togglePlay() {
