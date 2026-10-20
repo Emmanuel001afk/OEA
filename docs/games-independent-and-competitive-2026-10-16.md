@@ -15,6 +15,12 @@ edited file. Real-device confirmation is still required.
 
 ## 1. Games out of the launcher — independent apps
 
+> **Update (2026-10-19):** OEA now builds **one APK**. The games live inside the
+> launcher, each with its own icon, label, task and front menu, exactly like
+> Game Boost, Phone or Call Blocker. The standalone app modules
+> (`com.oea.arena`, `com.oea.chess`, `com.oea.runner`) were removed; the game
+> ids and multiplayer protocol are unchanged.
+
 The user's ask: *remove the in-launcher games from the general in-app OEA
 launcher and make them independent apps.*
 

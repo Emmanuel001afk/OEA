@@ -75,6 +75,6 @@ a debug build before relying on any of it.
   verifiable here.
 - Split-screen and floating: messaging was improved only for the freeform-off
   case. The OEM-block detection is unchanged.
-- Standalone game APKs (`com.oea.runner`, `com.oea.arena`, `com.oea.chess`), if
-  installed, still appear as their own launcher icons next to the in-OEA entries.
+- The games ship inside the launcher APK: each has its own launcher entry
+  (icon, label, task and front menu) next to the other OEA apps.
 - The Room database is not touched; no schema migration is needed.

@@ -117,7 +117,7 @@ intact.
   trailing defaults; `ParticleSystem.emit` named parameters match; `Hud.note`
   is used as a parent mutator (not as a View); `GameStorage` keys are private
   to the game; renderer point-light uniforms match shader arrays.
-- No local build is possible in this sandbox; run `./gradlew :oea:assembleDebug
-  :oea-game-arena:assembleDebug` on a machine with the configured Android
+- No local build is possible in this sandbox; run `./gradlew :oea:assembleDebug`
+  on a machine with the configured Android
   toolchain and test permissions, Calendar provider, default SMS flow,
   camera intents and GLES point-light/VFX performance on physical devices.

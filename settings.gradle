@@ -8,9 +8,8 @@ dependencyResolutionManagement {
 rootProject.name = "OEA"
 include(":oea")
 // OEA Game Engine (reusable runtime) and the first-party games built on it.
+// The games ship inside the launcher APK: each keeps its own identity
+// (icon, label, task, front menu, multiplayer) through the entries in
+// com.oea.launcher.games.OeaGameEntries, so OEA builds exactly one APK.
 include(":oea-engine")
 include(":oea-games")
-// Separately installable Android game apps; they share the engine and game library.
-include(":oea-game-arena")
-include(":oea-game-chess")
-include(":oea-game-runner")

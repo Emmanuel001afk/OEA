@@ -275,18 +275,47 @@ object OeaConsoleApp {
                     } catch (_: Throwable) {}
                 }
             }
-            kit.note(panel, "All data from Build, ActivityManager, BatteryManager, DisplayMetrics, PackageManager, etc. No fabricated information. Unsupported operations explained rather than faked. For mini-apps not working in device ultra power saving, see Performance section.")
+            // The whole report, the way the Play Store shows a device:
+            // one block you can copy or send anywhere.
+            val report = info.joinToString("\n") { "${it.first}: ${it.second}" }
+            val actions = kit.group(panel)
+            kit.row(actions, R.drawable.oic_file_copy, "Copy everything", "The whole report, as text", onClick = {
+                try {
+                    val cb = host.getSystemService(android.content.ClipboardManager::class.java) as android.content.ClipboardManager
+                    cb.setPrimaryClip(android.content.ClipData.newPlainText("OEA device info", report))
+                    android.widget.Toast.makeText(host, "Device info copied", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (_: Throwable) {}
+            })
+            kit.row(actions, R.drawable.oic_share_filled, "Share device info", "Send the report to any app", onClick = {
+                try {
+                    host.startActivity(Intent.createChooser(
+                        Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "OEA Device Info\n$report"),
+                        "Share device info"
+                    ))
+                } catch (_: Throwable) {}
+            })
+            kit.note(panel, "All data from Build, ActivityManager, BatteryManager, DisplayMetrics, PackageManager, StatFs, etc. No fabricated information. Unsupported operations explained rather than faked. For mini-apps not working in device ultra power saving, see Performance section.")
         })
     }
 
     private fun deviceDetails(ctx: Context): List<Pair<String, String>> {
         val list = mutableListOf<Pair<String, String>>()
+        // The identity trio the system device-info app and the Play
+        // Store both lead with: what the phone calls itself, its model
+        // and the Android it runs.
+        val deviceName = runCatching {
+            android.provider.Settings.Global.getString(ctx.contentResolver, "device_name")
+                ?.takeIf { it.isNotBlank() } ?: Build.MANUFACTURER + " " + Build.MODEL
+        }.getOrDefault(Build.MANUFACTURER + " " + Build.MODEL)
+        list.add("Device name" to deviceName)
         list.add("Manufacturer" to Build.MANUFACTURER)
         list.add("Model" to Build.MODEL)
         list.add("Brand" to Build.BRAND)
         list.add("Device" to Build.DEVICE)
         list.add("Android" to "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-        list.add("Security patch" to (Build.VERSION.SECURITY_PATCH ?: "unknown"))
+        list.add("Android security patch" to (Build.VERSION.SECURITY_PATCH ?: "unknown"))
+        list.add("Build number" to (Build.DISPLAY ?: "unknown"))
+        list.add("Kernel" to (System.getProperty("os.version") ?: "unknown"))
         list.add("Fingerprint" to (Build.FINGERPRINT ?: "unknown"))
         list.add("Board" to (Build.BOARD ?: "unknown"))
         list.add("Hardware" to (Build.HARDWARE ?: "unknown"))
@@ -303,18 +332,32 @@ object OeaConsoleApp {
         } catch (_: Throwable) {}
         try {
             val dm = ctx.resources.displayMetrics
-            list.add("Screen" to "${dm.widthPixels}x${dm.heightPixels} • ${dm.densityDpi} dpi • ${dm.density}x")
+            val inches = screenInches(ctx)
+            list.add("Screen" to "${dm.widthPixels}x${dm.heightPixels} • ${dm.densityDpi} dpi • ${dm.density}x" + if (inches > 0f) " • ${"%1.1f".format(inches)}\"" else "")
         } catch (_: Throwable) {}
+        list.addAll(storageStats(ctx))
         try {
             val pm = ctx.packageManager
             val info = pm.getPackageInfo(ctx.packageName, 0)
             list.add("OEA version" to "${info.versionName} (${info.longVersionCode})")
+        } catch (_: Throwable) {}
+        try {
+            val bm = ctx.getSystemService(android.os.BatteryManager::class.java)
+            val capacity = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
+            if (capacity > 0) list.add("Battery" to "up to $capacity% measured capacity")
         } catch (_: Throwable) {}
         list.add("Low mode (Ultra Saving)" to if (com.oea.launcher.perf.OeaLowMode.active(ctx)) "ON • ${com.oea.launcher.perf.OeaLowMode.summary(ctx)}" else "OFF")
         list.add("Device ultra saving" to if (isDeviceInUltraPowerSaving(ctx)) "ON • OEM may block mini-apps" else "OFF")
         list.add("Power save mode" to if (isPowerSaveMode(ctx)) "ON" else "OFF")
         return list
     }
+
+    private fun screenInches(ctx: Context): Float = runCatching {
+        val dm = ctx.resources.displayMetrics
+        val w = dm.widthPixels / dm.xdpi
+        val h = dm.heightPixels / dm.ydpi
+        Math.sqrt((w * w + h * h).toDouble()).toFloat()
+    }.getOrDefault(0f)
 
     private fun deviceSummary(ctx: Context): String = "${Build.MANUFACTURER} ${Build.MODEL} • Android ${Build.VERSION.RELEASE}"
 

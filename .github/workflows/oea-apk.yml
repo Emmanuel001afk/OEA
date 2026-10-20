@@ -241,17 +241,19 @@ jobs:
           grep -q "oeaGameScreens" $L/gameboost/OeaGameBoostService.kt
           # APK size controls must not be switched off by accident.
           grep -q "minifyEnabled true" oea/build.gradle
-          grep -q "minifyEnabled true" oea-game-arena/build.gradle
-          grep -q "abiFilters" oea-game-runner/build.gradle
+          grep -q "abiFilters" oea/build.gradle
+          # One APK: the games ship inside the launcher, so the
+          # standalone game modules must never come back.
+          test ! -d oea-game-runner && test ! -d oea-game-arena && test ! -d oea-game-chess
           # Online play only ever uses the user's own STUN/TURN servers: no public ones may be hardcoded.
           if grep -rEn "stun:[a-z0-9.-]+[.](com|org|net|io)|google[.]com:19302" oea-engine/src/main oea-games/src/main oea/src/main; then
             echo "ERROR: a public STUN/TURN server is hardcoded."
             exit 1
           fi
-      - name: Build standalone OEA Launcher APK
+      - name: Build the single OEA APK (launcher and games)
         run: |
           set -o pipefail
-          if ! ./gradlew :oea:assembleRelease :oea-game-arena:assembleRelease :oea-game-chess:assembleRelease :oea-game-runner:assembleRelease --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+          if ! ./gradlew :oea:assembleRelease --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
             # Surface compiler/lint errors as annotations so they are visible
             # without downloading the full log.
             {
@@ -321,26 +323,23 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
-      - name: Verify game APK identity
+      - name: Verify the games are inside the APK
         run: |
           set -euo pipefail
+          APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
           AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
-          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
-          # Copied under the game's own name: the released asset has to be
-          # recognisable to the person downloading it, not to Gradle.
-          check() {
-            local expected="$1" dir="$2" out="$3"
-            local apk
-            apk="$(find "$dir" -type f -name '*.apk' -print -quit)"
-            test -n "$apk" || { echo "ERROR: no APK in $dir"; return 1; }
-            "$AAPT2" dump badging "$apk" | grep -F "package: name='$expected'"
-            "$APKSIGNER" verify --verbose "$apk"
-            mkdir -p "$RUNNER_TEMP/games"
-            cp "$apk" "$RUNNER_TEMP/games/$out"
-          }
-          check com.oea.runner oea-game-runner/build/outputs/apk OEA-Endless-Days.apk
-          check com.oea.arena oea-game-arena/build/outputs/apk OEA-Send-Off.apk
-          check com.oea.chess oea-game-chess/build/outputs/apk OEA-Chess.apk
+          # Each game keeps its own identity inside the one APK:
+          # its own launcher activity, icon and label.
+          for activity in \
+            "com.oea.launcher.games.OeaEndlessDaysActivity" \
+            "com.oea.launcher.games.OeaSendOffActivity" \
+            "com.oea.launcher.games.OeaChessGameActivity"; do
+            "$AAPT2" dump badging "$APK" | grep -F "name='$activity'"
+          done
+          for label in "Endless Days" "Send Off" "Chess"; do
+            "$AAPT2" dump badging "$APK" | grep -F "label='$label'"
+          done
       - name: Report APK sizes
         run: |
           set -euo pipefail
@@ -349,7 +348,7 @@ jobs:
           TABLE="| App | Size | Native libs | Code | Resources | Assets | Other |"$'\n'"| --- | --- | --- | --- | --- | --- | --- |"
           DETAILS=""
           TOTAL_KB=0
-          for apk in oea/build/outputs/apk/release/*.apk "$RUNNER_TEMP"/games/*.apk; do
+          for apk in oea/build/outputs/apk/release/*.apk; do
             [ -f "$apk" ] || continue
             KB=$(du -k "$apk" | cut -f1)
             TOTAL_KB=$((TOTAL_KB + KB))
@@ -409,34 +408,20 @@ jobs:
           path: oea/build/outputs/apk/**/*.apk
           retention-days: 7
           if-no-files-found: error
-      - name: Upload game APKs
-        # The games are separate, installable apps: if these are not published
-        # they can never be installed, which is exactly how a "standalone game"
-        # ends up looking inactive.
-        uses: actions/upload-artifact@v4
-        with:
-          name: oea-game-apks
-          path: |
-            oea-game-arena/build/outputs/apk/**/*.apk
-            oea-game-chess/build/outputs/apk/**/*.apk
-            oea-game-runner/build/outputs/apk/**/*.apk
-          retention-days: 7
-          if-no-files-found: error
       - name: Publish latest APK release
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # The three games ship next to the launcher: they are independent
-          # apps, and a release that only contains the launcher leaves them
-          # uninstallable.
-          ASSETS=("$RUNNER_TEMP/OEA-latest.apk" "$RUNNER_TEMP"/games/*.apk)
+          # One APK: the launcher with Endless Days, Send Off and
+          # Chess inside it, each with its own icon and identity.
+          ASSETS=("$RUNNER_TEMP/OEA-latest.apk")
           if gh release view oea-latest >/dev/null 2>&1; then
             # --clobber replaces the old asset. This job is serialized above to
             # prevent another push from deleting the asset during this upload.
             gh release upload oea-latest "${ASSETS[@]}" --clobber
           else
             gh release create oea-latest "${ASSETS[@]}" --title "OEA Latest" \
-              --notes "Latest OEA Launcher and OEA game builds from main. OEA-latest.apk is the launcher; the game APKs (Endless Days, Send Off, Chess) install as independent apps."
+              --notes "Latest OEA build from main. The single APK is the launcher with Endless Days, Send Off and Chess inside it, each keeping its own icon, label and identity."
           fi
