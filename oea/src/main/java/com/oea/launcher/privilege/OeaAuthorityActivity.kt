@@ -10,7 +10,6 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
 import com.oea.launcher.assistant.OeaAssistant
-import com.oea.launcher.applock.OeaAppFreezer
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
