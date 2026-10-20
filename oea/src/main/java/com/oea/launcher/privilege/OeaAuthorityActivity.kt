@@ -35,6 +35,8 @@ class OeaAuthorityActivity : Activity() {
     private lateinit var forgetButton: Button
     private var autoReadStartedAt = 0L
     private var autoCapturedCode: String? = null
+    private var autoPairInFlight = false
+    private var lastAutoPairKey: String? = null
     private val pairingListener: () -> Unit = { runOnUiThread { refreshCapturedValues() } }
 
     private val inkColor = Color.rgb(235, 240, 248)
@@ -68,7 +70,9 @@ class OeaAuthorityActivity : Activity() {
         OeaWirelessPairing.startWatching()
         runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
             .onFailure { runCatching { startActivity(Intent(Settings.ACTION_SETTINGS)) } }
-        statusText.text = "Auto-read is active for five minutes. Open Wireless debugging, capture the pairing code, then return here to pair."
+        lastAutoPairKey = null
+        autoPairInFlight = false
+        statusText.text = "Auto-read is active. Keep Wireless debugging open; OEA will pair automatically when it captures the fresh code and both ports."
         statusText.setTextColor(accentColor)
     }
 
@@ -86,22 +90,70 @@ class OeaAuthorityActivity : Activity() {
             autoCapturedCode = null
         }
         if (connection != null) {
-            // The main Wireless debugging page is the authoritative endpoint for
-            // the connection port and current host address.
-            hostField.setTextIfDifferent(connection.host)
+            // Preserve the distinct main-page connection port. Automatic pairing
+            // below refuses to combine endpoints if their captured hosts disagree.
             connectPortField.setTextIfDifferent(connection.port.toString())
+            if (pair == null) hostField.setTextIfDifferent(connection.host)
         }
+
+        if (pair != null && connection != null &&
+            autoReadStartedAt != 0L && !pair.manual && !connection.manual &&
+            pair.capturedAt >= autoReadStartedAt && connection.capturedAt >= autoReadStartedAt) {
+            startAutomaticPairing(pair, connection)
+            return
+        }
+
         if (pair != null || connection != null) {
             val captured = buildList {
                 if (pair != null) add("pairing endpoint and code")
                 if (connection != null) add("connection port")
             }.joinToString(" + ")
-            statusText.text = "Automatically captured $captured. Check the values, then tap Pair and verify connection."
+            statusText.text = "Automatically captured $captured. Waiting for fresh matching values to pair automatically; manual Pair remains available as fallback."
             statusText.setTextColor(accentColor)
         } else if (autoReadStartedAt != 0L &&
             android.os.SystemClock.elapsedRealtime() - autoReadStartedAt > 5 * 60_000L) {
-            statusText.text = "Auto-read timed out. Tap Auto-read again, or enter the values manually."
+            statusText.text = "Auto-read timed out. Start Auto-read again, or enter the values manually."
             statusText.setTextColor(mutedColor)
+        }
+    }
+
+    private fun startAutomaticPairing(
+        pair: OeaWirelessPairing.Pairing,
+        connection: OeaWirelessPairing.Connection
+    ) {
+        val key = "${pair.host}:${pair.port}|${pair.code}|${connection.host}:${connection.port}"
+        if (autoPairInFlight || lastAutoPairKey == key) return
+        if (pair.host != connection.host) {
+            lastAutoPairKey = key
+            statusText.text = "Automatic pairing blocked: Android exposed different hosts for the pairing dialog and connection page. Reopen Wireless debugging and capture both endpoints again, or use manual entry."
+            statusText.setTextColor(Color.rgb(255, 180, 110))
+            return
+        }
+        lastAutoPairKey = key
+        autoPairInFlight = true
+        setBusy(true, "Fresh code and ports detected. Pairing with Android and verifying the connection automatically…")
+        work.launch {
+            val result = runCatching {
+                OeaAdbAuthority.pairAndConnect(
+                    this@OeaAuthorityActivity,
+                    pair.host,
+                    pair.port,
+                    pair.code,
+                    connection.port
+                )
+            }
+            autoPairInFlight = false
+            val message = result.fold(
+                { "Automatic pairing complete. $it" },
+                { "Automatic pairing failed: ${it.message ?: it.javaClass.simpleName}. Reopen the pairing dialog for a fresh code, or use manual Pair." }
+            )
+            setBusy(false, message)
+            codeField.setText("")
+            autoCapturedCode = null
+            refreshStatus(message)
+            if (result.isSuccess) {
+                toastShort("OEA pairing and connection verified.")
+            }
         }
     }
 
@@ -275,6 +327,7 @@ class OeaAuthorityActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    private fun toastShort(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
     override fun onDestroy() {
         OeaAssistant.removeListener(pairingListener)
