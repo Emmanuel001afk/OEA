@@ -77,11 +77,12 @@ open class OeaMiniAppActivity : Activity() {
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
-        OeaFaultShield.guard("miniapp:host:intent") {
+        val handled = OeaFaultShield.guard("miniapp:host:intent") {
             setIntent(intent)
             screenId = resolveScreenId()
             renderGuarded(keepScroll = false)
         }
+        if (!handled) showRenderFallback()
     }
 
     private fun resolveAliasId(): String? {
@@ -107,28 +108,32 @@ open class OeaMiniAppActivity : Activity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
-        if (resultHook?.invoke(requestCode, resultCode, data) == true) return
-        if (screenId == "camera" && OeaCameraApp.handleActivityResult(this, requestCode, resultCode, data)) return
-        if (requestCode == 4001 && resultCode == RESULT_OK) {
-            val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            val text = results?.firstOrNull()?.trim()
-            if (!text.isNullOrBlank()) {
-                try {
-                    val p = getSharedPreferences("oea_notes_v2", MODE_PRIVATE)
-                    val existing = p.getString("notes", "") ?: ""
-                    val id = System.currentTimeMillis()
-                    val encoded = if (existing.isBlank()) "" else existing + "\u001E"
-                    val newRow = listOf(id.toString(), text.replace("\u001F", " ").replace("\u001E", " "), "0", "voice", System.currentTimeMillis().toString(), "0").joinToString("\u001F")
-                    p.edit().putString("notes", encoded + newRow).apply()
-                    android.widget.Toast.makeText(this, "Voice note saved", android.widget.Toast.LENGTH_SHORT).show()
-                } catch (_: Throwable) {
-                    intent.putExtra("voice_result", text)
+        val handled = OeaFaultShield.guard("miniapp:host:activity-result") {
+            if (resultHook?.invoke(requestCode, resultCode, data) == true) return
+            if (screenId == "camera" && OeaCameraApp.handleActivityResult(this, requestCode, resultCode, data)) return
+            if (requestCode == 4001 && resultCode == RESULT_OK) {
+                val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                val text = results?.firstOrNull()?.trim()
+                if (!text.isNullOrBlank()) {
+                    try {
+                        val p = getSharedPreferences("oea_notes_v2", MODE_PRIVATE)
+                        val existing = p.getString("notes", "") ?: ""
+                        val id = System.currentTimeMillis()
+                        val encoded = if (existing.isBlank()) "" else existing + "\u001E"
+                        val newRow = listOf(id.toString(), text.replace("\u001F", " ").replace("\u001E", " "), "0", "voice", System.currentTimeMillis().toString(), "0").joinToString("\u001F")
+                        p.edit().putString("notes", encoded + newRow).apply()
+                        android.widget.Toast.makeText(this, "Voice note saved", android.widget.Toast.LENGTH_SHORT).show()
+                    } catch (error: Throwable) {
+                        OeaFaultShield.note("miniapp:voice:save-result", error)
+                        intent.putExtra("voice_result", text)
+                    }
+                    renderGuarded()
+                    return
                 }
-                renderGuarded()
-                return
             }
+            super.onActivityResult(requestCode, resultCode, data)
         }
-        super.onActivityResult(requestCode, resultCode, data)
+        if (!handled) showRenderFallback()
     }
 
     override fun onResume() {
@@ -152,7 +157,9 @@ open class OeaMiniAppActivity : Activity() {
     }
 
     override fun onPause() {
-        runCatching { pauseHook?.invoke() }
+        OeaFaultShield.guard("miniapp:host:pause-hook") {
+            pauseHook?.invoke()
+        }
         // The camera's torch is a hardware state the app owes the
         // user: leaving the mini-app puts it out, always.
         if (screenId == "camera") {
