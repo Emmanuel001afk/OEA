@@ -420,6 +420,10 @@ internal object OeaEmageViewer {
             val item = current()
             kit.sheet("Edit", item.name) { panel, dialog ->
                 val group = kit.group(panel)
+                kit.row(group, R.drawable.oic_edit, "Crop, rotate and filters", "Built-in editor • saves an edited copy") {
+                    dialog.dismiss()
+                    OeaEmageEditor.open(host, item) { onChanged() }
+                }
                 kit.row(group, R.drawable.oic_refresh, "Rotate right", "Saved into the picture itself") {
                     dialog.dismiss()
                     rotateAndSave(item)
