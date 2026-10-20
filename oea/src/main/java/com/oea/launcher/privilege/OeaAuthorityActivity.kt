@@ -277,21 +277,21 @@ class OeaAuthorityActivity : Activity() {
                     OeaAccessDoctor.examine(this@OeaAuthorityActivity)
                 }
                 buildString {
-                    append("OEA ACCESS DOCTOR — COMPLETE SCAN\\n")
-                    append("Android API: ").append(capabilities.androidApi).append("\\n")
-                    append("Checked: ").append(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(capabilities.checkedAtMillis))).append("\\n")
-                    append("ADB shell identity: ").append(capabilities.shellIdentity ?: "not connected / not verified").append("\\n\\n")
-                    append("PERMISSIONS & FEATURE ACCESS\\n")
+                    append("OEA ACCESS DOCTOR — COMPLETE SCAN\n")
+                    append("Android API: ").append(capabilities.androidApi).append("\n")
+                    append("Checked: ").append(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(capabilities.checkedAtMillis))).append("\n")
+                    append("ADB shell identity: ").append(capabilities.shellIdentity ?: "not connected / not verified").append("\n\n")
+                    append("PERMISSIONS & FEATURE ACCESS\n")
                     findings.forEach { finding ->
                         append("• ").append(finding.privilege.name.replace('_', ' '))
-                            .append(" — ").append(finding.state.name.replace('_', ' ')).append("\\n")
-                        append(finding.evidence).append("\\nNext: ").append(finding.advice).append("\\n\\n")
+                            .append(" — ").append(finding.state.name.replace('_', ' ')).append("\n")
+                        append(finding.evidence).append("\nNext: ").append(finding.advice).append("\n\n")
                     }
-                    append("AUTHORITY CAPABILITIES\\n")
+                    append("AUTHORITY CAPABILITIES\n")
                     capabilities.capabilities.forEach { capability ->
                         append("• ").append(capability.id.name.replace('_', ' '))
-                            .append(" — ").append(capability.level.name).append("\\n")
-                        append(capability.evidence).append("\\n").append(capability.detail).append("\\n\\n")
+                            .append(" — ").append(capability.level.name).append("\n")
+                        append(capability.evidence).append("\n").append(capability.detail).append("\n\n")
                     }
                     append("Note: LIMITED/UNAVAILABLE/UNKNOWN are not successful grants. Android may require you to approve or enable some items in Settings. Device Admin is not Device Owner, and a successful ADB connection does not mean every privileged operation is allowed.")
                 }
