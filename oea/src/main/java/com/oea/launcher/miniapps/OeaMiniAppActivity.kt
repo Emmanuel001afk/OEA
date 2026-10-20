@@ -164,7 +164,7 @@ open class OeaMiniAppActivity : Activity() {
     }
 
     override fun onPause() {
-        OeaFaultShield.guard(faultOwner("pause"), { pauseHook?.invoke() }) {
+        OeaFaultShield.guard(faultOwner("pause")) {
             pauseHook?.invoke()
         }
         // The camera's torch is a hardware state the app owes the
