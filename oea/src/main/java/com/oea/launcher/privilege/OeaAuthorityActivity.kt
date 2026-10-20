@@ -174,7 +174,7 @@ class OeaAuthorityActivity : Activity() {
         setContentView(scroll)
 
         root.addView(text("OEA Authority", 27, inkColor, true))
-        root.addView(text("Built-in Wireless Debugging bridge", 15, accentColor, true).apply {
+        root.addView(text("Built-in Authority engine + Wireless Debugging", 15, accentColor, true).apply {
             setPadding(0, dp(4), 0, dp(16))
         })
         root.addView(card().apply {
@@ -211,6 +211,7 @@ class OeaAuthorityActivity : Activity() {
                 setPadding(0, dp(8), 0, dp(12))
             }
             addView(statusText)
+            addView(button("Scan authority capabilities") { scanAuthorityCapabilities() })
             addView(button("Test real ADB authority") { testAuthority() })
             addView(button("Test app suspension + restore") { chooseSuspensionTestApp() })
             addView(button("Review permission status and repair") { reviewPermissionRepairs() })
@@ -223,7 +224,7 @@ class OeaAuthorityActivity : Activity() {
         })
 
         root.addView(text(
-            "Safety: OEA does not expose a free-form shell. The bridge is restricted to the verified package-freeze operations it needs. To revoke Android's trust, use Wireless debugging → Paired devices / Revoke authorizations.",
+            "OEA Authority provides a shared, typed API over the embedded Wireless Debugging bridge. It probes supported capabilities and returns real command results; it does not pretend unsupported Android operations succeeded. No free-form shell is exposed. To revoke Android's trust, use Wireless debugging → Paired devices / Revoke authorizations.",
             13, mutedColor, false
         ).apply { setPadding(dp(2), dp(4), dp(2), 0) })
     }
@@ -262,6 +263,36 @@ class OeaAuthorityActivity : Activity() {
             val message = result.fold({ it }, { "Reconnect failed: ${it.message ?: it.javaClass.simpleName}" })
             setBusy(false, message)
             refreshStatus(message)
+        }
+    }
+
+    /** Live capability discovery; shows what this device actually permits. */
+    private fun scanAuthorityCapabilities() {
+        setBusy(true, "Probing OEA Authority capabilities on this device…")
+        work.launch {
+            val result = runCatching { OeaAuthorityEngine.inspect(this@OeaAuthorityActivity) }
+            setBusy(false, "Authority capability scan finished.")
+            result.onSuccess { snapshot ->
+                val message = buildString {
+                    append("Android API: ").append(snapshot.androidApi).append("\n")
+                    append("Checked: ").append(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(snapshot.checkedAtMillis))).append("\n")
+                    append("Shell identity: ").append(snapshot.shellIdentity ?: "not available").append("\n\n")
+                    snapshot.capabilities.forEach { capability ->
+                        append("• ").append(capability.id.name.replace('_', ' '))
+                            .append(" — ").append(capability.level.name).append("\n")
+                        append(capability.evidence).append("\n")
+                        append(capability.detail).append("\n\n")
+                    }
+                }
+                AlertDialog.Builder(this@OeaAuthorityActivity)
+                    .setTitle("OEA Authority capability report")
+                    .setMessage(message)
+                    .setPositiveButton("Close", null)
+                    .show()
+                refreshStatus("Capability scan complete. Review the report for actual results.")
+            }.onFailure {
+                refreshStatus("Capability scan failed: ${it.message ?: it.javaClass.simpleName}")
+            }
         }
     }
 
