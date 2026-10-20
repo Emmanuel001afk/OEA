@@ -202,8 +202,10 @@ internal object OeaEmageEditor {
                     val values = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                         put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                        if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/EMAGE")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        if (Build.VERSION.SDK_INT >= 29) {
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/EMAGE")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
                     }
                     val uri = host.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                         ?: error("Android refused to create the edited picture")
