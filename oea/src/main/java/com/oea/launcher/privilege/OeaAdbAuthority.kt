@@ -215,8 +215,8 @@ object OeaAdbAuthority {
                 "dumpsys window", "dumpsys wifi", "dumpsys accessibility", "dumpsys cpuinfo"
             )) return true
         if (Regex("""getprop [A-Za-z0-9_.-]{1,128}""").matches(command)) return true
-        if (Regex("""cmd appops get [A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+""").matches(command)) return true
-        val packageName = "[A-Za-z0-9_]+(?:\\\\.[A-Za-z0-9_]+)+"
+        if (Regex("""cmd appops get [A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+""").matches(command)) return true
+        val packageName = "[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+"
         if (Regex("cmd package (?:suspend|unsuspend) --user 0 $packageName").matches(command) ||
             Regex("dumpsys package $packageName").matches(command)) return true
 
