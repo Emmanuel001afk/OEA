@@ -1854,7 +1854,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     private fun safeExternalUri(uri: Uri): Uri? {
         if (uri.scheme != "file") return uri
-        val file = uri.path?.let(::java.io.File)?.takeIf { it.isFile } ?: return null
+        val file = uri.path?.let { java.io.File(it) }?.takeIf { it.isFile } ?: return null
         return runCatching {
             androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
         }.getOrNull()
