@@ -24,6 +24,7 @@ import android.view.Window
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import com.oea.launcher.ui.OeaInsets
 import java.util.Locale
@@ -67,16 +68,20 @@ internal object OeaEmageEditor {
         }
         private var source: Bitmap? = null
         private var filterIndex = 0
-        private val filters = listOf("Original", "Mono", "Warm", "Cool", "Vintage", "Bright")
+        private var brightness = 0f
+        private var contrast = 1f
+        private val filters = listOf("Original", "Mono", "Warm", "Cool", "Vintage", "Bright", "Vivid", "Soft")
         private val ink = Color.WHITE
         private val buttonColor = Color.rgb(37, 45, 58)
 
         fun show() {
             stage.addView(editorView, FrameLayout.LayoutParams(-1, -1))
-            root.addView(toolbar(listOf("Cancel" to { dialog.dismiss() }, "Rotate" to { rotate() }, "Crop reset" to { editorView.resetCrop() })))
+            root.addView(toolbar(listOf("Cancel" to { dialog.dismiss() }, "Rotate left" to { rotate(-90f) }, "Rotate right" to { rotate(90f) }, "Mirror" to { mirror() }, "Crop reset" to { editorView.resetCrop() })))
             root.addView(stage)
             root.addView(message, LinearLayout.LayoutParams(-1, -2))
-            root.addView(toolbar(listOf("Filter" to { nextFilter() }, "Save copy" to { save() })))
+            root.addView(adjustmentRow("Brightness", -50, 50, 50) { brightness = (it - 50).toFloat(); refreshPreview() })
+            root.addView(adjustmentRow("Contrast", 50, 150, 100) { contrast = it / 100f; refreshPreview() })
+            root.addView(toolbar(listOf("Filter: ${filters[filterIndex]}" to { nextFilter() }, "Reset adjustments" to { resetAdjustments() }, "Save copy" to { save() })))
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setContentView(root)
             dialog.window?.apply {
@@ -154,22 +159,71 @@ internal object OeaEmageEditor {
                 }
             }
 
-        private fun rotate() {
+        private fun rotate(degrees: Float) {
             val old = source ?: return
             val rotated = runCatching {
-                val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+                val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
                 Bitmap.createBitmap(old, 0, 0, old.width, old.height, matrix, true)
             }.getOrNull() ?: return
             if (rotated !== old) old.recycle()
             source = rotated
             editorView.setBitmap(rotated)
-            message.text = "Rotated preview • Save copy to keep the edit"
+            refreshPreview()
+            message.text = "Rotation preview • Save copy to keep the edit"
+        }
+
+        private fun mirror() {
+            val old = source ?: return
+            val mirrored = runCatching {
+                val matrix = android.graphics.Matrix().apply { preScale(-1f, 1f) }
+                Bitmap.createBitmap(old, 0, 0, old.width, old.height, matrix, true)
+            }.getOrNull() ?: return
+            if (mirrored !== old) old.recycle()
+            source = mirrored
+            editorView.setBitmap(mirrored)
+            refreshPreview()
+            message.text = "Mirrored preview • Save copy to keep the edit"
+        }
+
+        private fun adjustmentRow(label: String, min: Int, max: Int, initial: Int, changed: (Int) -> Unit): LinearLayout =
+            LinearLayout(host).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(12, 0, 12, 0)
+                addView(TextView(host).apply {
+                    text = label
+                    setTextColor(Color.LTGRAY)
+                    textSize = 11f
+                }, LinearLayout.LayoutParams(82, -2))
+                addView(SeekBar(host).apply {
+                    this.max = max - min
+                    progress = initial - min
+                    setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { changed(progress + min) }
+                        override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                        override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+                    })
+                }, LinearLayout.LayoutParams(0, dp(30), 1f))
+            }
+
+        private fun dp(value: Int): Int = (value * host.resources.displayMetrics.density).toInt()
+
+        private fun refreshPreview() {
+            editorView.setFilter(filterIndex, brightness, contrast)
+            message.text = "Filter: ${filters[filterIndex]} • Brightness: ${brightness.toInt()} • Contrast: ${(contrast * 100).toInt()}%"
+        }
+
+        private fun resetAdjustments() {
+            filterIndex = 0
+            brightness = 0f
+            contrast = 1f
+            editorView.setFilter(filterIndex, brightness, contrast)
+            message.text = "Adjustments reset • Crop is preserved"
         }
 
         private fun nextFilter() {
             filterIndex = (filterIndex + 1) % filters.size
-            editorView.setFilter(filterIndex)
-            message.text = "Filter: ${filters[filterIndex]} • Save copy to keep the edit"
+            refreshPreview()
         }
 
         private fun save() {
@@ -190,7 +244,7 @@ internal object OeaEmageEditor {
                     val right = crop.right.toInt().coerceIn(left + 1, bitmap.width)
                     val bottom = crop.bottom.toInt().coerceIn(top + 1, bitmap.height)
                     val cropped = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
-                    val filter = filterFor(filterIndex)
+                    val filter = filterFor(filterIndex, brightness, contrast)
                     val edited = if (filter == null) cropped else Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888).also { out ->
                         Canvas(out).drawBitmap(cropped, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG).apply { colorFilter = filter })
                         if (out !== cropped) cropped.recycle()
@@ -242,7 +296,7 @@ internal object OeaEmageEditor {
             }
         }
 
-        private fun filterFor(index: Int): ColorMatrixColorFilter? {
+        private fun filterFor(index: Int, brightness: Float = 0f, contrast: Float = 1f): ColorMatrixColorFilter? {
             val matrix = when (index) {
                 1 -> ColorMatrix().apply { setSaturation(0f) }
                 2 -> ColorMatrix(floatArrayOf(
@@ -272,8 +326,27 @@ internal object OeaEmageEditor {
                     0f, 0f, 1.0f, 0f, 24f,
                     0f, 0f, 0f, 1f, 0f
                 ))
-                else -> return null
+                6 -> ColorMatrix().apply { setSaturation(1.35f) }
+                7 -> ColorMatrix().apply {
+                    setSaturation(0.82f)
+                    postConcat(ColorMatrix(floatArrayOf(
+                        1.02f, 0f, 0f, 0f, 5f,
+                        0f, 1.02f, 0f, 0f, 5f,
+                        0f, 0f, 1.02f, 0f, 5f,
+                        0f, 0f, 0f, 1f, 0f
+                    )))
+                }
+                else -> ColorMatrix()
             }
+            if (contrast != 1f || brightness != 0f) {
+                matrix.postConcat(ColorMatrix(floatArrayOf(
+                    contrast, 0f, 0f, 0f, brightness,
+                    0f, contrast, 0f, 0f, brightness,
+                    0f, 0f, contrast, 0f, brightness,
+                    0f, 0f, 0f, 1f, 0f
+                )))
+            }
+            if (index == 0 && contrast == 1f && brightness == 0f) return null
             return ColorMatrixColorFilter(matrix)
         }
 
@@ -299,8 +372,8 @@ internal object OeaEmageEditor {
                 invalidate()
             }
 
-            fun setFilter(index: Int) {
-                filter = filterFor(index)
+            fun setFilter(index: Int, brightness: Float = 0f, contrast: Float = 1f) {
+                filter = filterFor(index, brightness, contrast)
                 bitmapPaint.colorFilter = filter
                 invalidate()
             }
