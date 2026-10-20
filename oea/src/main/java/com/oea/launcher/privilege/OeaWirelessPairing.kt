@@ -83,10 +83,13 @@ object OeaWirelessPairing {
      * Called by the Accessibility service for each window event while watching.
      * Cheap: throttled, and it only reads Settings windows.
      */
-    fun scan(root: AccessibilityNodeInfo?, packageName: String?) {
+    fun scan(root: AccessibilityNodeInfo?, packageName: String?, scanAdditionalWindow: Boolean = false) {
         if (!isWatching() || root == null) return
         val now = SystemClock.elapsedRealtime()
-        if (now - lastScan < SCAN_GAP_MS) return
+        // The service may scan several Settings windows in one pass. The normal
+        // throttle prevents duplicate event scans, but must not discard the
+        // second window in that same pass (it may contain the pairing dialog).
+        if (!scanAdditionalWindow && now - lastScan < SCAN_GAP_MS) return
         lastScan = now
         // Only Settings screens: the values live there, nothing else is read.
         if (packageName == null || !packageName.contains("settings", ignoreCase = true)) return
