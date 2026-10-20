@@ -488,6 +488,9 @@ object OeaFaultShield {
         // A game in front legitimately keeps the shared main thread busy with
         // nothing to do about it, and a paused Home can be idle by design.
         if (frontIsRecoverableScreen) return
+        // Use monotonic elapsed time for the cooldown; wall-clock changes must
+        // not disable or flood the Home stall watchdog.
+        val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastStallAt < 30_000L) return
         lastStallAt = now
         val frames = runCatching {
