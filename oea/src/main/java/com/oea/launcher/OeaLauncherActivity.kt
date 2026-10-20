@@ -111,7 +111,6 @@ class OeaLauncherActivity : Activity() {
             val controller = home ?: return false
             OeaFaultShield.value("home:recover:$cause", false) {
                 controller.recoverSurface()
-                true
             }
         } finally {
             recovering = false
