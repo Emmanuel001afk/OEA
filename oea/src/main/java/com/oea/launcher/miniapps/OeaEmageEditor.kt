@@ -70,6 +70,8 @@ internal object OeaEmageEditor {
         private var filterIndex = 0
         private var brightness = 0f
         private var contrast = 1f
+        private lateinit var brightnessSeek: SeekBar
+        private lateinit var contrastSeek: SeekBar
         private val filters = listOf("Original", "Mono", "Warm", "Cool", "Vintage", "Bright", "Vivid", "Soft")
         private val ink = Color.WHITE
         private val buttonColor = Color.rgb(37, 45, 58)
@@ -195,7 +197,7 @@ internal object OeaEmageEditor {
                     setTextColor(Color.LTGRAY)
                     textSize = 11f
                 }, LinearLayout.LayoutParams(82, -2))
-                addView(SeekBar(host).apply {
+                val seek = SeekBar(host).apply {
                     this.max = max - min
                     progress = initial - min
                     setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -203,7 +205,9 @@ internal object OeaEmageEditor {
                         override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
                         override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
                     })
-                }, LinearLayout.LayoutParams(0, dp(30), 1f))
+                }
+                if (label == "Brightness") brightnessSeek = seek else if (label == "Contrast") contrastSeek = seek
+                addView(seek, LinearLayout.LayoutParams(0, dp(30), 1f))
             }
 
         private fun dp(value: Int): Int = (value * host.resources.displayMetrics.density).toInt()
@@ -217,6 +221,8 @@ internal object OeaEmageEditor {
             filterIndex = 0
             brightness = 0f
             contrast = 1f
+            brightnessSeek.progress = 50
+            contrastSeek.progress = 50
             editorView.setFilter(filterIndex, brightness, contrast)
             message.text = "Adjustments reset • Crop is preserved"
         }
