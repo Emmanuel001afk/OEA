@@ -8,7 +8,6 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.os.Build
 import android.view.View
 import java.util.Locale
 
@@ -34,7 +33,6 @@ internal class OeaNetworkQualityReader(context: Context) {
     @Volatile private var checkedNetwork: android.net.Network? = null
     @Volatile private var lastProbeAt = 0L
     @Volatile private var probeSucceeded: Boolean? = null
-    @Volatile private var probeMessage: String = "Checking internet"
 
     fun read(): OeaNetworkQuality = runCatching {
         val manager = connectivity
@@ -65,7 +63,6 @@ internal class OeaNetworkQualityReader(context: Context) {
                 checkedNetwork = network
                 lastProbeAt = 0L
                 probeSucceeded = null
-                probeMessage = "Checking internet"
             }
         }
         if (changed || now - lastProbeAt >= PROBE_INTERVAL_MS) scheduleProbe(network)
@@ -85,9 +82,9 @@ internal class OeaNetworkQualityReader(context: Context) {
             else -> 0
         }
         when (score) {
-            2 -> OeaNetworkQuality("FAST*", link, COLOR_FAST)
-            1 -> OeaNetworkQuality("MEDIUM*", link, COLOR_MEDIUM)
-            else -> OeaNetworkQuality("SLOW*", link, COLOR_SLOW)
+            2 -> OeaNetworkQuality("FAST", link, COLOR_FAST)
+            1 -> OeaNetworkQuality("MEDIUM", link, COLOR_MEDIUM)
+            else -> OeaNetworkQuality("SLOW", link, COLOR_SLOW)
         }
     }.getOrElse {
         OeaNetworkQuality("UNKNOWN", "Unavailable", COLOR_OFFLINE)
@@ -103,7 +100,6 @@ internal class OeaNetworkQualityReader(context: Context) {
             }
             if (probing.get() || now - lastProbeAt < PROBE_INTERVAL_MS) return
             lastProbeAt = now
-            probeMessage = "Checking internet"
             if (!probing.compareAndSet(false, true)) return
         }
         executor.execute {
@@ -127,7 +123,6 @@ internal class OeaNetworkQualityReader(context: Context) {
                 synchronized(lock) {
                     if (connectivity?.activeNetwork == network && checkedNetwork == network) {
                         probeSucceeded = success
-                        probeMessage = if (success) "Internet reachable" else "Internet probe failed"
                     }
                     probing.set(false)
                 }
