@@ -489,16 +489,26 @@ internal object OeaEmageViewer {
                             if (android.os.Build.VERSION.SDK_INT >= 29) {
                                 put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
                                     android.os.Environment.DIRECTORY_PICTURES)
+                                put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
                             }
                         }
                         val copy = host.contentResolver.insert(
                             android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                         val saved = copy?.let { uri ->
-                            host.contentResolver.openOutputStream(uri)?.use { out ->
+                            val written = host.contentResolver.openOutputStream(uri)?.use { out ->
                                 rotated.compress(format, 95, out)
                             } ?: false
+                            if (written && android.os.Build.VERSION.SDK_INT >= 29) {
+                                host.contentResolver.update(uri, android.content.ContentValues().apply {
+                                    put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                                }, null, null)
+                            }
+                            written
                         } ?: false
-                        if (!saved) return@runCatching false
+                        if (!saved) {
+                            copy?.let { runCatching { host.contentResolver.delete(it, null, null) } }
+                            return@runCatching false
+                        }
                     }
                     rotated.recycle()
                     OeaThumbnails.invalidate(item.uri)

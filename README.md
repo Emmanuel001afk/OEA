@@ -10,7 +10,7 @@ The active launcher path is:
 
 OEA owns the home surface, app model, workspace persistence, drawer, dock, folders, shortcuts, gestures, themes, and system-feature integrations. The engine is initialized lazily, loads the app catalogue away from the UI thread, retains the last good workspace on failure, and publishes its state for future engine-owned features.
 
-See [Launcher engine and live activities](docs/launcher-engine-and-live-activities.md) for the lifecycle boundaries, Dynamic Island-style notification design, platform constraints, and verification checklist, and [Stability, permissions and wallpapers](docs/stability-and-privileges.md) for the fault shield, the capability system and the wallpaper/theme engine.
+See [Launcher engine and live activities](docs/launcher-engine-and-live-activities.md) for the lifecycle boundaries, Dynamic Island-style notification design, platform constraints, and verification checklist, [EMAGE platform integration](docs/emage-platform-integration-2026-10-20.md) for the image-app identity, Android 14 access model, picker/share contracts and device verification checklist, and [Stability, permissions and wallpapers](docs/stability-and-privileges.md) for the fault shield, the capability system and the wallpaper/theme engine.
 
 Modules:
 

@@ -52,6 +52,9 @@ open class OeaMiniAppActivity : Activity() {
      */
     var resultHook: ((requestCode: Int, resultCode: Int, data: android.content.Intent?) -> Boolean)? = null
 
+    /** Called only after Android returns a runtime-permission result. */
+    var permissionHook: (() -> Unit)? = null
+
     /**
      * The gentle refresh path: a full-bleed app reloads its data in place when the
      * permission or the media set changed, instead of the whole screen being
@@ -107,6 +110,7 @@ open class OeaMiniAppActivity : Activity() {
         // showing the "needs permission" card until the next visit. A full-bleed
         // app reloads its own data in place; a page-style app is rebuilt.
         val handled = OeaFaultShield.guard(faultOwner("permission")) {
+            permissionHook?.invoke()
             val hook = resumeHook
             if (hook != null) hook() else renderGuarded(keepScroll = true)
         }
@@ -216,6 +220,7 @@ open class OeaMiniAppActivity : Activity() {
             resumeHook = null
             pauseHook = null
             resultHook = null
+            permissionHook = null
             currentScroll = null
             currentRoot?.animate()?.cancel()
             currentRoot = null

@@ -43,6 +43,14 @@ object OeaMediaLibrary {
 
     enum class Kind { IMAGE, VIDEO, AUDIO }
 
+    /**
+     * The access Android actually granted for one media collection. Android 14+
+     * can report a non-empty library while exposing only the pictures selected
+     * in the permission picker; treating that as FULL makes a gallery silently
+     * look incomplete.
+     */
+    enum class Access { FULL, PARTIAL, DENIED }
+
     /** One MediaStore row (or one OEA-owned file), normalised for the UI. */
     data class Item(
         val id: Long,
@@ -58,7 +66,9 @@ object OeaMediaLibrary {
         val durationMs: Long,
         val kind: Kind,
         val systemFavorite: Boolean,
-        val local: Boolean = false
+        val local: Boolean = false,
+        /** Real filesystem path for OEA-owned files; a FileProvider URI is not a path. */
+        val localPath: String? = null
     ) {
         val key: String get() = uri.toString()
         val aspect: Float get() = if (width > 0 && height > 0) width.toFloat() / height.toFloat() else 4f / 3f
@@ -84,7 +94,11 @@ object OeaMediaLibrary {
         val videoAlbums: List<Album> = emptyList(),
         val audioAlbums: List<Album> = emptyList(),
         val takenAt: Long = 0L,
-        val permissionMissing: Boolean = false
+        val permissionMissing: Boolean = false,
+        val imageAccess: Access = Access.DENIED,
+        val videoAccess: Access = Access.DENIED,
+        val audioAccess: Access = Access.DENIED,
+        val error: String? = null
     ) {
         val totalSize: Long get() = (images + videos + audio).sumOf { it.size }
         val totalCount: Int get() = images.size + videos.size + audio.size
@@ -203,9 +217,19 @@ object OeaMediaLibrary {
         val kinds = kindsWanted.ifEmpty { setOf(Kind.IMAGE) }
         progress(8, "Reading your library…")
         io.execute {
-            val built = build(context, kinds)
-            snapshot = built
+            val result = runCatching { build(context, kinds) }
             scanning.set(false)
+            val built = result.getOrElse { error ->
+                android.util.Log.w("OeaMediaLibrary", "MediaStore scan failed", error)
+                snapshot ?: Snapshot(
+                    takenAt = System.currentTimeMillis(),
+                    imageAccess = accessFor(context, Kind.IMAGE),
+                    videoAccess = accessFor(context, Kind.VIDEO),
+                    audioAccess = accessFor(context, Kind.AUDIO),
+                    error = error.message ?: error.javaClass.simpleName
+                )
+            }
+            snapshot = built
             main.post { subscribers.toList().forEach { it.onSnapshot(built) } }
         }
     }
@@ -257,9 +281,14 @@ object OeaMediaLibrary {
         val visible = { list: List<Item> ->
             list.filterNot { hiddenSet.contains(it.album.lowercase(Locale.getDefault())) || gone.contains(it.key) }
         }
-        val images = order(visible(own.filter { it.kind == Kind.IMAGE } + imagesRaw), sortFor(context, Kind.IMAGE))
-        val videos = order(visible(own.filter { it.kind == Kind.VIDEO } + videosRaw), sortFor(context, Kind.VIDEO))
+        val ownImages = own.filter { it.kind == Kind.IMAGE }
+        val ownVideos = own.filter { it.kind == Kind.VIDEO }
+        val images = order(visible(mergeOwn(ownImages, imagesRaw)), sortFor(context, Kind.IMAGE))
+        val videos = order(visible(mergeOwn(ownVideos, videosRaw)), sortFor(context, Kind.VIDEO))
         val audio = order(visible(audioRaw), sortFor(context, Kind.AUDIO))
+        val imageAccess = accessFor(context, Kind.IMAGE)
+        val videoAccess = accessFor(context, Kind.VIDEO)
+        val audioAccess = accessFor(context, Kind.AUDIO)
         progress(70, "Grouping albums…")
         return Snapshot(
             images = images,
@@ -269,37 +298,56 @@ object OeaMediaLibrary {
             videoAlbums = albums(videos, Kind.VIDEO),
             audioAlbums = albums(audio, Kind.AUDIO),
             takenAt = System.currentTimeMillis(),
-            permissionMissing = permissionMissing(context, kinds, images, videos, audio)
+            permissionMissing = missing(kinds, Kind.IMAGE, imageAccess, images) ||
+                missing(kinds, Kind.VIDEO, videoAccess, videos) ||
+                missing(kinds, Kind.AUDIO, audioAccess, audio),
+            imageAccess = imageAccess,
+            videoAccess = videoAccess,
+            audioAccess = audioAccess
         )
     }
 
     /**
-     * True when a requested collection came back empty because Android has
-     * not granted its media permission yet. EMAGE asks for images and VIP
-     * for videos and audio, so every kind is checked on its own: an empty
-     * collection with the permission granted is simply an empty library,
-     * not a permission problem, and must not offer an "Allow access" card.
+     * Android 14's selected-photos grant is deliberately checked separately
+     * from READ_MEDIA_IMAGES/VIDEO. A gallery must not label a partial library
+     * "empty" or imply that the user has granted full access.
      */
-    private fun permissionMissing(
-        context: Context, kinds: Set<Kind>,
-        images: List<Item>, videos: List<Item>, audio: List<Item>
-    ): Boolean {
-        if (hasOwnFiles(context)) return false
-        fun denied(kind: Kind): Boolean {
-            val permission = if (Build.VERSION.SDK_INT >= 33) when (kind) {
+    fun accessFor(context: Context, kind: Kind): Access {
+        fun granted(permission: String): Boolean =
+            androidx.core.content.ContextCompat.checkSelfPermission(context, permission) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT >= 34) {
+            val fullPermission = when (kind) {
                 Kind.IMAGE -> android.Manifest.permission.READ_MEDIA_IMAGES
                 Kind.VIDEO -> android.Manifest.permission.READ_MEDIA_VIDEO
                 Kind.AUDIO -> android.Manifest.permission.READ_MEDIA_AUDIO
-            } else android.Manifest.permission.READ_EXTERNAL_STORAGE
-            return androidx.core.content.ContextCompat.checkSelfPermission(
-                context, permission
-            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+            if (granted(fullPermission)) return Access.FULL
+            // READ_MEDIA_VISUAL_USER_SELECTED applies to images and videos, not audio.
+            if (kind != Kind.AUDIO && granted(android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)) {
+                return Access.PARTIAL
+            }
+            return Access.DENIED
         }
-        val imageMissing = kinds.contains(Kind.IMAGE) && images.isEmpty() && denied(Kind.IMAGE)
-        val videoMissing = kinds.contains(Kind.VIDEO) && videos.isEmpty() && denied(Kind.VIDEO)
-        val audioMissing = kinds.contains(Kind.AUDIO) && audio.isEmpty() && denied(Kind.AUDIO)
-        return imageMissing || videoMissing || audioMissing
+        if (Build.VERSION.SDK_INT >= 33) {
+            val permission = when (kind) {
+                Kind.IMAGE -> android.Manifest.permission.READ_MEDIA_IMAGES
+                Kind.VIDEO -> android.Manifest.permission.READ_MEDIA_VIDEO
+                Kind.AUDIO -> android.Manifest.permission.READ_MEDIA_AUDIO
+            }
+            return if (granted(permission)) Access.FULL else Access.DENIED
+        }
+        return if (granted(android.Manifest.permission.READ_EXTERNAL_STORAGE)) Access.FULL else Access.DENIED
     }
+
+    private fun missing(kinds: Set<Kind>, kind: Kind, access: Access, items: List<Item>): Boolean =
+        kinds.contains(kind) && access == Access.DENIED && items.isEmpty()
+
+    /**
+     * The old boolean is kept in the snapshot for callers that only need the
+     * blocking state. Partial access is not missing: it is usable, but the UI
+     * should say that Android is showing only the selected media.
+     */
 
     /**
      * Reads a whole collection: no LIMIT, no offset, no truncation. The grid that
@@ -352,8 +400,17 @@ object OeaMediaLibrary {
 
     private fun read(context: Context, collection: Uri, projection: Array<String>, kind: Kind): List<Item> {
         val rows = ArrayList<Item>(4096)
+        val selection = when {
+            Build.VERSION.SDK_INT >= 30 -> "${MediaStore.MediaColumns.IS_PENDING} = 0 AND ${MediaStore.MediaColumns.IS_TRASHED} = 0"
+            Build.VERSION.SDK_INT >= 29 -> "${MediaStore.MediaColumns.IS_PENDING} = 0"
+            else -> null
+        }
         val cursor = context.contentResolver.query(
-            collection, projection, null, null, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+            collection,
+            projection,
+            selection,
+            null,
+            "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
         ) ?: return emptyList()
         cursor.use { c ->
             fun col(name: String) = c.getColumnIndex(name)
@@ -406,6 +463,22 @@ object OeaMediaLibrary {
         return rows
     }
 
+    /**
+     * OEA Camera writes one private copy (for editing/trash) and one MediaStore
+     * copy (for other galleries). EMAGE should show that as one picture, with the
+     * private item retained as the editable/trash-capable representative.
+     */
+    private fun mergeOwn(privateItems: List<Item>, indexed: List<Item>): List<Item> {
+        if (privateItems.isEmpty()) return indexed
+        val privateNames = privateItems.map { it.name.lowercase(Locale.US) }.toSet()
+        return privateItems + indexed.filterNot { item ->
+            item.name.lowercase(Locale.US) in privateNames &&
+                item.relativePath.lowercase(Locale.US).contains("pictures/oea") ||
+                item.name.lowercase(Locale.US) in privateNames &&
+                item.relativePath.lowercase(Locale.US).contains("movies/oea")
+        }
+    }
+
     /** OEA's own camera roll, so a shot taken in OEA is never "missing". */
     private fun ownFiles(context: Context, kinds: Set<Kind>): List<Item> {
         val out = ArrayList<Item>()
@@ -444,7 +517,8 @@ object OeaMediaLibrary {
                 durationMs = if (kind == Kind.VIDEO) probeDuration(file) else 0L,
                 kind = kind,
                 systemFavorite = false,
-                local = true
+                local = true,
+                localPath = file.absolutePath
             )
         }.sortedByDescending { it.takenAt }
     }
@@ -473,10 +547,6 @@ object OeaMediaLibrary {
             android.media.MediaScannerConnection.scanFile(context.applicationContext, paths.toTypedArray(), null, null)
         }
     }
-
-    private fun hasOwnFiles(context: Context): Boolean =
-        runCatching { File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA").listFiles() }
-            .getOrNull()?.isNotEmpty() == true
 
     // --------------------------------------------------------------------- albums
 
@@ -625,7 +695,7 @@ object OeaMediaLibrary {
     }
 
     private fun moveToOeaTrash(context: Context, item: Item): String? {
-        val source = runCatching { File(item.uri.path ?: return null) }.getOrNull()?.takeIf { it.isFile } ?: return null
+        val source = item.localPath?.let(::File)?.takeIf { it.isFile } ?: return null
         val root = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
         val dir = File(root, TRASH_DIR)
         if (!dir.isDirectory && !dir.mkdirs()) return null
@@ -754,6 +824,13 @@ object OeaMediaLibrary {
             }
         }
         intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // EXTRA_STREAM is the historical contract; ClipData is the modern
+        // grant carrier and is required by some Android 13+ share targets.
+        items.firstOrNull()?.let { first ->
+            intent.clipData = android.content.ClipData.newUri(context.contentResolver, first.name, first.uri).apply {
+                items.drop(1).forEach { addItem(android.content.ClipData.Item(it.uri)) }
+            }
+        }
         runCatching { context.startActivity(android.content.Intent.createChooser(intent, label)) }
             .onFailure { toast(context, "Nothing on this phone can receive a share.") }
     }
@@ -797,7 +874,7 @@ object OeaMediaLibrary {
         var deleted = 0
         items.filter { it.local }.forEach { item ->
             val ok = runCatching { context.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false) ||
-                runCatching { File(item.uri.path ?: "").takeIf { it.isFile }?.delete() == true }.getOrDefault(false)
+                runCatching { item.localPath?.let(::File)?.takeIf { it.isFile }?.delete() == true }.getOrDefault(false)
             if (ok) {
                 recordDeletion(context, item)
                 deleted++
@@ -818,7 +895,7 @@ object OeaMediaLibrary {
 
     /** The readable path of an item, for the details sheet. */
     fun pathOf(item: Item): String {
-        if (item.local) return item.uri.path ?: item.name
+        if (item.local) return item.localPath ?: item.name
         val relative = item.relativePath.trimEnd('/')
         return if (relative.isBlank()) item.name else "$relative/${item.name}"
     }
@@ -826,16 +903,34 @@ object OeaMediaLibrary {
     /** Copies a picture OEA owns into the device's Pictures collection. */
     fun publishToDeviceLibrary(context: Context, item: Item): Boolean {
         if (!item.local) return false
-        val source = item.uri.path?.let { File(it) }?.takeIf { it.isFile } ?: return false
+        val source = item.localPath?.let(::File)?.takeIf { it.isFile } ?: return false
+        val mime = android.webkit.MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(source.extension.lowercase(Locale.US)) ?: "image/jpeg"
         val values = android.content.ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/OEA")
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            if (Build.VERSION.SDK_INT >= 29) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/OEA")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
             put(MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000L)
         }
-        return runCatching {
-            val target = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return@runCatching false
-            context.contentResolver.openOutputStream(target)?.use { out -> source.inputStream().use { it.copyTo(out) } } != null
-        }.getOrDefault(false).also { if (it) refresh(context) }
+        var target: Uri? = null
+        val copied = runCatching {
+            target = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return@runCatching false
+            context.contentResolver.openOutputStream(target!!)?.use { out ->
+                source.inputStream().use { it.copyTo(out) }
+            } ?: return@runCatching false
+            if (Build.VERSION.SDK_INT >= 29) {
+                context.contentResolver.update(target!!, android.content.ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }, null, null)
+            }
+            true
+        }.getOrDefault(false)
+        if (!copied) target?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+        if (copied) refresh(context)
+        return copied
     }
 }

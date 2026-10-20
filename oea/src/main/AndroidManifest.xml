@@ -7,6 +7,12 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Android 14+ can grant a gallery only the photos the user selected.
+         EMAGE requests this alongside READ_MEDIA_IMAGES so the UI can tell
+         limited access from a genuinely empty library. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <!-- Needed only by the legacy MediaStore write path on Android 9 and below. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
@@ -260,18 +266,39 @@
             android:launchMode="singleTask"
             android:theme="@style/OeaFullscreenAppTheme"
             android:windowSoftInputMode="adjustResize">
+            <!-- MAIN + APP_GALLERY makes EMAGE discoverable as a picture app,
+                 while LAUNCHER keeps its own icon in OEA Home and Android's
+                 launcher. It does not claim a private or OEM-only gallery role. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.APP_GALLERY" />
             </intent-filter>
-            <!-- EMAGE is Android's picture app: a picture opened from Files, the
-                 camera or messages opens full-screen here. Media access is
-                 requested in EMAGE itself. -->
+            <!-- View and edit an existing picture from Files, Messages, a
+                 camera or another gallery. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.EDIT" />
                 <action android:name="android.intent.action.ATTACH_DATA" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <!-- Let EMAGE act as a real image picker when another app asks for
+                 ACTION_PICK or ACTION_GET_CONTENT. CATEGORY_OPENABLE is kept in
+                 the filter because callers use it to require a readable stream. -->
+            <intent-filter>
+                <action android:name="android.intent.action.PICK" />
+                <action android:name="android.intent.action.GET_CONTENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.OPENABLE" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <!-- Share sheets can send one or several pictures directly to EMAGE. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
