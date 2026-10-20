@@ -370,8 +370,15 @@ object OeaFaultShield {
             FaultAction.REBUILD_HOME -> main.post {
                 val r = recovery
                 if (r == null || !OeaFaultShield.value("fault:rebuild", false) { r.rebuildHome() }) {
+                    // A failed Home rebuild must never finish the launcher Activity.
+                    // Closing it can make Android forget the active Home surface and
+                    // leave the user at a blank screen or the default-launcher chooser.
                     homeHealthy = false
-                    closeFrontActivity()
+                    safeMode = true
+                    context()?.let { app -> OeaDataStore.get(app).setHomeSafeMode(true) }
+                    val recoveredInSafeMode = r != null &&
+                        OeaFaultShield.value("fault:safe-mode-after-rebuild", false) { r.enterSafeMode() }
+                    if (!recoveredInSafeMode) restartHome()
                 }
             }
 
