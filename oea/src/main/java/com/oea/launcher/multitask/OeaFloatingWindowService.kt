@@ -135,6 +135,13 @@ class OeaFloatingWindowService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     /**
+     * Required by AccessibilityService. The floating window needs no
+     * window-content events: it only uses the overlay window and the
+     * hardware-key filter, so events are acknowledged and dropped.
+     */
+    override fun onAccessibilityEvent(event: android.view.accessibility.AccessibilityEvent?) = Unit
+
+    /**
      * Hardware-key filter (enabled by flagRequestFilterKeyEvents).
      * Returns false so keys are never swallowed: the app or game
      * underneath keeps its input. Override the body to react to,
@@ -269,7 +276,7 @@ class OeaFloatingWindowService : AccessibilityService() {
                 intArrayOf(0xF2131C2E.toInt(), 0xEE0C1220.toInt())
             ).apply {
                 cornerRadius = dp(20).toFloat()
-                setStroke(dp(1), 0x8855BFFF)
+                setStroke(dp(1), 0x8855BFFF.toInt())
             }
             // Clip children so content never paints past the rounded
             // corners while the box is being resized.

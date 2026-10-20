@@ -41,7 +41,7 @@ import java.util.Locale
  * - Unique: integration with Low mode (Ultra Power Saving) — Clock explains that device ultra power saving may block alarms and how to whitelist
  */
 object OeaClockApp {
-    private const val PREFS = "oea_clock"
+    internal const val PREFS = "oea_clock"
     private const val KEY_ALARMS = "alarms_v2"
     private const val KEY_WORLD = "world_zones"
     private const val KEY_TIMERS = "timers"
@@ -475,7 +475,7 @@ object OeaClockApp {
                                 val cleaned = input.trim()
                                 if (!cleaned.matches(Regex("""\d{1,2}:\d{2}"""))) {
                                     android.widget.Toast.makeText(host, "Use HH:mm, like 22:30", android.widget.Toast.LENGTH_SHORT).show()
-                                    return@prompt
+                                    return@prompt null
                                 }
                                 prefs(host).edit().putString("bedtime_time", cleaned).apply()
                                 scheduleBedtime(host)
@@ -488,7 +488,7 @@ object OeaClockApp {
                                 val cleaned = input.trim()
                                 if (!cleaned.matches(Regex("""\d{1,2}:\d{2}"""))) {
                                     android.widget.Toast.makeText(host, "Use HH:mm, like 06:30", android.widget.Toast.LENGTH_SHORT).show()
-                                    return@prompt
+                                    return@prompt null
                                 }
                                 prefs(host).edit().putString("wake_time", cleaned).apply()
                                 scheduleBedtime(host)
@@ -782,8 +782,8 @@ object OeaClockApp {
         val now = java.util.Calendar.getInstance()
         val nowMin = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
         listOf(
-            bedMin to OeaClockBedtimeReceiver.EXTRA_BEDTIME_ON to 7001,
-            wakeMin to OeaClockBedtimeReceiver.EXTRA_BEDTIME_OFF to 7002
+            Triple(bedMin, OeaClockBedtimeReceiver.EXTRA_BEDTIME_ON, 7001),
+            Triple(wakeMin, OeaClockBedtimeReceiver.EXTRA_BEDTIME_OFF, 7002)
         ).forEach { (minutes, extra, code) ->
             val trigger = java.util.Calendar.getInstance().apply {
                 set(java.util.Calendar.HOUR_OF_DAY, minutes / 60)
