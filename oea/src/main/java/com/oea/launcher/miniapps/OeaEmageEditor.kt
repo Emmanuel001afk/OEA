@@ -317,11 +317,9 @@ internal object OeaEmageEditor {
                 bitmapRect.set((width - w) / 2f, (height - h) / 2f, (width + w) / 2f, (height + h) / 2f)
                 canvas.drawColor(Color.BLACK)
                 canvas.drawBitmap(image, null, bitmapRect, bitmapPaint)
-                if (crop.isEmpty) {
-                    val insetX = bitmapRect.width() * 0.06f
-                    val insetY = bitmapRect.height() * 0.06f
-                    crop.set(bitmapRect.left + insetX, bitmapRect.top + insetY, bitmapRect.right - insetX, bitmapRect.bottom - insetY)
-                }
+                // Start with the entire image selected: simply applying a filter
+                // or rotating must not silently crop away the edges.
+                if (crop.isEmpty) crop.set(bitmapRect)
                 val outside = Path().apply {
                     fillType = Path.FillType.EVEN_ODD
                     addRect(bitmapRect, Path.Direction.CW)
