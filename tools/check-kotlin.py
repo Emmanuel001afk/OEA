@@ -25,7 +25,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULES = ("oea", "oea-engine", "oea-games", "oea-game-arena", "oea-game-chess", "oea-game-runner")
+MODULES = ("oea", "oea-engine", "oea-games")
 
 # --------------------------------------------------------------------- lexer
 
@@ -360,7 +360,8 @@ def check_app_registration() -> list[str]:
                     f"ends the session the moment the game opens"
                 )
 
-    # 3. Every standalone app ships a real game id that the engine registers.
+    # 3. Every in-launcher game entry ships a real game id that the
+    #    engine registers, and every built-in game has an entry.
     games = os.path.join(ROOT, "oea-games", "src", "main", "java", "com", "oea", "games", "OeaGames.kt")
     known_ids = set()
     if os.path.exists(games):
@@ -368,55 +369,27 @@ def check_app_registration() -> list[str]:
         m = re.search(r"val builtInIds: List<String> = listOf\(([^)]*)\)", gsrc)
         if m:
             known_ids = {x.strip().strip('"') for x in m.group(1).split(",") if x.strip()}
-    # 4. The launcher's hand-off map agrees with the modules' applicationIds.
-    rescue = os.path.join(ROOT, "oea", "src", "main", "java", "com", "oea", "launcher", "perf", "OeaGameRescue.kt")
-    app_ids = {}
-    for mod in ("oea-game-arena", "oea-game-chess", "oea-game-runner"):
-        g = os.path.join(ROOT, mod, "build.gradle")
-        if os.path.exists(g):
-            m = re.search(r"applicationId\s+\"([^\"]+)\"", open(g, encoding="utf-8").read())
-            if m:
-                app_ids[mod] = m.group(1)
-    if os.path.exists(rescue):
-        rsrc = open(rescue, encoding="utf-8").read()
-        m = re.search(r"private val standalonePackages = mapOf\((.*?)\)", rsrc, re.S)
-        if m:
-            mapped = dict(re.findall(r'"(\w+)"\s+to\s+"([\w\.]+)"', m.group(1)))
-            for game_id, pkg in sorted(mapped.items()):
-                if known_ids and game_id not in known_ids:
-                    problems.append(f"OeaGameRescue: '{game_id}' is not a built-in game id {sorted(known_ids)}")
-                if app_ids and pkg not in app_ids.values():
+    if os.path.exists(entries):
+        esrc = open(entries, encoding="utf-8").read()
+        entry_ids = {m.group(1) for m in re.finditer(r'override val standaloneGameId: String = "([^"]+)"', esrc)}
+        if known_ids:
+            for game_id in sorted(entry_ids):
+                if game_id not in known_ids:
                     problems.append(
-                        f"OeaGameRescue: '{game_id}' hands off to {pkg}, which is not any game module's "
-                        f"applicationId {sorted(app_ids.values())}"
+                        f"OeaGameEntries: standaloneGameId '{game_id}' is not a registered built-in game {sorted(known_ids)}"
                     )
-            if app_ids:
-                missing = set(app_ids.values()) - set(mapped.values())
-                if missing:
-                    problems.append(f"OeaGameRescue: no game id maps to {sorted(missing)}")
-
-    for mod, _ in (("oea-game-arena", "arena"), ("oea-game-chess", "chess"), ("oea-game-runner", "runner")):
-        act = glob_module_activity(mod)
-        if not act:
-            problems.append(f"{mod}: no activity found")
-            continue
-        m = re.search(r'override val standaloneGameId: String = "([^"]+)"', act)
-        if not m:
-            problems.append(f"{mod}: its activity does not set standaloneGameId")
-        elif known_ids and m.group(1) not in known_ids:
-            problems.append(f"{mod}: standaloneGameId '{m.group(1)}' is not a registered built-in game {sorted(known_ids)}")
+            missing = known_ids - entry_ids - HUB_ONLY_IDS
+            if missing:
+                problems.append(
+                    f"OeaGameEntries: built-in game(s) {sorted(missing)} have no launcher entry, "
+                    f"so they are unplayable in the single APK"
+                )
     return problems
 
 
-def glob_module_activity(mod: str):
-    root = os.path.join(ROOT, mod, "src", "main", "java")
-    if not os.path.isdir(root):
-        return None
-    for dirpath, _, names in os.walk(root):
-        for nm in names:
-            if nm.endswith(".kt"):
-                return open(os.path.join(dirpath, nm), encoding="utf-8").read()
-    return None
+# Built-in ids that are engine demos reachable from the games hub
+# rather than games with their own launcher entry.
+HUB_ONLY_IDS = {"lab"}
 
 
 # ------------------------------------------------------- lightweight typing
@@ -627,9 +600,6 @@ def main() -> int:
 
     for manifest in (
         "oea/src/main/AndroidManifest.xml",
-        "oea-game-arena/src/main/AndroidManifest.xml",
-        "oea-game-chess/src/main/AndroidManifest.xml",
-        "oea-game-runner/src/main/AndroidManifest.xml",
     ):
         p = os.path.join(ROOT, manifest)
         if os.path.exists(p):

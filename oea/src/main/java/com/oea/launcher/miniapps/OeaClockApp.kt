@@ -186,6 +186,23 @@ object OeaClockApp {
         var swText: TextView? = null
         val swHandler = Handler(Looper.getMainLooper())
 
+        // One ticker, owned by the tab rather than by a single build of
+        // it: switching tabs rebuilds the view, and the old design's
+        // runnable died with it — so a running stopwatch looked frozen
+        // the moment you glanced at another tab.
+        val swTicker = object : Runnable {
+            override fun run() {
+                if (!swRunning || host.isDestroyed) return
+                swText?.text = formatMs(swElapsed + (System.currentTimeMillis() - swStartAt))
+                swHandler.postDelayed(this, 50L)
+            }
+        }
+
+        fun swStartTicking() {
+            swHandler.removeCallbacks(swTicker)
+            swHandler.post(swTicker)
+        }
+
         fun renderTabs() {
             tabBar.removeAllViews()
             listOf("alarms" to "Alarms", "timer" to "Timer", "stopwatch" to "Stopwatch", "world" to "World", "bedtime" to "Bedtime").forEach { (id, label) ->
@@ -347,17 +364,11 @@ object OeaClockApp {
                         if (swRunning) {
                             swRunning = false
                             swElapsed += System.currentTimeMillis() - swStartAt
+                            swHandler.removeCallbacks(swTicker)
                         } else {
                             swRunning = true
                             swStartAt = System.currentTimeMillis()
-                            swHandler.post(object : Runnable {
-                                override fun run() {
-                                    if (!swRunning || host.isDestroyed) return
-                                    val elapsed = swElapsed + (System.currentTimeMillis() - swStartAt)
-                                    swText?.text = formatMs(elapsed)
-                                    swHandler.postDelayed(this, 50L)
-                                }
-                            })
+                            swStartTicking()
                         }
                         refresh()
                     }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { rightMargin = kit.dp(8) })
@@ -396,6 +407,9 @@ object OeaClockApp {
                             } catch (_: Throwable) {}
                         }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) })
                     }
+                    // Still running from before: keep the hands moving
+                    // on this fresh view too.
+                    if (swRunning) swStartTicking()
                 }
                 "world" -> {
                     val savedZones = prefs(host).getStringSet(KEY_WORLD, setOf("UTC", "America/New_York", "Europe/London", "Africa/Lagos")) ?: setOf("Africa/Lagos")
@@ -447,28 +461,42 @@ object OeaClockApp {
                 }
                 "bedtime" -> {
                     val bedtimeEnabled = prefs(host).getBoolean(KEY_BEDTIME, false)
+                    val bedtimeSaved = prefs(host).getString("bedtime_time", "22:00") ?: "22:00"
+                    val wakeSaved = prefs(host).getString("wake_time", "06:00") ?: "06:00"
                     val group = kit.group(content)
                     kit.switchRow(group, R.drawable.oic_bedtime, "Bedtime mode", "Automatically enable DND + Sleeping mode at bedtime", bedtimeEnabled) {
                         prefs(host).edit().putBoolean(KEY_BEDTIME, it).apply()
+                        if (it) scheduleBedtime(host) else cancelBedtime(host)
                         refresh()
                     }
                     if (bedtimeEnabled) {
-                        kit.row(group, R.drawable.oic_schedule, "Bedtime", "22:00 • Tap to change") {
-                            kit.prompt("Bedtime", "HH:mm", "22:00") { input ->
-                                // Save bedtime time
-                                prefs(host).edit().putString("bedtime_time", input).apply()
+                        kit.row(group, R.drawable.oic_schedule, "Bedtime", "$bedtimeSaved • Tap to change") {
+                            kit.prompt("Bedtime", "HH:mm", bedtimeSaved) { input ->
+                                val cleaned = input.trim()
+                                if (!cleaned.matches(Regex("""\d{1,2}:\d{2}"""))) {
+                                    android.widget.Toast.makeText(host, "Use HH:mm, like 22:30", android.widget.Toast.LENGTH_SHORT).show()
+                                    return@prompt
+                                }
+                                prefs(host).edit().putString("bedtime_time", cleaned).apply()
+                                scheduleBedtime(host)
                                 refresh()
                                 null
                             }
                         }
-                        kit.row(group, R.drawable.oic_schedule, "Wake up", "06:00 • Tap to change") {
-                            kit.prompt("Wake up", "HH:mm", "06:00") { input ->
-                                prefs(host).edit().putString("wake_time", input).apply()
+                        kit.row(group, R.drawable.oic_schedule, "Wake up", "$wakeSaved • Tap to change") {
+                            kit.prompt("Wake up", "HH:mm", wakeSaved) { input ->
+                                val cleaned = input.trim()
+                                if (!cleaned.matches(Regex("""\d{1,2}:\d{2}"""))) {
+                                    android.widget.Toast.makeText(host, "Use HH:mm, like 06:30", android.widget.Toast.LENGTH_SHORT).show()
+                                    return@prompt
+                                }
+                                prefs(host).edit().putString("wake_time", cleaned).apply()
+                                scheduleBedtime(host)
                                 refresh()
                                 null
                             }
                         }
-                        kit.note(content, "Bedtime unique: when enabled, OEA at bedtime time will set DND on and apply Sleeping mode (quiet, LOW optional, islands hidden). At wake time, restores. Integration with Low mode: if battery low, also enables LOW (Ultra Power Saving).")
+                        kit.note(content, "Bedtime: at bedtime time OEA puts the phone in Sleeping mode (DND on, quiet, islands hidden), and at wake time it puts back the mode you had before. Both are scheduled with exact alarms, so they survive the phone sleeping. If battery is low, Sleeping mode also keeps LOW (Ultra Power Saving) as that mode itself does.")
                         content.addView(kit.primaryButton("Apply Sleeping mode now", R.drawable.oic_bedtime) {
                             try { com.oea.launcher.ui.OeaModes.apply(host, com.oea.launcher.ui.OeaMode.SLEEPING) } catch (_: Throwable) {}
                             android.widget.Toast.makeText(host, "Sleeping mode applied", android.widget.Toast.LENGTH_SHORT).show()
@@ -503,30 +531,51 @@ object OeaClockApp {
     private fun pickRingtone(host: Activity, kit: OeaKit, onPick: (String, String?) -> Unit) {
         val titles = mutableListOf("Phone default (alarm)")
         val uris = mutableListOf<String?>(null)
-        runCatching {
-            val projection = arrayOf(
-                android.provider.MediaStore.Audio.Media._ID,
-                android.provider.MediaStore.Audio.Media.TITLE
-            )
-            host.contentResolver.query(
-                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                "${android.provider.MediaStore.Audio.Media.IS_ALARM} != 0",
-                null,
-                "${android.provider.MediaStore.Audio.Media.TITLE} ASC"
-            )?.use { cursor ->
-                val idColumn = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media._ID)
-                val titleColumn = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.TITLE)
-                while (cursor.moveToNext() && titles.size < 60) {
-                    titles += cursor.getString(titleColumn)
-                    uris += android.content.ContentUris.withAppendedId(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cursor.getLong(idColumn)).toString()
+        val kinds = mutableListOf("alarm")
+        // The alarm column is often empty on Go devices, so the
+        // picker falls back to the phone's whole music library —
+        // any sound the user owns can be their ring.
+        val queries = listOf(
+            "${android.provider.MediaStore.Audio.Media.IS_ALARM} != 0" to "alarm",
+            "${android.provider.MediaStore.Audio.Media.IS_MUSIC} != 0" to "music",
+            "${android.provider.MediaStore.Audio.Media.IS_NOTIFICATION} != 0" to "notification"
+        )
+        val seen = mutableSetOf<String>()
+        for ((selection, kind) in queries) {
+            if (titles.size >= 80) break
+            runCatching {
+                val projection = arrayOf(
+                    android.provider.MediaStore.Audio.Media._ID,
+                    android.provider.MediaStore.Audio.Media.TITLE
+                )
+                host.contentResolver.query(
+                    android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection, selection, null,
+                    "${android.provider.MediaStore.Audio.Media.TITLE} ASC"
+                )?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media._ID)
+                    val titleColumn = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.TITLE)
+                    while (cursor.moveToNext() && titles.size < 80) {
+                        val uri = android.content.ContentUris.withAppendedId(
+                            android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                            cursor.getLong(idColumn)
+                        ).toString()
+                        if (!seen.add(uri)) continue
+                        titles += cursor.getString(titleColumn)
+                        uris += uri
+                        kinds += kind
+                    }
                 }
             }
         }
         val descriptions = titles.mapIndexed { index, _ ->
-            if (index == 0) "Android's own alarm sound, at alarm volume" else "From this phone's alarm ringtone library"
+            when {
+                index == 0 -> "Android's own alarm sound, at alarm volume"
+                kinds.getOrElse(index) { "" } == "alarm" -> "From this phone's alarm ringtone library"
+                else -> "Any sound on this phone"
+            }
         }
-        kit.choose("Alarm sound", if (titles.size == 1) "This phone lists no alarm ringtones, so only the default is offered" else "Only what this phone carries", titles, 0, descriptions) { pick ->
+        kit.choose("Alarm sound", if (titles.size == 1) "This phone lists no alarm ringtones, so only the default is offered" else "From the alarm library and your other sounds", titles, 0, descriptions) { pick ->
             onPick(titles[pick], uris[pick])
         }
     }
@@ -708,6 +757,74 @@ object OeaClockApp {
     /** Pending duration for the timer tab, coming from an external Set-timer request. */
     private var presetTimerMs: Long? = null
 
+    // ------------------------------------------------------------------ bedtime
+
+    internal const val KEY_MODE_BEFORE_BEDTIME = "mode_before_bedtime"
+
+    /** Parse "HH:mm" into minutes since midnight, or null. */
+    private fun parseHm(raw: String): Int? {
+        val m = Regex("""(\d{1,2}):(\d{2})""").matchEntire(raw.trim()) ?: return null
+        val h = m.groupValues[1].toInt()
+        val min = m.groupValues[2].toInt()
+        return if (h in 0..23 && min in 0..59) h * 60 + min else null
+    }
+
+    /**
+     * Arm (or re-arm) the two bedtime alarms: one that puts the phone
+     * into Sleeping mode at bedtime, one that restores the previous
+     * mode at wake time. Exact alarms, so they fire on time even
+     * with the phone asleep.
+     */
+    fun scheduleBedtime(context: Context) {
+        val bedMin = parseHm(prefs(context).getString("bedtime_time", "22:00") ?: "22:00") ?: 22 * 60
+        val wakeMin = parseHm(prefs(context).getString("wake_time", "06:00") ?: "06:00") ?: 6 * 60
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        val now = java.util.Calendar.getInstance()
+        val nowMin = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+        listOf(
+            bedMin to OeaClockBedtimeReceiver.EXTRA_BEDTIME_ON to 7001,
+            wakeMin to OeaClockBedtimeReceiver.EXTRA_BEDTIME_OFF to 7002
+        ).forEach { (minutes, extra, code) ->
+            val trigger = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, minutes / 60)
+                set(java.util.Calendar.MINUTE, minutes % 60)
+                set(java.util.Calendar.SECOND, 0)
+                if (before(now) || (minutes == nowMin)) add(java.util.Calendar.DAY_OF_YEAR, 1)
+            }
+            val intent = Intent(context, OeaClockBedtimeReceiver::class.java)
+                .putExtra(OeaClockBedtimeReceiver.EXTRA_BEDTIME_MODE, extra == OeaClockBedtimeReceiver.EXTRA_BEDTIME_ON)
+            val pi = PendingIntent.getBroadcast(
+                context, code, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            runCatching {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    if (am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger.timeInMillis, pi)
+                    else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger.timeInMillis, pi)
+                } else {
+                    @Suppress("DEPRECATION")
+                    am.setExact(AlarmManager.RTC_WAKEUP, trigger.timeInMillis, pi)
+                }
+            }
+        }
+    }
+
+    /** Cancel both bedtime alarms (bedtime mode switched off). */
+    fun cancelBedtime(context: Context) {
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        listOf(7001, 7002).forEach { code ->
+            val pi = PendingIntent.getBroadcast(
+                context, code,
+                Intent(context, OeaClockBedtimeReceiver::class.java),
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            pi?.let {
+                runCatching { am.cancel(it) }
+                it.cancel()
+            }
+        }
+    }
+
     /** Map Calendar's day constants onto OEA's Mon..Sun (0..6) index set. */
     private fun calendarDayToOea(calendarDay: Int): Int? = when (calendarDay) {
         java.util.Calendar.MONDAY -> 0
@@ -812,6 +929,34 @@ class OeaClockAlarmReceiver : android.content.BroadcastReceiver() {
             }
             nm?.notify((id % Int.MAX_VALUE).toInt(), notif.build())
         } catch (_: Throwable) {}
+    }
+}
+
+/**
+ * Bedtime's pair: at bedtime time it puts the phone into Sleeping
+ * mode (remembering the mode you had), and at wake time it puts
+ * that mode back. DND, quiet and the rest come from Sleeping mode
+ * itself — OEA does not invent a second behaviour here.
+ */
+class OeaClockBedtimeReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val bedtime = intent.getBooleanExtra(EXTRA_BEDTIME_MODE, true)
+        if (bedtime) {
+            val before = com.oea.launcher.ui.OeaModes.current(context).id
+            context.getSharedPreferences(OeaClockApp.PREFS, Context.MODE_PRIVATE)
+                .edit().putString(OeaClockApp.KEY_MODE_BEFORE_BEDTIME, before).apply()
+            com.oea.launcher.ui.OeaModes.apply(context, com.oea.launcher.ui.OeaMode.SLEEPING)
+        } else {
+            val before = context.getSharedPreferences(OeaClockApp.PREFS, Context.MODE_PRIVATE)
+                .getString(OeaClockApp.KEY_MODE_BEFORE_BEDTIME, null)
+            com.oea.launcher.ui.OeaModes.apply(context, com.oea.launcher.ui.OeaMode.of(before))
+        }
+    }
+
+    companion object {
+        internal const val EXTRA_BEDTIME_MODE = "oea.clock.bedtime_on"
+        internal const val EXTRA_BEDTIME_ON = "on"
+        internal const val EXTRA_BEDTIME_OFF = "off"
     }
 }
 
