@@ -93,12 +93,16 @@ object OeaAppFreezer {
         }
     }
 
-    /** Reads the suspension state back through the OEA Authority bridge. */
+    /** Reads the package's per-user state back through the OEA Authority bridge. */
     private fun adbSuspensionState(packageName: String): Boolean? {
+        // Ask dumpsys for this package only: a whole-device package dump can
+        // exceed the bridge's bounded output and omit apps near the end. Some
+        // Android builds also omit an explicit "suspended=false" field, so the
+        // presence of a readable User 0 state is what lets us verify restoration.
         val (success, output) = OeaAdbAuthority.runShell("dumpsys package $packageName")
-        if (!success) return null
-        // "suspended=true" appears in dumpsys only while the package is suspended.
-        return Regex("""suspended\s*=\s*(true|false)""").find(output)?.groupValues?.get(1)?.toBooleanStrictOrNull()
+        if (!success || !output.contains(packageName)) return null
+        val userState = Regex("""(?m)^\s*User 0:.*$""").find(output)?.value ?: return null
+        return Regex("""\bsuspended=true\b""").containsMatchIn(userState)
     }
 
     fun frozenPackages(context: Context): Set<String> =

@@ -1,7 +1,10 @@
 package com.oea.launcher.privilege
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -208,6 +211,9 @@ class OeaAuthorityActivity : Activity() {
                 setPadding(0, dp(8), 0, dp(12))
             }
             addView(statusText)
+            addView(button("Test real ADB authority") { testAuthority() })
+            addView(button("Test app suspension + restore") { chooseSuspensionTestApp() })
+            addView(button("Review permission status and repair") { reviewPermissionRepairs() })
             forgetButton = button("Forget endpoint in OEA") {
                 OeaAdbAuthority.forget(this@OeaAuthorityActivity)
                 codeField.setText("")
@@ -256,6 +262,139 @@ class OeaAuthorityActivity : Activity() {
             val message = result.fold({ it }, { "Reconnect failed: ${it.message ?: it.javaClass.simpleName}" })
             setBusy(false, message)
             refreshStatus(message)
+        }
+    }
+
+    /**
+     * A successful pairing is not proof that later privileged operations work.
+     * Run a fresh, read-only shell identity probe and show its actual output.
+     */
+    private fun testAuthority() {
+        if (!OeaAdbAuthority.isSessionReady()) {
+            refreshStatus("Test blocked: the shell session is not currently connected. Tap Reconnect first.")
+            return
+        }
+        setBusy(true, "Testing the live ADB shell identity…")
+        work.launch {
+            val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                OeaAdbAuthority.runShell("id")
+            }
+            val message = if (result.first) {
+                val identity = result.second.trim()
+                when {
+                    identity.contains("uid=2000") -> "ADB test passed. Android granted OEA the shell identity (uid=2000):\n$identity"
+                    identity.contains("uid=0") -> "ADB test passed with root identity:\n$identity"
+                    else -> "The command returned, but the identity is unexpected. No privileged action was attempted:\n$identity"
+                }
+            } else {
+                "ADB test failed. OEA could not execute the read-only identity probe:\n${result.second}"
+            }
+            setBusy(false, message)
+            refreshStatus(message)
+        }
+    }
+
+    /** Tests a real Android package suspension and immediately restores the chosen app. */
+    private fun chooseSuspensionTestApp() {
+        if (!OeaAdbAuthority.isSessionReady()) {
+            refreshStatus("Suspension test blocked: reconnect OEA Authority and pass the shell identity test first.")
+            return
+        }
+        val pm = packageManager
+        val apps = runCatching {
+            pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                .filter { app ->
+                    app.packageName != packageName &&
+                        (app.flags and ApplicationInfo.FLAG_SYSTEM) == 0 &&
+                        pm.getLaunchIntentForPackage(app.packageName) != null
+                }
+                .sortedBy { pm.getApplicationLabel(it).toString().lowercase(java.util.Locale.ROOT) }
+        }.getOrDefault(emptyList())
+        if (apps.isEmpty()) {
+            refreshStatus("Suspension test unavailable: no launchable user-installed apps were found.")
+            return
+        }
+        val labels = apps.map { app ->
+            "${pm.getApplicationLabel(app)}  •  ${app.packageName}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Choose a test app")
+            .setMessage("OEA will suspend this app, verify Android's state, then immediately restore it. Choose a non-critical app.")
+            .setItems(labels) { _, which ->
+                val app = apps[which]
+                setBusy(true, "Testing real suspension and restoration for ${app.packageName}…")
+                work.launch {
+                    val outcome = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        val pkg = app.packageName
+                        val freezeCommand = OeaAdbAuthority.runShell("cmd package suspend --user 0 $pkg")
+                        if (!freezeCommand.first) {
+                            "ADB SUSPEND FAILED/BLOCKED\nApp: $pkg\n${freezeCommand.second}\nNo alternate backend was used; this test specifically checks OEA's Wireless Debugging bridge."
+                        } else {
+                            val freezeState = verifyAdbSuspended(pkg, expected = true)
+                            if (freezeState == true) {
+                                val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
+                                val restoreState = if (restoreCommand.first) verifyAdbSuspended(pkg, expected = false) else null
+                                when {
+                                    restoreCommand.first && restoreState == true ->
+                                        "PASS — OEA's ADB bridge suspended the app and Android's package state confirmed it; restore was also verified.\nApp: $pkg\nSuspend output: ${freezeCommand.second.ifBlank { "(no output)" }}\nRestore output: ${restoreCommand.second.ifBlank { "(no output)" }}"
+                                    else ->
+                                        "RESTORE FAILED — ADB suspension was accepted, but restoration was not verified. Open Android App info for $pkg and restore/unsuspend it now.\nRestore output: ${restoreCommand.second}\nState check: ${restoreState?.toString() ?: "unreadable"}"
+                                }
+                            } else {
+                                val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
+                                val restored = restoreCommand.first && verifyAdbSuspended(pkg, expected = false) == true
+                                "VERIFICATION FAILED — Android did not confirm the suspended state. Immediate restore ${if (restored) "was verified" else "could not be verified"}.\nApp: $pkg\nSuspend output: ${freezeCommand.second}\nRestore output: ${restoreCommand.second}"
+                            }
+                        }
+                    }
+                    setBusy(false, outcome)
+                    refreshStatus(outcome)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** null means Android's per-user package state could not be read; otherwise returns whether it matches. */
+    private fun verifyAdbSuspended(packageName: String, expected: Boolean): Boolean? {
+        val (success, output) = OeaAdbAuthority.runShell("dumpsys package $packageName")
+        if (!success || !output.contains(packageName)) return null
+        val userState = Regex("""(?m)^\s*User 0:.*$""").find(output)?.value ?: return null
+        val suspended = Regex("""\bsuspended=true\b""").containsMatchIn(userState)
+        return suspended == expected
+    }
+
+    /** Shows evidence from OEA's existing capability checks; selecting a row invokes its existing repair flow. */
+    private fun reviewPermissionRepairs() {
+        setBusy(true, "Checking permissions and supported repair paths…")
+        work.launch {
+            val findings = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                OeaAccessDoctor.examine(this@OeaAuthorityActivity)
+            }
+            setBusy(false, "Permission check complete. Select a finding to run its existing repair flow.")
+            val labels = findings.map { finding ->
+                "${finding.privilege.name.replace('_', ' ')} — ${finding.state.name.replace('_', ' ')}"
+            }.toTypedArray()
+            AlertDialog.Builder(this@OeaAuthorityActivity)
+                .setTitle("OEA permission diagnostics")
+                .setItems(labels) { _, which ->
+                    val finding = findings[which]
+                    AlertDialog.Builder(this@OeaAuthorityActivity)
+                        .setTitle(finding.privilege.name.replace('_', ' '))
+                        .setMessage("${finding.state.name.replace('_', ' ')}\n\nEvidence: ${finding.evidence}\n\nNext step: ${finding.advice}" +
+                            (finding.command?.let { "\n\nSupported repair command: $it" } ?: "\n\nNo shell repair command is available for this permission."))
+                        .setPositiveButton("Run repair / open Settings") { _, _ ->
+                            OeaPrivileges.grant(this@OeaAuthorityActivity, finding.privilege) { result ->
+                                val message = "${finding.privilege.name.replace('_', ' ')}: ${result.kind.name}\n${result.message}"
+                                refreshStatus(message)
+                                toast(message)
+                            }
+                        }
+                        .setNegativeButton("Close", null)
+                        .show()
+                }
+                .setPositiveButton("Close", null)
+                .show()
         }
     }
 
