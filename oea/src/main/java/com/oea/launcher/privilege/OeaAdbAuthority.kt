@@ -21,8 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * pairing endpoint and one-time code. Android must already have Wireless
  * Debugging enabled and the user must approve/authorize the pairing.
  *
- * Only a small allowlist of OEA operations is exposed to callers. This is not
- * an arbitrary shell/terminal and does not silently enable Android debugging.
+ * Only validated diagnostic commands and OEA operations are exposed to callers.
+ * This is not an arbitrary shell/terminal and does not silently enable debugging.
  */
 object OeaAdbAuthority {
     private const val PREFS = "oea_adb_authority"
