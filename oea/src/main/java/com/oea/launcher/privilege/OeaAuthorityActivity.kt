@@ -358,8 +358,8 @@ class OeaAuthorityActivity : Activity() {
     private fun verifyAdbSuspended(packageName: String, expected: Boolean): Boolean? {
         val (success, output) = OeaAdbAuthority.runShell("dumpsys package $packageName")
         if (!success || !output.contains(packageName)) return null
-        val userState = Regex("""(?m)^\\s*User 0:.*$""").find(output)?.value ?: return null
-        val suspended = Regex("""\\bsuspended=true\\b""").containsMatchIn(userState)
+        val userState = Regex("""(?m)^\s*User 0:.*$""").find(output)?.value ?: return null
+        val suspended = Regex("""\bsuspended=true\b""").containsMatchIn(userState)
         return suspended == expected
     }
 
