@@ -326,15 +326,24 @@ class OeaAuthorityActivity : Activity() {
                 setBusy(true, "Testing real suspension and restoration for ${app.packageName}…")
                 work.launch {
                     val outcome = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                        val frozen = OeaAppFreezer.setFrozen(this@OeaAuthorityActivity, app.packageName, true)
-                        if (!frozen.success) {
-                            "SUSPEND FAILED/BLOCKED\n${frozen.message}\nBackend: ${frozen.backend}"
+                        val pkg = app.packageName
+                        val freezeCommand = OeaAdbAuthority.runShell("cmd package suspend --user 0 $pkg")
+                        if (!freezeCommand.first) {
+                            "ADB SUSPEND FAILED/BLOCKED\nApp: $pkg\n${freezeCommand.second}\nNo alternate backend was used; this test specifically checks OEA's Wireless Debugging bridge."
                         } else {
-                            val restored = OeaAppFreezer.setFrozen(this@OeaAuthorityActivity, app.packageName, false)
-                            if (restored.success) {
-                                "PASS — Android suspension was applied and restoration was verified.\nApp: ${app.packageName}\nBackend: ${frozen.backend}\nRestore: ${restored.message}"
+                            val freezeState = verifyAdbSuspended(pkg, expected = true)
+                            if (freezeState == true) {
+                                val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
+                                val restoreState = if (restoreCommand.first) verifyAdbSuspended(pkg, expected = false) else null
+                                when {
+                                    restoreCommand.first && restoreState == true ->
+                                        "PASS — OEA's ADB bridge suspended the app and Android's package state confirmed it; restore was also verified.\nApp: $pkg\nSuspend output: ${freezeCommand.second.ifBlank { "(no output)" }}\nRestore output: ${restoreCommand.second.ifBlank { "(no output)" }}"
+                                    else ->
+                                        "RESTORE FAILED — ADB suspension was accepted, but restoration was not verified. Open Android App info for $pkg and restore/unsuspend it now.\nRestore output: ${restoreCommand.second}\nState check: ${restoreState?.toString() ?: "unreadable"}"
+                                }
                             } else {
-                                "RESTORE FAILED — Android accepted suspension, but OEA could not verify restoration. Open the app's Android App info and restore/unsuspend it now.\nApp: ${app.packageName}\nFreeze: ${frozen.message}\nRestore: ${restored.message}"
+                                val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
+                                "VERIFICATION FAILED — suspend command returned, but Android's package state did not confirm suspension. Restore was requested immediately.\nApp: $pkg\nSuspend output: ${freezeCommand.second}\nRestore output: ${restoreCommand.second}"
                             }
                         }
                     }
@@ -344,6 +353,15 @@ class OeaAuthorityActivity : Activity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /** null means Android's per-user package state could not be read; otherwise returns whether it matches. */
+    private fun verifyAdbSuspended(packageName: String, expected: Boolean): Boolean? {
+        val (success, output) = OeaAdbAuthority.runShell("dumpsys package $packageName")
+        if (!success || !output.contains(packageName)) return null
+        val userState = Regex("""(?m)^\\s*User 0:.*$""").find(output)?.value ?: return null
+        val suspended = Regex("""\\bsuspended=true\\b""").containsMatchIn(userState)
+        return suspended == expected
     }
 
     /** Shows evidence from OEA's existing capability checks; selecting a row invokes its existing repair flow. */
