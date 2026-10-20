@@ -62,6 +62,9 @@ open class OeaMiniAppActivity : Activity() {
     /** Called before [resumeHook] so an app can save what it has open. */
     var pauseHook: (() -> Unit)? = null
 
+    /** Releases app-owned listeners, players and callbacks when this Activity is destroyed. */
+    var destroyHook: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val created = OeaFaultShield.guard("miniapp:host:create") {
@@ -74,6 +77,12 @@ open class OeaMiniAppActivity : Activity() {
     }
 
     private fun resolveScreenId(): String? = appId ?: intent.getStringExtra(EXTRA_APP) ?: resolveAliasId()
+
+    override fun onStart() {
+        super.onStart()
+        val ok = OeaFaultShield.guard("miniapp:host:start") { /* lifecycle boundary for fault attribution */ }
+        if (!ok) showRenderFallback()
+    }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
@@ -168,6 +177,51 @@ open class OeaMiniAppActivity : Activity() {
             OeaFaultShield.guard("miniapp:camera:pause") { OeaCameraApp.onHostPaused(this) }
         }
         super.onPause()
+    }
+
+    override fun onStop() {
+        OeaFaultShield.guard("miniapp:host:stop") {
+            currentScroll?.let { lastScrollY = it.scrollY }
+            window.decorView.clearAnimation()
+        }
+        super.onStop()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        OeaFaultShield.guard("miniapp:host:save-state") {
+            currentScroll?.let { lastScrollY = it.scrollY }
+            outState.putInt(STATE_SCROLL_Y, lastScrollY)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        OeaFaultShield.guard("miniapp:host:restore-state") {
+            lastScrollY = savedInstanceState.getInt(STATE_SCROLL_Y, lastScrollY).coerceAtLeast(0)
+            currentScroll?.let { scroll -> if (lastScrollY > 0) scroll.post { scroll.scrollTo(0, lastScrollY) } }
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        OeaFaultShield.guard("miniapp:host:trim-memory") {
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+                currentScroll?.let { lastScrollY = it.scrollY }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        OeaFaultShield.guard("miniapp:host:destroy") {
+            destroyHook?.invoke()
+            destroyHook = null
+            resumeHook = null
+            pauseHook = null
+            resultHook = null
+            currentScroll = null
+        }
+        super.onDestroy()
     }
 
     /** Renders with a containment net: a fault shows an in-app card, never a dead window. */
@@ -306,6 +360,7 @@ open class OeaMiniAppActivity : Activity() {
 
     companion object {
         const val EXTRA_APP = "oea.miniapp.id"
+        private const val STATE_SCROLL_Y = "oea.miniapp.scroll_y"
     }
 }
 
