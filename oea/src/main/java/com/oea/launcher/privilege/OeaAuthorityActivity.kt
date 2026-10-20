@@ -211,6 +211,7 @@ class OeaAuthorityActivity : Activity() {
                 setPadding(0, dp(8), 0, dp(12))
             }
             addView(statusText)
+            addView(button("Run complete Access Doctor scan") { runCompleteAccessScan() })
             addView(button("Scan authority capabilities") { scanAuthorityCapabilities() })
             addView(button("Test real ADB authority") { testAuthority() })
             addView(button("Test app suspension + restore") { chooseSuspensionTestApp() })
@@ -263,6 +264,60 @@ class OeaAuthorityActivity : Activity() {
             val message = result.fold({ it }, { "Reconnect failed: ${it.message ?: it.javaClass.simpleName}" })
             setBusy(false, message)
             refreshStatus(message)
+        }
+    }
+
+    /** One pass over local permissions and live shell-backed capabilities. */
+    private fun runCompleteAccessScan() {
+        setBusy(true, "Checking Android permissions and OEA Authority capabilities together…")
+        work.launch {
+            val result = runCatching {
+                val capabilities = OeaAuthorityEngine.inspect(this@OeaAuthorityActivity)
+                val findings = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    OeaAccessDoctor.examine(this@OeaAuthorityActivity)
+                }
+                buildString {
+                    append("OEA ACCESS DOCTOR — COMPLETE SCAN\\n")
+                    append("Android API: ").append(capabilities.androidApi).append("\\n")
+                    append("Checked: ").append(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(capabilities.checkedAtMillis))).append("\\n")
+                    append("ADB shell identity: ").append(capabilities.shellIdentity ?: "not connected / not verified").append("\\n\\n")
+                    append("PERMISSIONS & FEATURE ACCESS\\n")
+                    findings.forEach { finding ->
+                        append("• ").append(finding.privilege.name.replace('_', ' '))
+                            .append(" — ").append(finding.state.name.replace('_', ' ')).append("\\n")
+                        append(finding.evidence).append("\\nNext: ").append(finding.advice).append("\\n\\n")
+                    }
+                    append("AUTHORITY CAPABILITIES\\n")
+                    capabilities.capabilities.forEach { capability ->
+                        append("• ").append(capability.id.name.replace('_', ' '))
+                            .append(" — ").append(capability.level.name).append("\\n")
+                        append(capability.evidence).append("\\n").append(capability.detail).append("\\n\\n")
+                    }
+                    append("Note: LIMITED/UNAVAILABLE/UNKNOWN are not successful grants. Android may require you to approve or enable some items in Settings. Device Admin is not Device Owner, and a successful ADB connection does not mean every privileged operation is allowed.")
+                }
+            }
+            setBusy(false, if (result.isSuccess) "Complete scan finished. Review the combined report for each permission and capability." else "Complete scan failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
+            result.onSuccess { report ->
+                val reportView = TextView(this@OeaAuthorityActivity).apply {
+                    text = report
+                    textSize = 14f
+                    setTextColor(inkColor)
+                    setPadding(dp(18), dp(12), dp(18), dp(12))
+                    setTextIsSelectable(true)
+                }
+                val reportScroll = ScrollView(this@OeaAuthorityActivity).apply {
+                    addView(reportView)
+                    isFillViewport = true
+                }
+                AlertDialog.Builder(this@OeaAuthorityActivity)
+                    .setTitle("Complete Access Doctor report")
+                    .setView(reportScroll)
+                    .setPositiveButton("Close", null)
+                    .show()
+                refreshStatus("Complete Access Doctor scan finished. Review the combined report.")
+            }.onFailure {
+                refreshStatus("Complete scan failed: ${it.message ?: it.javaClass.simpleName}")
+            }
         }
     }
 
