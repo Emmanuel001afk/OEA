@@ -4,6 +4,7 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import com.oea.launcher.privilege.OeaAdbAuthority
+import com.oea.launcher.privilege.OeaAuthorityEngine
 import java.util.concurrent.TimeUnit
 
 /**
@@ -73,16 +74,16 @@ object OeaAppFreezer {
         }
 
         if (OeaAdbAuthority.isSessionReady()) {
-            val command = if (frozen) "cmd package suspend --user 0 $packageName"
-                else "cmd package unsuspend --user 0 $packageName"
-            val (success, output) = OeaAdbAuthority.runShell(command)
-            if (!success) return Result(false, output.ifBlank { "OEA Authority suspension command failed" }, Backend.ADB)
-            val actual = adbSuspensionState(packageName)
-            if (actual == null || actual != frozen) {
-                return Result(false, "Android did not confirm the requested frozen state through OEA Authority. Nothing was saved.", Backend.ADB)
+            val result = OeaAuthorityEngine.suspendPackageNow(context, packageName, frozen)
+            if (!result.success) {
+                return Result(false, result.output.ifBlank { "OEA Authority could not verify the requested package state." }, Backend.ADB)
             }
             persist(context, packageName, frozen)
-            return Result(true, if (frozen) "App frozen and verified through OEA Authority" else "App restored and verified through OEA Authority", Backend.ADB)
+            return Result(
+                true,
+                if (frozen) "App frozen and verified through OEA Authority" else "App restored and verified through OEA Authority",
+                Backend.ADB
+            )
         }
 
         val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
@@ -91,18 +92,6 @@ object OeaAppFreezer {
         } else {
             Result(false, "App freezing needs Device Owner, root or OEA Authority on this Android device.", Backend.NONE)
         }
-    }
-
-    /** Reads the package's per-user state back through the OEA Authority bridge. */
-    private fun adbSuspensionState(packageName: String): Boolean? {
-        // Ask dumpsys for this package only: a whole-device package dump can
-        // exceed the bridge's bounded output and omit apps near the end. Some
-        // Android builds also omit an explicit "suspended=false" field, so the
-        // presence of a readable User 0 state is what lets us verify restoration.
-        val (success, output) = OeaAdbAuthority.runShell("dumpsys package $packageName")
-        if (!success || !output.contains(packageName)) return null
-        val userState = Regex("""(?m)^\s*User 0:.*$""").find(output)?.value ?: return null
-        return Regex("""\bsuspended=true\b""").containsMatchIn(userState)
     }
 
     fun frozenPackages(context: Context): Set<String> =
