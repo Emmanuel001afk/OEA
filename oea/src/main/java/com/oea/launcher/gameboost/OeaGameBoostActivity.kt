@@ -406,7 +406,13 @@ class OeaGameBoostActivity : Activity() {
                 ?: if (OeaGameBoostStore.isOeaGameKey(app.packageName)) {
                     // OEA-hosted games carry the OEA Games badge.
                     runCatching { getDrawable(R.drawable.ic_oea_games) }.getOrNull()
-                } else null
+                } else {
+                    // Android declares some packages as games without a
+                    // launcher icon (instant apps, stubs); keep the cell
+                    // readable with the game controller mark instead of
+                    // leaving a blank tile.
+                    kit.icon(R.drawable.oic_stadia_controller_fill, palette.textSecondary)
+                }
             setImageDrawable(icon)
         }, LinearLayout.LayoutParams(dp(52), dp(52)))
         addView(kit.text(app.label, 12f, palette.text).apply {
