@@ -68,14 +68,20 @@ object OeaAuthorityEngine {
      * coroutine; it performs several live shell probes.
      */
     suspend fun inspect(context: Context): Snapshot = withContext(Dispatchers.IO) {
-        val packageManager = context.packageManager
         val dpm = context.getSystemService(android.app.admin.DevicePolicyManager::class.java)
-        val root = runCatching {
-            // Do not trigger a root prompt; detection is strictly non-interactive.
-            val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
-            val completed = p.waitFor(900, java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (!completed) p.destroyForcibly()
-            completed && p.exitValue() == 0
+        // Never execute "su" during a scan: some root managers would display an
+        // unexpected authorization prompt. Presence is only a candidate signal,
+        // not proof that OEA has been granted root.
+        val rootCandidate = runCatching {
+            val paths = listOf(
+                "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su",
+                "/system/sbin/su", "/vendor/bin/su", "/data/local/xbin/su",
+                "/data/local/bin/su", "/debug_ramdisk/su"
+            )
+            paths.any { java.io.File(it).exists() } ||
+                System.getenv("PATH").orEmpty().split(':').any {
+                    it.isNotBlank() && java.io.File(it, "su").exists()
+                }
         }.getOrDefault(false)
 
         val bridgeReady = OeaAdbAuthority.isSessionReady()
@@ -148,9 +154,10 @@ object OeaAuthorityEngine {
         )
         caps += Capability(
             CapabilityId.ROOT,
-            if (root) Level.AVAILABLE else Level.UNAVAILABLE,
-            "Non-interactive su identity check",
-            if (root) "Root identity was executable." else "Root was not available to this process; no root prompt was requested."
+            if (rootCandidate) Level.LIMITED else Level.UNAVAILABLE,
+            "Non-invasive su binary presence check",
+            if (rootCandidate) "A su binary exists, but OEA has not tested or requested root authorization. This is not proof that root is usable."
+            else "No known su binary was found. The scan did not request root authorization."
         )
         Snapshot(System.currentTimeMillis(), Build.VERSION.SDK_INT, identity, caps)
     }
