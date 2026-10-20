@@ -589,7 +589,10 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
                 return
             }
             progress.visibility = View.VISIBLE
-            val width = root.width.takeIf { it > 0 } ?: (root.layoutParams.width.takeIf { it > 0 } ?: dp(120))
+            val width = root.width.takeIf { it > 0 }
+                ?: root.layoutParams?.width?.takeIf { it > 0 }
+                ?: (progress.layoutParams as? FrameLayout.LayoutParams)?.width?.takeIf { it > 0 }
+                ?: dp(120)
             progress.translationX = 0f
             progress.scaleX = 1f
             (progress.layoutParams as? FrameLayout.LayoutParams)?.width = (width * fraction.coerceIn(0f, 1f)).toInt()
