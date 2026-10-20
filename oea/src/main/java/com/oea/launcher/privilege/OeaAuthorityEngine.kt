@@ -1,7 +1,12 @@
 package com.oea.launcher.privilege
 
+import android.app.AppOpsManager
+import android.content.ComponentName
 import android.content.Context
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import com.oea.launcher.applock.OeaDeviceAdminReceiver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -28,7 +33,15 @@ object OeaAuthorityEngine {
         SYSTEM_SERVICE_INSPECTION,
         SYSTEM_PROPERTY_READ,
         DEVICE_OWNER,
-        ROOT
+        DEVICE_ADMIN,
+        OVERLAY_PERMISSION,
+        USAGE_ACCESS,
+        ACCESSIBILITY_SERVICE,
+        NOTIFICATION_LISTENER,
+        WRITE_SETTINGS,
+        BATTERY_OPTIMIZATION_EXEMPTION,
+        ROOT,
+        BINDER_SYSTEM_API
     }
 
     data class Capability(
@@ -158,6 +171,60 @@ object OeaAuthorityEngine {
             "Non-invasive su binary presence check",
             if (rootCandidate) "A su binary exists, but OEA has not tested or requested root authorization. This is not proof that root is usable."
             else "No known su binary was found. The scan did not request root authorization."
+        )
+        // Authority is not only the ADB bridge. Report local Android grants too;
+        // these can work with Wireless Debugging disconnected and are separate
+        // from shell privileges.
+        val packageName = context.packageName
+        val appOps = context.getSystemService(AppOpsManager::class.java)
+        val usageAccess = runCatching {
+            appOps?.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(), packageName) == AppOpsManager.MODE_ALLOWED
+        }.getOrDefault(false)
+        val enabledAccessibility = Settings.Secure.getString(
+            context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ).orEmpty().split(':').any { it.substringBefore('/') == packageName }
+        val enabledNotifications = Settings.Secure.getString(
+            context.contentResolver, "enabled_notification_listeners"
+        ).orEmpty().split(':').any { it.substringBefore('/') == packageName }
+        val deviceAdmin = runCatching {
+            context.getSystemService(android.app.admin.DevicePolicyManager::class.java)
+                ?.isAdminActive(ComponentName(context, OeaDeviceAdminReceiver::class.java)) == true
+        }.getOrDefault(false)
+        val overlay = Settings.canDrawOverlays(context)
+        val writeSettings = Settings.System.canWrite(context)
+        val batteryExempt = runCatching {
+            context.getSystemService(PowerManager::class.java)
+                ?.isIgnoringBatteryOptimizations(packageName) == true
+        }.getOrDefault(false)
+
+        fun localCapability(id: CapabilityId, granted: Boolean, label: String, detail: String) {
+            caps += Capability(
+                id,
+                if (granted) Level.AVAILABLE else Level.LIMITED,
+                "Live Android framework/settings check",
+                if (granted) "$label is granted. $detail" else "$label is not currently granted. $detail"
+            )
+        }
+        localCapability(CapabilityId.OVERLAY_PERMISSION, overlay, "Display-over-other-apps access",
+            "This is an app-level permission, not ADB/root authority.")
+        localCapability(CapabilityId.USAGE_ACCESS, usageAccess, "Usage access",
+            "Used for app/activity visibility; it does not grant arbitrary system control.")
+        localCapability(CapabilityId.ACCESSIBILITY_SERVICE, enabledAccessibility, "OEA Accessibility service",
+            "Accessibility actions remain limited to the service's Android-granted capabilities.")
+        localCapability(CapabilityId.NOTIFICATION_LISTENER, enabledNotifications, "OEA notification access",
+            "This allows notification access, not unrestricted notification-policy changes.")
+        localCapability(CapabilityId.WRITE_SETTINGS, writeSettings, "Modify system settings",
+            "Android may still restrict individual settings on this OS/OEM build.")
+        localCapability(CapabilityId.BATTERY_OPTIMIZATION_EXEMPTION, batteryExempt, "Battery-optimization exemption",
+            "This does not override OEM-specific background-process management.")
+        localCapability(CapabilityId.DEVICE_ADMIN, deviceAdmin, "OEA Device Admin",
+            "Ordinary Device Admin is not Device Owner and cannot suspend arbitrary apps.")
+        caps += Capability(
+            CapabilityId.BINDER_SYSTEM_API,
+            Level.UNAVAILABLE,
+            "Implementation status",
+            "A persistent app_process/Binder authority server is not implemented in this stage. OEA currently uses its embedded Wireless Debugging shell bridge plus the local Android APIs listed above; no separate helper app is required."
         )
         Snapshot(System.currentTimeMillis(), Build.VERSION.SDK_INT, identity, caps)
     }
