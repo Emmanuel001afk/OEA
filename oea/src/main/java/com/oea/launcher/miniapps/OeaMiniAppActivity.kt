@@ -101,10 +101,11 @@ open class OeaMiniAppActivity : Activity() {
         // the mini-app so it picks up its new capabilities immediately instead of
         // showing the "needs permission" card until the next visit. A full-bleed
         // app reloads its own data in place; a page-style app is rebuilt.
-        OeaFaultShield.guard("miniapp:host:permission") {
+        val handled = OeaFaultShield.guard("miniapp:host:permission") {
             val hook = resumeHook
             if (hook != null) hook() else renderGuarded(keepScroll = true)
         }
+        if (!handled) showRenderFallback()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
@@ -138,7 +139,7 @@ open class OeaMiniAppActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        OeaFaultShield.guard("miniapp:host:resume") {
+        val handled = OeaFaultShield.guard("miniapp:host:resume") {
             if (!::palette.isInitialized) {
                 palette = OeaTheme.resolve(this)
                 kit = OeaKit(this, palette)
@@ -154,6 +155,7 @@ open class OeaMiniAppActivity : Activity() {
             }
             resumeHook?.let { OeaFaultShield.guard("miniapp:host:resume-data", it) }
         }
+        if (!handled) showRenderFallback()
     }
 
     override fun onPause() {
