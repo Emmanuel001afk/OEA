@@ -342,7 +342,8 @@ class OeaAuthorityActivity : Activity() {
                                 }
                             } else {
                                 val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
-                                "VERIFICATION FAILED — suspend command returned, but Android's package state did not confirm suspension. Restore was requested immediately.\nApp: $pkg\nSuspend output: ${freezeCommand.second}\nRestore output: ${restoreCommand.second}"
+                                val restored = restoreCommand.first && verifyAdbSuspended(pkg, expected = false) == true
+                                "VERIFICATION FAILED — Android did not confirm the suspended state. Immediate restore ${if (restored) "was verified" else "could not be verified"}.\nApp: $pkg\nSuspend output: ${freezeCommand.second}\nRestore output: ${restoreCommand.second}"
                             }
                         }
                     }
