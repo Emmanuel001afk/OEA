@@ -18,6 +18,13 @@ internal var Activity.miniResultHook: ((requestCode: Int, resultCode: Int, data:
         (this as? OeaMiniAppActivity)?.let { it.resultHook = value }
     }
 
+/** Called only after Android returns a runtime-permission result. */
+internal var Activity.miniPermissionHook: (() -> Unit)?
+    get() = (this as? OeaMiniAppActivity)?.permissionHook
+    set(value) {
+        (this as? OeaMiniAppActivity)?.let { it.permissionHook = value }
+    }
+
 /** Called on every resume, so an app can reload what it has open without a rebuild. */
 internal var Activity.miniResumeHook: (() -> Unit)?
     get() = (this as? OeaMiniAppActivity)?.resumeHook

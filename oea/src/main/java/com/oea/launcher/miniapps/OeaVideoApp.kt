@@ -160,14 +160,21 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             showProgress(null)
             rebuild()
         }
-        host.miniResultHook = { requestCode, resultCode, data -> handleResult(requestCode, resultCode, data) }
+        val ownedSubscription = subscription
+        val resultHook: (Int, Int, Intent?) -> Boolean = { requestCode, resultCode, data ->
+            handleResult(requestCode, resultCode, data)
+        }
+        host.miniResultHook = resultHook
+        host.miniPermissionHook = { OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO)) }
         root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) = Unit
 
             override fun onViewDetachedFromWindow(v: View) {
-                subscription?.dispose()
+                if (subscription !== ownedSubscription) return
+                ownedSubscription?.dispose()
                 subscription = null
-                host.miniResultHook = null
+                if (host.miniResultHook === resultHook) host.miniResultHook = null
+                host.miniPermissionHook = null
             }
         })
         openIncoming()
@@ -275,6 +282,12 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             videos.notifyDataSetChanged()
             return
         }
+        if (built.error != null) {
+            showState(R.drawable.oic_warning_fill, "VIP could not read the library", "Android returned an error while reading your media. Your files were not changed.", "Try again") {
+                OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO))
+            }
+            return
+        }
         hideState()
         when (surface) {
             Surface.VIDEOS -> {
@@ -338,8 +351,12 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     }
 
     private fun emptyVideos(built: OeaMediaLibrary.Snapshot) {
-        if (built.permissionMissing) {
+        if (built.videoAccess == OeaMediaLibrary.Access.DENIED) {
             showState(R.drawable.ic_oea_video, "VIP cannot see your videos yet", "Allow video access and every folder on this phone shows up — Camera, Screen recordings, Downloads and the folders other apps write into.", "Allow access") {
+                askPermission()
+            }
+        } else if (built.videoAccess == OeaMediaLibrary.Access.PARTIAL) {
+            showState(R.drawable.ic_oea_video, "No selected videos", "Android has given VIP limited video access, but none of the selected videos are in this view. Choose more videos or allow full access.", "Manage access") {
                 askPermission()
             }
         } else {
@@ -387,9 +404,23 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     }
 
     private fun askPermission() {
-        val video = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO else android.Manifest.permission.READ_EXTERNAL_STORAGE
-        val audio = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_AUDIO else android.Manifest.permission.READ_EXTERNAL_STORAGE
-        runCatching { host.requestPermissions(arrayOf(video, audio, android.Manifest.permission.WRITE_EXTERNAL_STORAGE), 2202) }
+        val permissions = when {
+            Build.VERSION.SDK_INT >= 34 -> arrayOf(
+                android.Manifest.permission.READ_MEDIA_VIDEO,
+                android.Manifest.permission.READ_MEDIA_AUDIO,
+                android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            )
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(
+                android.Manifest.permission.READ_MEDIA_VIDEO,
+                android.Manifest.permission.READ_MEDIA_AUDIO
+            )
+            Build.VERSION.SDK_INT >= 29 -> arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            else -> arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        }
+        runCatching { host.requestPermissions(permissions, 2202) }
             .onFailure { snack.show("Android would not open the permission dialog", OeaKit.Tone.WARNING) }
     }
 

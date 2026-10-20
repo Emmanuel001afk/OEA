@@ -70,6 +70,12 @@ object OeaImageApp {
  */
 internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
 
+    /** A picker request must return a URI; it must not open a viewer and lose the caller. */
+    private val pickerRequest: Boolean
+        get() = host.intent?.action == Intent.ACTION_PICK || host.intent?.action == Intent.ACTION_GET_CONTENT
+    private val allowMultiple: Boolean
+        get() = host.intent?.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false) == true
+
     private val kit = OeaAppKit(host, palette)
     val root: FrameLayout = kit.overlay()
     private val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
@@ -118,6 +124,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         visibility = View.GONE
     }
     private var stateCard: View? = null
+    private var accessRow: View? = null
     private val snack = kit.snack(root)
 
     // ---------------------------------------------------------------- state
@@ -228,23 +235,49 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             showProgress(null)
             rebuild()
         }
-        host.miniResultHook = { requestCode, resultCode, data -> handleResult(requestCode, resultCode, data) }
+        val ownedSubscription = subscription
+        val resultHook: (Int, Int, Intent?) -> Boolean = { requestCode, resultCode, data ->
+            handleResult(requestCode, resultCode, data)
+        }
+        host.miniResultHook = resultHook
+        host.miniPermissionHook = { OeaMediaLibrary.refresh(host, setOf(Kind.IMAGE)) }
         // A screen that is no longer in the window must not keep listening: the
         // host can rebuild this view tree at any moment (theme change, a granted
-        // permission), and a stale listener would paint into a dead grid.
+        // permission), and a stale listener would paint into a dead grid. Only
+        // clear hooks if they still belong to this particular view tree; a new
+        // tree may already have installed its own hooks before this one detaches.
         root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) = Unit
 
             override fun onViewDetachedFromWindow(v: View) {
-                subscription?.dispose()
+                if (subscription !== ownedSubscription) return
+                ownedSubscription?.dispose()
                 subscription = null
-                host.miniResultHook = null
+                if (host.miniResultHook === resultHook) host.miniResultHook = null
+                host.miniPermissionHook = null
             }
         })
         openIncoming()
     }
 
     private fun handleResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == REQUEST_PICKER) {
+            if (resultCode != Activity.RESULT_OK) return true
+            val uris = dataUris(data)
+            if (uris.isEmpty()) return true
+            uris.forEach { uri ->
+                if (android.os.Build.VERSION.SDK_INT < 33) {
+                    runCatching {
+                        val takeFlags = data?.flags?.and(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            ?: Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        host.contentResolver.takePersistableUriPermission(uri, takeFlags and Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                }
+            }
+            val items = uris.map(::incomingItem)
+            OeaEmageViewer.open(host, items, 0) { rebuild() }
+            return true
+        }
         if (requestCode != REQUEST_DELETE) return false
         val items = pendingDelete
         pendingDelete = emptyList()
@@ -257,20 +290,60 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         return true
     }
 
-    /** A picture opened from Files, Messages or the camera goes straight to the viewer. */
+    /** A picture opened from Files, Messages, the camera, or a share sheet opens in the viewer. */
     private fun openIncoming() {
         val intent = host.intent ?: return
-        val uri = intent.data ?: return
-        if (intent.action != Intent.ACTION_VIEW && intent.action != Intent.ACTION_ATTACH_DATA) return
-        if (intent.getBooleanExtra(EXTRA_HANDLED, false)) return
+        if (pickerRequest || intent.getBooleanExtra(EXTRA_HANDLED, false)) return
+        val action = intent.action ?: return
+        val uris = dataUris(intent)
+        if (uris.isEmpty()) return
+        if (action !in setOf(Intent.ACTION_VIEW, Intent.ACTION_EDIT, Intent.ACTION_ATTACH_DATA, Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return
         intent.putExtra(EXTRA_HANDLED, true)
-        val existing = snapshot?.images?.firstOrNull { it.uri == uri }
-        val item = existing ?: Item(
+        val incoming = uris.map(::incomingItem)
+        val existing = incoming.firstOrNull()?.let { item -> snapshot?.images?.firstOrNull { it.uri == item.uri } }
+        // A normal VIEW keeps the surrounding EMAGE library available. Shared
+        // streams stay scoped to what the sender actually handed us.
+        val items = if (action == Intent.ACTION_VIEW && existing != null && album == null) currentList() else incoming
+        val index = items.indexOfFirst { it.uri == uris.first() }.coerceAtLeast(0)
+        OeaEmageViewer.open(host, items, index) { rebuild() }
+    }
+
+    private fun dataUris(intent: Intent?): List<android.net.Uri> {
+        if (intent == null) return emptyList()
+        val result = ArrayList<android.net.Uri>()
+        intent.data?.let { result += it }
+        intent.clipData?.let { clip ->
+            for (index in 0 until clip.itemCount) clip.getItemAt(index).uri?.let { result += it }
+        }
+        intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.let { result += it }
+        intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.forEach { result += it }
+        return result.distinct()
+    }
+
+    private fun incomingItem(uri: android.net.Uri): Item {
+        val fallbackName = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "Picture"
+        val values = runCatching {
+            host.contentResolver.query(
+                uri,
+                arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, android.provider.MediaStore.MediaColumns.SIZE),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sizeIndex = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.SIZE)
+                    (if (nameIndex >= 0) cursor.getString(nameIndex) else null).orEmpty().ifBlank { fallbackName } to
+                        if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
+                } else fallbackName to 0L
+            }
+        }.getOrNull() ?: (fallbackName to 0L)
+        return Item(
             id = 0L,
             uri = uri,
-            name = uri.lastPathSegment?.substringAfterLast('/') ?: "Picture",
+            name = values.first,
             takenAt = System.currentTimeMillis(),
-            size = 0L,
+            size = values.second,
             width = 0,
             height = 0,
             bucketId = 0L,
@@ -280,8 +353,6 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             kind = Kind.IMAGE,
             systemFavorite = false
         )
-        val albumItems = if (existing != null && album == null) currentList() else listOf(item)
-        OeaEmageViewer.open(host, albumItems, albumItems.indexOfFirst { it.uri == uri }.coerceAtLeast(0)) { rebuild() }
     }
 
     // ------------------------------------------------------------------ views
@@ -333,12 +404,39 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         if (label == null) {
             progressRow?.let { status.removeView(it) }
             progressRow = null
+            if (accessRow == null) status.visibility = View.GONE
             return
         }
         if (progressRow == null) {
             progressRow = kit.progressRow(label)
             status.addView(progressRow)
         }
+        status.visibility = View.VISIBLE
+    }
+
+    private fun clearAccessNotice() {
+        accessRow?.let { status.removeView(it) }
+        accessRow = null
+        if (progressRow == null) status.visibility = View.GONE
+    }
+
+    private fun showAccessNotice(built: OeaMediaLibrary.Snapshot) {
+        clearAccessNotice()
+        val access = built.imageAccess
+        if (access == OeaMediaLibrary.Access.FULL) return
+        val partial = access == OeaMediaLibrary.Access.PARTIAL
+        accessRow = kit.banner(
+            status,
+            R.drawable.oic_photo_library,
+            if (partial) "Limited photo access" else "Photo access is off",
+            if (partial) {
+                "EMAGE is showing the pictures you selected in Android (${built.images.size} visible). It cannot list the rest until you expand access."
+            } else {
+                "Only OEA-owned pictures can be shown until Android grants photo access."
+            },
+            if (partial) OeaKit.Tone.INFO else OeaKit.Tone.WARNING,
+            "Manage access"
+        ) { askPermission() }
         status.visibility = View.VISIBLE
     }
 
@@ -350,7 +448,18 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             tiles.notifyDataSetChanged()
             return
         }
+        if (built.error != null) {
+            clearAccessNotice()
+            showState(
+                R.drawable.oic_warning_fill,
+                "EMAGE could not read the library",
+                "Android returned an error while reading your pictures. Your files were not changed. Try again, or check photo access in Android settings.",
+                "Try again"
+            ) { rescan() }
+            return
+        }
         if (built.permissionMissing) {
+            clearAccessNotice()
             showState(
                 R.drawable.oic_photo_library,
                 "EMAGE cannot see your pictures yet",
@@ -360,7 +469,18 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             return
         }
         hideState()
+        showAccessNotice(built)
         scope.visibility = if (album != null) View.VISIBLE else View.GONE
+        if (built.images.isEmpty() && built.imageAccess != OeaMediaLibrary.Access.FULL) {
+            clearAccessNotice()
+            showState(
+                R.drawable.oic_photo_library,
+                "No selected pictures yet",
+                "Android has given EMAGE limited photo access, but none of the selected pictures are available. Choose more photos or allow full access to see your whole library.",
+                "Manage access"
+            ) { askPermission() }
+            return
+        }
         album?.let { name -> scopeTitle.text = "Album  •  $name" }
         when (surface) {
             Surface.PHOTOS -> {
@@ -377,9 +497,11 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                     }
                 }
                 tiles.notifyDataSetChanged()
-                bar.title.text = "EMAGE"
+                bar.title.text = if (pickerRequest) "Choose a picture" else "EMAGE"
                 bar.setSubtitle(
                     when {
+                        pickerRequest && allowMultiple -> "Select one or more pictures, then tap Use selected"
+                        pickerRequest -> "Tap a picture to return it to the calling app"
                         query.isNotBlank() -> "${list.size} matching ${if (list.size == 1) "picture" else "pictures"}"
                         album != null -> "$album • ${list.size} • ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}"
                         else -> "${list.size} pictures • ${built.imageAlbums.size} albums • ${OeaMediaLibrary.formatSize(built.totalSize)}"
@@ -456,10 +578,36 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         album.contains("download", true) || relativePath.contains("Download", true)
 
     private fun askPermission() {
-        val permission = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_IMAGES
-        else android.Manifest.permission.READ_EXTERNAL_STORAGE
-        runCatching { host.requestPermissions(arrayOf(permission, android.Manifest.permission.WRITE_EXTERNAL_STORAGE), 2201) }
+        val permissions = when {
+            Build.VERSION.SDK_INT >= 34 -> arrayOf(
+                android.Manifest.permission.READ_MEDIA_IMAGES,
+                android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            )
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(android.Manifest.permission.READ_MEDIA_IMAGES)
+            Build.VERSION.SDK_INT >= 29 -> arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            else -> arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        }
+        runCatching { host.requestPermissions(permissions, 2201) }
             .onFailure { snack.show("Android would not open the permission dialog", OeaKit.Tone.WARNING) }
+    }
+
+    private fun openSystemPicker() {
+        val intent = if (Build.VERSION.SDK_INT >= 33) {
+            Intent(android.provider.MediaStore.ACTION_PICK_IMAGES).apply {
+                type = "image/*"
+            }
+        } else {
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type = "image/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            }
+        }
+        runCatching { host.startActivityForResult(intent, REQUEST_PICKER) }
+            .onFailure { snack.show("Android's photo picker is not available on this device", OeaKit.Tone.WARNING) }
     }
 
     private fun rescan() {
@@ -500,9 +648,34 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
 
     private fun openTile(position: Int) {
         val row = rows.getOrNull(position) as? Row.Tile ?: return
+        if (pickerRequest) {
+            if (!allowMultiple) {
+                finishPick(listOf(row.item))
+            } else {
+                if (!selecting) selecting = true
+                toggleSelected(row.item)
+            }
+            return
+        }
         val items = itemsForViewer
         val index = items.indexOfFirst { it.uri == row.item.uri }.coerceAtLeast(0)
         OeaEmageViewer.open(host, items, index) { rebuild() }
+    }
+
+    private fun finishPick(items: List<Item>) {
+        if (items.isEmpty()) return
+        val result = Intent().addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (items.size == 1) {
+            result.setDataAndType(items.first().uri, "image/*")
+        } else {
+            result.type = "image/*"
+            result.putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(items.map { it.uri }))
+            result.clipData = android.content.ClipData.newUri(host.contentResolver, items.first().name, items.first().uri).apply {
+                items.drop(1).forEach { addItem(android.content.ClipData.Item(it.uri)) }
+            }
+        }
+        host.setResult(Activity.RESULT_OK, result)
+        host.finish()
     }
 
     private fun beginSelection(position: Int): Boolean {
@@ -523,12 +696,19 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
 
     private fun updateSelectionBar() {
         selection.setCount(selected.size, itemsForViewer.size)
-        val single = selected.size == 1
-        selection.setAction(0, R.drawable.oic_share_filled, "Share") { shareSelected() }
-        selection.setAction(1, R.drawable.oic_star_fill, if (single) "Favourite" else "Favourite") { favouriteSelected() }
-        selection.setAction(2, R.drawable.oic_wallpaper, "Wallpaper") { wallpaperSelected() }
-        selection.setAction(3, R.drawable.oic_delete, "Delete") { deleteSelected() }
-        selection.setAction(4, R.drawable.oic_info, "Details") { detailsSelected() }
+        if (pickerRequest) {
+            selection.setAction(0, R.drawable.oic_check, "Use selected") { finishPick(selectedItems()) }
+            (1..4).forEach { selection.hideAction(it) }
+            selection.allLabel = "All"
+        } else {
+            val single = selected.size == 1
+            selection.setAction(0, R.drawable.oic_share_filled, "Share") { shareSelected() }
+            selection.setAction(1, R.drawable.oic_star_fill, if (single) "Favourite" else "Favourite") { favouriteSelected() }
+            selection.setAction(2, R.drawable.oic_wallpaper, "Wallpaper") { wallpaperSelected() }
+            selection.setAction(3, R.drawable.oic_delete, "Delete") { deleteSelected() }
+            selection.setAction(4, R.drawable.oic_info, "Details") { detailsSelected() }
+            selection.allLabel = "All"
+        }
         selection.selectAll {
             selected.clear()
             itemsForViewer.forEach { selected.add(it.key) }
@@ -687,6 +867,9 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             kit.row(grid, R.drawable.oic_photo_library, "OEA pictures", "Wallpapers, live scenes and OEA camera shots", chevron = true) {
                 pickTab("oea")
                 tabs.select("oea")
+            }
+            kit.row(grid, R.drawable.oic_open_in_new, "Choose with Android Photos", "Pick one picture without granting EMAGE the whole library", chevron = true) {
+                openSystemPicker()
             }
             kit.row(grid, R.drawable.oic_refresh, "Rescan now", "Asks Android to index OEA's camera output again") {
                 rescan()
@@ -989,6 +1172,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         private const val TYPE_TILE = 0
         private const val TYPE_HEADER = 1
         private const val REQUEST_DELETE = 4310
+        private const val REQUEST_PICKER = 4312
         const val EXTRA_HANDLED = "oea.emage.view_handled"
         private val TABS = listOf(
             "all" to "All",

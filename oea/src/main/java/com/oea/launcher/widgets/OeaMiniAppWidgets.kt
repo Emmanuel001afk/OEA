@@ -113,7 +113,7 @@ class OeaImageWidgetProvider : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.oea_widget_notes) // reuse layout for simplicity, real layout would be oea_widget_image
             val prefs = context.getSharedPreferences("oea_image_v2", Context.MODE_PRIVATE)
             val count = prefs.getStringSet("favorites", emptySet())?.size ?: 0
-            views.setTextViewText(R.id.notes_content, "EMAGE • ${count} favorites\nTap to open gallery\nUnlimited images • Albums: Screenshots, Downloads, external apps")
+            views.setTextViewText(R.id.notes_content, "EMAGE • ${count} favourites\nTap to open EMAGE\nUnlimited pictures • Albums: Screenshots, Downloads, external apps")
             val intent = OeaMiniApps.launchIntent(context, "emage")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)

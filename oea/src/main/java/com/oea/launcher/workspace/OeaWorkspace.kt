@@ -1174,6 +1174,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             Telephony.Sms.getDefaultSmsPackage(context)?.let { byPackage[it]?.firstOrNull() },
             appFor(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))),
             appFor(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)),
+            // The category is Android's gallery identity; keep it in the same
+            // resolution path as VIEW so EMAGE is seeded in the dock when it is
+            // the device's selected picture app, without forcing it to be.
+            appFor(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)),
             appFor(Intent(Intent.ACTION_VIEW).setType("image/*"))
 ).forEach { dock += it }
         val oeaApps = visible.filter { it.packageName == context.packageName && it !in dock }

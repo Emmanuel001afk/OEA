@@ -341,6 +341,8 @@ object OeaConsoleApp {
             val info = pm.getPackageInfo(ctx.packageName, 0)
             list.add("OEA version" to "${info.versionName} (${info.longVersionCode})")
         } catch (_: Throwable) {}
+        list.add("OEA Home" to homeHandlerStatus(ctx))
+        list.add("EMAGE image handler" to imageHandlerStatus(ctx))
         try {
             val bm = ctx.getSystemService(android.os.BatteryManager::class.java)
             val capacity = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
@@ -351,6 +353,33 @@ object OeaConsoleApp {
         list.add("Power save mode" to if (isPowerSaveMode(ctx)) "ON" else "OFF")
         return list
     }
+
+    private fun homeHandlerStatus(ctx: Context): String = runCatching {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val roles = ctx.getSystemService(android.app.role.RoleManager::class.java)
+            if (roles?.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME) == true) {
+                return@runCatching if (roles.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) "OEA is the default launcher" else "Another launcher is default"
+            }
+        }
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolved = ctx.packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo
+        when {
+            resolved == null -> "Android has no resolved Home"
+            resolved.packageName == ctx.packageName -> "OEA is the resolved launcher"
+            else -> "${resolved.packageName} is the resolved launcher"
+        }
+    }.getOrDefault("Unavailable")
+
+    private fun imageHandlerStatus(ctx: Context): String = runCatching {
+        val view = Intent(Intent.ACTION_VIEW).setType("image/*")
+        val resolved = ctx.packageManager.resolveActivity(view, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo
+        when {
+            resolved == null -> "No image handler resolved"
+            resolved.name?.contains("Resolver", ignoreCase = true) == true -> "Android will ask which app to use"
+            resolved.packageName == ctx.packageName -> "EMAGE is the selected image app"
+            else -> "${resolved.packageName} is selected; EMAGE is available as an alternative"
+        }
+    }.getOrDefault("Unavailable")
 
     private fun screenInches(ctx: Context): Float = runCatching {
         val dm = ctx.resources.displayMetrics

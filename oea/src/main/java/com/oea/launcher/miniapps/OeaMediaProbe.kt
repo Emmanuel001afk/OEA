@@ -268,7 +268,7 @@ object OeaMediaProbe {
      */
     fun siblingFile(item: OeaMediaLibrary.Item, extensions: List<String>): File? {
         if (!item.local) return null
-        val path = item.uri.path ?: return null
+        val path = item.localPath ?: return null
         val parent = File(path).parentFile ?: return null
         val base = item.name.substringBeforeLast('.')
         return extensions
