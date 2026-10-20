@@ -96,11 +96,34 @@ class OeaLauncherActivity : Activity() {
      * stay diagnosable, and the existing workspace keeps the screen.
      */
     private fun reportFailure(screen: String, error: Throwable) {
+        android.util.Log.e("OeaLauncherActivity", "$screen failed; attempting launcher recovery", error)
+
+        // A previously attached surface is not proof that it is still usable:
+        // a drawer/workspace can be left empty after a failed refresh. Try the
+        // saved workspace first, then retry with optional subsystems disabled.
         if (surfaceReady) {
-            android.util.Log.w("OeaLauncherActivity", "$screen hit a recoverable error; keeping the running Home surface", error)
-            return
+            val rebuilt = runCatching { recover("failure:$screen") }.getOrDefault(false)
+            if (rebuilt) return
+            OeaFaultShield.setSafeMode(true, application)
+            val safe = runCatching { recover("failure-safe-mode:$screen") }.getOrDefault(false)
+            if (safe) return
         }
-        OeaScreenFailure.show(this, screen, error)
+
+        // Do not leave the user on a dead transparent/black Home surface. This
+        // screen offers a retry path while preserving the saved layout/settings.
+        OeaScreenFailure.show(
+            this,
+            screen,
+            error,
+            null,
+            "Retry Home",
+            {
+                OeaFaultShield.setSafeMode(true, application)
+                home = null
+                surfaceReady = false
+                buildHome()
+            }
+        )
     }
 
     /** Rebuilds Home from the saved workspace; true when the surface is usable again. */
