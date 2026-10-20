@@ -115,7 +115,10 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          ASSETS=("$RUNNER_TEMP/OEA-latest.apk" "$RUNNER_TEMP"/games/*.apk)
+          # One APK: the launcher with Endless Days, Send-Off and
+          # Chess inside it. Per-game APKs are no longer built
+          # separately, so only the launcher APK is published here.
+          ASSETS=("$RUNNER_TEMP/OEA-latest.apk")
           if gh release view oea-latest --repo "$REPOSITORY" >/dev/null 2>&1; then
             gh release upload oea-latest "${ASSETS[@]}" --repo "$REPOSITORY" --clobber
           else
