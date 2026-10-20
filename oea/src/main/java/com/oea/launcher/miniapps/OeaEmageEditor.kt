@@ -310,13 +310,21 @@ internal object OeaEmageEditor {
                 invalidate()
             }
 
-            override fun onDraw(canvas: Canvas) {
-                super.onDraw(canvas)
-                val image = bitmap ?: return
+            private fun updateBitmapRect(image: Bitmap) {
+                if (width <= 0 || height <= 0) {
+                    bitmapRect.setEmpty()
+                    return
+                }
                 val scale = min(width.toFloat() / image.width, height.toFloat() / image.height)
                 val w = image.width * scale
                 val h = image.height * scale
                 bitmapRect.set((width - w) / 2f, (height - h) / 2f, (width + w) / 2f, (height + h) / 2f)
+            }
+
+            override fun onDraw(canvas: Canvas) {
+                super.onDraw(canvas)
+                val image = bitmap ?: return
+                updateBitmapRect(image)
                 canvas.drawColor(Color.BLACK)
                 canvas.drawBitmap(image, null, bitmapRect, bitmapPaint)
                 // Start with the entire image selected: simply applying a filter
@@ -371,6 +379,7 @@ internal object OeaEmageEditor {
             }
 
             fun sourceCrop(sourceWidth: Int, sourceHeight: Int): RectF {
+                bitmap?.let { updateBitmapRect(it) }
                 if (bitmapRect.isEmpty) return RectF(0f, 0f, sourceWidth.toFloat(), sourceHeight.toFloat())
                 val effective = if (crop.width() < 12f || crop.height() < 12f) bitmapRect else crop
                 val sx = sourceWidth / bitmapRect.width()
