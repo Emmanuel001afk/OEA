@@ -78,13 +78,54 @@ class OeaAssistantService : AccessibilityService() {
         handler.post(object : Runnable {
             override fun run() {
                 if (!com.oea.launcher.privilege.OeaWirelessPairing.isWatching()) { pairingTickScheduled = false; return }
-                val root = rootInActiveWindow
-                runCatching { com.oea.launcher.privilege.OeaWirelessPairing.scan(root, root?.packageName?.toString()) }
+                runCatching { scanWirelessDebuggingWindows() }
                     .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:pairing-tick", it) }
                 handler.postDelayed(this, 1_200L)
             }
         })
     }
+    /**
+     * Settings can expose the Wireless debugging page and pairing dialog as
+     * separate accessibility windows. Scanning only rootInActiveWindow can
+     * therefore capture one endpoint and miss the other. Read only Settings
+     * windows, and always use each root's actual package instead of the event's
+     * package (which can describe a different, currently active window).
+     */
+    private fun scanWirelessDebuggingWindows() {
+        val pairing = com.oea.launcher.privilege.OeaWirelessPairing
+        var scannedSettingsWindow = false
+        val visibleWindows = runCatching { windows }.getOrDefault(emptyList())
+        for (window in visibleWindows) {
+            val root = runCatching { window.root }.getOrNull() ?: continue
+            try {
+                val packageName = root.packageName?.toString()
+                if (packageName?.contains("settings", ignoreCase = true) == true) {
+                    // Force this root through the scanner: multiple Settings
+                    // windows can be exposed in the same pass, and each may
+                    // contain a different endpoint.
+                    pairing.scan(root, packageName, scanAdditionalWindow = true)
+                    scannedSettingsWindow = true
+                }
+            } finally {
+                if (Build.VERSION.SDK_INT < 33) runCatching { root.recycle() }
+            }
+        }
+
+        // Some OEM builds expose no usable window roots. Fall back to the active
+        // root, but still validate its own package before reading any text.
+        if (!scannedSettingsWindow) {
+            val root = rootInActiveWindow ?: return
+            try {
+                val packageName = root.packageName?.toString()
+                if (packageName?.contains("settings", ignoreCase = true) == true) {
+                    pairing.scan(root, packageName)
+                }
+            } finally {
+                if (Build.VERSION.SDK_INT < 33) runCatching { root.recycle() }
+            }
+        }
+    }
+
     private var lastFrozenBlockAt = 0L
     private var lastFrozenPackage: String? = null
     /** A frozen-app interception that is currently playing out; kept apart from the user's own force-stop job. */
@@ -96,7 +137,7 @@ class OeaAssistantService : AccessibilityService() {
         com.oea.launcher.fault.OeaFaultShield.guard("assistant:event") {
             // Access Doctor is waiting for the Wireless debugging screens: read them.
             if (com.oea.launcher.privilege.OeaWirelessPairing.isWatching()) {
-                runCatching { com.oea.launcher.privilege.OeaWirelessPairing.scan(rootInActiveWindow, event?.packageName?.toString()) }
+                runCatching { scanWirelessDebuggingWindows() }
                     .onFailure { com.oea.launcher.fault.OeaFaultShield.note("assistant:pairing", it) }
                 ensurePairingTick()
             }
