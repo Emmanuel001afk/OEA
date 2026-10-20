@@ -63,13 +63,16 @@ internal object OeaEmageEditor {
             setTextColor(Color.WHITE)
             textSize = 12f
             gravity = Gravity.CENTER
-            setPadding(12, 6, 12, 6)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             text = "Crop by dragging over the picture. Edits save as a new copy."
         }
         private var source: Bitmap? = null
         private var filterIndex = 0
         private var brightness = 0f
         private var contrast = 1f
+        private var saving = false
         private lateinit var brightnessSeek: SeekBar
         private lateinit var contrastSeek: SeekBar
         private val filters = listOf("Original", "Mono", "Warm", "Cool", "Vintage", "Bright", "Vivid", "Soft")
@@ -78,7 +81,7 @@ internal object OeaEmageEditor {
 
         fun show() {
             stage.addView(editorView, FrameLayout.LayoutParams(-1, -1))
-            root.addView(toolbar(listOf("Cancel" to { dialog.dismiss() }, "Rotate left" to { rotate(-90f) }, "Rotate right" to { rotate(90f) }, "Mirror" to { mirror() }, "Crop reset" to { editorView.resetCrop() })))
+            root.addView(toolbar(listOf("Cancel" to { if (!saving) dialog.dismiss() else status("Please wait for the copy to finish.", announce = true) }, "Rotate left" to { rotate(-90f) }, "Rotate right" to { rotate(90f) }, "Mirror" to { mirror() }, "Crop reset" to { resetCrop() })))
             root.addView(stage)
             root.addView(message, LinearLayout.LayoutParams(-1, -2))
             root.addView(adjustmentRow("Brightness", -50, 50, 50) { brightness = (it - 50).toFloat(); refreshPreview() })
@@ -98,7 +101,7 @@ internal object OeaEmageEditor {
             }
             dialog.setOnDismissListener { source?.takeIf { !it.isRecycled }?.recycle() }
             dialog.show()
-            message.text = "Loading full-resolution picture…"
+            status("Loading editable picture…", announce = true)
             worker.execute {
                 val loaded = runCatching {
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -125,43 +128,54 @@ internal object OeaEmageEditor {
                         { bitmap ->
                             source = bitmap
                             editorView.setBitmap(bitmap)
-                            message.text = "Crop: drag a rectangle • Rotate • Filter: ${filters[filterIndex]}"
+                            status("Crop area ready. Drag a rectangle, rotate, mirror, or choose a filter.", announce = true)
                         },
-                        { err -> message.text = "Could not load picture: ${err.message ?: "unknown error"}" }
+                        { err -> status("Could not load picture: ${err.message ?: "unknown error"}", announce = true) }
                     )
                 }
             }
         }
 
-        private fun toolbar(actions: List<Pair<String, () -> Unit>>): LinearLayout =
-            LinearLayout(host).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(8, 6, 8, 6)
-                actions.forEach { (label, callback) ->
-                    val button = TextView(host).apply {
-                        text = label
-                        setTextColor(ink)
-                        textSize = 13f
-                        typeface = Typeface.DEFAULT_BOLD
-                        gravity = Gravity.CENTER
-                        isClickable = true
-                        isFocusable = true
-                        setPadding(10, 13, 10, 13)
-                        background = android.graphics.drawable.GradientDrawable().apply {
-                            setColor(buttonColor)
-                            cornerRadius = 18f
+        /** A horizontally scrollable action rail: labels stay legible on small phones. */
+        private fun toolbar(actions: List<Pair<String, () -> Unit>>): View =
+            android.widget.HorizontalScrollView(host).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
+                setPadding(dp(5), dp(3), dp(5), dp(3))
+                layoutParams = LinearLayout.LayoutParams(-1, dp(62))
+                addView(LinearLayout(host).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    actions.forEach { (label, callback) ->
+                        val button = TextView(host).apply {
+                            text = label
+                            contentDescription = label
+                            setTextColor(ink)
+                            textSize = 13f
+                            typeface = Typeface.DEFAULT_BOLD
+                            gravity = Gravity.CENTER
+                            isClickable = true
+                            isFocusable = true
+                            minimumHeight = dp(48)
+                            minWidth = dp(48)
+                            setPadding(dp(14), dp(8), dp(14), dp(8))
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(buttonColor)
+                                cornerRadius = dp(18).toFloat()
+                            }
+                            setOnClickListener { callback() }
                         }
-                        setOnClickListener { callback() }
+                        addView(button, LinearLayout.LayoutParams(-2, dp(52)).apply {
+                            marginStart = dp(3)
+                            marginEnd = dp(3)
+                        })
                     }
-                    addView(button, LinearLayout.LayoutParams(0, -2, 1f).apply {
-                        marginStart = 3
-                        marginEnd = 3
-                    })
-                }
+                })
             }
 
         private fun rotate(degrees: Float) {
+            if (saving) return
             val old = source ?: return
             val rotated = runCatching {
                 val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
@@ -171,10 +185,11 @@ internal object OeaEmageEditor {
             source = rotated
             editorView.setBitmap(rotated)
             refreshPreview()
-            message.text = "Rotation preview • Save copy to keep the edit"
+            status("Rotation preview. Save copy to keep the edit.", announce = true)
         }
 
         private fun mirror() {
+            if (saving) return
             val old = source ?: return
             val mirrored = runCatching {
                 val matrix = android.graphics.Matrix().apply { preScale(-1f, 1f) }
@@ -184,72 +199,109 @@ internal object OeaEmageEditor {
             source = mirrored
             editorView.setBitmap(mirrored)
             refreshPreview()
-            message.text = "Mirrored preview • Save copy to keep the edit"
+            status("Mirrored preview. Save copy to keep the edit.", announce = true)
         }
 
         private fun adjustmentRow(label: String, min: Int, max: Int, initial: Int, changed: (Int) -> Unit): LinearLayout =
             LinearLayout(host).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(12, 0, 12, 0)
-                addView(TextView(host).apply {
-                    text = label
-                    setTextColor(Color.LTGRAY)
-                    textSize = 11f
-                }, LinearLayout.LayoutParams(82, -2))
+                setPadding(dp(12), 0, dp(12), 0)
                 val seek = SeekBar(host).apply {
+                    id = View.generateViewId()
                     this.max = max - min
                     progress = initial - min
+                    minHeight = dp(48)
+                    contentDescription = "$label, ${initialValueLabel(label, initial)}"
                     setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { changed(progress + min) }
+                        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                            val value = progress + min
+                            contentDescription = "$label, ${initialValueLabel(label, value)}"
+                            if (!saving) changed(value)
+                        }
                         override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
                         override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
                     })
                 }
+                addView(TextView(host).apply {
+                    text = label
+                    setTextColor(Color.LTGRAY)
+                    textSize = 12f
+                    labelFor = seek.id
+                }, LinearLayout.LayoutParams(dp(86), dp(48)))
                 if (label == "Brightness") brightnessSeek = seek else if (label == "Contrast") contrastSeek = seek
-                addView(seek, LinearLayout.LayoutParams(0, dp(30), 1f))
+                addView(seek, LinearLayout.LayoutParams(0, dp(48), 1f))
             }
+
+        private fun initialValueLabel(label: String, value: Int): String = when (label) {
+            "Brightness" -> if (value > 0) "+$value" else value.toString()
+            "Contrast" -> "$value%"
+            else -> value.toString()
+        }
 
         private fun dp(value: Int): Int = (value * host.resources.displayMetrics.density).toInt()
 
+        private fun status(text: String, announce: Boolean = false) {
+            message.text = text
+            if (announce && message.isShown) message.announceForAccessibility(text)
+        }
+
         private fun refreshPreview() {
+            if (saving) return
             editorView.setFilter(filterIndex, brightness, contrast)
-            message.text = "Filter: ${filters[filterIndex]} • Brightness: ${brightness.toInt()} • Contrast: ${(contrast * 100).toInt()}%"
+            status("Filter: ${filters[filterIndex]} • Brightness: ${brightness.toInt()} • Contrast: ${(contrast * 100).toInt()}")
         }
 
         private fun resetAdjustments() {
+            if (saving) return
             filterIndex = 0
             brightness = 0f
             contrast = 1f
             brightnessSeek.progress = 50
             contrastSeek.progress = 50
             editorView.setFilter(filterIndex, brightness, contrast)
-            message.text = "Adjustments reset • Crop is preserved"
+            status("Adjustments reset. Crop is preserved.", announce = true)
         }
 
         private fun nextFilter() {
+            if (saving) return
             filterIndex = (filterIndex + 1) % filters.size
             refreshPreview()
         }
 
+        private fun resetCrop() {
+            if (saving) return
+            editorView.resetCrop()
+            status("Crop reset to the whole picture.", announce = true)
+        }
+
         private fun save() {
+            if (saving) return
             val bitmap = source ?: run {
-                message.text = "Wait until the picture has loaded."
+                status("Wait until the picture has loaded.", announce = true)
                 return
             }
             val crop = editorView.sourceCrop(bitmap.width, bitmap.height)
             if (crop.width() < 2f || crop.height() < 2f) {
-                message.text = "The crop is too small. Drag a larger area."
+                status("The crop is too small. Drag a larger area.", announce = true)
                 return
             }
-            message.text = "Saving edited copy…"
+            // Work from a stable snapshot. The preview may otherwise be rotated or
+            // recycled while the background writer is still reading it.
+            val working = runCatching { bitmap.copy(Bitmap.Config.ARGB_8888, false) }.getOrElse {
+                status("There is not enough memory to save this edit.", announce = true)
+                return
+            }
+            saving = true
+            dialog.setCancelable(false)
+            status("Saving edited copy…", announce = true)
             worker.execute {
                 val result = runCatching {
-                    val left = crop.left.toInt().coerceIn(0, bitmap.width - 1)
-                    val top = crop.top.toInt().coerceIn(0, bitmap.height - 1)
-                    val right = crop.right.toInt().coerceIn(left + 1, bitmap.width)
-                    val bottom = crop.bottom.toInt().coerceIn(top + 1, bitmap.height)
-                    val cropped = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+                    val left = crop.left.toInt().coerceIn(0, working.width - 1)
+                    val top = crop.top.toInt().coerceIn(0, working.height - 1)
+                    val right = crop.right.toInt().coerceIn(left + 1, working.width)
+                    val bottom = crop.bottom.toInt().coerceIn(top + 1, working.height)
+                    val cropped = Bitmap.createBitmap(working, left, top, right - left, bottom - top)
                     val filter = filterFor(filterIndex, brightness, contrast)
                     val edited = if (filter == null) cropped else Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888).also { out ->
                         Canvas(out).drawBitmap(cropped, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG).apply { colorFilter = filter })
@@ -284,19 +336,24 @@ internal object OeaEmageEditor {
                         runCatching { host.contentResolver.delete(uri, null, null) }
                         throw error
                     } finally {
-                        if (edited !== bitmap && !edited.isRecycled) edited.recycle()
+                        if (!edited.isRecycled) edited.recycle()
+                        if (cropped !== edited && !cropped.isRecycled) cropped.recycle()
                     }
                 }
+                if (!working.isRecycled) working.recycle()
                 host.runOnUiThread {
+                    saving = false
+                    if (host.isFinishing || host.isDestroyed || !dialog.isShowing) return@runOnUiThread
+                    dialog.setCancelable(true)
                     result.fold(
                         {
-                            message.text = "Saved to Pictures/EMAGE"
+                            status("Saved to Pictures/EMAGE", announce = true)
                             OeaMediaLibrary.refresh(host)
                             onSaved()
                             dialog.dismiss()
                             OeaMediaLibrary.toast(host, "Edited copy saved to Pictures/EMAGE")
                         },
-                        { error -> message.text = "Save failed: ${error.message ?: "Android refused the file"}" }
+                        { error -> status("Save failed: ${error.message ?: "Android refused the file"}", announce = true) }
                     )
                 }
             }
@@ -357,6 +414,19 @@ internal object OeaEmageEditor {
         }
 
         private inner class CropCanvas(context: Activity) : View(context) {
+            init {
+                isFocusable = true
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                contentDescription = "Photo crop area. Drag across the picture to choose the crop."
+                setOnLongClickListener {
+                    if (!saving) {
+                        resetCrop()
+                        status("Crop reset to the whole picture.", announce = true)
+                    }
+                    true
+                }
+            }
+
             private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
             private val shadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x99000000.toInt() }
             private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -375,6 +445,7 @@ internal object OeaEmageEditor {
             fun setBitmap(value: Bitmap) {
                 bitmap = value
                 crop.setEmpty()
+                contentDescription = "Photo crop area. Drag across the picture to choose a crop. Current picture is ${value.width} by ${value.height} pixels."
                 invalidate()
             }
 
@@ -429,6 +500,7 @@ internal object OeaEmageEditor {
             }
 
             override fun onTouchEvent(event: MotionEvent): Boolean {
+                if (saving || bitmap == null || bitmapRect.isEmpty) return false
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         downX = event.x.coerceIn(bitmapRect.left, bitmapRect.right)
@@ -450,10 +522,16 @@ internal object OeaEmageEditor {
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         dragging = false
+                        if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
                         invalidate()
                         return true
                     }
                 }
+                return true
+            }
+
+            override fun performClick(): Boolean {
+                super.performClick()
                 return true
             }
 

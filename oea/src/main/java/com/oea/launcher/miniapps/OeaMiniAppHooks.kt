@@ -4,7 +4,7 @@ import android.app.Activity
 import android.content.Intent
 
 /**
- * The three ways a mini-app screen talks back to the activity that hosts it.
+ * The lifecycle hooks a mini-app screen uses to talk back to the activity that hosts it.
  *
  * Screens are handed a plain [Activity], because the same builder is reused by the
  * index page, a launcher shortcut and a share sheet. When the host really is
@@ -37,4 +37,11 @@ internal var Activity.miniPauseHook: (() -> Unit)?
     get() = (this as? OeaMiniAppActivity)?.pauseHook
     set(value) {
         (this as? OeaMiniAppActivity)?.let { it.pauseHook = value }
+    }
+
+/** Called when a host activity is destroyed, even if its root never detaches. */
+internal var Activity.miniDestroyHook: (() -> Unit)?
+    get() = (this as? OeaMiniAppActivity)?.destroyHook
+    set(value) {
+        (this as? OeaMiniAppActivity)?.let { it.destroyHook = value }
     }

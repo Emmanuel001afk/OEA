@@ -463,7 +463,7 @@ class OeaIconToggle(context: Context) : View(context) {
         }
 
     var onChanged: (() -> Unit)? = null
-    var circleSizeDp: Int = 44
+    var circleSizeDp: Int = 48
 
     init {
         isClickable = true
