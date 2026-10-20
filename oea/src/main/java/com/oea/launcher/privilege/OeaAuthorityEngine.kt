@@ -194,11 +194,11 @@ object OeaAuthorityEngine {
                 val change = OeaAdbAuthority.runShell("cmd package $verb --user 0 ${request.packageName}")
                 if (!change.first) return@withContext Result(false, "Package $verb", change.second, CapabilityId.PACKAGE_SUSPENSION)
                 val verify = OeaAdbAuthority.runShell("dumpsys package ${request.packageName}")
-                val stateLine = Regex("""(?m)^\\s*User 0:.*$""").find(verify.second)?.value
+                val stateLine = Regex("""(?m)^\s*User 0:.*$""").find(verify.second)?.value
                 if (!verify.first || stateLine == null) {
                     Result(false, "Package $verb", "Android accepted the request but OEA could not verify the per-user state.\n${change.second}\n${verify.second}", CapabilityId.PACKAGE_SUSPENSION)
                 } else {
-                    val actual = Regex("""\\bsuspended=true\\b""").containsMatchIn(stateLine)
+                    val actual = Regex("""\bsuspended=true\b""").containsMatchIn(stateLine)
                     val ok = actual == request.suspended
                     Result(ok, "Package $verb", if (ok) "Verified state: suspended=$actual\n${change.second}" else "State mismatch: expected suspended=${request.suspended}, observed suspended=$actual", CapabilityId.PACKAGE_SUSPENSION)
                 }
