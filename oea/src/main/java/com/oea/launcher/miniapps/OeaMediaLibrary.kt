@@ -98,7 +98,9 @@ object OeaMediaLibrary {
         val imageAccess: Access = Access.DENIED,
         val videoAccess: Access = Access.DENIED,
         val audioAccess: Access = Access.DENIED,
-        val error: String? = null
+        val error: String? = null,
+        /** Collections represented by this snapshot; prevents a cached image scan from masking a VIP scan. */
+        val scannedKinds: Set<Kind> = emptySet()
     ) {
         val totalSize: Long get() = (images + videos + audio).sumOf { it.size }
         val totalCount: Int get() = images.size + videos.size + audio.size
@@ -123,7 +125,14 @@ object OeaMediaLibrary {
     enum class Sort { NEWEST, OLDEST, NAME, SIZE, DURATION }
 
     /** A deletion OEA remembers; recoverable when the bytes are OEA's own. */
-    data class TrashRecord(val key: String, val name: String, val album: String, val deletedAt: Long, val path: String?) {
+    data class TrashRecord(
+        val key: String,
+        val name: String,
+        val album: String,
+        val deletedAt: Long,
+        val path: String?,
+        val kind: Kind = Kind.IMAGE
+    ) {
         val recoverable: Boolean get() = !path.isNullOrBlank() && File(path).isFile
     }
 
@@ -153,14 +162,20 @@ object OeaMediaLibrary {
     private var snapshot: Snapshot? = null
 
     private var appContext: Context? = null
+    @Volatile
     private var kindsWanted = setOf<Kind>()
+    /** A VIP subscription can arrive while an image scan is still running. */
+    private val rescanAgain = AtomicBoolean(false)
 
     private val favourites = LinkedHashSet<String>()
     private var favouritesLoaded = false
+    private val favouritesLock = Any()
     private val hidden = LinkedHashSet<String>()
     private var hiddenLoaded = false
+    private val hiddenLock = Any()
     private val trash = LinkedHashMap<String, TrashRecord>()
     private var trashLoaded = false
+    private val trashLock = Any()
 
     /** A screen's link to the index. Dispose it when the screen leaves the window. */
     class Subscription(val onSnapshot: (Snapshot) -> Unit, val onProgress: ((Int, String) -> Unit)?) {
@@ -191,7 +206,19 @@ object OeaMediaLibrary {
         subscribers.add(subscription)
         watch(app, kinds)
         val cached = snapshot
-        if (cached != null) main.post { if (subscribers.contains(subscription)) onSnapshot(cached) } else requestScan(0L)
+        if (cached != null) {
+            main.post {
+                if (subscribers.contains(subscription)) {
+                    runCatching { onSnapshot(cached) }
+                        .onFailure { android.util.Log.w("OeaMediaLibrary", "Media subscriber failed", it) }
+                }
+            }
+            // A cached image-only snapshot is not a valid answer for VIP. Keep the
+            // fast first paint, then fill the newly requested collections.
+            if (!cached.scannedKinds.containsAll(kinds)) requestScan(0L)
+        } else {
+            requestScan(0L)
+        }
         return subscription
     }
 
@@ -202,7 +229,6 @@ object OeaMediaLibrary {
     fun refresh(context: Context, kinds: Set<Kind>? = null) {
         appContext = context.applicationContext
         if (kinds != null) kindsWanted = kindsWanted + kinds
-        scanOwnDirectories(context.applicationContext)
         requestScan(0L)
     }
 
@@ -213,7 +239,12 @@ object OeaMediaLibrary {
 
     private fun rescanNow() {
         val context = appContext ?: return
-        if (!scanning.compareAndSet(false, true)) return
+        if (!scanning.compareAndSet(false, true)) {
+            // Do not lose a request for a collection that was added while the
+            // single worker was busy. The next completion will start one scan.
+            rescanAgain.set(true)
+            return
+        }
         val kinds = kindsWanted.ifEmpty { setOf(Kind.IMAGE) }
         progress(8, "Reading your library…")
         io.execute {
@@ -221,21 +252,36 @@ object OeaMediaLibrary {
             scanning.set(false)
             val built = result.getOrElse { error ->
                 android.util.Log.w("OeaMediaLibrary", "MediaStore scan failed", error)
-                snapshot ?: Snapshot(
+                val message = error.message ?: error.javaClass.simpleName
+                snapshot?.copy(takenAt = System.currentTimeMillis(), error = message) ?: Snapshot(
                     takenAt = System.currentTimeMillis(),
                     imageAccess = accessFor(context, Kind.IMAGE),
                     videoAccess = accessFor(context, Kind.VIDEO),
                     audioAccess = accessFor(context, Kind.AUDIO),
-                    error = error.message ?: error.javaClass.simpleName
+                    error = message
                 )
             }
             snapshot = built
-            main.post { subscribers.toList().forEach { it.onSnapshot(built) } }
+            main.post {
+                subscribers.toList().forEach { subscriber ->
+                    if (!subscribers.contains(subscriber)) return@forEach
+                    runCatching { subscriber.onSnapshot(built) }
+                        .onFailure { android.util.Log.w("OeaMediaLibrary", "Media subscriber failed", it) }
+                }
+                val rerun = rescanAgain.getAndSet(false)
+                if (result.isSuccess && rerun) requestScan(0L)
+            }
         }
     }
 
     private fun progress(percent: Int, label: String) {
-        main.post { subscribers.toList().forEach { it.onProgress?.invoke(percent, label) } }
+        main.post {
+            subscribers.toList().forEach { subscriber ->
+                if (!subscribers.contains(subscriber)) return@forEach
+                runCatching { subscriber.onProgress?.invoke(percent, label) }
+                    .onFailure { android.util.Log.w("OeaMediaLibrary", "Media progress subscriber failed", it) }
+            }
+        }
     }
 
     private fun watch(context: Context, kinds: Set<Kind>) {
@@ -253,7 +299,6 @@ object OeaMediaLibrary {
                 observers[target] = observer
             }
         }
-        scanOwnDirectories(context)
     }
 
     private fun stopWatching() {
@@ -303,7 +348,8 @@ object OeaMediaLibrary {
                 missing(kinds, Kind.AUDIO, audioAccess, audio),
             imageAccess = imageAccess,
             videoAccess = videoAccess,
-            audioAccess = audioAccess
+            audioAccess = audioAccess,
+            scannedKinds = kinds.toSet()
         )
     }
 
@@ -355,12 +401,20 @@ object OeaMediaLibrary {
      * rather than 40 000 views — and the album list can finally be exact.
      */
     private fun query(context: Context, kind: Kind): List<Item> {
+        // A denied collection is expected on a first run (and for audio when
+        // EMAGE is the only screen open). Do not turn that normal state into a
+        // whole-library error by asking a provider we cannot read.
+        if (accessFor(context, kind) == Access.DENIED) return emptyList()
         val collection = collectionFor(kind)
+        var lastFailure: Throwable? = null
         projections(kind).forEach { projection ->
-            val rows = runCatching { read(context, collection, projection, kind) }.getOrNull()
-            if (rows != null) return rows
+            try {
+                return read(context, collection, projection, kind)
+            } catch (error: Throwable) {
+                lastFailure = error
+            }
         }
-        return emptyList()
+        throw lastFailure ?: IllegalStateException("Media provider could not be queried")
     }
 
     /**
@@ -386,6 +440,10 @@ object OeaMediaLibrary {
             }
             if (kind == Kind.AUDIO) add(MediaStore.Audio.Media.ALBUM)
             if (Build.VERSION.SDK_INT < 29) add(MediaStore.MediaColumns.DATA)
+            if (Build.VERSION.SDK_INT >= 29) {
+                add(MediaStore.MediaColumns.IS_PENDING)
+                if (Build.VERSION.SDK_INT >= 30) add(MediaStore.MediaColumns.IS_TRASHED)
+            }
         }
         val rich = withBucket.toMutableList().apply {
             if (Build.VERSION.SDK_INT >= 29) {
@@ -405,17 +463,26 @@ object OeaMediaLibrary {
             Build.VERSION.SDK_INT >= 29 -> "${MediaStore.MediaColumns.IS_PENDING} = 0"
             else -> null
         }
-        val cursor = context.contentResolver.query(
-            collection,
-            projection,
-            selection,
-            null,
-            "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
-        ) ?: return emptyList()
+        val resolver = context.contentResolver
+        val cursor = runCatching {
+            resolver.query(
+                collection,
+                projection,
+                selection,
+                null,
+                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+            ) ?: error("Media provider returned no cursor")
+        }.getOrElse {
+            // A few OEM providers expose the rows but reject IS_TRASHED or the
+            // sort expression. Retry without optional filtering; malformed and
+            // pending rows are still rejected when their columns are available.
+            resolver.query(collection, projection, null, null, null)
+                ?: throw IllegalStateException("Media provider returned no cursor", it)
+        }
         cursor.use { c ->
             fun col(name: String) = c.getColumnIndex(name)
             val idCol = col(MediaStore.MediaColumns._ID)
-            if (idCol < 0) return emptyList()
+            if (idCol < 0) error("Media provider omitted the media id")
             val nameCol = col(MediaStore.MediaColumns.DISPLAY_NAME)
             val addedCol = col(MediaStore.MediaColumns.DATE_ADDED)
             val modifiedCol = col(MediaStore.MediaColumns.DATE_MODIFIED)
@@ -425,39 +492,51 @@ object OeaMediaLibrary {
             val widthCol = col(MediaStore.MediaColumns.WIDTH)
             val heightCol = col(MediaStore.MediaColumns.HEIGHT)
             val pathCol = col(MediaStore.MediaColumns.RELATIVE_PATH)
+            val pendingCol = col(MediaStore.MediaColumns.IS_PENDING)
+            val trashedCol = col(MediaStore.MediaColumns.IS_TRASHED)
             val favCol = col(COLUMN_FAVOURITE)
             val dataCol = col(MediaStore.MediaColumns.DATA)
             val durationCol = if (kind == Kind.IMAGE) -1
             else col(if (kind == Kind.AUDIO) MediaStore.Audio.Media.DURATION else MediaStore.Video.Media.DURATION)
             val albumCol = if (kind == Kind.AUDIO) col(MediaStore.Audio.Media.ALBUM) else -1
             while (c.moveToNext()) {
-                val id = c.getLong(idCol)
-                val added = if (addedCol >= 0) c.getLong(addedCol) else 0L
-                val modified = if (modifiedCol >= 0) c.getLong(modifiedCol) else 0L
-                val taken = if (modified > 0L) modified * 1000L else added * 1000L
-                val data = if (dataCol >= 0) c.getString(dataCol).orEmpty() else ""
-                val albumFromColumn = if (albumCol >= 0) c.getString(albumCol).orEmpty() else ""
-                val bucketFromColumn = if (bucketCol >= 0) c.getString(bucketCol).orEmpty() else ""
-                val album = albumFromColumn.ifBlank { bucketFromColumn }.ifBlank { File(data).parentFile?.name.orEmpty() }
-                val relative = if (pathCol >= 0) c.getString(pathCol).orEmpty()
-                else if (data.isNotBlank()) File(data).parent.orEmpty() else ""
-                rows.add(
-                    Item(
-                        id = id,
-                        uri = ContentUris.withAppendedId(collection, id),
-                        name = if (nameCol >= 0) c.getString(nameCol).orEmpty().ifBlank { "Media" } else "Media",
-                        takenAt = taken,
-                        size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L,
-                        width = if (widthCol >= 0) c.getInt(widthCol) else 0,
-                        height = if (heightCol >= 0) c.getInt(heightCol) else 0,
-                        bucketId = if (bucketIdCol >= 0) c.getLong(bucketIdCol) else 0L,
-                        album = album.ifBlank { if (kind == Kind.AUDIO) "Music" else "Other" },
-                        relativePath = relative,
-                        durationMs = if (durationCol >= 0) c.getLong(durationCol) else 0L,
-                        kind = kind,
-                        systemFavorite = favCol >= 0 && c.getInt(favCol) != 0
+                val pending = pendingCol >= 0 && runCatching { c.getInt(pendingCol) != 0 }.getOrDefault(false)
+                val trashed = trashedCol >= 0 && runCatching { c.getInt(trashedCol) != 0 }.getOrDefault(false)
+                if (pending || trashed) continue
+                runCatching {
+                    val id = c.getLong(idCol)
+                    val added = if (addedCol >= 0) c.getLong(addedCol) else 0L
+                    val modified = if (modifiedCol >= 0) c.getLong(modifiedCol) else 0L
+                    val taken = if (modified > 0L) modified * 1000L else added * 1000L
+                    val data = if (dataCol >= 0) c.getString(dataCol).orEmpty() else ""
+                    val albumFromColumn = if (albumCol >= 0) c.getString(albumCol).orEmpty() else ""
+                    val bucketFromColumn = if (bucketCol >= 0) c.getString(bucketCol).orEmpty() else ""
+                    val album = albumFromColumn.ifBlank { bucketFromColumn }
+                        .ifBlank { File(data).parentFile?.name.orEmpty() }
+                    val relative = if (pathCol >= 0) c.getString(pathCol).orEmpty()
+                    else if (data.isNotBlank()) File(data).parent.orEmpty() else ""
+                    rows.add(
+                        Item(
+                            id = id,
+                            uri = ContentUris.withAppendedId(collection, id),
+                            name = if (nameCol >= 0) c.getString(nameCol).orEmpty().ifBlank { "Media" } else "Media",
+                            takenAt = taken,
+                            size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L,
+                            width = if (widthCol >= 0) c.getInt(widthCol) else 0,
+                            height = if (heightCol >= 0) c.getInt(heightCol) else 0,
+                            bucketId = if (bucketIdCol >= 0) c.getLong(bucketIdCol) else 0L,
+                            album = album.ifBlank { if (kind == Kind.AUDIO) "Music" else "Other" },
+                            relativePath = relative,
+                            durationMs = if (durationCol >= 0) c.getLong(durationCol) else 0L,
+                            kind = kind,
+                            systemFavorite = favCol >= 0 && c.getInt(favCol) != 0
+                        )
                     )
-                )
+                }.onFailure {
+                    // One malformed provider row must not erase every other
+                    // picture from a device's library.
+                    android.util.Log.d("OeaMediaLibrary", "Skipping malformed media row", it)
+                }
             }
         }
         return rows
@@ -472,10 +551,10 @@ object OeaMediaLibrary {
         if (privateItems.isEmpty()) return indexed
         val privateNames = privateItems.map { it.name.lowercase(Locale.US) }.toSet()
         return privateItems + indexed.filterNot { item ->
-            item.name.lowercase(Locale.US) in privateNames &&
+            item.name.lowercase(Locale.US) in privateNames && (
                 item.relativePath.lowercase(Locale.US).contains("pictures/oea") ||
-                item.name.lowercase(Locale.US) in privateNames &&
-                item.relativePath.lowercase(Locale.US).contains("movies/oea")
+                    item.relativePath.lowercase(Locale.US).contains("movies/oea")
+                )
         }
     }
 
@@ -499,10 +578,10 @@ object OeaMediaLibrary {
         val files = runCatching { dir.listFiles() }.getOrNull()?.filter {
             it.isFile && it.extension.lowercase(Locale.getDefault()) in extensions
         } ?: return emptyList()
-        return files.map { file ->
+        return files.mapNotNull { file ->
             val uri = runCatching {
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            }.getOrDefault(Uri.fromFile(file))
+            }.getOrNull() ?: return@mapNotNull null
             Item(
                 id = -(file.absolutePath.hashCode().toLong() and 0x7FFFFFFFL),
                 uri = uri,
@@ -580,7 +659,13 @@ object OeaMediaLibrary {
             audio = if (kind == Kind.AUDIO) order(current.audio, sort) else current.audio
         )
         snapshot = rebuilt
-        main.post { subscribers.toList().forEach { it.onSnapshot(rebuilt) } }
+        main.post {
+            subscribers.toList().forEach { subscriber ->
+                if (!subscribers.contains(subscriber)) return@forEach
+                runCatching { subscriber.onSnapshot(rebuilt) }
+                    .onFailure { android.util.Log.w("OeaMediaLibrary", "Media sort subscriber failed", it) }
+            }
+        }
     }
 
     fun order(items: List<Item>, sort: Sort): List<Item> = when (sort) {
@@ -594,27 +679,34 @@ object OeaMediaLibrary {
     // ---------------------------------------------------------------- favourites
 
     private fun loadFavourites(context: Context) {
-        if (favouritesLoaded) return
-        favouritesLoaded = true
-        runCatching { (prefs(context).getStringSet(KEY_FAV, emptySet()) ?: emptySet()).forEach { favourites.add(it) } }
+        synchronized(favouritesLock) {
+            if (favouritesLoaded) return
+            favouritesLoaded = true
+            runCatching { (prefs(context).getStringSet(KEY_FAV, emptySet()) ?: emptySet()).forEach { favourites.add(it) } }
+        }
     }
 
     fun favouriteKeys(context: Context): Set<String> {
         loadFavourites(context)
-        return favourites.toSet()
+        return synchronized(favouritesLock) { favourites.toSet() }
     }
 
     fun isFavourite(context: Context, item: Item): Boolean {
         loadFavourites(context)
-        return favourites.contains(item.key) || item.systemFavorite
+        return synchronized(favouritesLock) { favourites.contains(item.key) } || item.systemFavorite
     }
 
     /** @return the star's new state. */
     fun toggleFavourite(context: Context, item: Item): Boolean {
         loadFavourites(context)
-        val on = !favourites.contains(item.key)
-        if (on) favourites.add(item.key) else favourites.remove(item.key)
-        prefs(context).edit().putStringSet(KEY_FAV, favourites.toSet()).apply()
+        var on = false
+        var values: Set<String> = emptySet()
+        synchronized(favouritesLock) {
+            on = !favourites.contains(item.key)
+            if (on) favourites.add(item.key) else favourites.remove(item.key)
+            values = favourites.toSet()
+        }
+        prefs(context).edit().putStringSet(KEY_FAV, values).apply()
         return on
     }
 
@@ -626,59 +718,71 @@ object OeaMediaLibrary {
     // ------------------------------------------------------------ hidden albums
 
     private fun loadHidden(context: Context) {
-        if (hiddenLoaded) return
-        hiddenLoaded = true
-        runCatching { (prefs(context).getStringSet(KEY_HIDDEN, emptySet()) ?: emptySet()).forEach { hidden.add(it) } }
+        synchronized(hiddenLock) {
+            if (hiddenLoaded) return
+            hiddenLoaded = true
+            runCatching { (prefs(context).getStringSet(KEY_HIDDEN, emptySet()) ?: emptySet()).forEach { hidden.add(it) } }
+        }
     }
 
     fun hiddenAlbums(context: Context): Set<String> {
         loadHidden(context)
-        return hidden.toSet()
+        return synchronized(hiddenLock) { hidden.toSet() }
     }
 
     fun setHiddenAlbums(context: Context, albums: Set<String>) {
         loadHidden(context)
-        hidden.clear()
-        hidden.addAll(albums.map { it.lowercase(Locale.getDefault()) })
-        prefs(context).edit().putStringSet(KEY_HIDDEN, hidden.toSet()).apply()
+        val values = albums.map { it.lowercase(Locale.getDefault()) }.toSet()
+        synchronized(hiddenLock) {
+            hidden.clear()
+            hidden.addAll(values)
+        }
+        prefs(context).edit().putStringSet(KEY_HIDDEN, values).apply()
         requestScan(0L)
     }
 
     // ---------------------------------------------------------------------- trash
 
     private fun loadTrash(context: Context) {
-        if (trashLoaded) return
-        trashLoaded = true
-        val raw = runCatching { prefs(context).getStringSet(KEY_TRASH, emptySet()) ?: emptySet() }.getOrDefault(emptySet())
-        raw.forEach { entry ->
-            val parts = entry.split('\u001F')
-            if (parts.size >= 4) {
-                trash[parts[0]] = TrashRecord(
-                    key = parts[0],
-                    name = parts[1],
-                    album = parts[2],
-                    deletedAt = parts[3].toLongOrNull() ?: 0L,
-                    path = parts.getOrNull(4)?.takeIf { it.isNotBlank() && it != "~" }
-                )
+        synchronized(trashLock) {
+            if (trashLoaded) return
+            trashLoaded = true
+            val raw = runCatching { prefs(context).getStringSet(KEY_TRASH, emptySet()) ?: emptySet() }.getOrDefault(emptySet())
+            raw.forEach { entry ->
+                val parts = entry.split('\u001F')
+                if (parts.size >= 4) {
+                    trash[parts[0]] = TrashRecord(
+                        key = parts[0],
+                        name = parts[1],
+                        album = parts[2],
+                        deletedAt = parts[3].toLongOrNull() ?: 0L,
+                        path = parts.getOrNull(4)?.takeIf { it.isNotBlank() && it != "~" },
+                        kind = runCatching { Kind.valueOf(parts.getOrNull(5).orEmpty()) }.getOrDefault(Kind.IMAGE)
+                    )
+                }
             }
         }
     }
 
-    private fun storeTrash(context: Context) {
+    private fun storeTrashLocked(context: Context) {
         prefs(context).edit().putStringSet(KEY_TRASH, trash.values.map { record ->
-            listOf(record.key, record.name, record.album, record.deletedAt.toString(), record.path ?: "~")
+            listOf(record.key, record.name, record.album, record.deletedAt.toString(), record.path ?: "~", record.kind.name)
                 .joinToString("\u001F")
         }.toSet()).apply()
     }
 
+    private fun storeTrash(context: Context) {
+        synchronized(trashLock) { storeTrashLocked(context) }
+    }
+
     fun trashRecords(context: Context): List<TrashRecord> {
         loadTrash(context)
-        return trash.values.sortedByDescending { it.deletedAt }
+        return synchronized(trashLock) { trash.values.sortedByDescending { it.deletedAt } }
     }
 
     fun trashedKeys(context: Context): Set<String> {
         loadTrash(context)
-        return trash.keys.toSet()
+        return synchronized(trashLock) { trash.keys.toSet() }
     }
 
     /**
@@ -689,51 +793,74 @@ object OeaMediaLibrary {
     fun recordDeletion(context: Context, item: Item) {
         loadTrash(context)
         val moved = if (item.local) moveToOeaTrash(context, item) else null
-        trash[item.key] = TrashRecord(item.key, item.name, item.album, System.currentTimeMillis(), moved)
-        storeTrash(context)
+        synchronized(trashLock) {
+            trash[item.key] = TrashRecord(item.key, item.name, item.album, System.currentTimeMillis(), moved, item.kind)
+            storeTrashLocked(context)
+        }
         com.oea.launcher.ui.OeaThumbnails.invalidate(item.uri)
     }
 
+    private fun ownRoot(context: Context, kind: Kind): File = File(
+        context.getExternalFilesDir(if (kind == Kind.VIDEO) android.os.Environment.DIRECTORY_MOVIES else android.os.Environment.DIRECTORY_PICTURES),
+        "OEA"
+    )
+
     private fun moveToOeaTrash(context: Context, item: Item): String? {
         val source = item.localPath?.let(::File)?.takeIf { it.isFile } ?: return null
-        val root = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
-        val dir = File(root, TRASH_DIR)
+        val dir = File(ownRoot(context, item.kind), TRASH_DIR)
         if (!dir.isDirectory && !dir.mkdirs()) return null
-        val target = File(dir, source.name)
+        val target = uniqueFile(dir, source.name)
         return if (runCatching { source.renameTo(target) }.getOrDefault(false)) target.absolutePath else null
     }
 
-    /** Puts an OEA-owned picture back where it came from. */
+    private fun uniqueFile(dir: File, name: String): File {
+        val first = File(dir, name)
+        if (!first.exists()) return first
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val extension = if (dot > 0) name.substring(dot) else ""
+        var index = 2
+        var candidate: File
+        do {
+            candidate = File(dir, "${stem}_$index$extension")
+            index++
+        } while (candidate.exists() && index < 10_000)
+        return candidate
+    }
+
+    /** Puts an OEA-owned media file back into the appropriate private collection. */
     fun restore(context: Context, record: TrashRecord): Boolean {
         val source = record.path?.let { File(it) }?.takeIf { it.isFile } ?: return false
-        val dir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
+        val dir = ownRoot(context, record.kind)
         if (!dir.isDirectory) runCatching { dir.mkdirs() }
-        val target = File(dir, source.name)
+        val target = uniqueFile(dir, record.name)
         val moved = runCatching { source.renameTo(target) }.getOrDefault(false)
         if (moved) {
             removeTrashRecord(context, record.key)
-            scanOwnDirectories(context)
+            refresh(context)
         }
         return moved
     }
 
     fun removeTrashRecord(context: Context, key: String) {
         loadTrash(context)
-        trash.remove(key)?.path?.let { path ->
-            runCatching { File(path).takeIf { it.isFile }?.delete() }
-        }
-        storeTrash(context)
+        val path = synchronized(trashLock) { trash.remove(key)?.path }
+        path?.let { runCatching { File(it).takeIf { file -> file.isFile }?.delete() } }
+        synchronized(trashLock) { storeTrashLocked(context) }
     }
 
     fun emptyTrash(context: Context): Int {
         loadTrash(context)
+        val records = synchronized(trashLock) { trash.values.toList() }
         var deleted = 0
-        trash.values.toList().forEach { record ->
+        records.forEach { record ->
             val path = record.path
             if (path != null && runCatching { File(path).delete() }.getOrDefault(false)) deleted++
-            trash.remove(record.key)
         }
-        storeTrash(context)
+        synchronized(trashLock) {
+            records.forEach { trash.remove(it.key) }
+            storeTrashLocked(context)
+        }
         return deleted
     }
 
@@ -795,7 +922,7 @@ object OeaMediaLibrary {
     }
 
     fun formatDate(millis: Long): String =
-        SimpleDateFormat("d MMM yyyy • HH:mm", Locale.getDefault()).format(Date(millis))
+        if (millis <= 0L) "Date not recorded" else SimpleDateFormat("d MMM yyyy • HH:mm", Locale.getDefault()).format(Date(millis))
 
     /** "3 photos • 1.2 MB" style summary for a header line. */
     fun summary(count: Int, bytes: Long): String =
@@ -809,37 +936,70 @@ object OeaMediaLibrary {
         Kind.AUDIO -> "audio/*"
     }
 
+    /**
+     * Returns a URI that another package may read. OEA-owned rows normally
+     * already contain a FileProvider URI, but re-creating it here also repairs
+     * old indexes that were built before a provider was configured. A file URI
+     * is never handed to another app on Android 7+.
+     */
+    fun externalUri(context: Context, item: Item): Uri? {
+        val file = if (item.local) {
+            item.localPath?.let(::File)?.takeIf { it.isFile }
+        } else if (item.uri.scheme == "file") {
+            item.uri.path?.let(::File)?.takeIf { it.isFile }
+        } else {
+            null
+        }
+        if (!item.local && item.uri.scheme != "file") return item.uri
+        return file?.let {
+            runCatching {
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
+            }.getOrNull()
+        }
+    }
+
     /** Shares through the system chooser, granting the receiver read access. */
     fun share(context: Context, items: List<Item>, label: String = "Share") {
         if (items.isEmpty()) return
-        val intent = if (items.size == 1) {
+        val uris = items.mapNotNull { externalUri(context, it) }
+        if (uris.size != items.size) {
+            toast(context, "That file is no longer available to share.")
+            return
+        }
+        val commonType = items.firstOrNull()?.let { first ->
+            if (items.all { it.kind == first.kind }) mimeFor(first) else "*/*"
+        } ?: "*/*"
+        val intent = if (uris.size == 1) {
             android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = mimeFor(items.first())
-                putExtra(android.content.Intent.EXTRA_STREAM, items.first().uri)
+                type = commonType
+                putExtra(android.content.Intent.EXTRA_STREAM, uris.first())
             }
         } else {
             android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-                type = "image/*"
-                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(items.map { it.uri }))
+                type = commonType
+                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
             }
         }
         intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         // EXTRA_STREAM is the historical contract; ClipData is the modern
         // grant carrier and is required by some Android 13+ share targets.
-        items.firstOrNull()?.let { first ->
-            intent.clipData = android.content.ClipData.newUri(context.contentResolver, first.name, first.uri).apply {
-                items.drop(1).forEach { addItem(android.content.ClipData.Item(it.uri)) }
-            }
+        intent.clipData = android.content.ClipData.newUri(context.contentResolver, items.first().name, uris.first()).apply {
+            uris.drop(1).forEach { addItem(android.content.ClipData.Item(it)) }
         }
         runCatching { context.startActivity(android.content.Intent.createChooser(intent, label)) }
             .onFailure { toast(context, "Nothing on this phone can receive a share.") }
     }
 
     fun openExternally(context: Context, item: Item) {
+        val uri = externalUri(context, item)
+        if (uri == null) {
+            toast(context, "That file is no longer available.")
+            return
+        }
         runCatching {
             context.startActivity(
                 android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                    setDataAndType(item.uri, mimeFor(item))
+                    setDataAndType(uri, mimeFor(item))
                     addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             )
@@ -873,11 +1033,28 @@ object OeaMediaLibrary {
     fun deleteOwnedNow(context: Context, items: List<Item>): Int {
         var deleted = 0
         items.filter { it.local }.forEach { item ->
-            val ok = runCatching { context.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false) ||
-                runCatching { item.localPath?.let(::File)?.takeIf { it.isFile }?.delete() == true }.getOrDefault(false)
-            if (ok) {
-                recordDeletion(context, item)
+            // Move first so OEA-owned pictures remain recoverable. The old order
+            // deleted the FileProvider target and only then tried to move it to
+            // trash, which made every local delete permanently destructive.
+            recordDeletion(context, item)
+            loadTrash(context)
+            val record = synchronized(trashLock) { trash[item.key] }
+            if (record?.recoverable == true) {
                 deleted++
+            } else {
+                val removed = runCatching { context.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false) ||
+                    runCatching { item.localPath?.let(::File)?.takeIf { it.isFile }?.delete() == true }.getOrDefault(false)
+                if (removed) {
+                    synchronized(trashLock) {
+                        trash[item.key] = TrashRecord(item.key, item.name, item.album, System.currentTimeMillis(), null, item.kind)
+                        storeTrashLocked(context)
+                    }
+                    deleted++
+                } else {
+                    // Do not show a fake history entry when both moving and
+                    // deleting the private file were refused by the filesystem.
+                    removeTrashRecord(context, item.key)
+                }
             }
         }
         if (deleted > 0) refresh(context)

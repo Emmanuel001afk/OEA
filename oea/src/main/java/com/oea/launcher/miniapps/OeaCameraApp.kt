@@ -884,7 +884,13 @@ object OeaCameraApp {
                 },
                 kit.tonalButton("Edit in EMAGE") {
                     dialog.dismiss()
-                    OeaMiniApps.open(host, "emage")
+                    runCatching {
+                        host.startActivity(Intent(host, OeaImageActivity::class.java).apply {
+                            action = Intent.ACTION_EDIT
+                            setDataAndType(fileUri, "image/*")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        })
+                    }.onFailure { OeaMediaLibrary.toast(host, "EMAGE could not open that picture") }
                 },
                 kit.primaryButton("Close") { dialog.dismiss() }
             ))

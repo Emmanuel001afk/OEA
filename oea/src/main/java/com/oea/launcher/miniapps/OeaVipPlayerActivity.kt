@@ -497,7 +497,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         bar.addView(iconButton(R.drawable.oic_skip_previous, "Previous clip") { step(-1) }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_skip_next, "Next clip") { step(1) }, buttonSize())
         sleepPill = pill("Sleep", R.drawable.oic_timer, null) { showSleepSheet() }
-        bar.addView(sleepPill, LinearLayout.LayoutParams(-2, dp(32)).apply { marginStart = dp(4) })
+        bar.addView(sleepPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(4) })
         if (!isAudio) bar.addView(iconButton(R.drawable.ic_vip_pip, "Picture in picture") { enterPip() }, buttonSize())
         // Rotation lives up here, not buried in a sheet: tilting the phone
         // is how people expect a video to turn, and this is the one-tap
@@ -508,7 +508,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         return bar
     }
 
-    private fun buttonSize() = LinearLayout.LayoutParams(dp(44), dp(44))
+    private fun buttonSize() = LinearLayout.LayoutParams(dp(48), dp(48))
 
     private fun buildBottomBar(): LinearLayout {
         val bar = LinearLayout(this).apply {
@@ -553,7 +553,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 }
             }
         }
-        bar.addView(scrub, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(2) })
+        bar.addView(scrub, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(2) })
 
         val transport = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -581,12 +581,12 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         speedPill = pill(OeaVipStore.speedLabel(speed), R.drawable.oic_speed, null) { showSpeedSheet() }
         aspectPill = pill(aspect.label, R.drawable.oic_aspect_ratio, null) { cycleAspect() }
         ccPill = pill("Subtitles", R.drawable.oic_subtitles, null) { showSubtitleSheet() }
-        pills.addView(speedPill, LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(7) })
-        pills.addView(aspectPill, LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(7) })
-        pills.addView(ccPill, LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(7) })
+        pills.addView(speedPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
+        pills.addView(aspectPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
+        pills.addView(ccPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
         val queue = pill(queueLabel(), R.drawable.oic_queue_music, null) { showQueueSheet() }
         queuePill = queue
-        pills.addView(queue, LinearLayout.LayoutParams(0, dp(34), 1f))
+        pills.addView(queue, LinearLayout.LayoutParams(0, dp(48), 1f))
         bar.addView(pills, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         return bar
     }
@@ -611,6 +611,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 textSize = 13.5f
                 typeface = OeaType.medium
                 setPadding(dp(10), dp(6), dp(10), dp(6))
+                minimumHeight = dp(48)
+                isFocusable = true
                 background = GradientDrawable().apply {
                     setColor(0x22FFFFFF)
                     cornerRadius = dp(16).toFloat()
@@ -632,7 +634,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         contentDescription = description
         scaleType = ImageView.ScaleType.CENTER_INSIDE
         setPadding(dp(10), dp(10), dp(10), dp(10))
+        minimumWidth = dp(48)
+        minimumHeight = dp(48)
         isClickable = true
+        isFocusable = true
         background = GradientDrawable().apply {
             setColor(0x00000000)
             cornerRadius = dp(22).toFloat()
@@ -648,6 +653,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         gravity = Gravity.CENTER
         maxLines = 1
         setPadding(dp(11), 0, dp(11), 0)
+        minimumHeight = dp(48)
+        isFocusable = true
         background = GradientDrawable().apply {
             setColor(0x33000000.toInt())
             cornerRadius = dp(17).toFloat()
@@ -939,6 +946,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private fun onPlayStateChanged() {
         val playing = runCatching { player?.isPlaying == true }.getOrDefault(false)
         playToggle.selected = playing
+        playToggle.contentDescription = if (playing) "Pause" else "Play"
         playToggle.icon = drawable(
             if (playing) R.drawable.oic_pause else R.drawable.oic_play_arrow,
             if (playing) Color.BLACK else Color.WHITE
@@ -1844,11 +1852,25 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         toast("Subtitles removed from this clip")
     }
 
+    private fun safeExternalUri(uri: Uri): Uri? {
+        if (uri.scheme != "file") return uri
+        val file = uri.path?.let { java.io.File(it) }?.takeIf { it.isFile } ?: return null
+        return runCatching {
+            androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+        }.getOrNull()
+    }
+
     private fun shareCurrent() {
         val entry = current() ?: return
+        val uri = safeExternalUri(entry.uri)
+        if (uri == null) {
+            toast("That file is no longer available")
+            return
+        }
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = if (isAudio) "audio/*" else "video/*"
-            putExtra(Intent.EXTRA_STREAM, entry.uri)
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newUri(contentResolver, entry.title, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         runCatching { startActivity(Intent.createChooser(intent, "Share")) }
@@ -1856,8 +1878,14 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     }
 
     private fun openExternally(uri: Uri) {
+        val safeUri = safeExternalUri(uri)
+        if (safeUri == null) {
+            toast("That file is no longer available")
+            return
+        }
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, if (isAudio) "audio/*" else "video/*")
+            setDataAndType(safeUri, if (isAudio) "audio/*" else "video/*")
+            clipData = android.content.ClipData.newUri(contentResolver, safeUri.lastPathSegment, safeUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         runCatching { startActivity(Intent.createChooser(intent, "Open with")) }

@@ -233,6 +233,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         typeface = OeaType.medium
         gravity = Gravity.CENTER
         setTextColor(fg)
+        minimumHeight = dp(48)
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         setPadding(dp(18), dp(11), dp(18), dp(11))
@@ -259,6 +260,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         val bg = if (selected) palette.accent else palette.cardHigh
         val fg = if (selected) palette.onAccent else palette.text
         setTextColor(fg)
+        minimumHeight = dp(48)
+        isFocusable = true
         background = ripple(rounded(bg, 18), 18)
         if (iconRes != 0) {
             icon(iconRes, fg)?.let { d ->
@@ -288,9 +291,12 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
                 setTextColor(if (active) palette.onAccent else palette.textSecondary)
+                contentDescription = "$label${if (active) ", selected" else ""}"
+                minimumHeight = dp(48)
                 background = if (active) rounded(palette.accent, 18) else ripple(null, 18)
                 setPadding(dp(6), dp(9), dp(6), dp(9))
                 isClickable = true
+                isFocusable = true
                 setOnClickListener { if (!active) onSelect(index) }
             }, LinearLayout.LayoutParams(0, -2, 1f))
         }
@@ -324,7 +330,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         }
         if (onBack != null) {
             topRow.addView(circleIconButton(R.drawable.oic_arrow_back, "Back") { onBack() },
-                LinearLayout.LayoutParams(dp(44), dp(44)))
+                LinearLayout.LayoutParams(dp(48), dp(48)))
         }
         topRow.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
         if (trailing != null) topRow.addView(trailing)
@@ -353,6 +359,8 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         FrameLayout(context).apply {
             background = ripple(oval(bg), 22)
             contentDescription = description
+            minimumWidth = dp(48)
+            minimumHeight = dp(48)
             isClickable = true
             isFocusable = true
             setOnClickListener { onClick() }
@@ -490,9 +498,9 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(minus, LinearLayout.LayoutParams(dp(36), dp(36)))
+            addView(minus, LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(valueView, LinearLayout.LayoutParams(-2, -2))
-            addView(plus, LinearLayout.LayoutParams(dp(36), dp(36)))
+            addView(plus, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
         refresh()
         row(group, iconRes, title, subtitle, trailing = box, chevron = false)

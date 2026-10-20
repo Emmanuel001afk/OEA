@@ -324,10 +324,14 @@ internal class OeaVipSheet private constructor(
             selectedBg = palette.accent
             idleBg = 0x1FFFFFFF
             this.selected = selected
-            circleSizeDp = 46
-            onChanged = { onToggle(this.selected) }
+            circleSizeDp = 48
+            contentDescription = "$label, ${if (selected) "on" else "off"}"
+            onChanged = {
+                contentDescription = "$label, ${if (this.selected) "on" else "off"}"
+                onToggle(this.selected)
+            }
         }
-        box.addView(toggle, LinearLayout.LayoutParams(dp(46), dp(46)))
+        box.addView(toggle, LinearLayout.LayoutParams(dp(48), dp(48)))
         box.addView(
             TextView(activity).apply {
                 text = label
