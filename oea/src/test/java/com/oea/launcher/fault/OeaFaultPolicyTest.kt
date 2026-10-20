@@ -108,6 +108,18 @@ class OeaFaultPolicyTest {
     }
 
     @Test
+    fun `VIP and utility activities are isolated from Home and receive stable identities`() {
+        assertTrue(OeaFaultPolicy.isRecoverableOeaScreenName("com.oea.launcher.miniapps.OeaVipActivity"))
+        assertTrue(OeaFaultPolicy.isRecoverableOeaScreenName("com.oea.launcher.phone.OeaPhoneActivity"))
+        assertTrue(OeaFaultPolicy.isRecoverableOeaScreenName("com.oea.launcher.callblocker.OeaCallBlockerActivity"))
+        assertFalse(OeaFaultPolicy.isRecoverableOeaScreenName("com.oea.launcher.OeaLauncherActivity"))
+        assertEquals("miniapp:vip", OeaFaultPolicy.subsystemForScreenClassName("com.oea.launcher.miniapps.OeaVipActivity"))
+        assertEquals("miniapp:vip-player", OeaFaultPolicy.subsystemForScreenClassName("com.oea.launcher.miniapps.OeaVipPlayerActivity"))
+        assertEquals("miniapp:host", OeaFaultPolicy.subsystemForScreenClassName("com.oea.launcher.miniapps.OeaMiniAppActivity"))
+        assertEquals(null, OeaFaultPolicy.subsystemForScreenClassName("com.oea.launcher.OeaLauncherActivity"))
+    }
+
+    @Test
     fun `threads are classified by the work they do, not by their number`() {
         val main = Thread.currentThread()
         assertEquals(ThreadKind.MAIN_HOME, OeaFaultPolicy.classify(main, main, screenIsGame = false))

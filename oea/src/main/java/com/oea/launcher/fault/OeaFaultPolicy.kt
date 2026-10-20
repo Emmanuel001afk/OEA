@@ -142,11 +142,40 @@ object OeaFaultPolicy {
     fun isStackOverflow(error: Throwable): Boolean = error is StackOverflowError
 
     /**
-     * Maps a thread to its role. [screenIsGame] is supplied by the caller,
+     * True when the visible activity is an independently recoverable OEA screen,
+     * not the launcher workspace itself. Used by the crash boundary and stall
+     * watchdog so a mini-app or utility screen cannot be mistaken for Home.
+     */
+    fun isRecoverableOeaScreenName(className: String): Boolean {
+        val name = className.lowercase()
+        return name.contains(".games.") ||
+            name.contains("gameboost") ||
+            name.contains(".phone.") ||
+            name.contains(".callblocker.") ||
+            name.contains(".freezer.") ||
+            name.contains(".applock.") ||
+            name.contains(".assistant.") ||
+            name.startsWith("com.oea.launcher.miniapps.")
+    }
+
+    /** Stable diagnostic identity for each concrete mini-app activity. */
+    fun subsystemForScreenClassName(className: String): String? {
+        val prefix = "com.oea.launcher.miniapps."
+        if (!className.startsWith(prefix)) return null
+        val simpleName = className.substringAfterLast('.')
+        if (simpleName == "OeaMiniAppActivity") return "miniapp:host"
+        val id = simpleName.removePrefix("Oea").removeSuffix("Activity")
+            .replace(Regex("([a-z])([A-Z])"), "$1-$2")
+            .lowercase()
+        return "miniapp:" + id.ifBlank { "unknown" }
+    }
+
+    /**
+     * Maps a thread to its role. [screenIsRecoverableOeaScreen] is supplied by the caller,
      * which knows what OEA screen (if any) is in front.
      */
-    fun classify(thread: Thread, mainThread: Thread, screenIsGame: Boolean): ThreadKind = when {
-        thread === mainThread -> if (screenIsGame) ThreadKind.MAIN_SCREEN else ThreadKind.MAIN_HOME
+    fun classify(thread: Thread, mainThread: Thread, screenIsRecoverableOeaScreen: Boolean): ThreadKind = when {
+        thread === mainThread -> if (screenIsRecoverableOeaScreen) ThreadKind.MAIN_SCREEN else ThreadKind.MAIN_HOME
         thread.name.startsWith("GLThread") -> ThreadKind.RENDER
         thread.name.startsWith("oea-") || thread.name.startsWith("Oea") || thread.name.startsWith("DefaultDispatcher") ||
             thread.name.startsWith("kotlinx") || thread.name.contains("AsyncTask") || thread.name.startsWith("pool-") -> ThreadKind.WORKER

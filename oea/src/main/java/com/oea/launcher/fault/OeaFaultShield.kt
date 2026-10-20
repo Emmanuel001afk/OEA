@@ -81,6 +81,7 @@ object OeaFaultShield {
         private set
     @Volatile private var frontScreen: Activity? = null
     @Volatile private var frontIsGame = false
+    @Volatile private var frontIsRecoverableScreen = false
     @Volatile private var homeRendered = false
 
     /** Home is on screen and usable; faults are then recovered in place instead of shown. */
@@ -154,7 +155,7 @@ object OeaFaultShield {
         // The engine is a library inside this process; let it report faults here too,
         // so a contained engine fault still shows up in OEA's health log.
         OeaGuard.sink = OeaGuard.Sink { source, error, fatal ->
-            val kind = OeaFaultPolicy.classify(Thread.currentThread(), mainThread, frontIsGame)
+            val kind = OeaFaultPolicy.classify(Thread.currentThread(), mainThread, frontIsRecoverableScreen)
             handle(if (fatal && kind == ThreadKind.UNKNOWN) ThreadKind.WORKER else kind, source, error, fatal, contained = true)
         }
         startWatchdog()
@@ -204,7 +205,7 @@ object OeaFaultShield {
     /** Records an already-handled problem (a fallback was taken) without triggering recovery. */
     fun note(owner: String, error: Throwable) {
         val record = OeaFaultRecord.of(
-            kind = OeaFaultPolicy.classify(Thread.currentThread(), mainThread, frontIsGame),
+            kind = OeaFaultPolicy.classify(Thread.currentThread(), mainThread, frontIsRecoverableScreen),
             thread = Thread.currentThread(),
             subsystem = owner,
             error = error,
@@ -230,7 +231,7 @@ object OeaFaultShield {
      * recovery, and Home must not react to it at all.
      */
     fun onFaulted(owner: String, error: Throwable, contained: Boolean) {
-        val kind = OeaFaultPolicy.classify(Thread.currentThread(), mainThread, frontIsGame)
+        val kind = OeaFaultPolicy.classify(Thread.currentThread(), mainThread, frontIsRecoverableScreen)
         val action = handle(kind, owner, error, fatal = false, contained = contained, thread = Thread.currentThread())
         val homeScoped = owner == "home" || owner.startsWith("home:") || owner.startsWith("workspace")
         if (homeScoped && (action == FaultAction.REBUILD_HOME || action == FaultAction.SAFE_MODE)) act(action)
@@ -242,7 +243,7 @@ object OeaFaultShield {
     private val consecutiveMainResumes = AtomicInteger()
 
     private fun onUncaught(thread: Thread, error: Throwable) {
-        val kind = OeaFaultPolicy.classify(thread, mainThread, frontIsGame)
+        val kind = OeaFaultPolicy.classify(thread, mainThread, frontIsRecoverableScreen)
         val subsystem = subsystemOf(thread, error)
         // An uncaught fault on the main thread has already unwound Looper.loop(),
         // which stops the message queue from being pumped — merely posting a
@@ -422,7 +423,13 @@ object OeaFaultShield {
         }
         if (fromThread != null) return fromThread
         val top = error.stackTrace.firstOrNull()?.className.orEmpty()
+        val screenSubsystem = if (thread === mainThread) {
+            frontScreen?.javaClass?.name?.let { OeaFaultPolicy.subsystemForScreenClassName(it) }
+        } else null
+        if (screenSubsystem != null) return screenSubsystem
         return when {
+            top.startsWith("com.oea.launcher.miniapps.") ->
+                OeaFaultPolicy.subsystemForScreenClassName(top) ?: "miniapp:unknown"
             top.startsWith("com.oea.games.") -> "game:" + top.substringAfter("com.oea.games.").substringBefore('.')
             top.startsWith("com.oea.engine.") -> "engine:" + top.substringAfter("com.oea.engine.").substringBefore('.')
             top.startsWith("com.oea.launcher.games.") -> "oea-games"
@@ -480,10 +487,13 @@ object OeaFaultShield {
     private fun recordStall(unserved: Long) {
         // A game in front legitimately keeps the shared main thread busy with
         // nothing to do about it, and a paused Home can be idle by design.
-        if (frontIsGame) return
+        if (frontIsRecoverableScreen) return
+        // Use monotonic elapsed time for the cooldown; wall-clock changes must
+        // not disable or flood the Home stall watchdog.
+        val elapsedNow = android.os.SystemClock.elapsedRealtime()
+        if (elapsedNow - lastStallAt < 30_000L) return
+        lastStallAt = elapsedNow
         val now = System.currentTimeMillis()
-        if (now - lastStallAt < 30_000L) return
-        lastStallAt = now
         val frames = runCatching {
             mainThread.stackTrace.take(5).map { "${it.methodName}(${it.lineNumber})" }
         }.getOrDefault(emptyList())
@@ -527,10 +537,15 @@ object OeaFaultShield {
             override fun onActivityResumed(activity: Activity) {
                 frontScreen = activity
                 frontIsGame = isGameActivity(activity)
+                frontIsRecoverableScreen = isRecoverableOeaActivity(activity)
             }
 
             override fun onActivityPaused(activity: Activity) {
-                if (frontScreen === activity) frontScreen = null
+                if (frontScreen === activity) {
+                    frontScreen = null
+                    frontIsGame = false
+                    frontIsRecoverableScreen = false
+                }
             }
 
             override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
@@ -538,7 +553,11 @@ object OeaFaultShield {
             override fun onActivityStopped(activity: Activity) = Unit
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
             override fun onActivityDestroyed(activity: Activity) {
-                if (frontScreen === activity) frontScreen = null
+                if (frontScreen === activity) {
+                    frontScreen = null
+                    frontIsGame = false
+                    frontIsRecoverableScreen = false
+                }
             }
         })
     }
@@ -547,6 +566,10 @@ object OeaFaultShield {
         val name = activity.javaClass.name
         return name.contains(".games.") || name.contains("GameBoost") || name.contains(".gameboost.")
     }
+
+    private fun isRecoverableOeaActivity(activity: Activity): Boolean =
+        isGameActivity(activity) ||
+            OeaFaultPolicy.isRecoverableOeaScreenName(activity.javaClass.name)
 
     private const val TICK_MS = 1_000L
     private const val STALL_TICKS = 6L

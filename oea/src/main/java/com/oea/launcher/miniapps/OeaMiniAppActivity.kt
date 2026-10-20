@@ -62,9 +62,12 @@ open class OeaMiniAppActivity : Activity() {
     /** Called before [resumeHook] so an app can save what it has open. */
     var pauseHook: (() -> Unit)? = null
 
+    /** Releases app-owned listeners, players and callbacks when this Activity is destroyed. */
+    var destroyHook: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val created = OeaFaultShield.guard("miniapp:host:create") {
+        val created = OeaFaultShield.guard(faultOwner("create")) {
             palette = OeaTheme.resolve(this)
             kit = OeaKit(this, palette)
             screenId = resolveScreenId()
@@ -75,13 +78,16 @@ open class OeaMiniAppActivity : Activity() {
 
     private fun resolveScreenId(): String? = appId ?: intent.getStringExtra(EXTRA_APP) ?: resolveAliasId()
 
+    private fun faultOwner(stage: String): String = "miniapp:${appId ?: screenId ?: "host"}:$stage"
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
-        OeaFaultShield.guard("miniapp:host:intent") {
+        val handled = OeaFaultShield.guard(faultOwner("intent")) {
             setIntent(intent)
             screenId = resolveScreenId()
             renderGuarded(keepScroll = false)
         }
+        if (!handled) showRenderFallback()
     }
 
     private fun resolveAliasId(): String? {
@@ -100,40 +106,45 @@ open class OeaMiniAppActivity : Activity() {
         // the mini-app so it picks up its new capabilities immediately instead of
         // showing the "needs permission" card until the next visit. A full-bleed
         // app reloads its own data in place; a page-style app is rebuilt.
-        OeaFaultShield.guard("miniapp:host:permission") {
+        val handled = OeaFaultShield.guard(faultOwner("permission")) {
             val hook = resumeHook
             if (hook != null) hook() else renderGuarded(keepScroll = true)
         }
+        if (!handled) showRenderFallback()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
-        if (resultHook?.invoke(requestCode, resultCode, data) == true) return
-        if (screenId == "camera" && OeaCameraApp.handleActivityResult(this, requestCode, resultCode, data)) return
-        if (requestCode == 4001 && resultCode == RESULT_OK) {
-            val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            val text = results?.firstOrNull()?.trim()
-            if (!text.isNullOrBlank()) {
-                try {
-                    val p = getSharedPreferences("oea_notes_v2", MODE_PRIVATE)
-                    val existing = p.getString("notes", "") ?: ""
-                    val id = System.currentTimeMillis()
-                    val encoded = if (existing.isBlank()) "" else existing + "\u001E"
-                    val newRow = listOf(id.toString(), text.replace("\u001F", " ").replace("\u001E", " "), "0", "voice", System.currentTimeMillis().toString(), "0").joinToString("\u001F")
-                    p.edit().putString("notes", encoded + newRow).apply()
-                    android.widget.Toast.makeText(this, "Voice note saved", android.widget.Toast.LENGTH_SHORT).show()
-                } catch (_: Throwable) {
-                    intent.putExtra("voice_result", text)
+        val handled = OeaFaultShield.guard(faultOwner("activity-result")) {
+            if (resultHook?.invoke(requestCode, resultCode, data) == true) return
+            if (screenId == "camera" && OeaCameraApp.handleActivityResult(this, requestCode, resultCode, data)) return
+            if (requestCode == 4001 && resultCode == RESULT_OK) {
+                val results = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                val text = results?.firstOrNull()?.trim()
+                if (!text.isNullOrBlank()) {
+                    try {
+                        val p = getSharedPreferences("oea_notes_v2", MODE_PRIVATE)
+                        val existing = p.getString("notes", "") ?: ""
+                        val id = System.currentTimeMillis()
+                        val encoded = if (existing.isBlank()) "" else existing + "\u001E"
+                        val newRow = listOf(id.toString(), text.replace("\u001F", " ").replace("\u001E", " "), "0", "voice", System.currentTimeMillis().toString(), "0").joinToString("\u001F")
+                        p.edit().putString("notes", encoded + newRow).apply()
+                        android.widget.Toast.makeText(this, "Voice note saved", android.widget.Toast.LENGTH_SHORT).show()
+                    } catch (error: Throwable) {
+                        OeaFaultShield.note("miniapp:voice:save-result", error)
+                        intent.putExtra("voice_result", text)
+                    }
+                    renderGuarded()
+                    return
                 }
-                renderGuarded()
-                return
             }
+            super.onActivityResult(requestCode, resultCode, data)
         }
-        super.onActivityResult(requestCode, resultCode, data)
+        if (!handled) showRenderFallback()
     }
 
     override fun onResume() {
         super.onResume()
-        OeaFaultShield.guard("miniapp:host:resume") {
+        val handled = OeaFaultShield.guard(faultOwner("resume")) {
             if (!::palette.isInitialized) {
                 palette = OeaTheme.resolve(this)
                 kit = OeaKit(this, palette)
@@ -147,12 +158,15 @@ open class OeaMiniAppActivity : Activity() {
                 renderGuarded(keepScroll = true)
                 return@guard
             }
-            resumeHook?.let { OeaFaultShield.guard("miniapp:host:resume-data", it) }
+            resumeHook?.let { OeaFaultShield.guard(faultOwner("resume-data"), it) }
         }
+        if (!handled) showRenderFallback()
     }
 
     override fun onPause() {
-        runCatching { pauseHook?.invoke() }
+        OeaFaultShield.guard(faultOwner("pause")) {
+            pauseHook?.invoke()
+        }
         // The camera's torch is a hardware state the app owes the
         // user: leaving the mini-app puts it out, always.
         if (screenId == "camera") {
@@ -161,9 +175,57 @@ open class OeaMiniAppActivity : Activity() {
         super.onPause()
     }
 
+    override fun onStop() {
+        OeaFaultShield.guard(faultOwner("stop")) {
+            currentScroll?.let { lastScrollY = it.scrollY }
+            currentRoot?.animate()?.cancel()
+            currentRoot?.clearAnimation()
+        }
+        super.onStop()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        OeaFaultShield.guard(faultOwner("save-state")) {
+            currentScroll?.let { lastScrollY = it.scrollY }
+            outState.putInt(STATE_SCROLL_Y, lastScrollY)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        OeaFaultShield.guard(faultOwner("restore-state")) {
+            lastScrollY = savedInstanceState.getInt(STATE_SCROLL_Y, lastScrollY).coerceAtLeast(0)
+            currentScroll?.let { scroll -> if (lastScrollY > 0) scroll.post { scroll.scrollTo(0, lastScrollY) } }
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        OeaFaultShield.guard(faultOwner("trim-memory")) {
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+                currentScroll?.let { lastScrollY = it.scrollY }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        OeaFaultShield.guard(faultOwner("destroy")) {
+            destroyHook?.invoke()
+            destroyHook = null
+            resumeHook = null
+            pauseHook = null
+            resultHook = null
+            currentScroll = null
+            currentRoot?.animate()?.cancel()
+            currentRoot = null
+        }
+        super.onDestroy()
+    }
+
     /** Renders with a containment net: a fault shows an in-app card, never a dead window. */
     private fun renderGuarded(keepScroll: Boolean = true) {
-        val ok = OeaFaultShield.guard("miniapp:host:render") { render(keepScroll) }
+        val ok = OeaFaultShield.guard(faultOwner("render")) { render(keepScroll) }
         if (!ok) showRenderFallback()
     }
 
@@ -174,6 +236,7 @@ open class OeaMiniAppActivity : Activity() {
      */
     private var lastScrollY = 0
     private var currentScroll: android.widget.ScrollView? = null
+    private var currentRoot: View? = null
 
     private fun render(keepScroll: Boolean) {
         if (keepScroll) currentScroll?.let { lastScrollY = it.scrollY } else lastScrollY = 0
@@ -184,7 +247,9 @@ open class OeaMiniAppActivity : Activity() {
             // The app owns the whole window: its own app bar, its own scrolling,
             // its own insets. Wrapping a media grid in a settings page is how you
             // get a gallery that scrolls like one long screenshot.
-            setContentView(OeaMiniApps.build(this, app.id, kit))
+            val fullBleedRoot = OeaMiniApps.build(this, app.id, kit)
+            currentRoot = fullBleedRoot
+            setContentView(fullBleedRoot)
             return
         }
         val page = kit.page(
@@ -219,6 +284,7 @@ open class OeaMiniAppActivity : Activity() {
             page.content.addView(body, LinearLayout.LayoutParams(-1, -2))
         }
         setContentView(page.root)
+        currentRoot = page.root
         currentScroll = page.scroll
         if (lastScrollY > 0) page.scroll.post { page.scroll.scrollTo(0, lastScrollY) }
         // A short rise-and-fade: the rebuild is how a mini-app applies a change,
@@ -262,11 +328,12 @@ open class OeaMiniAppActivity : Activity() {
                 setTextColor(textColor)
                 alpha = 0.7f
             })
+            currentRoot = root
             setContentView(root)
         }.onFailure {
             // Nothing else can be done safely; Android's own window background
             // (never transparent black) remains, and the fault is on record.
-            OeaFaultShield.note("miniapp:host:fallback", "even the fallback screen failed to build")
+            OeaFaultShield.note(faultOwner("fallback"), "even the fallback screen failed to build")
         }
     }
 
@@ -282,12 +349,12 @@ open class OeaMiniAppActivity : Activity() {
     }
 
     /** Rebuilds the page in place, which is how a mini-app refreshes itself. */
-    fun refresh() = runCatching { renderGuarded() }.onFailure { OeaFaultShield.note("miniapp:host", it) }
+    fun refresh() = runCatching { renderGuarded() }.onFailure { OeaFaultShield.note(faultOwner("refresh"), it) }
 
     /** Opens another mini-app (or the index) without stacking activities. Used by the index host only. */
     fun show(id: String?) {
         screenId = id
-        runCatching { renderGuarded(keepScroll = false) }.onFailure { OeaFaultShield.note("miniapp:host", it) }
+        runCatching { renderGuarded(keepScroll = false) }.onFailure { OeaFaultShield.note(faultOwner("show"), it) }
     }
 
     /** A toast that never throws (a dying activity must not shadow the real error). */
@@ -297,6 +364,7 @@ open class OeaMiniAppActivity : Activity() {
 
     companion object {
         const val EXTRA_APP = "oea.miniapp.id"
+        private const val STATE_SCROLL_Y = "oea.miniapp.scroll_y"
     }
 }
 

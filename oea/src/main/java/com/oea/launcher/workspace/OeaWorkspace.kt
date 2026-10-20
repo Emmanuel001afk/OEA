@@ -1846,10 +1846,30 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             setTextColor(palette.homeText)
         }, LinearLayout.LayoutParams(0, -2, 1f))
         card.addView(kit.button("Fix", palette.accent, palette.onAccent) {
-            com.oea.launcher.fault.OeaFaultShield.setSafeMode(false, context)
-            widgets.start()
-            applySafeModeVisibility()
-            scheduleRebuild()
+            val shield = com.oea.launcher.fault.OeaFaultShield
+            // Never let recovery work escape this click listener and kill Home.
+            // Restore safe mode if rebuilding the core visibility state fails;
+            // widget startup is optional and must not block launcher recovery.
+            shield.setSafeMode(false, context)
+            val visibilityReady = runCatching { applySafeModeVisibility() }
+                .onFailure { shield.note("safe-mode:fix:visibility", it) }
+                .isSuccess
+            if (visibilityReady) {
+                runCatching { widgets.start() }
+                    .onFailure { shield.note("safe-mode:fix:widgets", it) }
+            } else {
+                shield.setSafeMode(true, context)
+                runCatching { applySafeModeVisibility() }
+                    .onFailure { shield.note("safe-mode:fix:fallback", it) }
+            }
+            val rebuilt = runCatching { scheduleRebuild() }
+                .onFailure { shield.note("safe-mode:fix:rebuild", it) }
+                .isSuccess
+            if (!rebuilt) {
+                shield.setSafeMode(true, context)
+                runCatching { applySafeModeVisibility() }
+                    .onFailure { shield.note("safe-mode:fix:rebuild-fallback", it) }
+            }
         }.apply { setPadding(dp(14), dp(8), dp(14), dp(8)) }, LinearLayout.LayoutParams(-2, -2))
         card.setOnClickListener {
             runCatching {
