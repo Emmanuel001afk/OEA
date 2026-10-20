@@ -60,13 +60,25 @@ object OeaThumbnails {
 
     private fun diskFile(context: Context, key: String): File {
         val dir = File(context.cacheDir, "oea_thumbs").apply { if (!isDirectory) runCatching { mkdirs() } }
-        val hash = (key.hashCode().toLong() shl 32) or key.length.toLong()
-        return File(dir, "%x.webp".format(hash))
+        diskRoot = dir
+        val digest = runCatching {
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest(key.toByteArray(Charsets.UTF_8))
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+        }.getOrElse { "${key.hashCode()}_${key.length}" }
+        return File(dir, "$digest.webp")
     }
+
+    /** The directory used by the disk cache in this process. */
+    @Volatile
+    private var diskRoot: File? = null
 
     /** Drops every cached picture — after a bulk edit, a delete or a rescan. */
     fun invalidateAll() {
         memory.evictAll()
+        diskOf.values.toSet().forEach { file -> runCatching { file.delete() } }
+        diskOf.clear()
+        diskRoot?.listFiles()?.forEach { file -> runCatching { file.delete() } }
     }
 
     /** The disk file behind each cached key, so an edit can evict it for good. */
@@ -127,10 +139,12 @@ object OeaThumbnails {
             if (bitmap == null) {
                 val raw = decode(context, uri, px, video) ?: return@execute
                 bitmap = if (cornerRadiusPx > 0) roundCorners(raw, cornerRadiusPx) else raw
+                if (bitmap !== raw && !raw.isRecycled) raw.recycle()
                 writeDisk(context, file, bitmap)
                 diskOf[key] = file
                 memory.put(key, bitmap)
             } else {
+                diskOf[key] = file
                 memory.put(key, bitmap)
             }
             val finished = bitmap
@@ -161,7 +175,8 @@ object OeaThumbnails {
             val bitmap = decode(context, uri, px, video)
             if (bitmap != null) memory.put(key, bitmap)
             handler.post {
-                if (bitmap != null && view.tag == want) {
+                if (view.tag != want) return@post
+                if (bitmap != null) {
                     view.setImageDrawable(BitmapDrawable(context.resources, bitmap))
                     view.alpha = 0.35f
                     view.animate().alpha(1f).setDuration(180L)
@@ -182,14 +197,17 @@ object OeaThumbnails {
                 val key = keyFor(uri, px, radius)
                 if (memory.get(key) != null) return@forEach
                 val file = diskFile(app, key)
-                if (readDisk(file) == null) {
+                val disk = readDisk(file)
+                if (disk == null) {
                     val raw = decode(app, uri, px, video) ?: return@forEach
                     val bitmap = if (radius > 0) roundCorners(raw, radius) else raw
+                    if (bitmap !== raw && !raw.isRecycled) raw.recycle()
                     writeDisk(app, file, bitmap)
                     diskOf[key] = file
                     memory.put(key, bitmap)
                 } else {
-                    memory.put(key, readDisk(file) ?: return@forEach)
+                    diskOf[key] = file
+                    memory.put(key, disk)
                 }
             }
         }
@@ -295,12 +313,14 @@ object OeaThumbnails {
                 (frame.width * scale).toInt().coerceAtLeast(1),
                 (frame.height * scale).toInt().coerceAtLeast(1),
                 true
-            )
-            if (rotate % 360 == 0) sized else runCatching {
+            ).also { if (it !== frame && !frame.isRecycled) frame.recycle() }
+            val rotated = if (rotate % 360 == 0) sized else runCatching {
                 val matrix = android.graphics.Matrix()
                 matrix.postRotate(rotate.toFloat())
                 Bitmap.createBitmap(sized, 0, 0, sized.width, sized.height, matrix, true)
             }.getOrDefault(sized)
+            if (rotated !== sized && !sized.isRecycled) sized.recycle()
+            rotated
         } finally {
             runCatching { if (Build.VERSION.SDK_INT >= 29) retriever.close() else retriever.release() }
         }

@@ -88,15 +88,34 @@ the sender's selection into the rest of the library.
 
 EMAGE/VIP sharing now carries both `EXTRA_STREAM` and `ClipData`, which covers
 older receivers and Android's newer URI-grant path. OEA's copy-to-MediaStore
-and rotate-copy paths use `IS_PENDING` and clean up failed inserts, preventing
+and editor saves use `IS_PENDING` and clean up failed inserts, preventing
 half-written files from being indexed by the launcher or another gallery.
+
+### 4. Editing and accessibility are first-party
+
+`ACTION_EDIT` enters EMAGE's own editor directly. The editor supports crop,
+rotation, mirror, brightness, contrast and filters, and always writes a new
+copy under `Pictures/EMAGE`; the source is never overwritten. Its action rails
+scroll on narrow screens, sliders expose labels and current values to TalkBack,
+and the crop surface announces what gesture it supports. The viewer and library
+use descriptive image labels, logical focusable controls, live loading/error
+status, and 48 dp touch targets. An optional "open with another app" action is
+still available for deliberate hand-off, but EMAGE does not send ordinary crop,
+rotate or filter work away from OEA.
+
+The media pipeline now isolates malformed provider rows, keeps scan failures
+visible with a retry state, moves OEA-owned deletes to recoverable trash before
+falling back to permanent removal, routes viewer delete confirmations back to
+the viewer, and evicts stale thumbnail disk entries after edits/rescans.
 
 ## Verification checklist
 
 1. Install OEA and check that EMAGE appears with its own icon and label in OEA
    Home, the drawer, Android launcher search, and Settings' app list.
 2. From Files, Messages and another gallery, open a JPEG, PNG, HEIF and a
-   `content://` URI with **Open with EMAGE**. Also test an `ACTION_SEND` share.
+   `content://` URI with **Open with EMAGE**. Test both `ACTION_VIEW` and
+   `ACTION_EDIT`; the latter must open EMAGE's editor directly. Also test an
+   `ACTION_SEND` share.
 3. From a test app, launch `ACTION_PICK image/*` and
    `ACTION_GET_CONTENT image/*`, including `EXTRA_ALLOW_MULTIPLE`; confirm the
    caller receives the selected URI(s) and can read them after EMAGE closes.
@@ -112,7 +131,13 @@ half-written files from being indexed by the launcher or another gallery.
 7. Capture a picture in OEA Camera while EMAGE is open. The content observer
    should update the library without reopening the activity. Kill a write in
    progress and confirm no pending row is displayed.
-8. On a large screen, rotate and resize EMAGE, open a very large library, and
+8. Open the editor on a small phone with TalkBack enabled. Verify the focus
+   order, crop-area announcement, slider values, status announcements, and
+   that every visible action remains at least 48 dp and reachable by touch.
+9. Delete an OEA-owned picture, restore it from Recently deleted, and delete a
+   MediaStore picture through Android's confirmation. Confirm the viewer and
+   grid both refresh only after the system result.
+10. On a large screen, rotate and resize EMAGE, open a very large library, and
    verify the virtual grid remains responsive and the viewer keeps its URI
    grants. Device verification is still required because this checkout has no
    Android emulator or physical device.

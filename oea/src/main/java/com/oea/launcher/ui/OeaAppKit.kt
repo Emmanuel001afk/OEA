@@ -15,6 +15,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -172,7 +173,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         }
         val lead: View? = onBack?.let {
             circleIconButton(R.drawable.oic_arrow_back, "Back", palette.card, palette.text) { it() }
-                .apply { layoutParams = LinearLayout.LayoutParams(dp(42), dp(42)) }
+                .apply { layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)) }
         }
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -201,7 +202,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
     fun AppBar.addAction(iconRes: Int, description: String, active: Boolean = false, onToggle: ((Boolean) -> Unit)? = null, onClick: () -> Unit): View {
         if (onToggle != null) {
             val toggle = OeaIconToggle(context).apply {
-                circleSizeDp = 40
+                circleSizeDp = 48
                 icon = icon(iconRes, if (active) palette.onAccent else palette.text)
                 selectedBg = palette.accent
                 selectedTint = palette.onAccent
@@ -212,11 +213,11 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
                 isEnabled = true
                 onChanged = { onToggle(selected) }
             }
-            actions.addView(toggle, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(6) })
+            actions.addView(toggle, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
             return toggle
         }
         val button = circleIconButton(iconRes, description, palette.card, palette.text) { onClick() }
-        actions.addView(button, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(6) })
+        actions.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
         return button
     }
 
@@ -359,7 +360,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
                         render()
                         onPick?.invoke(id)
                     },
-                    LinearLayout.LayoutParams(-2, dp(34)).apply {
+                    LinearLayout.LayoutParams(-2, dp(48)).apply {
                         marginEnd = dp(6)
                     }
                 )
@@ -839,7 +840,9 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         }
         val allButton = text("All", 13f, palette.accent, OeaType.medium).apply {
             setPadding(dp(10), dp(6), dp(8), dp(6))
+            minimumHeight = dp(48)
             isClickable = true
+            isFocusable = true
             background = ripple(null, 14)
         }
         val bar = LinearLayout(context).apply {
@@ -857,18 +860,23 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             elevation = dpf(10f)
         }
         val count = text("0 selected", 14f, palette.text, OeaType.medium)
-        bar.addView(count, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
-        bar.addView(allButton, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
+        bar.addView(count, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(8) })
+        bar.addView(allButton, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(6) })
         buttons.forEach { (iconRes, label) ->
             actionRow.addView(
                 tonalButton(label, iconRes) { },
-                LinearLayout.LayoutParams(-2, dp(40)).apply { marginEnd = dp(6) }
+                LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(6) }
             )
         }
-        bar.addView(actionRow)
+        val actionScroll = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(actionRow, FrameLayout.LayoutParams(-2, -2))
+        }
+        bar.addView(actionScroll, LinearLayout.LayoutParams(0, -2, 1f))
         bar.addView(
             circleIconButton(R.drawable.oic_close, "Cancel", palette.cardHigh, palette.text) { onCancel() },
-            LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(2) }
+            LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(2) }
         )
         host.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
             setMargins(dp(12), 0, dp(12), dp(12))

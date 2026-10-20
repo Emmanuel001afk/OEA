@@ -44,7 +44,10 @@ class OeaToggle(context: Context) : View(context) {
     }
 
     fun setChecked(checked: Boolean, animate: Boolean = false) {
-        if (checked == isChecked && (animate || progress == if (checked) 1f else 0f)) return
+        if (checked == isChecked && (animate || progress == if (checked) 1f else 0f)) {
+            contentDescription = if (checked) "On" else "Off"
+            return
+        }
         isChecked = checked
         animator?.cancel()
         val target = if (checked) 1f else 0f
@@ -69,14 +72,17 @@ class OeaToggle(context: Context) : View(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        setMeasuredDimension((52 * density).toInt(), (32 * density).toInt())
+        // Keep a comfortable 48 dp accessibility target while retaining the
+        // compact 32 dp switch track inside it.
+        setMeasuredDimension((52 * density).toInt(), (48 * density).toInt())
     }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
-        val h = height.toFloat()
+        val h = (32f * density).coerceAtMost(height.toFloat())
+        val top = (height - h) / 2f
         val stroke = 2 * density
-        rect.set(stroke / 2f, stroke / 2f, w - stroke / 2f, h - stroke / 2f)
+        rect.set(stroke / 2f, top + stroke / 2f, w - stroke / 2f, top + h - stroke / 2f)
         trackPaint.color = OeaTheme.blend(trackOff, accent, progress)
         canvas.drawRoundRect(rect, h / 2f, h / 2f, trackPaint)
         if (progress < 1f) {
@@ -88,6 +94,6 @@ class OeaToggle(context: Context) : View(context) {
         val inset = 16f * density
         val cx = inset + (w - inset * 2) * progress
         thumbPaint.color = OeaTheme.blend(thumbOff, onAccent, progress)
-        canvas.drawCircle(cx, h / 2f, radius, thumbPaint)
+        canvas.drawCircle(cx, height / 2f, radius, thumbPaint)
     }
 }

@@ -221,21 +221,30 @@ object OeaMediaLibrary {
             scanning.set(false)
             val built = result.getOrElse { error ->
                 android.util.Log.w("OeaMediaLibrary", "MediaStore scan failed", error)
-                snapshot ?: Snapshot(
+                val message = error.message ?: error.javaClass.simpleName
+                snapshot?.copy(takenAt = System.currentTimeMillis(), error = message) ?: Snapshot(
                     takenAt = System.currentTimeMillis(),
                     imageAccess = accessFor(context, Kind.IMAGE),
                     videoAccess = accessFor(context, Kind.VIDEO),
                     audioAccess = accessFor(context, Kind.AUDIO),
-                    error = error.message ?: error.javaClass.simpleName
+                    error = message
                 )
             }
             snapshot = built
-            main.post { subscribers.toList().forEach { it.onSnapshot(built) } }
+            main.post {
+                subscribers.toList().forEach { subscriber ->
+                    if (subscribers.contains(subscriber)) subscriber.onSnapshot(built)
+                }
+            }
         }
     }
 
     private fun progress(percent: Int, label: String) {
-        main.post { subscribers.toList().forEach { it.onProgress?.invoke(percent, label) } }
+        main.post {
+            subscribers.toList().forEach { subscriber ->
+                if (subscribers.contains(subscriber)) subscriber.onProgress?.invoke(percent, label)
+            }
+        }
     }
 
     private fun watch(context: Context, kinds: Set<Kind>) {
@@ -431,7 +440,8 @@ object OeaMediaLibrary {
             else col(if (kind == Kind.AUDIO) MediaStore.Audio.Media.DURATION else MediaStore.Video.Media.DURATION)
             val albumCol = if (kind == Kind.AUDIO) col(MediaStore.Audio.Media.ALBUM) else -1
             while (c.moveToNext()) {
-                val id = c.getLong(idCol)
+                runCatching {
+                    val id = c.getLong(idCol)
                 val added = if (addedCol >= 0) c.getLong(addedCol) else 0L
                 val modified = if (modifiedCol >= 0) c.getLong(modifiedCol) else 0L
                 val taken = if (modified > 0L) modified * 1000L else added * 1000L
@@ -458,6 +468,11 @@ object OeaMediaLibrary {
                         systemFavorite = favCol >= 0 && c.getInt(favCol) != 0
                     )
                 )
+                }.onFailure {
+                    // One malformed provider row must not erase every other
+                    // picture from a device's library.
+                    android.util.Log.d("OeaMediaLibrary", "Skipping malformed media row", it)
+                }
             }
         }
         return rows
@@ -580,7 +595,11 @@ object OeaMediaLibrary {
             audio = if (kind == Kind.AUDIO) order(current.audio, sort) else current.audio
         )
         snapshot = rebuilt
-        main.post { subscribers.toList().forEach { it.onSnapshot(rebuilt) } }
+        main.post {
+            subscribers.toList().forEach { subscriber ->
+                if (subscribers.contains(subscriber)) subscriber.onSnapshot(rebuilt)
+            }
+        }
     }
 
     fun order(items: List<Item>, sort: Sort): List<Item> = when (sort) {
@@ -699,8 +718,23 @@ object OeaMediaLibrary {
         val root = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
         val dir = File(root, TRASH_DIR)
         if (!dir.isDirectory && !dir.mkdirs()) return null
-        val target = File(dir, source.name)
+        val target = uniqueFile(dir, source.name)
         return if (runCatching { source.renameTo(target) }.getOrDefault(false)) target.absolutePath else null
+    }
+
+    private fun uniqueFile(dir: File, name: String): File {
+        val first = File(dir, name)
+        if (!first.exists()) return first
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val extension = if (dot > 0) name.substring(dot) else ""
+        var index = 2
+        var candidate: File
+        do {
+            candidate = File(dir, "${stem}_$index$extension")
+            index++
+        } while (candidate.exists() && index < 10_000)
+        return candidate
     }
 
     /** Puts an OEA-owned picture back where it came from. */
@@ -708,11 +742,12 @@ object OeaMediaLibrary {
         val source = record.path?.let { File(it) }?.takeIf { it.isFile } ?: return false
         val dir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
         if (!dir.isDirectory) runCatching { dir.mkdirs() }
-        val target = File(dir, source.name)
+        val target = uniqueFile(dir, record.name)
         val moved = runCatching { source.renameTo(target) }.getOrDefault(false)
         if (moved) {
             removeTrashRecord(context, record.key)
             scanOwnDirectories(context)
+            refresh(context)
         }
         return moved
     }
@@ -812,14 +847,17 @@ object OeaMediaLibrary {
     /** Shares through the system chooser, granting the receiver read access. */
     fun share(context: Context, items: List<Item>, label: String = "Share") {
         if (items.isEmpty()) return
+        val commonType = items.firstOrNull()?.let { first ->
+            if (items.all { it.kind == first.kind }) mimeFor(first) else "*/*"
+        } ?: "*/*"
         val intent = if (items.size == 1) {
             android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = mimeFor(items.first())
+                type = commonType
                 putExtra(android.content.Intent.EXTRA_STREAM, items.first().uri)
             }
         } else {
             android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-                type = "image/*"
+                type = commonType
                 putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(items.map { it.uri }))
             }
         }
@@ -873,11 +911,22 @@ object OeaMediaLibrary {
     fun deleteOwnedNow(context: Context, items: List<Item>): Int {
         var deleted = 0
         items.filter { it.local }.forEach { item ->
-            val ok = runCatching { context.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false) ||
-                runCatching { item.localPath?.let(::File)?.takeIf { it.isFile }?.delete() == true }.getOrDefault(false)
-            if (ok) {
-                recordDeletion(context, item)
+            // Move first so OEA-owned pictures remain recoverable. The old order
+            // deleted the FileProvider target and only then tried to move it to
+            // trash, which made every local delete permanently destructive.
+            recordDeletion(context, item)
+            loadTrash(context)
+            val record = trash[item.key]
+            if (record?.recoverable == true) {
                 deleted++
+            } else {
+                val removed = runCatching { context.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false) ||
+                    runCatching { item.localPath?.let(::File)?.takeIf { it.isFile }?.delete() == true }.getOrDefault(false)
+                if (removed) {
+                    trash[item.key] = TrashRecord(item.key, item.name, item.album, System.currentTimeMillis(), null)
+                    storeTrash(context)
+                    deleted++
+                }
             }
         }
         if (deleted > 0) refresh(context)

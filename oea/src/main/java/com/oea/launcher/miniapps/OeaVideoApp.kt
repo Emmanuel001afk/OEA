@@ -22,6 +22,7 @@ import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaThumbnails
 import com.oea.launcher.ui.OeaType
+import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,11 +48,11 @@ import java.util.Locale
  */
 object OeaVideoApp {
 
-    private var active: VipScreen? = null
+    private var active: WeakReference<VipScreen>? = null
 
     fun build(host: Activity, palette: OeaPalette): View {
         val screen = VipScreen(host, palette)
-        active = screen
+        active = WeakReference(screen)
         screen.attach()
         return screen.root
     }
@@ -87,6 +88,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     private val continueList = kit.rail(kit.dp(10))
     private var stateCard: View? = null
     private var progressRow: View? = null
+    private var accessRow: View? = null
     private val snack = kit.snack(root)
 
     private enum class Surface { VIDEOS, ALBUMS, PLAYLISTS, AUDIO, CONTINUE }
@@ -165,7 +167,8 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             handleResult(requestCode, resultCode, data)
         }
         host.miniResultHook = resultHook
-        host.miniPermissionHook = { OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO)) }
+        val permissionHook: () -> Unit = { OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO)) }
+        host.miniPermissionHook = permissionHook
         root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) = Unit
 
@@ -174,7 +177,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 ownedSubscription?.dispose()
                 subscription = null
                 if (host.miniResultHook === resultHook) host.miniResultHook = null
-                host.miniPermissionHook = null
+                if (host.miniPermissionHook === permissionHook) host.miniPermissionHook = null
             }
         })
         openIncoming()
@@ -274,6 +277,30 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         status.visibility = View.VISIBLE
     }
 
+    private fun clearAccessNotice() {
+        accessRow?.let { status.removeView(it) }
+        accessRow = null
+        if (progressRow == null) status.visibility = View.GONE
+    }
+
+    private fun showAccessNotice(built: OeaMediaLibrary.Snapshot) {
+        clearAccessNotice()
+        val isAudioSurface = surface == Surface.AUDIO
+        val access = if (isAudioSurface) built.audioAccess else built.videoAccess
+        if (access == OeaMediaLibrary.Access.FULL) return
+        val partial = access == OeaMediaLibrary.Access.PARTIAL
+        accessRow = kit.banner(
+            status,
+            if (isAudioSurface) R.drawable.oic_music_note else R.drawable.ic_oea_video,
+            if (partial) "Limited ${if (isAudioSurface) "audio" else "video"} access" else "${if (isAudioSurface) "Audio" else "Video"} access is off",
+            if (partial) "VIP is showing only the ${if (isAudioSurface) "audio tracks" else "videos"} you selected in Android. Expand access to see the rest."
+            else "Only OEA-owned media can be shown until Android grants ${if (isAudioSurface) "audio" else "video"} access.",
+            if (partial) OeaKit.Tone.INFO else OeaKit.Tone.WARNING,
+            "Manage access"
+        ) { askPermission() }
+        status.visibility = View.VISIBLE
+    }
+
     private fun rebuild() {
         val built = snapshot
         if (built == null) {
@@ -283,12 +310,14 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             return
         }
         if (built.error != null) {
+            clearAccessNotice()
             showState(R.drawable.oic_warning_fill, "VIP could not read the library", "Android returned an error while reading your media. Your files were not changed.", "Try again") {
                 OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO))
             }
             return
         }
         hideState()
+        showAccessNotice(built)
         when (surface) {
             Surface.VIDEOS -> {
                 val list = currentList()
@@ -331,8 +360,14 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 bar.title.text = "Audio"
                 bar.setSubtitle("${built.audio.size} tracks • ${OeaMediaLibrary.formatSize(built.audio.sumOf { it.size })}")
                 if (built.audio.isEmpty()) {
-                    showState(R.drawable.oic_music_note, "No music or recordings", "VIP plays audio with the same controls: seek, speed, background play, sleep timer.", "Scan again") {
-                        OeaMediaLibrary.refresh(host, setOf(Kind.AUDIO))
+                    if (built.audioAccess != OeaMediaLibrary.Access.FULL) {
+                        showState(R.drawable.oic_music_note, "VIP cannot see audio yet", "Allow audio access and music or recordings on this phone will appear here.", "Manage access") {
+                            askPermission()
+                        }
+                    } else {
+                        showState(R.drawable.oic_music_note, "No music or recordings", "VIP plays audio with the same controls: seek, speed, background play, sleep timer.", "Scan again") {
+                            OeaMediaLibrary.refresh(host, setOf(Kind.AUDIO))
+                        }
                     }
                 }
             }
@@ -746,6 +781,17 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             cover.showStar(OeaMediaLibrary.isFavourite(host, item))
             val at = OeaVipStore.position(host, item.uri)
             cover.showProgress(if (item.durationMs > 0L && at > 0L) at.toFloat() / item.durationMs else 0f)
+            val isSelected = selecting && selected.contains(item.key)
+            cover.markSelected(isSelected)
+            cover.root.isFocusable = true
+            cover.root.contentDescription = buildString {
+                append(item.name.substringBeforeLast('.'))
+                append(" • ${OeaMediaLibrary.formatDuration(item.durationMs)}")
+                if (item.album.isNotBlank()) append(" • ${item.album}")
+                if (isSelected) append(" • selected")
+                append(if (selecting) ". Double tap to select." else ". Double tap to play.")
+            }
+            cover.image.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             cover.root.setOnClickListener {
                 if (selecting) toggleSelected(item) else play(rows, position)
             }
@@ -753,7 +799,6 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 if (!selecting) beginSelection(item) else toggleSelected(item)
                 true
             }
-            cover.markSelected(selecting && selected.contains(item.key))
         }
 
         override fun onViewRecycled(holder: Holder) {
@@ -774,6 +819,9 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             holder.card.meta.text = "${data.count} clips • ${OeaMediaLibrary.formatSize(data.size)}"
             holder.card.badge.text = SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(data.lastTakenAt))
             data.cover?.let { OeaThumbnails.load(holder.card.cover, it.uri, kit.dp(220), true, 0, position) }
+            holder.card.root.isFocusable = true
+            holder.card.root.contentDescription = "Album ${data.name}, ${data.count} ${if (data.count == 1) "clip" else "clips"}. Double tap to open."
+            holder.card.cover.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             holder.card.root.setOnClickListener {
                 album = data.name
                 surface = Surface.VIDEOS
@@ -809,6 +857,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 setPadding(kit.dp(14), kit.dp(12), kit.dp(12), kit.dp(12))
                 background = kit.rounded(palette.card, 20, palette.stroke, 1)
                 isClickable = true
+                isFocusable = true
                 isLongClickable = true
             }
             val badge = kit.iconBadge(R.drawable.oic_layers, palette.accentSoft, palette.onAccentSoft, 42)
@@ -820,7 +869,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             texts.addView(meta)
             row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
             val play = kit.circleIconButton(R.drawable.oic_play_arrow, "Play the playlist", palette.accentSoft, palette.onAccentSoft) {}
-            row.addView(play, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)))
+            row.addView(play, LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)))
             return Holder(row, title, meta, play)
         }
 
@@ -833,6 +882,8 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             holder.title.text = data.name
             holder.meta.text = if (items.isEmpty()) "${data.size} clips • none still on the phone"
             else "${items.size} clips • ${OeaMediaLibrary.formatSize(items.sumOf { it.size })}"
+            holder.row.contentDescription = "Playlist ${data.name}, ${items.size} clips. Double tap for options."
+            holder.play.contentDescription = "Play playlist ${data.name}"
             holder.row.setOnClickListener { playlistActions(data) }
             holder.play.setOnClickListener {
                 if (items.isEmpty()) snack.show("The clips in it are gone") else play(items, 0)
@@ -851,6 +902,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 setPadding(kit.dp(12), kit.dp(9), kit.dp(12), kit.dp(9))
                 background = kit.rounded(palette.card, 18, palette.stroke, 1)
                 isClickable = true
+                isFocusable = true
             }
             val cover = ImageView(host).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
@@ -886,6 +938,8 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             holder.title.text = item.name.substringBeforeLast('.')
             holder.meta.text = "${item.album} • ${OeaMediaLibrary.formatSize(item.size)}"
             holder.duration.text = OeaMediaLibrary.formatDuration(item.durationMs)
+            holder.row.contentDescription = "Audio ${item.name.substringBeforeLast('.')}, ${OeaMediaLibrary.formatDuration(item.durationMs)}. Double tap to play."
+            holder.cover.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             OeaThumbnails.load(holder.cover, item.uri, kit.dp(120), true, 0, position)
             holder.row.setOnClickListener { play(list, position) }
             holder.row.setOnLongClickListener {
@@ -909,6 +963,9 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             holder.card.meta.text = OeaVipStore.watchedLabel(at, item.durationMs)
             holder.card.badge.text = OeaMediaLibrary.formatDuration(item.durationMs - at)
             OeaThumbnails.load(holder.card.cover, item.uri, kit.dp(220), true, 0, position)
+            holder.card.root.isFocusable = true
+            holder.card.root.contentDescription = "Continue ${item.name.substringBeforeLast('.')}, ${OeaVipStore.watchedLabel(at, item.durationMs)}. Double tap to resume."
+            holder.card.cover.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             holder.card.root.setOnClickListener {
                 play(OeaVipStore.continueWatching(host, built.videos).map { it.first }, position)
             }

@@ -9,7 +9,6 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -32,6 +31,7 @@ import com.oea.launcher.ui.OeaThumbnails
 import com.oea.launcher.ui.OeaType
 import com.oea.launcher.ui.OeaZoomImageView
 import androidx.recyclerview.widget.PagerSnapHelper
+import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -48,8 +48,28 @@ import java.util.Locale
  */
 internal object OeaEmageViewer {
 
+    private const val REQUEST_VIEWER_DELETE = 4311
+    private var pendingDeleteViewer: WeakReference<Viewer>? = null
+
     private val WALLPAPER_WORKER = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
         Thread(task, "OeaWallpaperPick").apply { isDaemon = true }
+    }
+    private val DETAILS_WORKER = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "EMAGE-Details").apply { isDaemon = true }
+    }
+
+    /**
+     * The system delete prompt is launched by a dialog rather than EMAGE's grid.
+     * Route its result back to that dialog before the activity's normal grid hook
+     * handles its own delete request.
+     */
+    fun handleResult(host: Activity, requestCode: Int, resultCode: Int): Boolean {
+        if (requestCode != REQUEST_VIEWER_DELETE) return false
+        val viewer = pendingDeleteViewer?.get()
+        pendingDeleteViewer = null
+        if (viewer == null || viewer.host !== host) return true
+        viewer.onSystemDeleteResult(resultCode == Activity.RESULT_OK)
+        return true
     }
 
     /** Opens [items] at [index]. [onChanged] runs after a favourite or a delete. */
@@ -65,14 +85,35 @@ internal object OeaEmageViewer {
 
     /** The details sheet EMAGE's selection bar and viewer both open. */
     fun details(host: Activity, palette: OeaPalette, item: OeaMediaLibrary.Item) {
-        val kit = OeaKit(host, palette)
-        val exif = runCatching { OeaMediaProbe.photo(host, item.uri) }.getOrNull()
+        val hostRef = WeakReference(host)
+        val context = host.applicationContext
+        OeaMediaLibrary.toast(host, "Reading picture details…")
+        DETAILS_WORKER.execute {
+            val exif = runCatching { OeaMediaProbe.photo(context, item.uri) }.getOrNull()
+            val resolution = if (item.hasRealResolution) null else probeResolution(context, item)
+            val activity = hostRef.get() ?: return@execute
+            activity.runOnUiThread {
+                if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
+                renderDetails(activity, OeaKit(activity, palette), item, exif, resolution)
+            }
+        }
+    }
+
+    private fun renderDetails(
+        host: Activity,
+        kit: OeaKit,
+        item: OeaMediaLibrary.Item,
+        exif: OeaMediaProbe.Photo?,
+        probedResolution: String?
+    ) {
         kit.sheet(item.name, "${item.album} • ${OeaMediaLibrary.formatSize(item.size)}") { panel, _ ->
-            val group = kit.group(panel)
+            val body = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            panel.addView(kit.boundedScroll(body, 0.82f), LinearLayout.LayoutParams(-1, -2))
+            val group = kit.group(body)
             kit.row(group, R.drawable.oic_photo_library, "Taken", OeaMediaLibrary.formatDate(item.takenAt), chevron = false)
             kit.row(group, R.drawable.oic_layers, "Resolution",
                 if (item.hasRealResolution) "${item.width}×${item.height}  •  ${megapixels(item.width, item.height)}"
-                else probeResolution(host, item) ?: "Not recorded", chevron = false)
+                else probedResolution ?: "Not recorded", chevron = false)
             kit.row(group, R.drawable.oic_memory, "File", OeaMediaLibrary.formatSize(item.size), chevron = false)
             kit.row(
                 group, R.drawable.oic_folder, "Album",
@@ -86,8 +127,8 @@ internal object OeaEmageViewer {
                 copy(host, OeaMediaLibrary.pathOf(item), "Path copied")
             }
             if (exif != null && exif.hasCamera) {
-                kit.sectionTitle(panel, "Camera")
-                val camera = kit.group(panel)
+                kit.sectionTitle(body, "Camera")
+                val camera = kit.group(body)
                 kit.row(camera, R.drawable.oic_photo_library, "Camera",
                     listOf(exif.make, exif.model).filter { it.isNotBlank() }.joinToString(" ").ifBlank { "Not recorded" }, chevron = false)
                 if (exif.lens.isNotBlank()) {
@@ -102,8 +143,8 @@ internal object OeaEmageViewer {
                     kit.row(camera, R.drawable.oic_developer_mode, "Processed by", exif.software, chevron = false)
                 }
             }
-            kit.sectionTitle(panel, "Where")
-            val place = kit.group(panel)
+            kit.sectionTitle(body, "Where")
+            val place = kit.group(body)
             if (exif?.hasLocation == true) {
                 kit.row(place, R.drawable.oic_location_on, "Coordinates", exif.locationLabel,
                     value = exif.altitudeMeters?.let { "%.0f m".format(it) }, chevron = false) {
@@ -115,7 +156,7 @@ internal object OeaEmageViewer {
             } else {
                 kit.note(place, "This picture carries no GPS tag. OEA does not add one — and never reads your location for a photo.")
             }
-            kit.note(panel, "Everything here is read from the file itself with Android's EXIF reader. No upload, no lookup, no guess.")
+            kit.note(body, "Everything here is read from the file itself with Android's EXIF reader. No upload, no lookup, no guess.")
         }
     }
 
@@ -138,28 +179,38 @@ internal object OeaEmageViewer {
      */
     fun applyWallpaper(host: Activity, item: OeaMediaLibrary.Item, target: com.oea.launcher.wallpaper.OeaWallpaperStore.Target) {
         OeaMediaLibrary.toast(host, "Preparing ${target.label.lowercase(Locale.getDefault())}…")
+        val hostRef = WeakReference(host)
+        val context = host.applicationContext
         WALLPAPER_WORKER.execute {
-            val metrics = host.resources.displayMetrics
+            val metrics = context.resources.displayMetrics
             val edge = maxOf(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1080)
             val bitmap = runCatching {
                 val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                host.contentResolver.openInputStream(item.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+                context.contentResolver.openInputStream(item.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
                 var sample = 1
                 while (bounds.outWidth / (sample * 2) >= edge && bounds.outHeight / (sample * 2) >= edge) sample *= 2
                 val options = android.graphics.BitmapFactory.Options().apply {
                     inSampleSize = sample
                     inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                 }
-                host.contentResolver.openInputStream(item.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
+                context.contentResolver.openInputStream(item.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
             }.getOrNull()
-            host.runOnUiThread {
-                if (host.isDestroyed) return@runOnUiThread
-                if (bitmap == null) {
-                    OeaMediaLibrary.toast(host, "That picture could not be read")
+            val activity = hostRef.get() ?: run {
+                bitmap?.takeIf { !it.isRecycled }?.recycle()
+                return@execute
+            }
+            activity.runOnUiThread {
+                if (activity.isDestroyed) {
+                    bitmap?.takeIf { !it.isRecycled }?.recycle()
                     return@runOnUiThread
                 }
-                com.oea.launcher.wallpaper.OeaWallpaperStore.applyBitmap(host, bitmap, target) { result ->
-                    OeaMediaLibrary.toast(host, if (result is OeaWallpaperStore.Result.Failed) result.why else result.message)
+                if (bitmap == null) {
+                    OeaMediaLibrary.toast(activity, "That picture could not be read")
+                    return@runOnUiThread
+                }
+                com.oea.launcher.wallpaper.OeaWallpaperStore.applyBitmap(activity, bitmap, target) { result ->
+                    OeaMediaLibrary.toast(activity, if (result is OeaWallpaperStore.Result.Failed) result.why else result.message)
+                    if (!bitmap.isRecycled) bitmap.recycle()
                 }
             }
         }
@@ -171,9 +222,9 @@ internal object OeaEmageViewer {
         return "%.1f MP".format(mega)
     }
 
-    private fun probeResolution(host: Activity, item: OeaMediaLibrary.Item): String? = runCatching {
+    private fun probeResolution(context: Context, item: OeaMediaLibrary.Item): String? = runCatching {
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        host.contentResolver.openInputStream(item.uri)?.use { stream ->
+        context.contentResolver.openInputStream(item.uri)?.use { stream ->
             android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
         }
         if (bounds.outWidth > 0 && bounds.outHeight > 0) {
@@ -219,6 +270,7 @@ internal object OeaEmageViewer {
         private var position = startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
         private var chromeVisible = true
         private var liveItems = items.toMutableList()
+        private var awaitingSystemDelete = false
 
         private val pager = RecyclerView(host).apply {
             overScrollMode = View.OVER_SCROLL_NEVER
@@ -246,11 +298,16 @@ internal object OeaEmageViewer {
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0x99000000.toInt())
         }
+        private val bottomScroll = android.widget.HorizontalScrollView(host).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(bottomBar, FrameLayout.LayoutParams(-2, -2))
+        }
         private val root = FrameLayout(host).apply {
             setBackgroundColor(Color.BLACK)
             addView(pager, FrameLayout.LayoutParams(-1, -1))
             addView(topBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-            addView(bottomBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            addView(bottomScroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         }
 
         private val hideChrome = Runnable { if (chromeVisible) setChrome(false) }
@@ -278,13 +335,19 @@ internal object OeaEmageViewer {
             titles.addView(counter, LinearLayout.LayoutParams(-1, -2))
             titles.addView(albumLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(1) })
             topBar.addView(kit.circleIconButton(R.drawable.oic_close, "Close", 0x33FFFFFF, Color.WHITE) { dialog.dismiss() },
-                LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { marginEnd = kit.dp(8) })
+                LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { marginEnd = kit.dp(8) })
             topBar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
             topBar.addView(kit.circleIconButton(R.drawable.oic_more_vert, "More", 0x33FFFFFF, Color.WHITE) { more() },
-                LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { marginStart = kit.dp(6) })
+                LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { marginStart = kit.dp(6) })
             buildActions()
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setContentView(root)
+            dialog.setOnDismissListener {
+                handler.removeCallbacksAndMessages(null)
+                if (!awaitingSystemDelete && pendingDeleteViewer?.get() === this@Viewer) {
+                    pendingDeleteViewer = null
+                }
+            }
             dialog.window?.apply {
                 setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.BLACK))
                 addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
@@ -324,8 +387,10 @@ internal object OeaEmageViewer {
                 isClickable = true
                 isFocusable = true
                 setPadding(kit.dp(6), kit.dp(7), kit.dp(6), kit.dp(6))
+                minimumHeight = kit.dp(48)
                 background = kit.ripple(null, 12)
                 contentDescription = label
+                minimumWidth = kit.dp(56)
                 setOnClickListener { onClick() }
             }
             cell.addView(kit.iconView(icon, Color.WHITE, 21))
@@ -339,7 +404,10 @@ internal object OeaEmageViewer {
                     setPadding(0, kit.dp(2), 0, 0)
                 }
             )
-            bottomBar.addView(cell, LinearLayout.LayoutParams(0, -2, 1f))
+            bottomBar.addView(cell, LinearLayout.LayoutParams(-2, kit.dp(58)).apply {
+                marginStart = kit.dp(2)
+                marginEnd = kit.dp(2)
+            })
         }
 
         private fun current(): OeaMediaLibrary.Item = liveItems[position.coerceIn(0, (liveItems.size - 1).coerceAtLeast(0))]
@@ -420,129 +488,16 @@ internal object OeaEmageViewer {
             val item = current()
             kit.sheet("Edit", item.name) { panel, dialog ->
                 val group = kit.group(panel)
-                kit.row(group, R.drawable.oic_edit, "Crop, rotate and filters", "Built-in editor • saves an edited copy") {
+                kit.row(group, R.drawable.oic_edit, "Crop, rotate, mirror and filters", "Built into EMAGE • always saves a separate edited copy") {
                     dialog.dismiss()
                     OeaEmageEditor.open(host, item) { onChanged() }
-                }
-                kit.row(group, R.drawable.oic_refresh, "Rotate right", "Saved into the picture itself") {
-                    dialog.dismiss()
-                    rotateAndSave(item)
-                }
-                kit.row(group, R.drawable.oic_open_in_new, "Open in an editor", "The phone's own editor, with crop and filters") {
-                    dialog.dismiss()
-                    val started = runCatching {
-                        host.startActivity(
-                            Intent(Intent.ACTION_EDIT).apply {
-                                setDataAndType(item.uri, "image/*")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                            }
-                        )
-                    }.isSuccess
-                    if (!started) OeaMediaLibrary.toast(host, "This phone has no editor for pictures")
                 }
                 kit.row(group, R.drawable.oic_open_in_full, "Set as wallpaper", "Android crops that to fit by itself") {
                     dialog.dismiss()
                     wallpaperMenu()
                 }
-                kit.note(panel, "EMAGE saves a rotation straight into the file, so every app sees it turned. For crop and filters, the phone's own editor does it best — EMAGE sends the picture there unchanged.")
+                kit.note(panel, "Your original stays untouched. EMAGE does the crop, rotation, mirror, brightness, contrast and filters here, then publishes the result to Pictures/EMAGE.")
             }
-        }
-
-        /**
-         * Rotates the picture 90° and writes it back into the file
-         * itself. Where Android will not let EMAGE overwrite the
-         * original (a read-only grant from another app), a rotated
-         * copy is published into Pictures instead — a real result,
-         * never a silent failure.
-         */
-        private fun rotateAndSave(item: OeaMediaLibrary.Item) {
-            OeaMediaLibrary.toast(host, "Rotating…")
-            WALLPAPER_WORKER.execute {
-                val outcome = runCatching {
-                    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    host.contentResolver.openInputStream(item.uri)?.use {
-                        android.graphics.BitmapFactory.decodeStream(it, null, bounds)
-                    }
-                    var sample = 1
-                    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 4096) sample *= 2
-                    val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-                    val src = host.contentResolver.openInputStream(item.uri)?.use {
-                        android.graphics.BitmapFactory.decodeStream(it, null, opts)
-                    } ?: return@runCatching false
-                    val matrix = android.graphics.Matrix().apply { postRotate(90f) }
-                    val rotated = android.graphics.Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
-                    if (rotated !== src) src.recycle()
-                    val isPng = item.name.substringAfterLast('.', "").lowercase() == "png"
-                    val format = if (isPng) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG
-                    val overwritten = runCatching {
-                        host.contentResolver.openOutputStream(item.uri)?.use { out ->
-                            rotated.compress(format, 95, out)
-                        } ?: false
-                    }.getOrDefault(false)
-                    if (!overwritten) {
-                        val ext = item.name.substringAfterLast('.', "jpg")
-                        val values = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME,
-                                item.name.substringBeforeLast('.') + "_rotated." + ext)
-                            put(android.provider.MediaStore.Images.Media.MIME_TYPE,
-                                if (isPng) "image/png" else "image/jpeg")
-                            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
-                                    android.os.Environment.DIRECTORY_PICTURES)
-                                put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
-                            }
-                        }
-                        val copy = host.contentResolver.insert(
-                            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                        val saved = copy?.let { uri ->
-                            val written = host.contentResolver.openOutputStream(uri)?.use { out ->
-                                rotated.compress(format, 95, out)
-                            } ?: false
-                            if (written && android.os.Build.VERSION.SDK_INT >= 29) {
-                                host.contentResolver.update(uri, android.content.ContentValues().apply {
-                                    put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
-                                }, null, null)
-                            }
-                            written
-                        } ?: false
-                        if (!saved) {
-                            copy?.let { runCatching { host.contentResolver.delete(it, null, null) } }
-                            return@runCatching false
-                        }
-                    }
-                    rotated.recycle()
-                    OeaThumbnails.invalidate(item.uri)
-                    true
-                }
-                val ok = outcome.getOrDefault(false)
-                host.runOnUiThread {
-                    if (ok) {
-                        // The file itself now carries the turn, so
-                        // the on-screen one goes back to straight.
-                        currentZoomView()?.rotation = 0f
-                        OeaMediaLibrary.toast(host, "Rotated and saved")
-                    } else {
-                        // No write access: still turn the view, and
-                        // say plainly that the file is untouched.
-                        rotateInPlace(item)
-                        OeaMediaLibrary.toast(host, "Rotated the view only — Android would not let EMAGE save over that file")
-                    }
-                    onChanged()
-                }
-            }
-        }
-
-        /** Rotates what is on screen even with no editor installed — a real action, not a toast. */
-        private fun rotateInPlace(item: OeaMediaLibrary.Item) {
-            val view = currentZoomView() ?: return
-            view.rotation = (view.rotation + 90f) % 360f
-            OeaMediaLibrary.toast(host, "Rotated the view — an editor is needed to save a rotated file")
-        }
-
-        private fun currentZoomView(): OeaZoomImageView? {
-            val manager = pager.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager ?: return null
-            val holder = manager.findViewByPosition(position)?.let { pager.getChildViewHolder(it) }
-            return (holder as? PageHolder)?.zoom
         }
 
         private fun toggleFavourite() {
@@ -561,35 +516,66 @@ internal object OeaEmageViewer {
                         kit.note(panel, "Tap Delete again to let the system dialog finish this — OEA cannot remove a file another app owns without it.")
                         val group = kit.group(panel)
                         kit.row(group, R.drawable.oic_delete, "Delete with Android's confirm", "Opens the system dialog") {
-                            runCatching {
+                            awaitingSystemDelete = true
+                            currentOrPendingDelete = item
+                            pendingDeleteViewer = WeakReference(this)
+                            val launched = runCatching {
                                 @Suppress("DEPRECATION")
-                                host.startIntentSenderForResult(sender, 4311, null, 0, 0, 0)
+                                host.startIntentSenderForResult(sender, REQUEST_VIEWER_DELETE, null, 0, 0, 0)
+                            }.isSuccess
+                            if (!launched) {
+                                awaitingSystemDelete = false
+                                currentOrPendingDelete = null
+                                if (pendingDeleteViewer?.get() === this) pendingDeleteViewer = null
+                                OeaMediaLibrary.toast(host, "Android could not open its delete confirmation")
+                            } else {
+                                dialog.dismiss()
                             }
-                            dialog.dismiss()
                         }
                     }
                     return@confirm
                 }
-                val deleted = runCatching { host.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false) ||
-                    runCatching { Uri.parse(item.uri.toString()).path?.let { java.io.File(it).delete() } == true }.getOrDefault(false)
+                val deleted = if (item.local) {
+                    OeaMediaLibrary.deleteOwnedNow(host, listOf(item)) > 0
+                } else {
+                    runCatching { host.contentResolver.delete(item.uri, null, null) > 0 }.getOrDefault(false)
+                }
                 if (!deleted) {
                     OeaMediaLibrary.toast(host, "Android would not let this one be deleted")
                     return@confirm
                 }
-                OeaMediaLibrary.recordDeletion(host, item)
-                OeaThumbnails.invalidate(item.uri)
-                val index = liveItems.indexOfFirst { it.key == item.key }
-                if (index >= 0) {
-                    liveItems.removeAt(index)
-                    pager.adapter?.notifyItemRemoved(index)
-                    if (liveItems.isEmpty()) dialog.dismiss() else {
-                        position = index.coerceAtMost(liveItems.lastIndex)
-                        pager.scrollToPosition(position)
-                        paintLabels()
-                    }
-                }
-                onChanged()
+                if (!item.local) OeaMediaLibrary.recordDeletion(host, item)
+                removeDeletedItem(item)
             }
+        }
+
+        fun onSystemDeleteResult(granted: Boolean) {
+            val item = currentOrPendingDelete ?: return
+            awaitingSystemDelete = false
+            currentOrPendingDelete = null
+            if (!granted) {
+                OeaMediaLibrary.toast(host, "Delete cancelled")
+                return
+            }
+            OeaMediaLibrary.deleteFinished(host, listOf(item), granted = true)
+            removeDeletedItem(item)
+        }
+
+        private var currentOrPendingDelete: OeaMediaLibrary.Item? = null
+
+        private fun removeDeletedItem(item: OeaMediaLibrary.Item) {
+            OeaThumbnails.invalidate(item.uri)
+            val index = liveItems.indexOfFirst { it.key == item.key }
+            if (index >= 0) {
+                liveItems.removeAt(index)
+                pager.adapter?.notifyItemRemoved(index)
+                if (liveItems.isEmpty()) dialog.dismiss() else {
+                    position = index.coerceAtMost(liveItems.lastIndex)
+                    pager.scrollToPosition(position)
+                    paintLabels()
+                }
+            }
+            onChanged()
         }
 
         private inner class PageHolder(val frame: FrameLayout, val zoom: OeaZoomImageView, val loader: View) :
@@ -662,6 +648,7 @@ internal object OeaEmageViewer {
         private var image: OeaZoomImageView? = null
         private var label: TextView? = null
         private var state: TextView? = null
+        private var pauseButton: TextView? = null
 
         fun show() {
             val root = FrameLayout(host).apply { setBackgroundColor(Color.BLACK) }
@@ -684,22 +671,44 @@ internal object OeaEmageViewer {
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             label = title
-            bar.addView(title, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = kit.dp(10) })
-            bar.addView(kit.quietButton("Prev") { step(-1) }.apply { setTextColor(Color.WHITE) })
-            bar.addView(kit.quietButton("Pause") { toggle() }.apply {
+            bar.addView(title, LinearLayout.LayoutParams(0, -2, 0.38f).apply { marginEnd = kit.dp(8) })
+            val controls = LinearLayout(host).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            controls.addView(kit.quietButton("Prev") { step(-1) }.apply {
                 setTextColor(Color.WHITE)
+                minimumHeight = kit.dp(48)
+                contentDescription = "Previous picture"
+            })
+            val pause = kit.quietButton("Pause") { toggle() }.apply {
+                setTextColor(Color.WHITE)
+                minimumHeight = kit.dp(48)
+                contentDescription = "Pause slideshow"
+                setPadding(kit.dp(14), kit.dp(9), kit.dp(14), kit.dp(9))
+            }
+            pauseButton = pause
+            controls.addView(pause, LinearLayout.LayoutParams(-2, -2).apply { marginStart = kit.dp(6) })
+            controls.addView(kit.quietButton("Next") { step(1) }.apply {
+                setTextColor(Color.WHITE)
+                minimumHeight = kit.dp(48)
+                contentDescription = "Next picture"
                 setPadding(kit.dp(14), kit.dp(9), kit.dp(14), kit.dp(9))
             }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = kit.dp(6) })
-            bar.addView(kit.quietButton("Next") { step(1) }.apply {
+            controls.addView(kit.quietButton("Speed") { speed() }.apply {
                 setTextColor(Color.WHITE)
+                minimumHeight = kit.dp(48)
+                contentDescription = "Change slideshow speed"
                 setPadding(kit.dp(14), kit.dp(9), kit.dp(14), kit.dp(9))
             }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = kit.dp(6) })
-            bar.addView(kit.quietButton("Speed") { speed() }.apply {
-                setTextColor(Color.WHITE)
-                setPadding(kit.dp(14), kit.dp(9), kit.dp(14), kit.dp(9))
-            }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = kit.dp(6) })
-            bar.addView(kit.circleIconButton(R.drawable.oic_close, "Stop", 0x33FFFFFF, Color.WHITE) { close() },
-                LinearLayout.LayoutParams(kit.dp(38), kit.dp(38)).apply { marginStart = kit.dp(8) })
+            controls.addView(kit.circleIconButton(R.drawable.oic_close, "Stop", 0x33FFFFFF, Color.WHITE) { close() },
+                LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { marginStart = kit.dp(8) })
+            val controlsScroll = android.widget.HorizontalScrollView(host).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(controls, FrameLayout.LayoutParams(-2, -2))
+            }
+            bar.addView(controlsScroll, LinearLayout.LayoutParams(0, -2, 0.62f))
             root.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
             val badge = TextView(host).apply {
                 setTextColor(Color.WHITE)
@@ -736,6 +745,10 @@ internal object OeaEmageViewer {
 
         private fun schedule() {
             handler.removeCallbacksAndMessages(null)
+            pauseButton?.apply {
+                text = if (playing) "Pause" else "Play"
+                contentDescription = if (playing) "Pause slideshow" else "Play slideshow"
+            }
             if (!playing) {
                 state?.text = "Paused"
                 return

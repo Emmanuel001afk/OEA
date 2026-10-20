@@ -24,6 +24,7 @@ import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaSpanLookup
 import com.oea.launcher.ui.OeaThumbnails
 import com.oea.launcher.ui.OeaType
+import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,16 +51,16 @@ import java.util.Locale
  */
 object OeaImageApp {
 
-    private var active: EmageScreen? = null
+    private var active: WeakReference<EmageScreen>? = null
 
     fun build(host: Activity, palette: OeaPalette): View {
         val screen = EmageScreen(host, palette)
-        active = screen
+        active = WeakReference(screen)
         screen.attach()
         return screen.root
     }
 
-    fun onTop(): Boolean = active != null
+    fun onTop(): Boolean = active?.get()?.root?.isAttachedToWindow == true
 }
 
 /**
@@ -174,7 +175,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 album = null
                 rebuild()
             },
-            LinearLayout.LayoutParams(kit.dp(30), kit.dp(30)).apply { marginStart = kit.dp(6) }
+            LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { marginStart = kit.dp(6) }
         )
         column.addView(scope, LinearLayout.LayoutParams(-1, -2).apply {
             leftMargin = kit.dp(14)
@@ -240,7 +241,8 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             handleResult(requestCode, resultCode, data)
         }
         host.miniResultHook = resultHook
-        host.miniPermissionHook = { OeaMediaLibrary.refresh(host, setOf(Kind.IMAGE)) }
+        val permissionHook: () -> Unit = { OeaMediaLibrary.refresh(host, setOf(Kind.IMAGE)) }
+        host.miniPermissionHook = permissionHook
         // A screen that is no longer in the window must not keep listening: the
         // host can rebuild this view tree at any moment (theme change, a granted
         // permission), and a stale listener would paint into a dead grid. Only
@@ -254,13 +256,14 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 ownedSubscription?.dispose()
                 subscription = null
                 if (host.miniResultHook === resultHook) host.miniResultHook = null
-                host.miniPermissionHook = null
+                if (host.miniPermissionHook === permissionHook) host.miniPermissionHook = null
             }
         })
         openIncoming()
     }
 
     private fun handleResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (OeaEmageViewer.handleResult(host, requestCode, resultCode)) return true
         if (requestCode == REQUEST_PICKER) {
             if (resultCode != Activity.RESULT_OK) return true
             val uris = dataUris(data)
@@ -300,6 +303,13 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         if (action !in setOf(Intent.ACTION_VIEW, Intent.ACTION_EDIT, Intent.ACTION_ATTACH_DATA, Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return
         intent.putExtra(EXTRA_HANDLED, true)
         val incoming = uris.map(::incomingItem)
+        if (action == Intent.ACTION_EDIT && incoming.size == 1) {
+            // ACTION_EDIT means edit, not merely "show this picture". EMAGE's
+            // own editor can read a temporary grant and always returns a new
+            // Pictures/EMAGE copy without requiring another app.
+            OeaEmageEditor.open(host, incoming.first()) { rebuild() }
+            return
+        }
         val existing = incoming.firstOrNull()?.let { item -> snapshot?.images?.firstOrNull { it.uri == item.uri } }
         // A normal VIEW keeps the surrounding EMAGE library available. Shared
         // streams stay scoped to what the sender actually handed us.
@@ -831,7 +841,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                         kit.setSpan(photoGrid, count)
                         rebuild()
                     },
-                    LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { marginEnd = kit.dp(6) }
+                    LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { marginEnd = kit.dp(6) }
                 )
             }
             columnsRow.setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12))
@@ -844,7 +854,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                         tileShape = ratio
                         rebuild()
                     },
-                    LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { marginEnd = kit.dp(6) }
+                    LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { marginEnd = kit.dp(6) }
                 )
             }
             shapes.setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12))
@@ -910,13 +920,15 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 )
                 val count = built?.imageAlbums?.firstOrNull { it.name == name }?.count ?: 0
                 row.addView(kit.text("$count", 12.5f, palette.textSecondary).apply { setPadding(kit.dp(8), 0, kit.dp(10), 0) })
-                row.addView(
-                    kit.toggle(on) { value ->
-                        if (value) chosen.add(name.lowercase(Locale.getDefault()))
-                        else chosen.remove(name.lowercase(Locale.getDefault()))
-                        row.background = kit.ripple(kit.rounded(if (value) palette.accentSoft else palette.card, 16), 16)
-                    }
-                )
+                lateinit var toggle: com.oea.launcher.ui.OeaToggle
+                toggle = kit.toggle(on) { value ->
+                    if (value) chosen.add(name.lowercase(Locale.getDefault()))
+                    else chosen.remove(name.lowercase(Locale.getDefault()))
+                    toggle.contentDescription = "$name album, ${if (value) "hidden" else "visible"}"
+                    row.background = kit.ripple(kit.rounded(if (value) palette.accentSoft else palette.card, 16), 16)
+                }
+                toggle.contentDescription = "$name album, ${if (on) "hidden" else "visible"}"
+                row.addView(toggle)
                 list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(5) })
             }
             panel.addView(kit.boundedScroll(list, 0.55f))
@@ -989,9 +1001,20 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                         toggleSelected(item)
                         true
                     }
-                    tile.cover.markSelected(selecting && selected.contains(item.key))
-                    tile.cover.showStar(OeaMediaLibrary.isFavourite(host, item))
+                    val isSelected = selecting && selected.contains(item.key)
+                    val isFavourite = OeaMediaLibrary.isFavourite(host, item)
+                    tile.cover.markSelected(isSelected)
+                    tile.cover.showStar(isFavourite)
                     tile.cover.showBadge(if (item.local) "OEA" else null)
+                    tile.cover.root.isFocusable = true
+                    tile.cover.root.contentDescription = buildString {
+                        append(item.name.ifBlank { "Picture" })
+                        if (item.album.isNotBlank()) append(" • ${item.album}")
+                        if (isFavourite) append(" • favourite")
+                        if (isSelected) append(" • selected")
+                        append(if (selecting) ". Double tap to select." else ". Double tap to open.")
+                    }
+                    tile.cover.image.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                     tile.cover.image.scaleType = if (tileShape >= 1f) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
                     OeaThumbnails.load(
                         tile.cover.image,
@@ -1064,6 +1087,9 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             albumData.cover?.let { cover ->
                 OeaThumbnails.load(card.cover, cover.uri, kit.dp(220), false, 0, position)
             }
+            card.root.isFocusable = true
+            card.root.contentDescription = "Album ${albumData.name}, ${albumData.count} ${if (albumData.count == 1) "picture" else "pictures"}. Double tap to open."
+            card.cover.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             card.root.setOnClickListener {
                 album = albumData.name
                 surface = Surface.PHOTOS
@@ -1128,7 +1154,9 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             texts.addView(meta, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(2) })
             row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
             val restore = kit.tonalButton("Restore") { }
-            row.addView(restore, LinearLayout.LayoutParams(-2, kit.dp(38)).apply { marginStart = kit.dp(10) })
+            restore.contentDescription = "Restore deleted picture"
+            restore.minimumHeight = kit.dp(48)
+            row.addView(restore, LinearLayout.LayoutParams(-2, kit.dp(48)).apply { marginStart = kit.dp(10) })
             return Holder(row, name, meta, restore)
         }
 
@@ -1150,7 +1178,13 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 }
             }
             holder.row.setOnLongClickListener {
-                kit.confirm("Forget this record?", "EMAGE stops remembering this deletion. The picture itself is already gone.", "Forget") {
+                kit.confirm(
+                    if (record.recoverable) "Delete this trashed picture permanently?" else "Forget this record?",
+                    if (record.recoverable) "The picture is still in EMAGE's trash. This permanently removes its bytes and cannot be undone."
+                    else "EMAGE stops remembering this deletion. The picture itself is already gone.",
+                    if (record.recoverable) "Delete permanently" else "Forget",
+                    destructive = record.recoverable
+                ) {
                     OeaMediaLibrary.removeTrashRecord(host, record.key)
                     trashAdapter.notifyDataSetChanged()
                 }
