@@ -19,8 +19,8 @@ import com.oea.launcher.assistant.OeaAssistant
  * valid only while its dialog is open, so it is dropped after two minutes, and
  * the whole watch stops after five minutes or as soon as both values are read.
  *
- * Captured values feed OEA's embedded ADB pairing flow. Ambiguous endpoints
- * are rejected rather than guessed.
+ * Captured values feed OEA's embedded ADB pairing flow. When the main page and
+ * pairing dialog are both present, endpoints are associated by screen position.
  */
 object OeaWirelessPairing {
 
