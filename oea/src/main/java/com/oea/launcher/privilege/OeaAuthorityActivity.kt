@@ -1,12 +1,16 @@
 package com.oea.launcher.privilege
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
 import com.oea.launcher.assistant.OeaAssistant
+import com.oea.launcher.applock.OeaAppFreezer
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -209,6 +213,8 @@ class OeaAuthorityActivity : Activity() {
             }
             addView(statusText)
             addView(button("Test real ADB authority") { testAuthority() })
+            addView(button("Test app suspension + restore") { chooseSuspensionTestApp() })
+            addView(button("Review permission status and repair") { reviewPermissionRepairs() })
             forgetButton = button("Forget endpoint in OEA") {
                 OeaAdbAuthority.forget(this@OeaAuthorityActivity)
                 codeField.setText("")
@@ -286,6 +292,91 @@ class OeaAuthorityActivity : Activity() {
             }
             setBusy(false, message)
             refreshStatus(message)
+        }
+    }
+
+    /** Tests a real Android package suspension and immediately restores the chosen app. */
+    private fun chooseSuspensionTestApp() {
+        if (!OeaAdbAuthority.isSessionReady()) {
+            refreshStatus("Suspension test blocked: reconnect OEA Authority and pass the shell identity test first.")
+            return
+        }
+        val pm = packageManager
+        val apps = runCatching {
+            pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                .filter { app ->
+                    app.packageName != packageName &&
+                        (app.flags and ApplicationInfo.FLAG_SYSTEM) == 0 &&
+                        pm.getLaunchIntentForPackage(app.packageName) != null
+                }
+                .sortedBy { pm.getApplicationLabel(it).toString().lowercase(java.util.Locale.ROOT) }
+        }.getOrDefault(emptyList())
+        if (apps.isEmpty()) {
+            refreshStatus("Suspension test unavailable: no launchable user-installed apps were found.")
+            return
+        }
+        val labels = apps.map { app ->
+            "${pm.getApplicationLabel(app)}  •  ${app.packageName}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Choose a test app")
+            .setMessage("OEA will suspend this app, verify Android's state, then immediately restore it. Choose a non-critical app.")
+            .setItems(labels) { _, which ->
+                val app = apps[which]
+                setBusy(true, "Testing real suspension and restoration for ${app.packageName}…")
+                work.launch {
+                    val outcome = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        val frozen = OeaAppFreezer.setFrozen(this@OeaAuthorityActivity, app.packageName, true)
+                        if (!frozen.success) {
+                            "SUSPEND FAILED/BLOCKED\n${frozen.message}\nBackend: ${frozen.backend}"
+                        } else {
+                            val restored = OeaAppFreezer.setFrozen(this@OeaAuthorityActivity, app.packageName, false)
+                            if (restored.success) {
+                                "PASS — Android suspension was applied and restoration was verified.\nApp: ${app.packageName}\nBackend: ${frozen.backend}\nRestore: ${restored.message}"
+                            } else {
+                                "RESTORE FAILED — Android accepted suspension, but OEA could not verify restoration. Open the app's Android App info and restore/unsuspend it now.\nApp: ${app.packageName}\nFreeze: ${frozen.message}\nRestore: ${restored.message}"
+                            }
+                        }
+                    }
+                    setBusy(false, outcome)
+                    refreshStatus(outcome)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Shows evidence from OEA's existing capability checks; selecting a row invokes its existing repair flow. */
+    private fun reviewPermissionRepairs() {
+        setBusy(true, "Checking permissions and supported repair paths…")
+        work.launch {
+            val findings = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                OeaAccessDoctor.examine(this@OeaAuthorityActivity)
+            }
+            setBusy(false, "Permission check complete. Select a finding to run its existing repair flow.")
+            val labels = findings.map { finding ->
+                "${finding.privilege.name.replace('_', ' ')} — ${finding.state.name.replace('_', ' ')}"
+            }.toTypedArray()
+            AlertDialog.Builder(this@OeaAuthorityActivity)
+                .setTitle("OEA permission diagnostics")
+                .setItems(labels) { _, which ->
+                    val finding = findings[which]
+                    AlertDialog.Builder(this@OeaAuthorityActivity)
+                        .setTitle(finding.privilege.name.replace('_', ' '))
+                        .setMessage("${finding.state.name.replace('_', ' ')}\n\nEvidence: ${finding.evidence}\n\nNext step: ${finding.advice}" +
+                            (finding.command?.let { "\n\nSupported repair command: $it" } ?: "\n\nNo shell repair command is available for this permission."))
+                        .setPositiveButton("Run repair / open Settings") { _, _ ->
+                            OeaPrivileges.grant(this@OeaAuthorityActivity, finding.privilege) { result ->
+                                val message = "${finding.privilege.name.replace('_', ' ')}: ${result.kind.name}\n${result.message}"
+                                refreshStatus(message)
+                                toast(message)
+                            }
+                        }
+                        .setNegativeButton("Close", null)
+                        .show()
+                }
+                .setPositiveButton("Close", null)
+                .show()
         }
     }
 
