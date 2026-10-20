@@ -269,8 +269,36 @@ object OeaMediaLibrary {
             videoAlbums = albums(videos, Kind.VIDEO),
             audioAlbums = albums(audio, Kind.AUDIO),
             takenAt = System.currentTimeMillis(),
-            permissionMissing = kinds.contains(Kind.IMAGE) && images.isEmpty() && !hasOwnFiles(context)
+            permissionMissing = permissionMissing(context, kinds, images, videos, audio)
         )
+    }
+
+    /**
+     * True when a requested collection came back empty because Android has
+     * not granted its media permission yet. EMAGE asks for images and VIP
+     * for videos and audio, so every kind is checked on its own: an empty
+     * collection with the permission granted is simply an empty library,
+     * not a permission problem, and must not offer an "Allow access" card.
+     */
+    private fun permissionMissing(
+        context: Context, kinds: Set<Kind>,
+        images: List<Item>, videos: List<Item>, audio: List<Item>
+    ): Boolean {
+        if (hasOwnFiles(context)) return false
+        fun denied(kind: Kind): Boolean {
+            val permission = if (Build.VERSION.SDK_INT >= 33) when (kind) {
+                Kind.IMAGE -> android.Manifest.permission.READ_MEDIA_IMAGES
+                Kind.VIDEO -> android.Manifest.permission.READ_MEDIA_VIDEO
+                Kind.AUDIO -> android.Manifest.permission.READ_MEDIA_AUDIO
+            } else android.Manifest.permission.READ_EXTERNAL_STORAGE
+            return androidx.core.content.ContextCompat.checkSelfPermission(
+                context, permission
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        val imageMissing = kinds.contains(Kind.IMAGE) && images.isEmpty() && denied(Kind.IMAGE)
+        val videoMissing = kinds.contains(Kind.VIDEO) && videos.isEmpty() && denied(Kind.VIDEO)
+        val audioMissing = kinds.contains(Kind.AUDIO) && audio.isEmpty() && denied(Kind.AUDIO)
+        return imageMissing || videoMissing || audioMissing
     }
 
     /**
