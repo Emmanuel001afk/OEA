@@ -100,7 +100,10 @@ class OeaAssistantService : AccessibilityService() {
             try {
                 val packageName = root.packageName?.toString()
                 if (packageName?.contains("settings", ignoreCase = true) == true) {
-                    pairing.scan(root, packageName)
+                    // Force this root through the scanner: multiple Settings
+                    // windows can be exposed in the same pass, and each may
+                    // contain a different endpoint.
+                    pairing.scan(root, packageName, scanAdditionalWindow = true)
                     scannedSettingsWindow = true
                 }
             } finally {
