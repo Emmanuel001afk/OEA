@@ -162,6 +162,37 @@ object OeaAuthorityEngine {
         Snapshot(System.currentTimeMillis(), Build.VERSION.SDK_INT, identity, caps)
     }
 
+    /**
+     * Synchronous package-suspension API for existing worker-thread callers
+     * such as OEA Freezer. The result is successful only after Android's
+     * per-user package state has been read back and verified.
+     */
+    fun suspendPackageNow(context: Context, packageName: String, suspended: Boolean): Result {
+        if (!PACKAGE_NAME.matches(packageName) || packageName == context.packageName) {
+            return Result(false, "Change package suspension", "Invalid package or OEA itself was selected.", CapabilityId.PACKAGE_SUSPENSION)
+        }
+        if (!OeaAdbAuthority.isSessionReady()) {
+            return Result(false, "Change package suspension", "OEA Wireless Debugging session is not connected.", CapabilityId.WIRELESS_SHELL)
+        }
+        val verb = if (suspended) "suspend" else "unsuspend"
+        val change = OeaAdbAuthority.runShell("cmd package $verb --user 0 $packageName")
+        if (!change.first) return Result(false, "Package $verb", change.second, CapabilityId.PACKAGE_SUSPENSION)
+        val verify = OeaAdbAuthority.runShell("dumpsys package $packageName")
+        val stateLine = Regex("""(?m)^\s*User 0:.*$""").find(verify.second)?.value
+        if (!verify.first || stateLine == null) {
+            return Result(false, "Package $verb", "Android accepted the request but OEA could not verify the per-user state.\n${change.second}\n${verify.second}", CapabilityId.PACKAGE_SUSPENSION)
+        }
+        val actual = Regex("""\bsuspended=true\b""").containsMatchIn(stateLine)
+        val ok = actual == suspended
+        return Result(
+            ok,
+            "Package $verb",
+            if (ok) "Verified state: suspended=$actual\n${change.second}"
+            else "State mismatch: expected suspended=$suspended, observed suspended=$actual",
+            CapabilityId.PACKAGE_SUSPENSION
+        )
+    }
+
     /** Execute one validated internal operation through the shared authority bridge. */
     suspend fun execute(context: Context, request: Request): Result = withContext(Dispatchers.IO) {
         when (request) {
@@ -186,23 +217,7 @@ object OeaAuthorityEngine {
                 val r = OeaAdbAuthority.runShell("dumpsys ${request.service}")
                 Result(r.first, "Inspect ${request.service}", r.second, CapabilityId.SYSTEM_SERVICE_INSPECTION)
             }
-            is Request.SuspendPackage -> {
-                if (!PACKAGE_NAME.matches(request.packageName) || request.packageName == context.packageName) {
-                    return@withContext Result(false, "Change package suspension", "Invalid package or OEA itself was selected.", CapabilityId.PACKAGE_SUSPENSION)
-                }
-                val verb = if (request.suspended) "suspend" else "unsuspend"
-                val change = OeaAdbAuthority.runShell("cmd package $verb --user 0 ${request.packageName}")
-                if (!change.first) return@withContext Result(false, "Package $verb", change.second, CapabilityId.PACKAGE_SUSPENSION)
-                val verify = OeaAdbAuthority.runShell("dumpsys package ${request.packageName}")
-                val stateLine = Regex("""(?m)^\s*User 0:.*$""").find(verify.second)?.value
-                if (!verify.first || stateLine == null) {
-                    Result(false, "Package $verb", "Android accepted the request but OEA could not verify the per-user state.\n${change.second}\n${verify.second}", CapabilityId.PACKAGE_SUSPENSION)
-                } else {
-                    val actual = Regex("""\bsuspended=true\b""").containsMatchIn(stateLine)
-                    val ok = actual == request.suspended
-                    Result(ok, "Package $verb", if (ok) "Verified state: suspended=$actual\n${change.second}" else "State mismatch: expected suspended=${request.suspended}, observed suspended=$actual", CapabilityId.PACKAGE_SUSPENSION)
-                }
-            }
+            is Request.SuspendPackage -> suspendPackageNow(context, request.packageName, request.suspended)
             is Request.ReadAppOps -> {
                 if (!PACKAGE_NAME.matches(request.packageName)) return@withContext Result(false, "Read app-ops", "Invalid package name.", CapabilityId.APP_OPS_INSPECTION)
                 val r = OeaAdbAuthority.runShell("cmd appops get ${request.packageName}")
