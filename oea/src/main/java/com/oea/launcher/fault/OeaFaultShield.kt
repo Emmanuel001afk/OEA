@@ -490,9 +490,10 @@ object OeaFaultShield {
         if (frontIsRecoverableScreen) return
         // Use monotonic elapsed time for the cooldown; wall-clock changes must
         // not disable or flood the Home stall watchdog.
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastStallAt < 30_000L) return
-        lastStallAt = now
+        val elapsedNow = android.os.SystemClock.elapsedRealtime()
+        if (elapsedNow - lastStallAt < 30_000L) return
+        lastStallAt = elapsedNow
+        val now = System.currentTimeMillis()
         val frames = runCatching {
             mainThread.stackTrace.take(5).map { "${it.methodName}(${it.lineNumber})" }
         }.getOrDefault(emptyList())
