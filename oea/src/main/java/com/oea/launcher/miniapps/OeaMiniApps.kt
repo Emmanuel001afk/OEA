@@ -147,21 +147,37 @@ object OeaMiniApps {
      * voice commands, so every one of them lands on the same real application.
      */
     fun launchIntent(context: Context, id: String?): Intent {
+        // Null is the intentional Settings/Home index entry. A misspelled or
+        // stale non-null ID must never silently open that index instead of the
+        // app the user selected.
+        if (id == null) return Intent(context, OeaMiniAppActivity::class.java)
         val app = byId(id)
-        return Intent(context, app?.activity ?: OeaMiniAppActivity::class.java)
+            ?: throw IllegalArgumentException("Unknown OEA mini-app id: $id")
+        return Intent(context, app.activity)
     }
 
     fun open(context: Context, id: String? = null): Boolean = runCatching {
-        if (id != null && !OeaMiniAppSwitches.isOn(context, id)) {
-            android.widget.Toast.makeText(context, "${byId(id)?.label ?: "This mini-app"} is turned off in OEA Settings › Mini-apps", android.widget.Toast.LENGTH_LONG).show()
+        val app = if (id == null) null else byId(id)
+            ?: throw IllegalArgumentException("Unknown OEA mini-app id: $id")
+        if (app != null && !OeaMiniAppSwitches.isOn(context, app.id)) {
+            android.widget.Toast.makeText(context, "${app.label} is turned off in OEA Settings › Mini-apps", android.widget.Toast.LENGTH_LONG).show()
             return@runCatching false
         }
         val intent = launchIntent(context, id)
         if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
         true
-    }.getOrElse {
-        Log.w(TAG, "Mini-app host could not start", it)
+    }.getOrElse { error ->
+        val subsystem = if (id == null) "miniapp:index:launch" else "miniapp:$id:launch"
+        Log.w(TAG, "OEA ${id ?: "mini-app index"} could not start", error)
+        OeaFaultShield.note(subsystem, error)
+        runCatching {
+            android.widget.Toast.makeText(
+                context,
+                if (id == null) "OEA mini-app index could not open." else "${byId(id)?.label ?: id} could not open. OEA recorded the error.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
         false
     }
 
