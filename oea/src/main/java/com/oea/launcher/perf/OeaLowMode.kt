@@ -142,7 +142,9 @@ object OeaLowMode {
         if (apps.isEmpty()) return
         val backend = OeaAppFreezer.backend(context)
         Log.i(TAG, "Low mode suspension: wanted=$wanted apps=${apps.size} backend=$backend tier=${tier(context).id}")
-        if (backend == OeaAppFreezer.Backend.NONE) return
+        if (backend != OeaAppFreezer.Backend.DEVICE_OWNER &&
+            backend != OeaAppFreezer.Backend.ROOT &&
+            backend != OeaAppFreezer.Backend.ADB) return
         apps.forEach { packageName ->
             OeaFaultShield.guard("low-mode:suspend") {
                 val result = OeaAppFreezer.setFrozen(context, packageName, wanted)
@@ -195,7 +197,9 @@ object OeaLowMode {
         }.getOrDefault(false) == true
 
     fun hasDeepLayer(context: Context): Boolean =
-        OeaAppFreezer.backend(context) != OeaAppFreezer.Backend.NONE
+        OeaAppFreezer.backend(context).let {
+            it == OeaAppFreezer.Backend.DEVICE_OWNER || it == OeaAppFreezer.Backend.ROOT || it == OeaAppFreezer.Backend.ADB
+        }
 
     // ---- Device ultra saving detection and mitigation
 

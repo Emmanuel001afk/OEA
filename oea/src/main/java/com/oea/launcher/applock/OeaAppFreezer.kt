@@ -3,14 +3,16 @@ package com.oea.launcher.applock
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import com.oea.launcher.privilege.OeaAdbAuthority
 import java.util.concurrent.TimeUnit
 
 /**
  * Uses only authority Android actually grants OEA. Ordinary Device Admin is
  * detected separately because it cannot suspend arbitrary packages.
  *
- * Two freezing modes exist:
- *  - System freeze (Device Owner or root): Android suspends the package.
+ * Three freezing modes exist:
+ *  - System freeze (Device Owner, root or the OEA Authority wireless bridge):
+ *    Android suspends the package.
  *  - OEA Freeze (every other device, no root/ADB/PC): OEA hibernates the app.
  *    OEA Assistant force-stops it through Android's App info page, which puts
  *    the app in Android's "stopped" state (no background work, alarms or
@@ -18,7 +20,7 @@ import java.util.concurrent.TimeUnit
  *    Home and the drawer until it is unfrozen.
  */
 object OeaAppFreezer {
-    enum class Backend { DEVICE_OWNER, ROOT, DEVICE_ADMIN, NONE }
+    enum class Backend { DEVICE_OWNER, ROOT, ADB, DEVICE_ADMIN, NONE }
     enum class Mode { SYSTEM, OEA }
 
     @Volatile private var rootAvailableCache: Boolean? = null
@@ -29,6 +31,7 @@ object OeaAppFreezer {
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
         if (dpm?.isDeviceOwnerApp(context.packageName) == true) return Backend.DEVICE_OWNER
         if (hasRoot()) return Backend.ROOT
+        if (OeaAdbAuthority.isSessionReady()) return Backend.ADB
         val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
         if (dpm?.isAdminActive(admin) == true) return Backend.DEVICE_ADMIN
         return Backend.NONE
@@ -69,12 +72,33 @@ object OeaAppFreezer {
             return Result(true, if (frozen) "App frozen and verified" else "App restored and verified", Backend.ROOT)
         }
 
+        if (OeaAdbAuthority.isSessionReady()) {
+            val command = if (frozen) "cmd package suspend --user 0 $packageName"
+                else "cmd package unsuspend --user 0 $packageName"
+            val (success, output) = OeaAdbAuthority.runShell(command)
+            if (!success) return Result(false, output.ifBlank { "OEA Authority suspension command failed" }, Backend.ADB)
+            val actual = adbSuspensionState(packageName)
+            if (actual == null || actual != frozen) {
+                return Result(false, "Android did not confirm the requested frozen state through OEA Authority. Nothing was saved.", Backend.ADB)
+            }
+            persist(context, packageName, frozen)
+            return Result(true, if (frozen) "App frozen and verified through OEA Authority" else "App restored and verified through OEA Authority", Backend.ADB)
+        }
+
         val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
         return if (dpm?.isAdminActive(admin) == true) {
-            Result(false, "Device Admin is active, but Android does not let ordinary Device Admin freeze apps. OEA must be provisioned as Device Owner or have root access.", Backend.DEVICE_ADMIN)
+            Result(false, "Device Admin is active, but Android does not let ordinary Device Admin freeze apps. Use Device Owner, root, or pair OEA Authority through Wireless Debugging.", Backend.DEVICE_ADMIN)
         } else {
-            Result(false, "App freezing needs Device Owner or root authority on this Android device.", Backend.NONE)
+            Result(false, "App freezing needs Device Owner, root or OEA Authority on this Android device.", Backend.NONE)
         }
+    }
+
+    /** Reads the suspension state back through the OEA Authority bridge. */
+    private fun adbSuspensionState(packageName: String): Boolean? {
+        val (success, output) = OeaAdbAuthority.runShell("dumpsys package $packageName")
+        if (!success) return null
+        // "suspended=true" appears in dumpsys only while the package is suspended.
+        return Regex("""suspended\s*=\s*(true|false)""").find(output)?.groupValues?.get(1)?.toBooleanStrictOrNull()
     }
 
     fun frozenPackages(context: Context): Set<String> =

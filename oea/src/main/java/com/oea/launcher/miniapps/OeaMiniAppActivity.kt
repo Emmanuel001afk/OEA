@@ -153,6 +153,11 @@ open class OeaMiniAppActivity : Activity() {
 
     override fun onPause() {
         runCatching { pauseHook?.invoke() }
+        // The camera's torch is a hardware state the app owes the
+        // user: leaving the mini-app puts it out, always.
+        if (screenId == "camera") {
+            OeaFaultShield.guard("miniapp:camera:pause") { OeaCameraApp.onHostPaused(this) }
+        }
         super.onPause()
     }
 

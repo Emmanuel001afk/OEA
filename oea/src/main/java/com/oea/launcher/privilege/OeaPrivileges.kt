@@ -347,7 +347,20 @@ object OeaPrivileges {
             return if (verified) Outcome.granted("root")
             else Outcome.unverified("Root accepted the change but Android did not apply it.")
         }
-        // 3. No privileged channel: the user's own tap, verified when they return.
+        // 3. OEA's embedded Wireless Debugging bridge: the same
+        // allowlisted, OEA-scoped commands, then the capability
+        // is read back before anything is claimed.
+        if (OeaAdbAuthority.isSessionReady()) {
+            val command = rootCommand(context, privilege)
+                ?: return Outcome.blocked("Android requires the user to switch this on; no supported repair command exists.")
+            val (success, output) = OeaAdbAuthority.runShell(command)
+            val verified = success && OeaGuard.call("privileges:adb-verify", false) {
+                read(context, privilege) == Grant.GRANTED
+            }
+            return if (verified) Outcome.granted("OEA Authority")
+            else Outcome.unverified(output.ifBlank { "Wireless Debugging accepted the request, but Android did not confirm the permission." })
+        }
+        // 4. No privileged channel: the user's own tap, verified when they return.
         return openAndroidPage(context, privilege)
     }
 
