@@ -208,6 +208,7 @@ class OeaAuthorityActivity : Activity() {
                 setPadding(0, dp(8), 0, dp(12))
             }
             addView(statusText)
+            addView(button("Test real ADB authority") { testAuthority() })
             forgetButton = button("Forget endpoint in OEA") {
                 OeaAdbAuthority.forget(this@OeaAuthorityActivity)
                 codeField.setText("")
@@ -254,6 +255,35 @@ class OeaAuthorityActivity : Activity() {
         work.launch {
             val result = runCatching { OeaAdbAuthority.connect(this@OeaAuthorityActivity, host, port) }
             val message = result.fold({ it }, { "Reconnect failed: ${it.message ?: it.javaClass.simpleName}" })
+            setBusy(false, message)
+            refreshStatus(message)
+        }
+    }
+
+    /**
+     * A successful pairing is not proof that later privileged operations work.
+     * Run a fresh, read-only shell identity probe and show its actual output.
+     */
+    private fun testAuthority() {
+        if (!OeaAdbAuthority.isSessionReady()) {
+            refreshStatus("Test blocked: the shell session is not currently connected. Tap Reconnect first.")
+            return
+        }
+        setBusy(true, "Testing the live ADB shell identity…")
+        work.launch {
+            val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                OeaAdbAuthority.runShell("id")
+            }
+            val message = if (result.first) {
+                val identity = result.second.trim()
+                when {
+                    identity.contains("uid=2000") -> "ADB test passed. Android granted OEA the shell identity (uid=2000):\n$identity"
+                    identity.contains("uid=0") -> "ADB test passed with root identity:\n$identity"
+                    else -> "The command returned, but the identity is unexpected. No privileged action was attempted:\n$identity"
+                }
+            } else {
+                "ADB test failed. OEA could not execute the read-only identity probe:\n${result.second}"
+            }
             setBusy(false, message)
             refreshStatus(message)
         }
