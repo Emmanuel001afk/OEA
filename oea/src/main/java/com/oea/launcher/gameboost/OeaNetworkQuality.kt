@@ -67,6 +67,10 @@ internal class OeaNetworkQualityReader(context: Context) {
         }
         if (changed || now - lastProbeAt >= PROBE_INTERVAL_MS) scheduleProbe(network)
 
+        // Do not keep reporting a previous FAST/MEDIUM/SLOW result while a
+        // fresh reachability check is running. Cellular data can disappear
+        // while Android's validated capability and bandwidth estimate lag.
+        if (probing.get()) return OeaNetworkQuality("CHECKING", link, COLOR_OFFLINE)
         when (probeSucceeded) {
             false -> return OeaNetworkQuality("NO INTERNET", link, COLOR_OFFLINE)
             null -> return OeaNetworkQuality("CHECKING", link, COLOR_OFFLINE)
@@ -133,7 +137,7 @@ internal class OeaNetworkQualityReader(context: Context) {
     private companion object {
         const val FAST_BANDWIDTH_KBPS = 12_000
         const val MEDIUM_BANDWIDTH_KBPS = 2_500
-        const val PROBE_INTERVAL_MS = 15_000L
+        const val PROBE_INTERVAL_MS = 5_000L
         const val PROBE_TIMEOUT_MS = 2_500
         const val PROBE_URL = "https://connectivitycheck.gstatic.com/generate_204"
         const val COLOR_FAST = 0xFF6BE6A5.toInt()
