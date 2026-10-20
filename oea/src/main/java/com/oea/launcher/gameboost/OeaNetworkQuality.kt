@@ -24,20 +24,25 @@ internal data class OeaNetworkQuality(
 )
 
 internal class OeaNetworkQualityReader(context: Context) {
-    private val connectivity = context.applicationContext
-        .getSystemService(ConnectivityManager::class.java)
+    private val appContext = context.applicationContext
+    private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+    private val lock = Any()
+    private val probing = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val executor = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "oea-network-check").apply { isDaemon = true }
+    }
+    @Volatile private var checkedNetwork: android.net.Network? = null
+    @Volatile private var lastProbeAt = 0L
+    @Volatile private var probeSucceeded: Boolean? = null
+    @Volatile private var probeMessage: String = "Checking internet"
 
     fun read(): OeaNetworkQuality = runCatching {
-        val network = connectivity?.activeNetwork
+        val manager = connectivity
+            ?: return OeaNetworkQuality("UNKNOWN", "Unavailable", COLOR_OFFLINE)
+        val network = manager.activeNetwork
             ?: return OeaNetworkQuality("OFFLINE", "Disconnected", COLOR_OFFLINE)
-        val caps = connectivity?.getNetworkCapabilities(network)
+        val caps = manager.getNetworkCapabilities(network)
             ?: return OeaNetworkQuality("OFFLINE", "Disconnected", COLOR_OFFLINE)
-        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
-            !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        ) {
-            return OeaNetworkQuality("LIMITED", "No internet", COLOR_OFFLINE)
-        }
-
         val link = when {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile"
@@ -45,46 +50,97 @@ internal class OeaNetworkQualityReader(context: Context) {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
             else -> "Online"
         }
+        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+            return OeaNetworkQuality("OFFLINE", link, COLOR_OFFLINE)
+        }
+        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+            scheduleProbe(network)
+            return OeaNetworkQuality("NO INTERNET", link, COLOR_OFFLINE)
+        }
+
+        val now = android.os.SystemClock.elapsedRealtime()
+        val changed = checkedNetwork != network
+        if (changed) synchronized(lock) {
+            if (checkedNetwork != network) {
+                checkedNetwork = network
+                lastProbeAt = 0L
+                probeSucceeded = null
+                probeMessage = "Checking internet"
+            }
+        }
+        if (changed || now - lastProbeAt >= PROBE_INTERVAL_MS) scheduleProbe(network)
+
+        when (probeSucceeded) {
+            false -> return OeaNetworkQuality("NO INTERNET", link, COLOR_OFFLINE)
+            null -> return OeaNetworkQuality("CHECKING", link, COLOR_OFFLINE)
+            true -> Unit
+        }
+
+        // Android's bandwidth is an estimate, not measured throughput. Only
+        // show a quality grade after a recent request actually reached the internet.
         val bandwidthKbps = caps.linkDownstreamBandwidthKbps.coerceAtLeast(0)
-        var score = when {
+        val score = when {
             bandwidthKbps >= FAST_BANDWIDTH_KBPS -> 2
             bandwidthKbps >= MEDIUM_BANDWIDTH_KBPS -> 1
-            bandwidthKbps > 0 -> 0
-            else -> -1
+            else -> 0
         }
-
-        // Signal strength is a useful weak-network hint when Android has no
-        // bandwidth estimate. If both are available, use the weaker category.
-        val signalDbm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) caps.signalStrength else Int.MIN_VALUE
-        if (signalDbm in -120..0) {
-            val signalScore = when {
-                signalDbm >= STRONG_SIGNAL_DBM -> 2
-                signalDbm >= FAIR_SIGNAL_DBM -> 1
-                else -> 0
-            }
-            score = if (score < 0) signalScore else minOf(score, signalScore)
-        }
-        if (score < 0) {
-            // Unknown bandwidth with no signal hint: treat as constrained rather
-            // than optimistic — games feel "fast" only when we have evidence.
-            // Ethernet stays fast only when it advertised a real estimate above.
-            score = 0
-        }
-
         when (score) {
-            2 -> OeaNetworkQuality("FAST", link, COLOR_FAST)
-            1 -> OeaNetworkQuality("MEDIUM", link, COLOR_MEDIUM)
-            else -> OeaNetworkQuality("SLOW", link, COLOR_SLOW)
+            2 -> OeaNetworkQuality("FAST*", link, COLOR_FAST)
+            1 -> OeaNetworkQuality("MEDIUM*", link, COLOR_MEDIUM)
+            else -> OeaNetworkQuality("SLOW*", link, COLOR_SLOW)
         }
     }.getOrElse {
         OeaNetworkQuality("UNKNOWN", "Unavailable", COLOR_OFFLINE)
     }
 
+    private fun scheduleProbe(network: android.net.Network) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        synchronized(lock) {
+            if (checkedNetwork != network) {
+                checkedNetwork = network
+                lastProbeAt = 0L
+                probeSucceeded = null
+            }
+            if (probing.get() || now - lastProbeAt < PROBE_INTERVAL_MS) return
+            lastProbeAt = now
+            probeMessage = "Checking internet"
+            if (!probing.compareAndSet(false, true)) return
+        }
+        executor.execute {
+            var success = false
+            try {
+                val connection = network.openConnection(java.net.URL(PROBE_URL)) as java.net.HttpURLConnection
+                try {
+                    connection.requestMethod = "GET"
+                    connection.connectTimeout = PROBE_TIMEOUT_MS
+                    connection.readTimeout = PROBE_TIMEOUT_MS
+                    connection.instanceFollowRedirects = false
+                    connection.useCaches = false
+                    connection.setRequestProperty("Cache-Control", "no-cache")
+                    success = connection.responseCode == 204
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (_: Throwable) {
+                success = false
+            } finally {
+                synchronized(lock) {
+                    if (connectivity?.activeNetwork == network && checkedNetwork == network) {
+                        probeSucceeded = success
+                        probeMessage = if (success) "Internet reachable" else "Internet probe failed"
+                    }
+                    probing.set(false)
+                }
+            }
+        }
+    }
+
     private companion object {
         const val FAST_BANDWIDTH_KBPS = 12_000
         const val MEDIUM_BANDWIDTH_KBPS = 2_500
-        const val STRONG_SIGNAL_DBM = -60
-        const val FAIR_SIGNAL_DBM = -75
+        const val PROBE_INTERVAL_MS = 15_000L
+        const val PROBE_TIMEOUT_MS = 2_500
+        const val PROBE_URL = "https://connectivitycheck.gstatic.com/generate_204"
         const val COLOR_FAST = 0xFF6BE6A5.toInt()
         const val COLOR_MEDIUM = 0xFFFFC96B.toInt()
         const val COLOR_SLOW = 0xFFFF7B7B.toInt()
