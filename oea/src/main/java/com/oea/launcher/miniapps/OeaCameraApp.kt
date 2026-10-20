@@ -59,6 +59,9 @@ import kotlin.math.max
  */
 object OeaCameraApp {
 
+    /** The camera the torch was lit on, so it can be put out again. */
+    @Volatile private var torchCameraId: String? = null
+
     private const val PREFS = "oea_camera_v2"
     private const val KEY_FLASH = "flash"
     private const val KEY_TIMER = "timer"
@@ -353,7 +356,10 @@ object OeaCameraApp {
         flashChip.setOnClickListener {
             flash = FlashMode.values()[(flash.ordinal + 1) % FlashMode.values().size]
             p.edit().putString(KEY_FLASH, flash.name).apply()
-            applyFlash(host, flash, front)
+            val torchReady = applyFlash(host, flash, front)
+            if (flash == FlashMode.TORCH && !torchReady) {
+                android.widget.Toast.makeText(host, "This device has no available rear-camera torch.", android.widget.Toast.LENGTH_SHORT).show()
+            }
             refreshChips()
         }
         timerChip.setOnClickListener {
@@ -726,16 +732,53 @@ object OeaCameraApp {
         }
     }
 
-    private fun applyFlash(ctx: Context, mode: FlashMode, front: Boolean) {
-        if (front) return
-        try {
-            val manager = ctx.getSystemService(CameraManager::class.java) ?: return
-            val id = manager.cameraIdList.firstOrNull() ?: return
-            when (mode) {
-                FlashMode.TORCH -> manager.setTorchMode(id, true)
-                else -> manager.setTorchMode(id, false)
+    /**
+     * Controls the device torch independently of still-photo flash
+     * settings. Some phones list the front camera first, and some
+     * have rear cameras without a flash, so cameraIdList.first()
+     * must never be assumed torch-capable.
+     *
+     * @return true when the torch is (or was) actually under control.
+     */
+    private fun applyFlash(ctx: Context, mode: FlashMode, front: Boolean): Boolean {
+        val manager = runCatching { ctx.getSystemService(CameraManager::class.java) }.getOrNull()
+            ?: return mode != FlashMode.TORCH
+        val activeId = torchCameraId
+        if (activeId != null && (mode != FlashMode.TORCH || front)) {
+            runCatching { manager.setTorchMode(activeId, false) }
+            torchCameraId = null
+        }
+        if (mode != FlashMode.TORCH) return true
+        if (front) return false
+
+        val rearFlashId = runCatching {
+            manager.cameraIdList.firstOrNull { id ->
+                val chars = manager.getCameraCharacteristics(id)
+                chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK &&
+                    chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
             }
-        } catch (_: Throwable) {}
+        }.getOrNull() ?: run {
+            torchCameraId = null
+            return false
+        }
+        return runCatching {
+            manager.setTorchMode(rearFlashId, true)
+            torchCameraId = rearFlashId
+            true
+        }.getOrElse {
+            torchCameraId = null
+            false
+        }
+    }
+
+    /** Ensures the torch never stays lit after leaving Camera. */
+    fun onHostPaused(ctx: Context) {
+        val activeId = torchCameraId ?: return
+        runCatching {
+            val manager = ctx.getSystemService(CameraManager::class.java)
+            if (manager != null) manager.setTorchMode(activeId, false)
+        }
+        torchCameraId = null
     }
 
     private fun applyFilterToBitmap(src: Bitmap, filter: FilterMode): Bitmap {

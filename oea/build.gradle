@@ -64,6 +64,8 @@ dependencies {
     implementation project(":oea-games")
     implementation libs.androidx.core.ktx
     implementation libs.kotlinx.coroutines.android
+    // OEA-owned Wireless Debugging pairing and verified shell transport; no companion app.
+    implementation "com.flyfishxu:kadb:2.1.1"
 
     // EMAGE and VIP show your whole library, not a page of it, so their grids are
     // virtualised (recyclerview) and a picture's details are read from the file
