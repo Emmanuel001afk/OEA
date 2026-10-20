@@ -423,9 +423,9 @@ object OeaFaultShield {
         }
         if (fromThread != null) return fromThread
         val top = error.stackTrace.firstOrNull()?.className.orEmpty()
-        val screenSubsystem = frontScreen?.javaClass?.name?.let {
-            OeaFaultPolicy.subsystemForScreenClassName(it)
-        }
+        val screenSubsystem = if (thread === mainThread) {
+            frontScreen?.javaClass?.name?.let { OeaFaultPolicy.subsystemForScreenClassName(it) }
+        } else null
         if (screenSubsystem != null) return screenSubsystem
         return when {
             top.startsWith("com.oea.launcher.miniapps.") ->
