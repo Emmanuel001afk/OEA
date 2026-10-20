@@ -171,11 +171,11 @@ object OeaFaultPolicy {
     }
 
     /**
-     * Maps a thread to its role. [screenIsGame] is supplied by the caller,
+     * Maps a thread to its role. [screenIsRecoverableOeaScreen] is supplied by the caller,
      * which knows what OEA screen (if any) is in front.
      */
-    fun classify(thread: Thread, mainThread: Thread, screenIsGame: Boolean): ThreadKind = when {
-        thread === mainThread -> if (screenIsGame) ThreadKind.MAIN_SCREEN else ThreadKind.MAIN_HOME
+    fun classify(thread: Thread, mainThread: Thread, screenIsRecoverableOeaScreen: Boolean): ThreadKind = when {
+        thread === mainThread -> if (screenIsRecoverableOeaScreen) ThreadKind.MAIN_SCREEN else ThreadKind.MAIN_HOME
         thread.name.startsWith("GLThread") -> ThreadKind.RENDER
         thread.name.startsWith("oea-") || thread.name.startsWith("Oea") || thread.name.startsWith("DefaultDispatcher") ||
             thread.name.startsWith("kotlinx") || thread.name.contains("AsyncTask") || thread.name.startsWith("pool-") -> ThreadKind.WORKER
