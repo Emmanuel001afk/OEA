@@ -50,4 +50,16 @@ class OeaWirelessPairingTest {
         val p = OeaWirelessPairing.pairing
         assertNotNull(p); assertEquals("066520", p!!.code); assertEquals("192.168.43.215", p.host); assertEquals(44963, p.port)
     }
+
+    @Test fun mismatchedHostsKeepAutoReadArmedForRecovery() {
+        val pair = OeaWirelessPairing.Pairing("123456", "192.168.1.20", 37125, 1_000L)
+        val connection = OeaWirelessPairing.Connection("192.168.1.21", 41235, 1_000L)
+        assertFalse(OeaWirelessPairing.shouldStopWatching(pair, connection))
+    }
+
+    @Test fun matchingHostsAllowAutoReadToFinish() {
+        val pair = OeaWirelessPairing.Pairing("123456", "192.168.1.20", 37125, 1_000L)
+        val connection = OeaWirelessPairing.Connection("192.168.1.20", 41235, 1_000L)
+        assertTrue(OeaWirelessPairing.shouldStopWatching(pair, connection))
+    }
 }

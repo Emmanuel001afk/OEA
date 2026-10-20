@@ -96,12 +96,20 @@ object OeaWirelessPairing {
         if (entries.isEmpty()) return
         val changed = readEntries(entries, now)
         if (changed) OeaAssistant.notifyStateChanged()
-        if (freshPairing() != null && connection != null) {
-            // Both values are in hand: stop watching so nothing else is read.
+
+        // Do not stop on the first two values if Android/OEM exposed different
+        // hosts for the pairing dialog and main page. Keep watching so a later
+        // accessibility tree can correct a transient/mis-associated endpoint.
+        // The activity independently refuses to pair mismatched hosts.
+        if (shouldStopWatching(freshPairing(), connection)) {
             watchUntil = 0L
             OeaAssistant.refreshEventMask()
         }
     }
+
+    /** True only when both fresh values belong to the same reachable phone host. */
+    internal fun shouldStopWatching(pairing: Pairing?, connection: Connection?): Boolean =
+        pairing != null && connection != null && pairing.host == connection.host
 
     /** A text item and its vertical bounds in the Settings accessibility tree. */
     data class Entry(val text: String, val top: Int, val bottom: Int) {
