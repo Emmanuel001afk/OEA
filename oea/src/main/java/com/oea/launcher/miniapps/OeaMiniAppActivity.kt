@@ -178,7 +178,8 @@ open class OeaMiniAppActivity : Activity() {
     override fun onStop() {
         OeaFaultShield.guard(faultOwner("stop")) {
             currentScroll?.let { lastScrollY = it.scrollY }
-            window.decorView.clearAnimation()
+            currentRoot?.animate()?.cancel()
+            currentRoot?.clearAnimation()
         }
         super.onStop()
     }
@@ -216,6 +217,8 @@ open class OeaMiniAppActivity : Activity() {
             pauseHook = null
             resultHook = null
             currentScroll = null
+            currentRoot?.animate()?.cancel()
+            currentRoot = null
         }
         super.onDestroy()
     }
@@ -233,6 +236,7 @@ open class OeaMiniAppActivity : Activity() {
      */
     private var lastScrollY = 0
     private var currentScroll: android.widget.ScrollView? = null
+    private var currentRoot: View? = null
 
     private fun render(keepScroll: Boolean) {
         if (keepScroll) currentScroll?.let { lastScrollY = it.scrollY } else lastScrollY = 0
@@ -243,7 +247,9 @@ open class OeaMiniAppActivity : Activity() {
             // The app owns the whole window: its own app bar, its own scrolling,
             // its own insets. Wrapping a media grid in a settings page is how you
             // get a gallery that scrolls like one long screenshot.
-            setContentView(OeaMiniApps.build(this, app.id, kit))
+            val fullBleedRoot = OeaMiniApps.build(this, app.id, kit)
+            currentRoot = fullBleedRoot
+            setContentView(fullBleedRoot)
             return
         }
         val page = kit.page(
@@ -278,6 +284,7 @@ open class OeaMiniAppActivity : Activity() {
             page.content.addView(body, LinearLayout.LayoutParams(-1, -2))
         }
         setContentView(page.root)
+        currentRoot = page.root
         currentScroll = page.scroll
         if (lastScrollY > 0) page.scroll.post { page.scroll.scrollTo(0, lastScrollY) }
         // A short rise-and-fade: the rebuild is how a mini-app applies a change,
@@ -321,6 +328,7 @@ open class OeaMiniAppActivity : Activity() {
                 setTextColor(textColor)
                 alpha = 0.7f
             })
+            currentRoot = root
             setContentView(root)
         }.onFailure {
             // Nothing else can be done safely; Android's own window background
