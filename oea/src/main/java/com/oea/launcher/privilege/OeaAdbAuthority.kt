@@ -206,9 +206,17 @@ object OeaAdbAuthority {
     }
 
     private fun isAllowedCommand(command: String): Boolean {
-        if (command == "id" || command == "dumpsys package" ||
-            command == "settings put secure accessibility_enabled 1") return true
-        val packageName = "[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+"
+        if (command in setOf(
+                "id", "dumpsys package", "settings put secure accessibility_enabled 1",
+                "pm list packages", "pm list packages -3", "cmd package help", "cmd appops help",
+                "dumpsys activity", "dumpsys appops", "dumpsys battery", "dumpsys connectivity",
+                "dumpsys deviceidle", "dumpsys diskstats", "dumpsys input", "dumpsys meminfo",
+                "dumpsys notification", "dumpsys power", "dumpsys thermalservice",
+                "dumpsys window", "dumpsys wifi", "dumpsys accessibility", "dumpsys cpuinfo"
+            )) return true
+        if (Regex("""getprop [A-Za-z0-9_.-]{1,128}""").matches(command)) return true
+        if (Regex("""cmd appops get [A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+""").matches(command)) return true
+        val packageName = "[A-Za-z0-9_]+(?:\\\\.[A-Za-z0-9_]+)+"
         if (Regex("cmd package (?:suspend|unsuspend) --user 0 $packageName").matches(command) ||
             Regex("dumpsys package $packageName").matches(command)) return true
 
