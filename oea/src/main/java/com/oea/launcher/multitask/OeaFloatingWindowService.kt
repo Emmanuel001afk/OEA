@@ -22,6 +22,8 @@ import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.ScrollView
+import android.widget.LinearLayout
 import com.oea.launcher.R
 import kotlin.math.abs
 
@@ -46,10 +48,11 @@ import kotlin.math.abs
  *      touchable window that does NOT steal focus from the app or
  *      game underneath (FLAG_NOT_FOCUSABLE + FLAG_NOT_TOUCH_MODAL).
  *
- * The service hosts the container only. Whatever the user wants to
- * put inside it is a separate concern: the single content area is
- * a plain FrameLayout, and it is deliberately left empty here so
- * no input method or web view is coupled to this feature.
+ * The service hosts an OEA-owned floating workspace with launchable
+ * app shortcuts. Android does not allow an ordinary app to embed arbitrary
+ * third-party Activities inside an application overlay; those apps open as
+ * normal Android tasks. Select native freeform when actual app-in-window
+ * behaviour is required and supported by the device.
  *
  * THE CONTAINER (vertical stack)
  * ------------------------------
@@ -310,7 +313,6 @@ class OeaFloatingWindowService : AccessibilityService() {
         // ---- content area: the floating workspace itself --------------
         val content = FrameLayout(this).apply {
             id = R.id.oea_floating_content_slot
-            // Placeholder tint so an empty area reads as a workspace.
             setBackgroundColor(0x0AFFFFFF)
         }
         // Fills everything between the title bar and the bottom edge.
@@ -318,6 +320,7 @@ class OeaFloatingWindowService : AccessibilityService() {
             topMargin = dp(42)
             bottomMargin = dp(6)
         })
+        buildWorkspaceContent(content)
 
         // ---- bottom-right resize handle --------------------------------
         val handle = View(this).apply {
@@ -359,6 +362,93 @@ class OeaFloatingWindowService : AccessibilityService() {
         handle.setOnTouchListener(ResizeTouchListener(root))
 
         return root
+    }
+
+    /**
+     * Functional OEA-owned workspace content. Android does not permit an ordinary
+     * app to embed arbitrary third-party Activities in a TYPE_APPLICATION_OVERLAY;
+     * these shortcuts therefore launch their apps as normal Android tasks. For a
+     * real floating third-party app, the native freeform method must be selected.
+     */
+    private fun buildWorkspaceContent(content: FrameLayout) {
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(8), dp(10), dp(28))
+        }
+        body.addView(TextView(this).apply {
+            text = "OEA FLOATING WORKSPACE"
+            setTextColor(0xFF9CCEFF.toInt())
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(4), dp(2), dp(4), dp(6))
+        })
+        body.addView(TextView(this).apply {
+            text = "Choose an app to open. Android opens it as a normal task; use Android freeform for a true floating app window."
+            setTextColor(0xFFD6E2F3.toInt())
+            textSize = 11f
+            setPadding(dp(4), 0, dp(4), dp(8))
+        })
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val launchIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        val apps = runCatching {
+            @Suppress("DEPRECATION")
+            packageManager.queryIntentActivities(launchIntent, 0)
+                .filter { it.activityInfo.packageName != packageName }
+                .distinctBy { it.activityInfo.packageName }
+                .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
+        }.getOrDefault(emptyList())
+        if (apps.isEmpty()) {
+            list.addView(TextView(this).apply {
+                text = "No launchable apps were found. Check Android app visibility and try again."
+                setTextColor(0xFFD6E2F3.toInt())
+                textSize = 12f
+                setPadding(dp(8), dp(12), dp(8), dp(12))
+            })
+        } else {
+            apps.forEach { info ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    isClickable = true
+                    isFocusable = true
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(0x182F80ED)
+                        cornerRadius = dp(10).toFloat()
+                    }
+                    setPadding(dp(8), dp(6), dp(8), dp(6))
+                    contentDescription = "Open ${info.loadLabel(packageManager)} normally"
+                }
+                val icon = ImageView(this).apply {
+                    setImageDrawable(info.loadIcon(packageManager))
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }
+                row.addView(icon, LinearLayout.LayoutParams(dp(34), dp(34)))
+                row.addView(TextView(this).apply {
+                    text = info.loadLabel(packageManager).toString()
+                    setTextColor(0xFFF1F8FF.toInt())
+                    textSize = 13f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(dp(10), 0, 0, 0)
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                row.setOnClickListener {
+                    val intent = packageManager.getLaunchIntentForPackage(info.activityInfo.packageName)
+                    if (intent == null) {
+                        android.widget.Toast.makeText(this, "This app has no launchable activity.", android.widget.Toast.LENGTH_SHORT).show()
+                    } else runCatching {
+                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                    }.onFailure { error ->
+                        android.util.Log.w("OeaFloatingWindow", "Could not launch ${info.activityInfo.packageName}", error)
+                        android.widget.Toast.makeText(this, "Android could not open this app.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(5) })
+            }
+        }
+        val scroll = ScrollView(this).apply { isFillViewport = true; addView(body) }
+        body.addView(list, LinearLayout.LayoutParams(-1, -2))
+        content.addView(scroll, FrameLayout.LayoutParams(-1, -1))
     }
 
     private fun iconButton(res: Int, description: String, onClick: () -> Unit): ImageView = ImageView(this).apply {

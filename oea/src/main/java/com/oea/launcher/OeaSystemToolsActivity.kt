@@ -2548,7 +2548,7 @@ open class OeaSystemToolsActivity : Activity() {
                     "App info / force stop" -> runCatching {
                         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}")))
                     }.onFailure { toast("Android could not open app info.") }
-                    "Open as floating window" -> protectedLaunch(app) { toast(OeaMultitaskLauncher.launchFloating(this, app).message) }
+                    "Open as floating window" -> protectedLaunch(app) { toast(OeaFloatingWindows.launchDefault(this, app).message) }
                     "Split screen with…" -> splitWith(app)
                 }
             }
@@ -2637,7 +2637,7 @@ open class OeaSystemToolsActivity : Activity() {
                 actions.addView(kit.circleIconButton(R.drawable.oic_splitscreen, "Split screen with…", palette.cardHigh, palette.text) { splitWith(app) },
                     LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(8) })
                 actions.addView(kit.circleIconButton(R.drawable.oic_select_window, "Open as floating window", palette.cardHigh, palette.text) {
-                    protectedLaunch(app) { toast(OeaMultitaskLauncher.launchFloating(this, app).message) }
+                    protectedLaunch(app) { toast(OeaFloatingWindows.launchDefault(this, app).message) }
                 }, LinearLayout.LayoutParams(dp(44), dp(44)))
                 card.addView(actions)
                 list.addView(card, LinearLayout.LayoutParams(dp(284), -2).apply { rightMargin = dp(12) })
@@ -3102,6 +3102,22 @@ open class OeaSystemToolsActivity : Activity() {
         }
         kit.sectionTitle(box, "Floating multitask window")
         val floating = kit.group(box)
+        choiceRow(
+            floating, R.drawable.oic_select_window, "Default floating-window method",
+            listOf(
+                OeaFloatingWindows.MODE_NATIVE to "Android freeform",
+                OeaFloatingWindows.MODE_OEA to "OEA floating workspace"
+            ),
+            OeaFloatingWindows.defaultMode(this)
+        ) { mode ->
+            OeaFloatingWindows.setDefaultMode(this, mode)
+            toast(if (mode == OeaFloatingWindows.MODE_NATIVE)
+                "Default: Android freeform. OEA will not silently request its second accessibility service."
+            else
+                "Default: OEA floating workspace. Its accessibility service remains optional and is requested only when you enable this method."
+            )
+            rerender()
+        }
         kit.switchRow(
             floating, R.drawable.oic_select_window,
             "Floating window",
@@ -3122,7 +3138,7 @@ open class OeaSystemToolsActivity : Activity() {
             }
             rerender()
         }
-        kit.note(box, "The window has a title bar you drag to move it and a corner handle you drag to resize it. It never takes focus or touches away from the app underneath, outside its own bounds.")
+        kit.note(box, "OEA floating workspace is a movable/resizable floating app launcher. Tapping an app opens it as a normal Android task; ordinary Android apps cannot be embedded inside this overlay. For a real third-party app window, choose Android freeform above. The OEA accessibility service is requested only when you explicitly enable this workspace.")
         if (OeaAssistant.needsRestrictedSettingsHint() && !OeaAssistant.isEnabled(this)) kit.note(box, OeaAssistant.RESTRICTED_SETTINGS_HINT)
         if (!shell && !owner) {
             kit.note(box, "Two permissions can only be given by Android itself: \"Display over other apps\" and \"Usage access\". The pages above open exactly there, and OEA verifies the result when you come back. A helper app such as Shizuku would not change that — Android reserves these to the user, though root or device owner lets OEA do it alone.")

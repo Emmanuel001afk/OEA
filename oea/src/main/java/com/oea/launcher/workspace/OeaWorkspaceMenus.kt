@@ -731,7 +731,7 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                 panel.addView(k.buttonRow(
                     k.quietButton("Try anyway") {
                         dialog.dismiss()
-                        w.toast(OeaMultitaskLauncher.launchFloating(context, app).message)
+                        w.toast(OeaFloatingWindows.launchDefault(context, app).message)
                     },
                     k.quietButton("OEA floating window") {
                         dialog.dismiss()
@@ -750,7 +750,7 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             }
             return
         }
-        val launch = { w.toast(OeaMultitaskLauncher.launchFloating(context, app).message) }
+        val launch = { w.toast(OeaFloatingWindows.launchDefault(context, app).message) }
         if (OeaAppLockStore.isLocked(context, w.appKey(app))) showUnlockPrompt(app) { launch() } else launch()
     }
 
