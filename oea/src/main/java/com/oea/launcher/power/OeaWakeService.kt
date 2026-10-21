@@ -284,9 +284,16 @@ class OeaWakeService : Service() {
     private fun offGesture() {
         val store = OeaDataStore.get(this)
         val action = store.waveOffAction()
-        Log.i(TAG, "Screen-off gesture recognised -> $action")
+        Log.i(TAG, "Screen-off single-hold gesture recognised -> $action")
         when (action) {
-            "lock" -> OeaPower.lockScreen(this)
+            "lock" -> {
+                val result = OeaPower.lockScreen(this)
+                if (result == OeaPower.LockResult.LOCKED) {
+                    Log.i(TAG, "Screen-off gesture lock request dispatched successfully")
+                } else {
+                    Log.e(TAG, "Screen-off gesture detected, but locking needs setup: enable OEA Assistant or approve Device Admin FORCE_LOCK")
+                }
+            }
             "none" -> Unit
             else -> com.oea.launcher.gesture.OeaGestures.run(this, "wave_off", action)
         }
@@ -309,7 +316,7 @@ class OeaWakeService : Service() {
         val what = listOfNotNull(
             if (OeaPower.waveToWake(this)) "wave" else null,
             if (OeaPower.liftToWake(this) && OeaPower.liftSensor(this) != null) "lift" else null,
-            if (OeaDataStore.get(this).waveOffAction() != "none") "hold-and-wave" else null
+            if (OeaDataStore.get(this).waveOffAction() != "none") "single hold, then uncover" else null
 ).joinToString(" or ").ifEmpty { "nothing" }
         return builder
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
