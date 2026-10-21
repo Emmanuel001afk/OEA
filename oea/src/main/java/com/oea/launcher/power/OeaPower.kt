@@ -136,15 +136,26 @@ object OeaPower {
      * is the fallback; Android may then ask for the PIN on the next unlock.
      */
     fun lockScreen(context: Context): LockResult {
-        if (OeaAssistant.lockScreen()) return LockResult.LOCKED
+        // Accessibility is the primary route: it preserves the normal unlock
+        // experience. Device Admin is used only when its FORCE_LOCK policy is
+        // explicitly active and granted.
+        if (OeaAssistant.lockScreen()) {
+            Log.i(TAG, "Lock request dispatched through OEA Assistant")
+            return LockResult.LOCKED
+        }
+        Log.w(TAG, "OEA Assistant lock action unavailable; connected=${OeaAssistant.isConnected()} enabled=${OeaAssistant.isEnabled(context)}")
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
-        val admin = ComponentName(context, OeaDeviceAdminReceiver::class.java)
         if (dpm != null && deviceAdminCanLock(context)) {
             val locked = runCatching {
                 dpm.lockNow()
                 true
-            }.onFailure { Log.w(TAG, "Device admin lock is not granted (re-activation needed)", it) }.getOrDefault(false)
-            if (locked) return LockResult.LOCKED
+            }.onFailure { Log.e(TAG, "Device Admin lockNow() failed", it) }.getOrDefault(false)
+            if (locked) {
+                Log.i(TAG, "Lock request dispatched through Device Admin")
+                return LockResult.LOCKED
+            }
+        } else {
+            Log.w(TAG, "Device Admin fallback unavailable; active=${deviceAdminActive(context)} forceLockGranted=${deviceAdminCanLock(context)}")
         }
         return LockResult.NEEDS_SETUP
     }

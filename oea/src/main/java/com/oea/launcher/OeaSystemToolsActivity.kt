@@ -87,6 +87,7 @@ open class OeaSystemToolsActivity : Activity() {
         const val EXTRA_SCREEN = "oea_screen"
         private const val REQUEST_CONTACTS = 0x4F59
         private const val REQUEST_ISLAND_OVERLAY = 0x4F5A
+        private const val REQUEST_DEVICE_ADMIN = 0x4F5B
         private const val FREEZER_LIST_FRESH_MS = 30_000L
     }
 
@@ -1083,6 +1084,17 @@ open class OeaSystemToolsActivity : Activity() {
             finishIslandOverlayRequest(cameFromResult = true)
             return
         }
+        if (requestCode == REQUEST_DEVICE_ADMIN) {
+            val canLock = OeaPower.deviceAdminCanLock(this)
+            android.util.Log.i("OeaSystemToolsActivity", "Device Admin result=${resultCode}; active=${OeaPower.deviceAdminActive(this)}; forceLockGranted=${canLock}")
+            toast(
+                if (canLock) "Device Admin authorization confirmed. Screen lock fallback is ready."
+                else if (OeaPower.deviceAdminActive(this)) "Device Admin is active, but Android has not granted screen-lock permission. Open Device admin lock and approve the additional policy."
+                else "Device Admin was not activated. You can retry from Device admin lock."
+            )
+            if (current == "power") rerender()
+            return
+        }
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
     }
@@ -1378,8 +1390,11 @@ open class OeaSystemToolsActivity : Activity() {
 
         kit.sectionTitle(box, "Lock & power")
         group = kit.group(box)
-        kit.row(group, R.drawable.oic_lock, "Lock screen now", if (OeaAssistant.isConnected()) "Like pressing the power key; fingerprint and face unlock keep working" else if (power.deviceAdminCanLock(this)) "Uses OEA's Device admin (Android may ask for your PIN next time)" else "Needs OEA Assistant or Device admin") {
-            if (power.lockScreen(this) == com.oea.launcher.power.OeaPower.LockResult.NEEDS_SETUP) toast("Turn on OEA Assistant below (or Device admin) first.")
+        kit.row(group, R.drawable.oic_lock, "Lock screen now", if (OeaAssistant.isConnected()) "OEA Assistant • normal fingerprint/face unlock" else if (power.deviceAdminCanLock(this)) "Device Admin fallback • Android may ask for PIN" else "Needs OEA Assistant or approved Device Admin screen-lock policy") {
+            if (power.lockScreen(this) == com.oea.launcher.power.OeaPower.LockResult.NEEDS_SETUP) {
+                val assistantEnabled = OeaAssistant.isEnabled(this)
+                toast(if (assistantEnabled) "OEA Assistant is enabled but not connected. Reopen its Accessibility settings, or authorize Device Admin lock below." else "Enable OEA Assistant for the primary lock method, or authorize Device Admin lock below.")
+            }
         }
         kit.row(group, R.drawable.oic_restart_alt, "Power menu", "Android's own menu to power off or restart. Needs OEA Assistant") {
             if (!power.openPowerMenu()) {
@@ -1390,13 +1405,17 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_accessibility_new, "OEA Assistant", if (OeaAssistant.isConnected()) "On" else "Off • needed for lock without PIN and for the power menu") { OeaAssistant.openSetup(this) }
         val adminLock = power.deviceAdminCanLock(this)
         kit.row(group, R.drawable.oic_shield, "Device admin lock", when {
-            adminLock -> "Active • used when OEA Assistant is off"
-            power.deviceAdminActive(this) -> "Active for the Freezer only • tap to also allow locking"
-            else -> "Off • optional fallback for locking"
+            adminLock -> "Authorized • fallback ready when OEA Assistant is unavailable"
+            power.deviceAdminActive(this) -> "Active, but screen-lock policy not approved • tap to authorize"
+            else -> "Not active • tap to open Android's authorization screen"
         }) {
-            if (!adminLock) runCatching { startActivity(power.deviceAdminIntent(this)) }
-                .onFailure { toast("Android didn't open the Device admin screen.") }
-            else toast("Device admin is active. Remove it in Android Settings › Security › Device admin apps.")
+            if (!adminLock) runCatching {
+                startActivityForResult(power.deviceAdminIntent(this), REQUEST_DEVICE_ADMIN)
+            }.onFailure {
+                android.util.Log.e("OeaSystemToolsActivity", "Android Device Admin authorization screen could not be opened", it)
+                toast("Android could not open Device Admin authorization. Check Android Settings › Security › Device admin apps.")
+            }
+            else toast("Device Admin screen-lock permission is already approved.")
         }
         kit.row(group, R.drawable.oic_touch_app, "Double-tap Home", labelFor(dataStore.doubleTapAction(), mapOf("lock" to "Locks the screen", "power_menu" to "Opens the power menu", "quick_controls" to "Opens Quick controls", "drawer" to "Opens the app drawer", "none" to "Off"))) { navigate("gestures") }
 
