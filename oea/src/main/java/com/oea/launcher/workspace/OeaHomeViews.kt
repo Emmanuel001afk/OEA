@@ -98,7 +98,9 @@ class OeaTileView(context: Context) : View(context) {
     private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
     private var downRawX = 0f
     private var downRawY = 0f
+    /** Movement cancels long-press; a tap is cancelled only for a deliberate gesture. */
     private var movedBeyondSlop = false
+    private var tapCancelled = false
     private var longPressed = false
     private var dragStarted = false
     private val longPressRunnable = Runnable {
@@ -282,6 +284,7 @@ class OeaTileView(context: Context) : View(context) {
                 downRawX = event.rawX
                 downRawY = event.rawY
                 movedBeyondSlop = false
+                tapCancelled = false
                 longPressed = false
                 dragStarted = false
                 animatePress(true)
@@ -289,7 +292,9 @@ class OeaTileView(context: Context) : View(context) {
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                val dist = max(abs(event.rawX - downRawX), abs(event.rawY - downRawY))
+                val dx = abs(event.rawX - downRawX)
+                val dy = abs(event.rawY - downRawY)
+                val dist = max(dx, dy)
                 if (longPressed) {
                     if (!dragStarted && dist > touchSlop) {
                         dragStarted = true
@@ -298,11 +303,19 @@ class OeaTileView(context: Context) : View(context) {
                     if (dragStarted) listener?.onTileDragMove(this, event.rawX, event.rawY)
                     return true
                 }
+                // Stop long-press as soon as the finger moves, but do not discard
+                // an ordinary tap for tiny hand drift. Horizontal cancellation
+                // uses the same sensitivity threshold as the parent pager.
                 if (dist > touchSlop && !movedBeyondSlop) {
                     movedBeyondSlop = true
                     removeCallbacks(longPressRunnable)
                     animatePress(false)
                 }
+                val swipeSlop = touchSlop *
+                    com.oea.launcher.data.OeaDataStore.get(context).gestureSlopScale()
+                val deliberateHorizontalSwipe = dx > swipeSlop && dx > dy * 1.1f
+                val deliberateVerticalGesture = dy > touchSlop * 1.5f && dy > dx * 1.1f
+                if (deliberateHorizontalSwipe || deliberateVerticalGesture) tapCancelled = true
                 return true
             }
             MotionEvent.ACTION_UP -> {
@@ -311,9 +324,11 @@ class OeaTileView(context: Context) : View(context) {
                 when {
                     dragStarted -> listener?.onTileDragEnd(this, event.rawX, event.rawY, false)
                     longPressed -> Unit
-                    !movedBeyondSlop -> performClick()
+                    !tapCancelled -> performClick()
                 }
                 longPressed = false
+                movedBeyondSlop = false
+                tapCancelled = false
                 dragStarted = false
                 return true
             }
@@ -322,6 +337,8 @@ class OeaTileView(context: Context) : View(context) {
                 animatePress(false)
                 if (dragStarted) listener?.onTileDragEnd(this, event.rawX, event.rawY, true)
                 longPressed = false
+                movedBeyondSlop = false
+                tapCancelled = false
                 dragStarted = false
                 return true
             }
