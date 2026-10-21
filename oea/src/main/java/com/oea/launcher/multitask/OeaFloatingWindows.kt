@@ -27,6 +27,16 @@ import android.provider.Settings
 object OeaFloatingWindows {
     private const val PREFS = "oea_floating_window"
     private const val KEY_ENABLED = "floating_window_enabled"
+    private const val KEY_DEFAULT_MODE = "floating_window_default_mode"
+
+    /** The selected default is explicit; never silently request the other service as fallback. */
+    const val MODE_NATIVE = "native"
+    const val MODE_OEA = "oea"
+    fun defaultMode(context: Context): String =
+        prefs(context).getString(KEY_DEFAULT_MODE, MODE_NATIVE)?.takeIf { it == MODE_NATIVE || it == MODE_OEA } ?: MODE_NATIVE
+    fun setDefaultMode(context: Context, mode: String) {
+        prefs(context).edit().putString(KEY_DEFAULT_MODE, if (mode == MODE_OEA) MODE_OEA else MODE_NATIVE).apply()
+    }
     private const val KEY_WIDTH = "floating_window_width"
     private const val KEY_HEIGHT = "floating_window_height"
     private const val KEY_X = "floating_window_x"
