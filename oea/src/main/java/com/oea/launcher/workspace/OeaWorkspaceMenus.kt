@@ -731,7 +731,7 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
                 panel.addView(k.buttonRow(
                     k.quietButton("Try anyway") {
                         dialog.dismiss()
-                        w.toast(OeaMultitaskLauncher.launchFloating(context, app).message)
+                        w.toast(OeaFloatingWindows.launchDefault(context, app).message)
                     },
                     k.quietButton("OEA floating window") {
                         dialog.dismiss()
