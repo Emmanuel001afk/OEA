@@ -167,10 +167,13 @@ object OeaAccessDoctor {
                 }
             }
 
-            Privilege.DEVICE_ADMIN -> if (OeaPrivileges.isDeviceAdmin(app)) {
-                Finding(privilege, State.WORKING, "OEA's Device admin is active: the Freezer and the lock fallback work.", "Nothing to do.")
-            } else {
-                Finding(privilege, State.NEEDS_TAP, "Not active.", "Activate OEA's Device admin in Settings › Lock & power — no root and no PC needed.")
+            Privilege.DEVICE_ADMIN -> when {
+                com.oea.launcher.power.OeaPower.deviceAdminCanLock(app) ->
+                    Finding(privilege, State.WORKING, "OEA Device Admin is active and Android confirms the screen-lock policy.", "Nothing to do.")
+                OeaPrivileges.isDeviceAdmin(app) ->
+                    Finding(privilege, State.STALE, "OEA Device Admin is active, but Android has not granted the force-lock policy.", "Open Android Security settings, deactivate OEA's administrator, then return to Lock & power and activate Device Admin again. OEA will not remove the administrator automatically.")
+                else ->
+                    Finding(privilege, State.NEEDS_TAP, "OEA Device Admin is not active.", "Activate OEA Device Admin in Settings › Lock & power — no root and no PC needed.")
             }
 
             Privilege.HOME_ROLE -> if (OeaPrivileges.holdsHomeRole(app)) {
@@ -229,7 +232,7 @@ object OeaAccessDoctor {
      * DeviceAdminReceiver OEA already declares, so the command works without
      * anything extra installed.
      */
-    private val DEVICE_OWNER_RECEIVER = "com.oea.launcher.power.OeaDeviceAdminReceiver"
+    private val DEVICE_OWNER_RECEIVER = "com.oea.launcher.applock.OeaDeviceAdminReceiver"
 
     /**
      * Runs a short check on the main thread and waits for it. Only used for the one
