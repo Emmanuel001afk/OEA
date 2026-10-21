@@ -81,7 +81,7 @@ internal object OeaEmageEditor {
 
         fun show() {
             stage.addView(editorView, FrameLayout.LayoutParams(-1, -1))
-            root.addView(toolbar(listOf("Cancel" to { if (!saving) dialog.dismiss() else status("Please wait for the copy to finish.", announce = true) }, "Rotate left" to { rotate(-90f) }, "Rotate right" to { rotate(90f) }, "Mirror" to { mirror() }, "Crop reset" to { resetCrop() })))
+            root.addView(toolbar(listOf("Cancel" to { if (!saving) dialog.dismiss() else status("Please wait for the copy to finish.", announce = true) }, "↶" to { rotate(-90f) }, "↷" to { rotate(90f) }, "Mirror" to { mirror() }, "Reset crop" to { resetCrop() })))
             root.addView(stage)
             root.addView(message, LinearLayout.LayoutParams(-1, -2))
             root.addView(adjustmentRow("Brightness", -50, 50, 50) { brightness = (it - 50).toFloat(); refreshPreview() })
@@ -440,6 +440,12 @@ internal object OeaEmageEditor {
             private var dragging = false
             private var downX = 0f
             private var downY = 0f
+            // Existing crop edges can be grabbed and refined instead of forcing
+            // the user to redraw the whole selection every time.
+            private var adjustLeft = false
+            private var adjustTop = false
+            private var adjustRight = false
+            private var adjustBottom = false
             private var filter: ColorMatrixColorFilter? = null
 
             fun setBitmap(value: Bitmap) {
@@ -505,18 +511,40 @@ internal object OeaEmageEditor {
                     MotionEvent.ACTION_DOWN -> {
                         downX = event.x.coerceIn(bitmapRect.left, bitmapRect.right)
                         downY = event.y.coerceIn(bitmapRect.top, bitmapRect.bottom)
-                        crop.set(downX, downY, downX, downY)
+                        val handle = dp(28).toFloat()
+                        val hasCrop = !crop.isEmpty && crop.width() >= 12f && crop.height() >= 12f
+                        adjustLeft = hasCrop && kotlin.math.abs(downX - crop.left) <= handle
+                        adjustRight = hasCrop && kotlin.math.abs(downX - crop.right) <= handle
+                        adjustTop = hasCrop && kotlin.math.abs(downY - crop.top) <= handle
+                        adjustBottom = hasCrop && kotlin.math.abs(downY - crop.bottom) <= handle
+                        val nearCrop = hasCrop && downX >= crop.left - handle && downX <= crop.right + handle &&
+                            downY >= crop.top - handle && downY <= crop.bottom + handle
+                        if (!nearCrop) {
+                            crop.set(downX, downY, downX, downY)
+                            adjustLeft = true; adjustTop = true; adjustRight = false; adjustBottom = false
+                        } else {
+                            // If the finger lands inside the selection rather than on an edge,
+                            // start a fresh selection there; edge grabs resize the current crop.
+                            if (!adjustLeft && !adjustRight && !adjustTop && !adjustBottom) {
+                                crop.set(downX, downY, downX, downY)
+                                adjustLeft = true; adjustTop = true; adjustRight = false; adjustBottom = false
+                            }
+                        }
                         dragging = true
                         invalidate()
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> if (dragging) {
-                        crop.set(
-                            min(downX, event.x.coerceIn(bitmapRect.left, bitmapRect.right)),
-                            min(downY, event.y.coerceIn(bitmapRect.top, bitmapRect.bottom)),
-                            max(downX, event.x.coerceIn(bitmapRect.left, bitmapRect.right)),
-                            max(downY, event.y.coerceIn(bitmapRect.top, bitmapRect.bottom))
-                        )
+                        val x = event.x.coerceIn(bitmapRect.left, bitmapRect.right)
+                        val y = event.y.coerceIn(bitmapRect.top, bitmapRect.bottom)
+                        if (adjustLeft) crop.left = min(x, crop.right - 2f)
+                        if (adjustRight) crop.right = max(x, crop.left + 2f)
+                        if (adjustTop) crop.top = min(y, crop.bottom - 2f)
+                        if (adjustBottom) crop.bottom = max(y, crop.top + 2f)
+                        crop.left = crop.left.coerceAtLeast(bitmapRect.left)
+                        crop.top = crop.top.coerceAtLeast(bitmapRect.top)
+                        crop.right = crop.right.coerceAtMost(bitmapRect.right)
+                        crop.bottom = crop.bottom.coerceAtMost(bitmapRect.bottom)
                         invalidate()
                         return true
                     }
