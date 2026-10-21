@@ -2548,7 +2548,7 @@ open class OeaSystemToolsActivity : Activity() {
                     "App info / force stop" -> runCatching {
                         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}")))
                     }.onFailure { toast("Android could not open app info.") }
-                    "Open as floating window" -> protectedLaunch(app) { toast(OeaMultitaskLauncher.launchFloating(this, app).message) }
+                    "Open as floating window" -> protectedLaunch(app) { toast(OeaFloatingWindows.launchDefault(this, app).message) }
                     "Split screen with…" -> splitWith(app)
                 }
             }
@@ -2637,7 +2637,7 @@ open class OeaSystemToolsActivity : Activity() {
                 actions.addView(kit.circleIconButton(R.drawable.oic_splitscreen, "Split screen with…", palette.cardHigh, palette.text) { splitWith(app) },
                     LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(8) })
                 actions.addView(kit.circleIconButton(R.drawable.oic_select_window, "Open as floating window", palette.cardHigh, palette.text) {
-                    protectedLaunch(app) { toast(OeaMultitaskLauncher.launchFloating(this, app).message) }
+                    protectedLaunch(app) { toast(OeaFloatingWindows.launchDefault(this, app).message) }
                 }, LinearLayout.LayoutParams(dp(44), dp(44)))
                 card.addView(actions)
                 list.addView(card, LinearLayout.LayoutParams(dp(284), -2).apply { rightMargin = dp(12) })
