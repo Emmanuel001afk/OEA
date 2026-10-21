@@ -43,6 +43,8 @@ class OeaWakeService : Service() {
     private var sensorManager: SensorManager? = null
     private var proximity: Sensor? = null
     private var lift: Sensor? = null
+    private var accelerometer: Sensor? = null
+    @Volatile private var landscapeOrientation = false
     private var detector: OeaWaveDetector? = null
     private var listening = false
     private var receiverRegistered = false
@@ -57,13 +59,30 @@ class OeaWakeService : Service() {
             val bound = store.waveAction() != "none"
             val offBound = store.waveOffAction() != "none"
             if (inCall() || (!bound && !offBound)) return
-            when (detector?.onReading(covered, SystemClock.elapsedRealtime(), screenOffBound = offBound)) {
+            // Screen-off hold-to-lock is intentionally portrait-only. Keep the
+            // regular wake gesture unchanged; suppress only the OFF action.
+            val result = detector?.onReading(covered, SystemClock.elapsedRealtime(), screenOffBound = offBound)
+            when (if (landscapeOrientation && result == OeaWaveDetector.Result.OFF) OeaWaveDetector.Result.NONE else result) {
                 OeaWaveDetector.Result.ON -> if (bound) wake("wave")
                 OeaWaveDetector.Result.OFF -> if (offBound) offGesture()
                 else -> Unit
             }
         }
 
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    // Read device orientation while screen-off gestures are armed. This avoids
+    // relying on Activity orientation callbacks, which do not run in this service.
+    private val orientationListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.values.size < 2) return
+            val x = event.values[0]
+            val y = event.values[1]
+            // Ignore near-flat readings; retain the last stable orientation.
+            if (kotlin.math.abs(x) + kotlin.math.abs(y) < 3.0f) return
+            landscapeOrientation = kotlin.math.abs(x) > kotlin.math.abs(y)
+        }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
     }
 
@@ -200,6 +219,7 @@ class OeaWakeService : Service() {
         val needProximity = offGestureBound || OeaPower.waveToWake(this) || (OeaPower.liftToWake(this) && OeaPower.pocketGuard(this))
         proximity = if (needProximity) OeaPower.proximitySensor(this) else null
         lift = if (OeaPower.liftToWake(this)) OeaPower.liftSensor(this) else null
+        accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         detector = OeaWaveDetector(OeaPower.sensitivity(this), OeaPower.requireTwoWaves(this), OeaPower.pocketGuard(this))
         val screenOn = getSystemService(PowerManager::class.java)?.isInteractive != false
         stopListening()
@@ -215,6 +235,10 @@ class OeaWakeService : Service() {
         proximity?.let { sensor ->
             runCatching { sm.registerListener(proximityListener, sensor, SensorManager.SENSOR_DELAY_NORMAL) }
                 .onFailure { Log.w(TAG, "Proximity sensor unavailable", it) }
+        }
+        accelerometer?.let { sensor ->
+            runCatching { sm.registerListener(orientationListener, sensor, SensorManager.SENSOR_DELAY_NORMAL) }
+                .onFailure { Log.w(TAG, "Orientation sensor unavailable; landscape guard may be limited", it) }
         }
         armLift()
     }
@@ -233,6 +257,7 @@ class OeaWakeService : Service() {
         listening = false
         val sm = sensorManager ?: return
         runCatching { sm.unregisterListener(proximityListener) }
+        runCatching { sm.unregisterListener(orientationListener) }
         runCatching { sm.unregisterListener(liftListener) }
         lift?.let { sensor -> if (sensor.reportingMode == Sensor.REPORTING_MODE_ONE_SHOT) runCatching { sm.cancelTriggerSensor(liftTrigger, sensor) } }
     }
