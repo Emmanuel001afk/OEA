@@ -170,6 +170,14 @@ class OeaFloatingWindowService : AccessibilityService() {
      *    keyboard input; the overlay is touch-only.
      */
     private fun showWindow(animate: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
+            android.widget.Toast.makeText(
+                this,
+                "Allow Display over other apps for OEA Floating Workspace, then enable it again in OEA Settings.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         if (windowRoot != null) {
             // Already showing; just make sure it is visible.
             windowRoot?.visibility = View.VISIBLE

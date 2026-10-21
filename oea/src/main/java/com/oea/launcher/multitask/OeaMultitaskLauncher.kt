@@ -50,6 +50,13 @@ object OeaMultitaskLauncher {
 
         val freeformAdvertised = pm.hasSystemFeature("android.software.freeform_window_management") ||
             freeformEnabled(context)
+        if (!freeformAdvertised) {
+            return Result(
+                false,
+                "Android freeform windows are off on this phone, so OEA did not launch ${app.label} full screen. Enable Developer options → Enable freeform windows and restart, or explicitly choose OEA Floating Workspace in Multitasking. OEA will not silently switch methods.",
+                false
+            )
+        }
         val bounds = calculateLaunchBounds(context)
             ?: return Result(false, "OEA could not determine the screen size for a floating window.", freeformAdvertised)
 
@@ -66,12 +73,11 @@ object OeaMultitaskLauncher {
             bundle.putInt(KEY_LAUNCH_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
             context.startActivity(launchIntent, bundle)
             val sizeLabel = OeaDataStore.get(context).floatingWindowSize()
-            val message = if (freeformAdvertised) {
-                "Requested a $sizeLabel floating window for ${app.label}. If Android grants freeform, use its system title bar to move and its resize edge/handle to resize; this phone may ignore freeform requests."
-            } else {
-                "${app.label} will open full screen: this phone's manufacturer has freeform windows turned off. To allow floating windows, turn on Developer options → \"Enable freeform windows\" and restart. OEA's own floating window works without freeform — turn it on in Settings › Multitasking. Split screen works on most phones without it."
-            }
-            Result(true, message, freeformAdvertised)
+            Result(
+                true,
+                "Requested a $sizeLabel floating window for ${app.label}. Android/OEM policy can still refuse freeform; if granted, use its system title bar to move and its resize edge/handle to resize.",
+                freeformAdvertised
+            )
         }.getOrElse { error ->
             Result(
                 false,
