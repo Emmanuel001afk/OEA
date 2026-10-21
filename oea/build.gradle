@@ -9,8 +9,8 @@ android {
         applicationId "com.oea.launcher"
         minSdk 26
         targetSdk 36
-        versionCode 8
-        versionName "0.4.0-alpha8"
+        versionCode 9
+        versionName "0.4.0-alpha9"
         // WebRTC ships native code; every current phone is covered by these two ABIs.
         ndk { abiFilters.addAll(["arm64-v8a", "armeabi-v7a"]) }
     }
