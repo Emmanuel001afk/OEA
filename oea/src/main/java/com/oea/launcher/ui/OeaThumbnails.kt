@@ -187,10 +187,17 @@ object OeaThumbnails {
             return
         }
         pool.execute {
-            val bitmap = decode(context, uri, px, video)
+            // Do not use ContentResolver.loadThumbnail here: Android may return
+            // a provider-generated preview even when a larger target is asked
+            // for. That is appropriate for grids, but visibly blurs text in a
+            // full-screen viewer. Decode the image stream at the requested edge.
+            val bitmap = if (video) decodeFrame(context, uri, px) else decodeFullImage(context, uri, px)
             if (bitmap != null) memory.put(key, bitmap)
             handler.post {
-                if (view.tag != want) return@post
+                if (view.tag != want) {
+                    if (bitmap != null && memory.get(key) !== bitmap && !bitmap.isRecycled) bitmap.recycle()
+                    return@post
+                }
                 if (bitmap != null) {
                     view.setImageDrawable(BitmapDrawable(context.resources, bitmap))
                     view.alpha = 0.35f
@@ -295,6 +302,30 @@ object OeaThumbnails {
         }
         return if (video) decodeFrame(context, uri, px) else decodeImage(context, uri, px)
     }
+
+    /**
+     * Full-view image decode. Unlike grid thumbnails this intentionally bypasses
+     * ContentResolver.loadThumbnail and samples only when the source's long edge
+     * exceeds the requested decode edge. ARGB_8888 preserves fine UI/text detail
+     * in screenshots; the grid path remains memory-efficient and unchanged.
+     */
+    private fun decodeFullImage(context: Context, uri: Uri, px: Int): Bitmap? = runCatching {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        var sample = 1
+        while (longest / (sample * 2) >= px) sample *= 2
+        val options = android.graphics.BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            android.graphics.BitmapFactory.decodeStream(stream, null, options)
+        }
+    }.getOrNull()
 
     private fun decodeImage(context: Context, uri: Uri, px: Int): Bitmap? = runCatching {
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
