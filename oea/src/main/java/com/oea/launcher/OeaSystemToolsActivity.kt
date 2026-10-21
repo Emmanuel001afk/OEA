@@ -3102,6 +3102,22 @@ open class OeaSystemToolsActivity : Activity() {
         }
         kit.sectionTitle(box, "Floating multitask window")
         val floating = kit.group(box)
+        choiceRow(
+            floating, R.drawable.oic_select_window, "Default floating-window method",
+            listOf(
+                OeaFloatingWindows.MODE_NATIVE to "Android freeform",
+                OeaFloatingWindows.MODE_OEA to "OEA floating workspace"
+            ),
+            OeaFloatingWindows.defaultMode(this)
+        ) { mode ->
+            OeaFloatingWindows.setDefaultMode(this, mode)
+            toast(if (mode == OeaFloatingWindows.MODE_NATIVE)
+                "Default: Android freeform. OEA will not silently request its second accessibility service."
+            else
+                "Default: OEA floating workspace. Its accessibility service remains optional and is requested only when you enable this method."
+            )
+            rerender()
+        }
         kit.switchRow(
             floating, R.drawable.oic_select_window,
             "Floating window",
