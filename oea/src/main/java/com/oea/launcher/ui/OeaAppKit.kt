@@ -86,6 +86,9 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         val first = (recycler.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition() ?: 0
         (recycler.layoutManager as? GridLayoutManager)?.spanCount = span.coerceAtLeast(1)
         (recycler.tag as? OeaSpacingDecoration)?.setSpanCount(span.coerceAtLeast(1))
+        // Headers must span the new column count, not the one the lookup was
+        // built with — otherwise a row leaves one slot open beside its header.
+        ((recycler.layoutManager as? GridLayoutManager)?.spanSizeLookup as? OeaSpanLookup)?.span = span
         recycler.invalidateItemDecorations()
         if (first > 0) (recycler.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(first, dp(4))
     }
@@ -989,7 +992,17 @@ class OeaRailSpacingDecoration(private val spacing: Int) : RecyclerView.ItemDeco
  * column, a tile takes exactly one. Without this, "grouped by day" would mean an
  * outer ScrollView around a nested grid, which is the layout that janks.
  */
-class OeaSpanLookup(private val span: Int) : GridLayoutManager.SpanSizeLookup() {
+class OeaSpanLookup(initialSpan: Int) : GridLayoutManager.SpanSizeLookup() {
+
+    /**
+     * The live column count. It is writable because the grid's span can change
+     * after creation (EMAGE's Columns sheet); a header must span whatever the
+     * grid currently has, not the count captured when the lookup was built.
+     */
+    var span: Int = initialSpan.coerceAtLeast(1)
+        set(value) {
+            field = value.coerceAtLeast(1)
+        }
 
     /** Which view type each position has, so a header can span the whole row. */
     var typeAt: ((Int) -> Int)? = null

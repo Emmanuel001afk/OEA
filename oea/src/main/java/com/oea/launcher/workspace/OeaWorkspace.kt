@@ -1169,16 +1169,21 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             return candidates.firstNotNullOfOrNull { byPackage[it.activityInfo.packageName]?.firstOrNull() }
         }
         val dock = LinkedHashSet<OeaAppInfo>()
+        // OEA's own picture app owns the dock's gallery slot. Resolving
+        // CATEGORY_APP_GALLERY first hands the slot to whatever gallery Android
+        // happens to return first — Google Photos on most phones — which evicted
+        // EMAGE into the OEA folder and put a stranger in the dock on first run.
+        // Android's gallery identity stays only as the fallback for a build that
+        // somehow ships without EMAGE.
+        val emage = byPackage[context.packageName]
+            ?.firstOrNull { it.className == com.oea.launcher.miniapps.OeaImageActivity::class.java.name }
         listOfNotNull(
             appFor(Intent(Intent.ACTION_DIAL)),
             Telephony.Sms.getDefaultSmsPackage(context)?.let { byPackage[it]?.firstOrNull() },
             appFor(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))),
             appFor(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)),
-            // The category is Android's gallery identity; keep it in the same
-            // resolution path as VIEW so EMAGE is seeded in the dock when it is
-            // the device's selected picture app, without forcing it to be.
-            appFor(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)),
-            appFor(Intent(Intent.ACTION_VIEW).setType("image/*"))
+            emage ?: appFor(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)),
+            emage ?: appFor(Intent(Intent.ACTION_VIEW).setType("image/*"))
 ).forEach { dock += it }
         val oeaApps = visible.filter { it.packageName == context.packageName && it !in dock }
         val rest = visible.filter { it !in dock && it !in oeaApps }

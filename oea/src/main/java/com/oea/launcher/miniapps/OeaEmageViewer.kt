@@ -443,8 +443,11 @@ internal object OeaEmageViewer {
                 if (OeaMediaLibrary.isFavourite(host, item)) append("  •  ★")
                 append("  •  ${SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(item.takenAt))}")
             }
-            if (position + 2 < liveItems.size) {
-                OeaThumbnails.prefetch(host, listOf(liveItems[position + 1].uri, liveItems[position + 2].uri), kit.dp(900))
+            // Warm the pages about to be swiped to, without walking past the end
+            // when only one picture remains ahead.
+            val ahead = listOf(position + 1, position + 2).filter { it < liveItems.size }
+            if (ahead.isNotEmpty()) {
+                OeaThumbnails.prefetch(host, ahead.map { liveItems[it].uri }, kit.dp(900))
             }
         }
 

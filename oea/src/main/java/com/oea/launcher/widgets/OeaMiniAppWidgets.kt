@@ -110,10 +110,21 @@ class OeaNotesWidgetProvider : AppWidgetProvider() {
 class OeaImageWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.oea_widget_notes) // reuse layout for simplicity, real layout would be oea_widget_image
-            val prefs = context.getSharedPreferences("oea_image_v2", Context.MODE_PRIVATE)
-            val count = prefs.getStringSet("favorites", emptySet())?.size ?: 0
-            views.setTextViewText(R.id.notes_content, "EMAGE • ${count} favourites\nTap to open EMAGE\nUnlimited pictures • Albums: Screenshots, Downloads, external apps")
+            // The image layout, not the notes one: a widget whose header says
+            // "Notes" on Home is wrong no matter what the body text claims.
+            val views = RemoteViews(context.packageName, R.layout.oea_widget_image)
+            // The real index, not a legacy prefs file that never updates: the
+            // count on Home must agree with the star EMAGE itself shows.
+            val images = com.oea.launcher.miniapps.OeaMediaLibrary.cached()?.images ?: emptyList()
+            val favourites = images.count { com.oea.launcher.miniapps.OeaMediaLibrary.isFavourite(context, it) }
+            views.setTextViewText(
+                R.id.notes_content,
+                if (images.isEmpty()) {
+                    "Tap to open EMAGE\nEvery picture on this phone • Albums, days, favourites"
+                } else {
+                    "${images.size} pictures • $favourites favourite${if (favourites == 1) "" else "s"}\nTap to open EMAGE"
+                }
+            )
             val intent = OeaMiniApps.launchIntent(context, "emage")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
@@ -125,7 +136,7 @@ class OeaImageWidgetProvider : AppWidgetProvider() {
 class OeaVideoWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.oea_widget_notes)
+            val views = RemoteViews(context.packageName, R.layout.oea_widget_video)
             val prefs = context.getSharedPreferences("oea_video_v2", Context.MODE_PRIVATE)
             val favCount = prefs.getStringSet("favorites", emptySet())?.size ?: 0
             val history = prefs.getString("history", "")?.split("|")?.filter { it.isNotBlank() }?.size ?: 0
@@ -141,7 +152,7 @@ class OeaVideoWidgetProvider : AppWidgetProvider() {
 class OeaCalculatorWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.oea_widget_clock)
+            val views = RemoteViews(context.packageName, R.layout.oea_widget_calculator)
             val prefs = context.getSharedPreferences("oea_calculator", Context.MODE_PRIVATE)
             val last = prefs.getString("last_result", "Calculator")
             views.setTextViewText(R.id.clock_time, last ?: "0")
@@ -158,7 +169,7 @@ class OeaCalculatorWidgetProvider : AppWidgetProvider() {
 class OeaCameraWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.oea_widget_notes)
+            val views = RemoteViews(context.packageName, R.layout.oea_widget_camera)
             views.setTextViewText(R.id.notes_content, "OEA Camera • Tap to open\nPro controls • Filters • Grid • Timer • Video • QR • Doc\nLast photo thumbnail + EMAGE integration")
             val intent = OeaMiniApps.launchIntent(context, "camera")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)

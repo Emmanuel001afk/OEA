@@ -284,21 +284,35 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="image/*" />
             </intent-filter>
-            <!-- Let EMAGE act as a real image picker when another app asks for
-                 ACTION_PICK or ACTION_GET_CONTENT. CATEGORY_OPENABLE is kept in
-                 the filter because callers use it to require a readable stream. -->
-            <intent-filter>
-                <action android:name="android.intent.action.PICK" />
-                <action android:name="android.intent.action.GET_CONTENT" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.OPENABLE" />
-                <data android:mimeType="image/*" />
-            </intent-filter>
             <!-- Share sheets can send one or several pictures directly to EMAGE. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+        <!-- EMAGE's picker face. ACTION_PICK and ACTION_GET_CONTENT must return
+             a result to the calling app, so this entry is standard launch mode
+             with no private task affinity: it runs in the caller's task, where a
+             result can be delivered. OeaImageActivity keeps its singleTask entry
+             for the full app. No MAIN/LAUNCHER category means this adds no icon
+             to Home, the drawer or Android's app list — there is one EMAGE. -->
+        <activity
+            android:name="com.oea.launcher.miniapps.OeaEmagePickActivity"
+            android:exported="true"
+            android:label="EMAGE"
+            android:icon="@drawable/ic_oea_image"
+            android:roundIcon="@drawable/ic_oea_image"
+            android:theme="@style/OeaFullscreenAppTheme"
+            android:windowSoftInputMode="adjustResize">
+            <!-- CATEGORY_OPENABLE is kept in the filter because callers use it
+                 to require a readable stream. -->
+            <intent-filter>
+                <action android:name="android.intent.action.PICK" />
+                <action android:name="android.intent.action.GET_CONTENT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.OPENABLE" />
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>

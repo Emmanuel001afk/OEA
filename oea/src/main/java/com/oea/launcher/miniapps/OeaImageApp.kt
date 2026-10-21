@@ -81,7 +81,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
     val root: FrameLayout = kit.overlay()
     private val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
     private val content = FrameLayout(host).apply { layoutParams = LinearLayout.LayoutParams(-1, 0, 1f) }
-    private val bar = kit.appBar("EMAGE", "Reading your library…", onBack = { runCatching { host.finish() } })
+    private val bar = kit.appBar("EMAGE", "Reading your library…", onBack = { goBack() })
     private val searchBox = kit.searchField("Pictures, albums, dates", onQuery = { query ->
         this.query = query.trim()
         rebuild()
@@ -557,12 +557,20 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 bar.title.text = "Albums"
                 bar.setSubtitle("${built.imageAlbums.size} albums • $total pictures")
                 if (built.imageAlbums.isEmpty()) {
+                    // Offer the permission action only when the permission is
+                    // actually the thing missing; with access granted, "Allow
+                    // access" is a dead end that looks broken.
+                    val denied = built.imageAccess == OeaMediaLibrary.Access.DENIED
                     showState(
                         R.drawable.oic_folder,
                         "No albums yet",
-                        "An album is a folder with pictures in it. Take a photo, or allow photo access, and they appear here by themselves.",
-                        "Allow access"
-                    ) { askPermission() }
+                        if (denied) {
+                            "An album is a folder with pictures in it. Allow photo access and Camera, Screenshots, Downloads and every other folder appear here by themselves."
+                        } else {
+                            "An album is a folder with pictures in it. Nothing on this phone has a picture yet — take one with OEA Camera or another camera and it appears here by itself."
+                        },
+                        if (denied) "Allow access" else "Scan again"
+                    ) { if (denied) askPermission() else rescan() }
                 }
             }
 
@@ -698,6 +706,26 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
     }
 
     // -------------------------------------------------------------- interactions
+
+    /**
+     * Up behaves the way a gallery's back must: leave the search first, then the
+     * album, then any narrowed tab, and only then the app. The old arrow finished
+     * EMAGE from inside an album, which reads as "the app keeps kicking me out".
+     */
+    private fun goBack() {
+        when {
+            searchRow.visibility == View.VISIBLE -> toggleSearch()
+            album != null -> {
+                album = null
+                rebuild()
+            }
+            surface != Surface.PHOTOS || tab != "all" -> {
+                pickTab("all")
+                tabs.select("all")
+            }
+            else -> runCatching { host.finish() }
+        }
+    }
 
     private fun openTile(position: Int) {
         val row = rows.getOrNull(position) as? Row.Tile ?: return
@@ -886,6 +914,12 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 columnsRow.addView(
                     kit.chip("$count", count == columns) {
                         columns = count
+                        // The grid's own size does not change with its span, so
+                        // the layout listener never fires here; retarget the
+                        // decode edge or every tile keeps its old resolution.
+                        if (photoGrid.width > 0) {
+                            tileEdge = ((photoGrid.width - kit.dp(8)) / columns).coerceAtLeast(kit.dp(88))
+                        }
                         kit.setSpan(photoGrid, count)
                         rebuild()
                     },
@@ -894,7 +928,9 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             }
             columnsRow.setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12))
             grid.addView(columnsRow, LinearLayout.LayoutParams(-1, -2))
-            kit.row(grid, R.drawable.oic_layers, "Tile shape", if (tileShape == 1f) "Square" else if (tileShape > 1f) "Tall (3:4)" else "Wide (4:3)", chevron = false)
+            // ratio > 1 divides the tile's height below its width, so >1 is the
+            // wide shape; the label must not say the opposite of what renders.
+            kit.row(grid, R.drawable.oic_layers, "Tile shape", if (tileShape == 1f) "Square" else if (tileShape > 1f) "Wide (4:3)" else "Tall (3:4)", chevron = false)
             val shapes = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
             listOf(1f to "Square", 3f / 4f to "Tall", 4f / 3f to "Wide").forEach { (ratio, label) ->
                 shapes.addView(

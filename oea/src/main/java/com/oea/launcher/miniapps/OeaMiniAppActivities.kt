@@ -20,6 +20,21 @@ class OeaCalendarActivity : OeaMiniAppActivity() { override val appId get() = "c
 /** EMAGE — photos, albums, downloads, and the OEA pictures (wallpapers, lock screens, live scenes). */
 class OeaImageActivity : OeaMiniAppActivity() { override val appId get() = "emage" }
 
+/**
+ * EMAGE's picker face — the activity behind `ACTION_PICK` and
+ * `ACTION_GET_CONTENT`.
+ *
+ * It renders the same EMAGE screen ([OeaImageApp] switches to picker mode from
+ * the launch action itself), but it must be declared `standard` with no task
+ * affinity of its own: a picker runs inside the *caller's* task, or the caller
+ * receives `RESULT_CANCELED` the moment it asks — which is exactly what
+ * [OeaImageActivity]'s `singleTask` entry would do to every requesting app.
+ *
+ * It deliberately carries no `MAIN`/`LAUNCHER` category, so Android's app list,
+ * Home and the drawer keep showing exactly one EMAGE.
+ */
+class OeaEmagePickActivity : OeaMiniAppActivity() { override val appId get() = "emage" }
+
 /** VIP (Video Instant Player) — full-screen video and audio playback with PIP. */
 class OeaVipActivity : OeaMiniAppActivity() { override val appId get() = "vip" }
 
