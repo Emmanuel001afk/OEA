@@ -296,7 +296,12 @@ internal object OeaEmageViewer {
 
         private val pager = RecyclerView(host).apply {
             overScrollMode = View.OVER_SCROLL_NEVER
-            clipToPadding = false
+            // A photo viewer is a single-image surface, not a peeking carousel.
+            // Keep adjacent pages outside the visible viewport while still
+            // allowing a deliberate horizontal swipe to change pictures.
+            clipToPadding = true
+            clipChildren = true
+            setPadding(0, 0, 0, 0)
         }
         private val counter = TextView(host).apply {
             setTextColor(Color.WHITE)
@@ -612,6 +617,14 @@ internal object OeaEmageViewer {
                     onTap = { setChrome(!chromeVisible) }
                 }
                 val frame = FrameLayout(host).apply {
+                    // Explicitly make every pager item fill the viewport. This
+                    // prevents a neighbouring photo from appearing beside the
+                    // selected image on devices with unusual display metrics.
+                    layoutParams = RecyclerView.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    clipChildren = true
                     addView(zoom, FrameLayout.LayoutParams(-1, -1))
                 }
                 val loader = View(host).apply {
