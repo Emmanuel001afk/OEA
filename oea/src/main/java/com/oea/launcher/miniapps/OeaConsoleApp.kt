@@ -1173,7 +1173,7 @@ Examples:
             "float" -> {
                 if (parts.size < 2) return "Usage: float <package>"
                 val app = com.oea.launcher.model.OeaAppInfo(parts[1], "", parts[1])
-                val result = com.oea.launcher.multitask.OeaMultitaskLauncher.launchFloating(ctx, app)
+                val result = com.oea.launcher.multitask.OeaFloatingWindows.launchDefault(ctx, app)
                 "Floating result: ${result.message}\nWhat it does: launches app as freeform window (floating)\nNeeds: freeform enabled in Developer options\nAlternative on phones without freeform: multitask window on\nConfirm: window appears movable/resizable if granted"
             }
 
