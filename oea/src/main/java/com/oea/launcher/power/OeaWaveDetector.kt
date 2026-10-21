@@ -88,11 +88,12 @@ class OeaWaveDetector(
             return Result.NONE
         }
         if (screenOffBound && held >= longCoverMs) {
-            // A long cover arms the screen-off gesture. The wave that follows it
-            // decides; on its own a long cover does nothing.
+            // One deliberate hold is enough: trigger when the user uncovers the
+            // sensor, rather than requiring an additional wave afterward.
             if (offCooling) return Result.NONE
-            armedAt = nowMs
-            return Result.NONE
+            armedAt = -1L
+            offTriggerAt = nowMs
+            return Result.OFF
         }
         if (pocketGuard && held >= pocketMs) return Result.NONE
         if (held < minCoverMs || held > maxCoverMs) return Result.NONE
