@@ -103,6 +103,16 @@ object OeaFloatingWindows {
         }.getOrDefault(false)
     }
 
+    /** Opens Android's Display over other apps page for this app. */
+    fun openOverlaySetup(context: Context): Boolean = runCatching {
+        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+            data = android.net.Uri.parse("package:${context.packageName}")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+
     /** Opens Android's Accessibility page, focused on this service. */
     fun openSetup(context: Context) {
         val flags = Intent.FLAG_ACTIVITY_NEW_TASK

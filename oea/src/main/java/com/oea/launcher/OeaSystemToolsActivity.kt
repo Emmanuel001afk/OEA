@@ -1211,6 +1211,7 @@ open class OeaSystemToolsActivity : Activity() {
         kit.sectionTitle(box, "Recently used")
         val recents = kit.group(box)
         choiceRow(recents, R.drawable.oic_layers, "Recent apps (Home menu)", listOf("system" to "Android Recents", "oea" to "OEA Overview"), dataStore.recentsMode()) { dataStore.setRecentsMode(it) }
+        kit.note(box, "This chooses what the Recent apps action inside OEA's Home menu opens. Android reserves the system Recents button and gesture for its own task switcher; OEA cannot replace those system surfaces without privileged OS support.")
         kit.note(box, "Double-tap and triple-tap are told apart by time: after second tap Home waits 260ms to see if third comes, so same taps never run both.")
         present(page)
     }
@@ -2412,19 +2413,72 @@ open class OeaSystemToolsActivity : Activity() {
         val page = page("Multitasking", "Use two apps at once, or float one above another")
         val box = page.content
         val group = kit.group(box)
-        kit.row(group, R.drawable.oic_layers, "Overview", "Recently used apps with open, split and floating actions") { navigate("overview") }
+        kit.row(group, R.drawable.oic_layers, "Overview", "OEA recent-use overview with open, split and floating actions") { navigate("overview") }
         kit.row(group, R.drawable.oic_splitscreen, "Split screen & app pairs", if (Build.VERSION.SDK_INT >= 32) "Requests Android split screen; OEM and app support vary" else if (OeaAssistant.isConnected()) "Uses OEA Assistant and Android's split toggle; support varies" else "Needs OEA Assistant; Android/OEM may still restrict split screen") { navigate("split") }
+
+        kit.sectionTitle(box, "Floating method")
+        choiceRow(
+            group, R.drawable.oic_select_window, "Default floating-window method",
+            listOf(
+                OeaFloatingWindows.MODE_NATIVE to "Android freeform",
+                OeaFloatingWindows.MODE_OEA to "OEA floating workspace"
+            ),
+            OeaFloatingWindows.defaultMode(this)
+        ) { mode ->
+            OeaFloatingWindows.setDefaultMode(this, mode)
+            toast(if (mode == OeaFloatingWindows.MODE_NATIVE)
+                "Default: Android freeform. OEA will not silently fall back to its overlay."
+            else
+                "Default: OEA Floating Workspace. It remains optional and needs its own permissions."
+            )
+        }
+
         val freeform = OeaMultitaskLauncher.freeformEnabled(this)
-        kit.row(group, R.drawable.oic_select_window, "Floating windows", if (freeform) "Available on this phone; Android may still deny an individual app" else "Off • enable in Developer options") {
-            if (freeform) toast("Long-press an app on Home or in All Apps and choose Float. Android supplies move/resize handles only when freeform is granted.")
-            else kit.confirm("Enable floating windows", "Open Settings › Developer options and turn on \"Enable freeform windows\" (and \"Force activities to be resizable\"), then restart your phone. Some phones don't expose freeform at all.", "Open Developer options") {
-                if (!OeaMultitaskLauncher.openDeveloperOptions(this)) toast("Turn on Developer options first: Settings › About phone › tap Build number 7 times.")
+        kit.row(group, R.drawable.oic_select_window, "Android freeform windows", if (freeform) "Enabled by Android; individual apps or OEM policy may still refuse" else "Off • may be enabled in Developer options") {
+            if (freeform) {
+                toast("Long-press an app on Home or in All Apps and choose Float. Android owns moving and resizing its real app window.")
+            } else {
+                kit.confirm("Enable Android freeform", "Open Developer options and turn on \"Enable freeform windows\" (and, if offered, \"Force activities to be resizable\"), then restart the phone. Some manufacturers do not expose this option.", "Open Developer options") {
+                    if (!OeaMultitaskLauncher.openDeveloperOptions(this)) toast("Turn on Developer options first: Settings › About phone › tap Build number 7 times.")
+                }
             }
         }
-        choiceRow(group, R.drawable.oic_tune, "Initial floating size", listOf("small" to "Small", "medium" to "Medium", "large" to "Large"), dataStore.floatingWindowSize()) {
+        choiceRow(group, R.drawable.oic_tune, "Initial Android freeform size", listOf("small" to "Small", "medium" to "Medium", "large" to "Large"), dataStore.floatingWindowSize()) {
             dataStore.setFloatingWindowSize(it)
         }
-        kit.note(box, "OEA requests an initial freeform size; Android/OEM policy owns window movement and resizing. Split-screen placement is also device- and app-dependent, so OEA reports when Android rejects it instead of drawing fake handles.")
+
+        kit.sectionTitle(box, "OEA Floating Workspace (optional)")
+        val overlayAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+        val accessibilityAllowed = OeaFloatingWindows.isAccessibilityEnabled(this)
+        kit.row(group, R.drawable.oic_layers, "Display over other apps", if (overlayAllowed) "Allowed" else "Not allowed • required only for OEA Floating Workspace", value = if (overlayAllowed) "On" else "Off") {
+            if (!overlayAllowed && !OeaFloatingWindows.openOverlaySetup(this)) toast("Open Settings › Apps › Special app access › Display over other apps and allow OEA.")
+        }
+        kit.row(group, R.drawable.oic_accessibility_new, "OEA Floating Window accessibility", if (accessibilityAllowed) "Allowed • separate from OEA Assistant" else "Off • only needed for OEA Floating Workspace", value = if (accessibilityAllowed) "On" else "Off") {
+            OeaFloatingWindows.openSetup(this)
+        }
+        kit.switchRow(
+            group, R.drawable.oic_select_window,
+            "Enable OEA Floating Workspace",
+            "Show OEA's own draggable, resizable app launcher above other apps. Apps open as normal Android tasks, not embedded windows.",
+            OeaFloatingWindows.enabled(this)
+        ) { on ->
+            if (!on) {
+                OeaFloatingWindows.setEnabled(this, false)
+            } else if (!overlayAllowed) {
+                kit.confirm("Allow OEA overlay", "Android requires Display over other apps for this optional workspace. Android freeform remains available without this permission.", "Open permission") {
+                    if (!OeaFloatingWindows.openOverlaySetup(this)) toast("Open Settings › Apps › Special app access › Display over other apps and allow OEA.")
+                }
+            } else if (!accessibilityAllowed) {
+                kit.confirm("Enable OEA Floating Window", "This optional accessibility service hosts OEA's movable/resizable workspace. It is separate from OEA Assistant and is not required for Android freeform.", "Open Accessibility") {
+                    OeaFloatingWindows.openSetup(this)
+                }
+            } else {
+                OeaFloatingWindows.setEnabled(this, true)
+                toast("OEA Floating Workspace enabled. Drag its title bar to move and the corner handle to resize.")
+            }
+            rerender()
+        }
+        kit.note(box, "Choose the default method above. Android freeform creates real, system-managed app windows when the phone allows it. OEA Floating Workspace is a separate optional overlay containing app shortcuts; ordinary apps cannot be embedded inside it. Neither method silently switches to the other.")
         present(page)
     }
 
@@ -3100,45 +3154,7 @@ open class OeaSystemToolsActivity : Activity() {
                 requestPrivilege(privilege, grant)
             }
         }
-        kit.sectionTitle(box, "Floating multitask window")
-        val floating = kit.group(box)
-        choiceRow(
-            floating, R.drawable.oic_select_window, "Default floating-window method",
-            listOf(
-                OeaFloatingWindows.MODE_NATIVE to "Android freeform",
-                OeaFloatingWindows.MODE_OEA to "OEA floating workspace"
-            ),
-            OeaFloatingWindows.defaultMode(this)
-        ) { mode ->
-            OeaFloatingWindows.setDefaultMode(this, mode)
-            toast(if (mode == OeaFloatingWindows.MODE_NATIVE)
-                "Default: Android freeform. OEA will not silently request its second accessibility service."
-            else
-                "Default: OEA floating workspace. Its accessibility service remains optional and is requested only when you enable this method."
-            )
-            rerender()
-        }
-        kit.switchRow(
-            floating, R.drawable.oic_select_window,
-            "Floating window",
-            "A draggable, resizable container above other apps, for devices whose split screen is switched off",
-            OeaFloatingWindows.enabled(this)
-        ) { on ->
-            if (on && !OeaFloatingWindows.isAccessibilityEnabled(this)) {
-                // The container is drawn by an accessibility service,
-                // so Android's own switch must come on first.
-                kit.confirm(
-                    "Enable in Accessibility",
-                    "The floating window is hosted by an accessibility service so it can stay above games. Switch on \"OEA Floating Window\" on the next page, then turn this row on again.",
-                    "Open settings"
-                ) { OeaFloatingWindows.openSetup(this) }
-            } else {
-                OeaFloatingWindows.setEnabled(this, on)
-                if (on) toast("The floating window appears over the next app you open.")
-            }
-            rerender()
-        }
-        kit.note(box, "OEA floating workspace is a movable/resizable floating app launcher. Tapping an app opens it as a normal Android task; ordinary Android apps cannot be embedded inside this overlay. For a real third-party app window, choose Android freeform above. The OEA accessibility service is requested only when you explicitly enable this workspace.")
+        kit.row(group, R.drawable.oic_select_window, "Floating methods", "Choose Android freeform or OEA Floating Workspace under Multitasking; each stays independent and optional") { navigate("multitasking") }
         if (OeaAssistant.needsRestrictedSettingsHint() && !OeaAssistant.isEnabled(this)) kit.note(box, OeaAssistant.RESTRICTED_SETTINGS_HINT)
         if (!shell && !owner) {
             kit.note(box, "Two permissions can only be given by Android itself: \"Display over other apps\" and \"Usage access\". The pages above open exactly there, and OEA verifies the result when you come back. A helper app such as Shizuku would not change that — Android reserves these to the user, though root or device owner lets OEA do it alone.")

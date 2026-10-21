@@ -36,6 +36,13 @@ class OeaLauncherActivity : Activity() {
     private var home: OeaHomeController? = null
     private var resumedAndFocused = false
 
+    /** Register once per Activity instance; rebuilding Home must not stack Back handlers. */
+    private val backCallback by lazy {
+        android.window.OnBackInvokedCallback {
+            OeaFaultShield.guard("home:back") { home?.handleBack() }
+        }
+    }
+
     /**
      * True once OEA Home's view tree was created and attached successfully.
      *
@@ -63,6 +70,12 @@ class OeaLauncherActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                backCallback
+            )
+        }
         OeaFaultShield.guard("home:create") { buildHome() }
     }
 
@@ -77,11 +90,6 @@ class OeaLauncherActivity : Activity() {
             setContentView(controller.createHomeSurface())
             surfaceReady = true
             OeaFaultShield.noteHomeRendered()
-            if (Build.VERSION.SDK_INT >= 33) {
-                onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
-) { home?.handleBack() }
-            }
             consumeHomeAction(intent)
         } catch (error: Throwable) {
             reportFailure("OEA Home", error)
@@ -232,6 +240,9 @@ class OeaLauncherActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backCallback)
+        }
         OeaPrivileges.stopObserving(this)
         OeaFaultShield.setRecovery(null)
         OeaFaultShield.guard("home:destroy") { home?.onDestroy() }
