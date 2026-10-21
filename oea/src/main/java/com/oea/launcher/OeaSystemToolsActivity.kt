@@ -1406,16 +1406,22 @@ open class OeaSystemToolsActivity : Activity() {
         val adminLock = power.deviceAdminCanLock(this)
         kit.row(group, R.drawable.oic_shield, "Device admin lock", when {
             adminLock -> "Authorized • fallback ready when OEA Assistant is unavailable"
-            power.deviceAdminActive(this) -> "Active, but screen-lock policy not approved • tap to authorize"
-            else -> "Not active • tap to open Android's authorization screen"
+            power.deviceAdminActive(this) -> "Active, but Android has not granted screen-lock policy • tap for recovery steps"
+            else -> "Not active • tap to request Android authorization"
         }) {
-            if (!adminLock) runCatching {
-                startActivityForResult(power.deviceAdminIntent(this), REQUEST_DEVICE_ADMIN)
+            if (adminLock) {
+                toast("Device Admin screen-lock permission is already approved.")
+            } else runCatching {
+                if (power.deviceAdminActive(this)) {
+                    toast("OEA Device Admin is already active but lacks force-lock approval. In Android Security settings, deactivate OEA's administrator, then return here and activate it again. OEA will not deactivate it automatically.")
+                    startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                } else {
+                    startActivityForResult(power.deviceAdminIntent(this), REQUEST_DEVICE_ADMIN)
+                }
             }.onFailure {
-                android.util.Log.e("OeaSystemToolsActivity", "Android Device Admin authorization screen could not be opened", it)
-                toast("Android could not open Device Admin authorization. Check Android Settings › Security › Device admin apps.")
+                android.util.Log.e("OeaSystemToolsActivity", "Android Device Admin authorization/recovery screen could not be opened", it)
+                toast("Android could not open Device Admin settings. Open Settings › Security › Device admin apps, then retry.")
             }
-            else toast("Device Admin screen-lock permission is already approved.")
         }
         kit.row(group, R.drawable.oic_touch_app, "Double-tap Home", labelFor(dataStore.doubleTapAction(), mapOf("lock" to "Locks the screen", "power_menu" to "Opens the power menu", "quick_controls" to "Opens Quick controls", "drawer" to "Opens the app drawer", "none" to "Off"))) { navigate("gestures") }
 
