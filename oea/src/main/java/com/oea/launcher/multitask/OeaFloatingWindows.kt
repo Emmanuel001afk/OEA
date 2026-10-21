@@ -48,6 +48,26 @@ object OeaFloatingWindows {
     /** True when the user wants the floating window on. */
     fun enabled(context: Context) = prefs(context).getBoolean(KEY_ENABLED, false)
 
+    /** Routes floating-window requests through the user's selected default. */
+    fun launchDefault(context: Context, app: com.oea.launcher.model.OeaAppInfo): OeaMultitaskLauncher.Result {
+        if (defaultMode(context) == MODE_NATIVE) return OeaMultitaskLauncher.launchFloating(context, app)
+        if (!isAccessibilityEnabled(context)) {
+            return OeaMultitaskLauncher.Result(false,
+                "OEA floating workspace is your selected default, but its optional accessibility service is off. Enable OEA Floating Window in OEA Settings only if you want to use this method.")
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(context)) {
+            return OeaMultitaskLauncher.Result(false,
+                "OEA floating workspace is selected, but Android has not granted Display over other apps. Enable that permission only if you want this method.")
+        }
+        setEnabled(context, true)
+        val service = instance()
+        if (service == null) return OeaMultitaskLauncher.Result(false,
+            "OEA Floating Window accessibility is enabled, but Android has not connected the service yet. Reopen OEA Settings and check its status.")
+        service.expand()
+        return OeaMultitaskLauncher.Result(true,
+            "Opened OEA floating workspace for ${app.label}. The workspace can launch apps, but Android opens those apps as normal tasks; select Android freeform for true third-party app windows.")
+    }
+
     /** Turns the OEA-side preference on/off. */
     fun setEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
