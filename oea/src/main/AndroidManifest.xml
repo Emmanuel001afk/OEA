@@ -680,7 +680,7 @@
         <receiver
             android:name="com.oea.launcher.applock.OeaDeviceAdminReceiver"
             android:exported="true"
-            android:label="OEA App Freezer">
+            android:label="OEA Screen Lock &amp; App Freezer">
             <meta-data android:name="android.app.device_admin" android:resource="@xml/oea_device_admin" />
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
