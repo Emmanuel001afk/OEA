@@ -104,7 +104,7 @@ internal object OeaEmageViewer {
     fun details(host: Activity, palette: OeaPalette, item: OeaMediaLibrary.Item) {
         val hostRef = WeakReference(host)
         val context = host.applicationContext
-        OeaMediaLibrary.toast(host, "Reading picture details…")
+        // Opening Details should be quiet; render the sheet when metadata is ready.
         DETAILS_WORKER.execute {
             val exif = runCatching { OeaMediaProbe.photo(context, item.uri) }.getOrNull()
             val resolution = if (item.hasRealResolution) null else probeResolution(context, item)
