@@ -48,10 +48,11 @@ import kotlin.math.abs
  *      touchable window that does NOT steal focus from the app or
  *      game underneath (FLAG_NOT_FOCUSABLE + FLAG_NOT_TOUCH_MODAL).
  *
- * The service hosts the container only. Whatever the user wants to
- * put inside it is a separate concern: the single content area is
- * a plain FrameLayout, and it is deliberately left empty here so
- * no input method or web view is coupled to this feature.
+ * The service hosts an OEA-owned floating workspace with launchable
+ * app shortcuts. Android does not allow an ordinary app to embed arbitrary
+ * third-party Activities inside an application overlay; those apps open as
+ * normal Android tasks. Select native freeform when actual app-in-window
+ * behaviour is required and supported by the device.
  *
  * THE CONTAINER (vertical stack)
  * ------------------------------
@@ -312,7 +313,6 @@ class OeaFloatingWindowService : AccessibilityService() {
         // ---- content area: the floating workspace itself --------------
         val content = FrameLayout(this).apply {
             id = R.id.oea_floating_content_slot
-            // Placeholder tint so an empty area reads as a workspace.
             setBackgroundColor(0x0AFFFFFF)
         }
         // Fills everything between the title bar and the bottom edge.
