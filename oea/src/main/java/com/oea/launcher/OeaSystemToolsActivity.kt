@@ -2433,10 +2433,18 @@ open class OeaSystemToolsActivity : Activity() {
             )
         }
 
-        val freeform = OeaMultitaskLauncher.freeformEnabled(this)
-        kit.row(group, R.drawable.oic_select_window, "Android freeform windows", if (freeform) "Enabled by Android; individual apps or OEM policy may still refuse" else "Off • may be enabled in Developer options") {
-            if (freeform) {
-                toast("Long-press an app on Home or in All Apps and choose Float. Android owns moving and resizing its real app window.")
+        val nativeFreeform = OeaMultitaskLauncher.nativeFreeformSupported(this)
+        val developerFreeform = OeaMultitaskLauncher.freeformDeveloperOverrideEnabled(this)
+        val freeformStatus = when {
+            nativeFreeform -> "Android reports native freeform support; apps/OEM policy may still refuse"
+            developerFreeform -> "Developer override is on; native freeform support is not confirmed (restart may be needed)"
+            else -> "Off • may be enabled in Developer options"
+        }
+        kit.row(group, R.drawable.oic_select_window, "Android freeform windows", freeformStatus) {
+            if (nativeFreeform) {
+                toast("Android reports native freeform support. Long-press an app on Home or in All Apps and choose Float; Android controls its real app window.")
+            } else if (developerFreeform) {
+                toast("Developer override is on, but native freeform support is not confirmed. Restart, then test an app; Android may still ignore the request.")
             } else {
                 kit.confirm("Enable Android freeform", "Open Developer options and turn on \"Enable freeform windows\" (and, if offered, \"Force activities to be resizable\"), then restart the phone. Some manufacturers do not expose this option.", "Open Developer options") {
                     if (!OeaMultitaskLauncher.openDeveloperOptions(this)) toast("Turn on Developer options first: Settings › About phone › tap Build number 7 times.")

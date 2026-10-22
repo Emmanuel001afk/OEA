@@ -23,16 +23,21 @@ object OeaMultitaskLauncher {
         val freeformAdvertised: Boolean = false
 )
 
+    /** True only when the Android build advertises native freeform support. */
+    fun nativeFreeformSupported(context: Context): Boolean =
+        context.packageManager.hasSystemFeature("android.software.freeform_window_management")
+
+    /** The Developer options override is experimental and does not prove OEM support. */
+    fun freeformDeveloperOverrideEnabled(context: Context): Boolean = runCatching {
+        Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) != 0
+    }.getOrDefault(false)
+
     /**
-     * Freeform needs either the system feature or Developer options →
-     * "Enable freeform windows" (then a restart on most phones).
+     * Freeform can be attempted if the system feature is advertised or the
+     * Developer options override is enabled (often requiring a restart).
      */
-    fun freeformEnabled(context: Context): Boolean {
-        val pm = context.packageManager
-        if (pm.hasSystemFeature("android.software.freeform_window_management")) return true
-        val resolver = context.contentResolver
-        return runCatching { Settings.Global.getInt(resolver, "enable_freeform_support", 0) != 0 }.getOrDefault(false)
-    }
+    fun freeformEnabled(context: Context): Boolean =
+        nativeFreeformSupported(context) || freeformDeveloperOverrideEnabled(context)
 
     fun openDeveloperOptions(context: Context): Boolean = runCatching {
         context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -48,9 +53,9 @@ object OeaMultitaskLauncher {
         val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
             ?: return Result(false, "This app has no launchable activity.")
 
-        val freeformAdvertised = pm.hasSystemFeature("android.software.freeform_window_management") ||
-            freeformEnabled(context)
-        if (!freeformAdvertised) {
+        val freeformAdvertised = nativeFreeformSupported(context)
+        val freeformEnabled = freeformAdvertised || freeformDeveloperOverrideEnabled(context)
+        if (!freeformEnabled) {
             return Result(
                 false,
                 "Android freeform windows are off on this phone, so OEA did not launch ${app.label} full screen. Enable Developer options → Enable freeform windows and restart, or explicitly choose OEA Floating Workspace in Multitasking. OEA will not silently switch methods.",
@@ -73,9 +78,14 @@ object OeaMultitaskLauncher {
             bundle.putInt(KEY_LAUNCH_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
             context.startActivity(launchIntent, bundle)
             val sizeLabel = OeaDataStore.get(context).floatingWindowSize()
+            val supportNote = if (freeformAdvertised) {
+                "Android reports native freeform support, but app/OEM policy can still refuse the request."
+            } else {
+                "Only the Developer options override is enabled; native freeform support is not confirmed, so Android may ignore the request or open full screen."
+            }
             Result(
                 true,
-                "Requested a $sizeLabel floating window for ${app.label}. Android/OEM policy can still refuse freeform; if granted, use its system title bar to move and its resize edge/handle to resize.",
+                "Requested a $sizeLabel floating window for ${app.label}. $supportNote If granted, use Android's title bar to move and its resize edge/handle to resize.",
                 freeformAdvertised
             )
         }.getOrElse { error ->
