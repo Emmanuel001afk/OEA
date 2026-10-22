@@ -213,12 +213,20 @@ Settings tile. `choose()` is plain data and is unit-tested.
 
 ## 4. Verification
 
-**Not compiled, not run.** The environment this was written in has no JDK, no
-Gradle, no `kotlinc` and no Android SDK, and downloading a toolchain failed
-(network access to the release asset host was refused). Everything above was
-checked by reading the tree — every API used exists in it, every helper the screen
-calls is defined, braces/parens balance, and imports were reconciled — but a
-compiler has **not** seen this code. Treat the first build as the real test.
+**Built, not device-tested.** The environment this was written in had no JDK, no
+Gradle, no `kotlinc` and no Android SDK, and downloading a toolchain failed, so
+the first version of this work went to CI without a compiler having seen it. CI
+then found three real compile errors — an `AspectMode` passed where a ratio was
+expected, `CameraDevice.ERROR_*` qualified through the wrong class (they live on
+`CameraDevice.StateCallback`), and a test that compared `IntArray`s by identity —
+all fixed in follow-up commits.
+
+The current head **builds**: `:oea:assembleRelease` succeeds, the `Oea Launcher
+APK` workflow is green, the APK is produced and uploaded, and the launcher's own
+JVM unit tests run in that workflow (24 tests across launcher, engine and games,
+including the two camera test classes below). That is a compile and unit-test
+result — the camera code itself has **not** been run against a camera. The
+checklist below is what a phone should confirm.
 
 What *is* testable without a phone is the arithmetic and the torch decision, and
 both now have JVM tests:
