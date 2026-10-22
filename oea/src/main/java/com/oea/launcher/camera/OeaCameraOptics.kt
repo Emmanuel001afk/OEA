@@ -44,6 +44,34 @@ object OeaCameraOptics {
     /** Turns a display rotation constant's degrees into whole quarter turns. */
     fun quarterTurns(degrees: Int): Int = (normalize(degrees) / 90) % 4
 
+    /**
+     * Degrees to turn stored pixels clockwise so they read upright, from an EXIF
+     * orientation tag.
+     *
+     * The camera only ever writes 1, 3, 6 and 8, but a picture edited in OEA can
+     * arrive with any of the eight values; 5 and 7 are the transposed pair and are
+     * treated as their rotation plus a mirror, which is what they are.
+     */
+    fun rotationForOrientationTag(tag: Int): Int = when (tag) {
+        3, 4 -> 180
+        5, 6 -> 90
+        7, 8 -> 270
+        else -> 0
+    }
+
+    /** True for the EXIF tags that mirror as well as rotate. */
+    fun orientationTagMirrors(tag: Int): Boolean = tag == 2 || tag == 4 || tag == 5 || tag == 7
+
+    /**
+     * The aspect a rotated frame needs so the finished picture reads as [aspect].
+     *
+     * The chips speak the sensor's language: "4:3" means the frame the lens sees,
+     * and on a portrait phone that frame is displayed as 3:4. Once the pixels are
+     * turned upright, the crop has to be turned with them or it eats the sides.
+     */
+    fun displayAspect(aspect: Float, rotationDegrees: Int): Float =
+        if (aspect > 0f && (rotationDegrees == 90 || rotationDegrees == 270)) 1f / aspect else aspect
+
     private fun normalize(degrees: Int): Int = ((degrees % 360) + 360) % 360
 
     /**

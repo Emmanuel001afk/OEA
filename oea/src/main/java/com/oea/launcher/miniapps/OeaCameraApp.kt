@@ -13,10 +13,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -43,18 +45,28 @@ import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
 import androidx.exifinterface.media.ExifInterface
 import com.oea.engine.net.qr.QrCodes
 import com.oea.engine.net.qr.QrScannerView
 import com.oea.launcher.R
+import com.oea.launcher.camera.OeaCameraChrome
 import com.oea.launcher.camera.OeaCameraOptics
+import com.oea.launcher.camera.OeaCountdownOverlay
+import com.oea.launcher.camera.OeaLevelView
+import com.oea.launcher.camera.OeaRecordingPill
 import com.oea.launcher.camera.OeaTorch
+import com.oea.launcher.camera.OeaZoomBadge
+import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaTheme
@@ -117,6 +129,7 @@ object OeaCameraApp {
     private const val KEY_TIMER = "timer"
     private const val KEY_GRID = "grid"
     private const val KEY_ASPECT = "aspect"
+    private const val KEY_PERMISSION_ASKED = "permission_asked"
     private const val KEY_FILTER = "filter"
     private const val KEY_FACING = "facing_front"
     private const val KEY_ZOOM = "zoom"
@@ -126,6 +139,8 @@ object OeaCameraApp {
     private const val KEY_PRIVACY_BLUR = "privacy_blur"
     private const val KEY_BURST = "burst_frames"
     private const val KEY_PENDING_SYSTEM_CAPTURE = "pending_system_capture"
+    private const val KEY_MIRROR_SELFIE = "mirror_selfie"
+    private const val KEY_LEVEL = "level"
 
     private const val REQUEST_SYSTEM_PHOTO = 3001
     private const val REQUEST_SYSTEM_VIDEO = 3004
@@ -163,6 +178,26 @@ object OeaCameraApp {
 
     fun setPrivacyBlur(host: Activity, value: Boolean) {
         prefs(host).edit().putBoolean(KEY_PRIVACY_BLUR, value).apply()
+    }
+
+    /**
+     * Whether a front-camera photo is saved the way the preview showed it.
+     *
+     * Camera2 delivers the front sensor's image un-mirrored while every preview
+     * mirrors it, so a selfie used to flip between the screen and the file. On by
+     * default, because that is what the user framed.
+     */
+    fun mirrorSelfies(host: Activity): Boolean = prefs(host).getBoolean(KEY_MIRROR_SELFIE, true)
+
+    fun setMirrorSelfies(host: Activity, value: Boolean) {
+        prefs(host).edit().putBoolean(KEY_MIRROR_SELFIE, value).apply()
+    }
+
+    /** The horizon level, shown in the still modes. */
+    fun levelEnabled(host: Activity): Boolean = prefs(host).getBoolean(KEY_LEVEL, true)
+
+    fun setLevelEnabled(host: Activity, value: Boolean) {
+        prefs(host).edit().putBoolean(KEY_LEVEL, value).apply()
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -347,35 +382,69 @@ object OeaCameraApp {
         val externalCapture = isExternalCapture(host)
         var captureMode = if (host.intent?.action == MediaStore.ACTION_VIDEO_CAPTURE) CaptureMode.VIDEO else CaptureMode.PHOTO
         var isRecording = false
+        // One capture request at a time: a second tap during a slow capture used to
+        // queue another shutter on top of the first.
+        var capturing = false
+        // How many burst frames are still in the air; the shutter re-enables when
+        // the last one has been handed back by the camera.
+        var shotsOutstanding = 0
         val density = host.resources.displayMetrics.density
         fun dp(v: Int) = (v * density + 0.5f).toInt()
         // Chips are styled when created; this repaints one when its selection changes.
+        // The icon has to be tinted here too: setTextColor leaves a compound
+        // drawable at whatever colour the chip was born with.
         fun styleChip(view: TextView, selected: Boolean) {
-            view.setTextColor(if (selected) palette.onAccent else palette.text)
+            val foreground = if (selected) palette.onAccent else palette.text
+            view.setTextColor(foreground)
             view.background = kit.ripple(kit.rounded(if (selected) palette.accent else palette.cardHigh, 18), 18)
+            view.compoundDrawablesRelative.forEach { drawable -> drawable?.setTint(foreground) }
         }
 
         val root = FrameLayout(host).apply { setBackgroundColor(Color.BLACK) }
 
         val cameraGranted = host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         if (!cameraGranted) {
+            // A refused permission is still a camera screen, not an error page: it
+            // explains what is missing, offers the two ways forward, and points at
+            // the system settings once Android stops showing its own dialog.
+            val asked = p.getBoolean(KEY_PERMISSION_ASKED, false)
+            val canAsk = !asked || ActivityCompat.shouldShowRequestPermissionRationale(host, Manifest.permission.CAMERA)
             val column = LinearLayout(host).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 setPadding(dp(24), dp(24), dp(24), dp(24))
             }
+            column.addView(
+                ImageView(host).apply {
+                    setImageResource(R.drawable.oic_photo_camera)
+                    setColorFilter(Color.WHITE)
+                    background = kit.oval(0x1FFFFFFF)
+                    setPadding(dp(16), dp(16), dp(16), dp(16))
+                    contentDescription = null
+                },
+                LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(16) }
+            )
             column.addView(kit.text("Camera needs permission", 20f, Color.WHITE, OeaType.medium).apply { gravity = Gravity.CENTER })
             column.addView(
                 kit.text(
-                    "Allow the camera to use OEA's own viewfinder, flash, zoom and pro controls. Without it, the system camera still takes photos.",
+                    if (canAsk) {
+                        "Allow the camera to use OEA's own viewfinder, flash, zoom and pro controls. Without it, the system camera still takes photos."
+                    } else {
+                        "OEA's camera access is switched off in Android settings. Turn on Camera for OEA and come back, or keep using the system camera."
+                    },
                     14f,
                     Color.LTGRAY
                 ).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(20)) }
             )
-            column.addView(kit.primaryButton("Allow camera", R.drawable.oic_info) {
-                try {
-                    host.requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA_PERMISSION)
-                } catch (_: Throwable) {
+            column.addView(kit.primaryButton(if (canAsk) "Allow camera" else "Open app settings", R.drawable.oic_photo_camera) {
+                if (canAsk) {
+                    p.edit().putBoolean(KEY_PERMISSION_ASKED, true).apply()
+                    try {
+                        host.requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA_PERMISSION)
+                    } catch (_: Throwable) {
+                    }
+                } else {
+                    openAppSettings(host)
                 }
             }, LinearLayout.LayoutParams(-1, dp(50)))
             column.addView(
@@ -385,6 +454,20 @@ object OeaCameraApp {
                 LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) }
             )
             root.addView(column, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+            // The permission dialog returns to a stale screen; re-check on attach.
+            root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {
+                    if (host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
+                        v.parent is android.view.ViewGroup
+                    ) {
+                        (v.parent as android.view.ViewGroup).post {
+                            (v.parent as? android.view.ViewGroup)?.removeView(v)
+                        }
+                    }
+                }
+
+                override fun onViewDetachedFromWindow(v: View) = Unit
+            })
             return root
         }
 
@@ -398,6 +481,9 @@ object OeaCameraApp {
         }
         root.addView(textureView, FrameLayout.LayoutParams(-1, -1))
         val gridOverlay = GridOverlayView(host, grid)
+        // The preview is the sensor's full frame; the crop guide shows what the
+        // chosen aspect will actually keep, so 1:1 is never a surprise.
+        gridOverlay.setAspect(aspect.ratio)
         root.addView(gridOverlay, FrameLayout.LayoutParams(-1, -1))
         val filterOverlay = View(host).apply { alpha = 0f }
         root.addView(filterOverlay, FrameLayout.LayoutParams(-1, -1))
@@ -406,6 +492,33 @@ object OeaCameraApp {
             visibility = View.GONE
         }
         root.addView(focusView, FrameLayout.LayoutParams(dp(72), dp(72)))
+
+        // The horizon level sits over the middle of the frame, where the eye is.
+        val levelView = OeaLevelView(host)
+        root.addView(levelView, FrameLayout.LayoutParams(dp(260), dp(64), Gravity.CENTER))
+
+        val zoomBadge = OeaZoomBadge(host)
+        root.addView(
+            zoomBadge,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(96) }
+        )
+        val recordingPill = OeaRecordingPill(host)
+        root.addView(
+            recordingPill,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(96) }
+        )
+        // What the shutter is doing while a phone develops a picture; a still with
+        // effects can take a second and a half, and a dead shutter reads as broken.
+        val countdown = OeaCountdownOverlay(host)
+        val savingPill = kit.text("Saving…", 12f, Color.WHITE).apply {
+            background = kit.rounded(0xC0101216.toInt(), 100)
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            visibility = View.GONE
+        }
+        root.addView(
+            savingPill,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(146) }
+        )
 
         // A camera that cannot start says so, and one tap tries again — instead of
         // leaving the user looking at a black rectangle with working buttons.
@@ -425,19 +538,21 @@ object OeaCameraApp {
             retryAction?.invoke()
         }
 
+        // A flat wash can never be the real colour matrix (that needs a shader on the
+        // preview surface), but it can at least be *derived* from the same matrix the
+        // saved file goes through, so the viewfinder never drifts away from the
+        // picture it is promising. The tint and its strength are computed by pushing
+        // a mid grey through the filter's matrix; desaturating filters have no tone
+        // shift at all, so they get a neutral grey wash that visibly flattens colour.
         fun applyFilterOverlay() {
-            filterOverlay.alpha = if (filter == FilterMode.NONE) 0f else 0.18f
-            filterOverlay.setBackgroundColor(
-                when (filter) {
-                    FilterMode.MONO -> Color.GRAY
-                    FilterMode.SEPIA -> Color.rgb(112, 66, 20)
-                    FilterMode.VIVID -> Color.rgb(255, 100, 100)
-                    FilterMode.COOL -> Color.rgb(100, 150, 255)
-                    FilterMode.WARM -> Color.rgb(255, 180, 80)
-                    FilterMode.NOIR -> Color.BLACK
-                    else -> Color.TRANSPARENT
-                }
-            )
+            val preview = filterPreview(filter)
+            if (preview == null) {
+                filterOverlay.alpha = 0f
+                filterOverlay.setBackgroundColor(Color.TRANSPARENT)
+            } else {
+                filterOverlay.setBackgroundColor(preview.first)
+                filterOverlay.alpha = preview.second
+            }
         }
         applyFilterOverlay()
 
@@ -469,6 +584,10 @@ object OeaCameraApp {
         if (miniApp != null) {
             miniApp.pauseHook = {
                 runCatching { qrDialog?.dismiss() }
+                // A timer or a burst must not keep firing at a screen the user left.
+                countdown.stopQuietly()
+                capturing = false
+                shotsOutstanding = 0
                 cameraHelper.pauseNow()
             }
             miniApp.resumeHook = { cameraHelper.resumeNow() }
@@ -478,6 +597,9 @@ object OeaCameraApp {
         root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
                 cameraHelper.start()
+                // The user may have deleted the last photo from EMAGE while the
+                // camera was in the background.
+                refreshLastShot(0)
             }
 
             override fun onViewDetachedFromWindow(v: View) {
@@ -486,12 +608,23 @@ object OeaCameraApp {
         })
 
         // ---- touch: pinch to zoom, tap to focus
+        // The zoom UI is built further down the screen, but the pinch gesture is
+        // attached here, so the two talk through these forward references. Without
+        // them a pinch could not update the chips or the readout.
+        var zoomCeiling = cameraHelper.maxZoomFor(front).coerceIn(1f, 8f)
+        var syncZoomUi: (Float) -> Unit = {}
+        var refreshLevelUi: () -> Unit = {}
+        var refreshLastShot: (Int) -> Unit = {}
+
+        // A pinch is a zoom, so it moves the same state as the chips and the
+        // slider — including the lens ceiling, which pinch used to ignore.
         val scaleDetector = ScaleGestureDetector(host, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val next = (zoom * detector.scaleFactor).coerceIn(1f, 8f)
+                val next = (zoom * detector.scaleFactor).coerceIn(1f, zoomCeiling)
                 zoom = next
                 p.edit().putFloat(KEY_ZOOM, zoom).apply()
                 cameraHelper.setZoom(zoom)
+                syncZoomUi(zoom)
                 return true
             }
         })
@@ -528,25 +661,41 @@ object OeaCameraApp {
         val topBar = LinearLayout(host).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0x66000000)
-            setPadding(dp(10), dp(30), dp(10), dp(8))
+            // A real scrim, not a flat grey band: the controls fade into the
+            // picture instead of cutting it in half, and stay readable over sky.
+            background = OeaCameraChrome.scrim(forTop = true)
+            setPadding(dp(10), dp(14), dp(10), dp(8))
         }
-        val aspectChip = kit.chip("Aspect ${aspect.label}", aspect != AspectMode.R_4_3) {}
-        val flashChip = kit.chip("Flash ${flash.name.lowercase().replaceFirstChar { it.uppercase() }}", flash != FlashMode.OFF) {}
-        val timerChip = kit.chip("Timer ${timer.label}", timer != TimerMode.OFF) {}
-        val gridChip = kit.chip("Grid ${grid.label}", grid != GridMode.OFF) {}
-        val filterChip = kit.chip("Filter ${filter.label}", filter != FilterMode.NONE) {}
+        // A camera's top strip is read at a glance, so each control is an icon and
+        // its current value — not five sentences ("Aspect 4:3") competing with the
+        // settings button for the width of the screen.
+        fun flashLabel(): String = when (flash) {
+            FlashMode.AUTO -> "Auto"
+            FlashMode.ON -> "On"
+            FlashMode.OFF -> "Off"
+            FlashMode.TORCH -> "Torch"
+        }
+        val aspectChip = kit.chip(aspect.label, aspect != AspectMode.R_4_3, R.drawable.oic_aspect_ratio) {}
+        val flashChip = kit.chip(flashLabel(), flash != FlashMode.OFF, R.drawable.oic_flash_on) {}
+        val timerChip = kit.chip(timer.label, timer != TimerMode.OFF, R.drawable.oic_timer) {}
+        val gridChip = kit.chip(grid.label, grid != GridMode.OFF, R.drawable.oic_grid_view) {}
+        val filterChip = kit.chip(filter.label, filter != FilterMode.NONE, R.drawable.oic_palette) {}
 
         fun refreshChips() {
-            aspectChip.text = "Aspect ${aspect.label}"
+            aspectChip.text = aspect.label
+            aspectChip.contentDescription = "Aspect ratio, ${aspect.label}"
             styleChip(aspectChip, aspect != AspectMode.R_4_3)
-            flashChip.text = "Flash ${flash.name.lowercase().replaceFirstChar { it.uppercase() }}"
+            flashChip.text = flashLabel()
+            flashChip.contentDescription = "Flash, ${flashLabel()}"
             styleChip(flashChip, flash != FlashMode.OFF)
-            timerChip.text = "Timer ${timer.label}"
+            timerChip.text = timer.label
+            timerChip.contentDescription = "Self timer, ${timer.label}"
             styleChip(timerChip, timer != TimerMode.OFF)
-            gridChip.text = "Grid ${grid.label}"
+            gridChip.text = grid.label
+            gridChip.contentDescription = "Grid, ${grid.label}"
             styleChip(gridChip, grid != GridMode.OFF)
-            filterChip.text = "Filter ${filter.label}"
+            filterChip.text = filter.label
+            filterChip.contentDescription = "Filter, ${filter.label}"
             styleChip(filterChip, filter != FilterMode.NONE)
         }
         refreshChips()
@@ -601,12 +750,20 @@ object OeaCameraApp {
         topBar.addView(kit.hscroll(chips), LinearLayout.LayoutParams(0, -2, 1f))
         topBar.addView(
             kit.circleIconButton(R.drawable.oic_settings, "Camera settings", 0x33FFFFFF, Color.WHITE) {
-                showSettings(host, kit, palette, aspect) { chosen ->
-                    aspect = chosen
-                    p.edit().putString(KEY_ASPECT, chosen.name).apply()
-                    cameraHelper.setAspect(chosen)
-                    refreshChips()
-                }
+                showSettings(
+                    host = host,
+                    kit = kit,
+                    palette = palette,
+                    aspect = aspect,
+                    onAspect = { chosen ->
+                        aspect = chosen
+                        p.edit().putString(KEY_ASPECT, chosen.name).apply()
+                        cameraHelper.setAspect(chosen)
+                        gridOverlay.setAspect(chosen.ratio)
+                        refreshChips()
+                    },
+                    onVisualChange = { refreshLevelUi() }
+                )
             },
             LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(6) }
         )
@@ -615,8 +772,8 @@ object OeaCameraApp {
         // ---- bottom band: pro controls, zoom, modes, shutter row
         val bottom = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0x66000000)
-            setPadding(dp(12), dp(10), dp(12), dp(22))
+            background = OeaCameraChrome.scrim(forTop = false)
+            setPadding(dp(12), dp(10), dp(12), dp(16))
         }
         root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
 
@@ -678,22 +835,39 @@ object OeaCameraApp {
             gravity = Gravity.CENTER_VERTICAL
         }
         val zoomLabels = mutableListOf<Pair<Float, TextView>>()
-        val zoomBar = SeekBar(host).apply { max = 700; progress = (((zoom - 1f) * 100).toInt()).coerceIn(0, 700) }
+        // How far this lens can actually crop. The old row offered 1×/2×/4× plus a
+        // slider to 8× on every phone, so on a 2× camera half of it was decoration.
+        val zoomBar = SeekBar(host).apply { max = 100; progress = 0 }
         fun refreshZoom() {
-            zoomLabels.forEach { (level, view) -> styleChip(view, kotlin.math.abs(level - zoom) < 0.05f) }
-            val wanted = (((zoom - 1f) * 100).toInt()).coerceIn(0, 700)
+            zoomLabels.forEach { (level, view) ->
+                styleChip(view, kotlin.math.abs(level - zoom) < 0.05f)
+                val reachable = level <= zoomCeiling + 0.05f
+                view.isEnabled = reachable
+                view.alpha = if (reachable) 1f else 0.32f
+            }
+            val span = ((zoomCeiling - 1f) * 100f).toInt().coerceAtLeast(1)
+            if (zoomBar.max != span) zoomBar.max = span
+            val wanted = (((zoom - 1f) * 100f).toInt()).coerceIn(0, span)
             if (zoomBar.progress != wanted) zoomBar.progress = wanted
         }
         listOf(1f, 2f, 4f).forEach { level ->
             val chip = kit.chip("${level.toInt()}×", false) {
+                if (level > zoomCeiling + 0.05f) {
+                    toast(host, "This lens stops at ${String.format(Locale.US, "%.1f", zoomCeiling)}×")
+                    return@chip
+                }
                 zoom = level
                 p.edit().putFloat(KEY_ZOOM, zoom).apply()
                 cameraHelper.setZoom(zoom)
                 refreshZoom()
+                zoomBadge.show(zoom)
+                OeaCameraChrome.buzz(host, 8L)
             }
+            chip.contentDescription = "Zoom ${level.toInt()} times"
             zoomLabels += level to chip
             zoomRow.addView(chip, LinearLayout.LayoutParams(dp(56), dp(34)).apply { rightMargin = dp(6) })
         }
+        zoomBar.contentDescription = "Zoom"
         zoomBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
@@ -701,6 +875,7 @@ object OeaCameraApp {
                     p.edit().putFloat(KEY_ZOOM, zoom).apply()
                     cameraHelper.setZoom(zoom)
                     refreshZoom()
+                    zoomBadge.show(zoom)
                 }
             }
 
@@ -710,6 +885,24 @@ object OeaCameraApp {
         zoomRow.addView(zoomBar, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(4) })
         bottom.addView(zoomRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         refreshZoom()
+        syncZoomUi = { value ->
+            zoomBadge.show(value)
+            refreshZoom()
+        }
+
+        // The level belongs to the still modes: a video or a QR scan does not care
+        // whether the horizon is straight, and the line would only be in the way.
+        fun refreshLevel() {
+            val wanted = levelEnabled(host) &&
+                (captureMode == CaptureMode.PHOTO || captureMode == CaptureMode.PRO || captureMode == CaptureMode.DOC)
+            levelView.setActive(wanted && !isRecording)
+        }
+        refreshLevel()
+        refreshLevelUi = { refreshLevel() }
+
+        // The shutter is built below the mode row, so the row talks to it through
+        // this: a mode change has to repaint the button (still / red dot / stop).
+        var syncShutterUi: () -> Unit = {}
 
         // Modes: one row of chips, selection updated in place.
         val modeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
@@ -736,6 +929,8 @@ object OeaCameraApp {
                 cameraHelper.applyPro(isoPercent = 0, evPercent = 100, awbPick = 0, focusPercent = 0)
             }
             modeChips.forEach { (m, view) -> styleChip(view, m == mode) }
+            refreshLevel()
+            syncShutterUi()
             when (mode) {
                 CaptureMode.QR -> openQrScanner(host, kit, palette) { dialog -> qrDialog = dialog }
                 CaptureMode.VIDEO, CaptureMode.TIMELAPSE -> {
@@ -747,8 +942,19 @@ object OeaCameraApp {
                 else -> Unit
             }
         }
+        fun modeIcon(mode: CaptureMode): Int = when (mode) {
+            CaptureMode.PHOTO -> R.drawable.oic_photo_camera
+            CaptureMode.VIDEO -> R.drawable.oic_play_arrow
+            CaptureMode.PORTRAIT -> R.drawable.oic_person
+            CaptureMode.NIGHT -> R.drawable.oic_bedtime
+            CaptureMode.PRO -> R.drawable.oic_tune
+            CaptureMode.QR -> R.drawable.oic_qr_code
+            CaptureMode.DOC -> R.drawable.oic_text_fields
+            CaptureMode.TIMELAPSE -> R.drawable.oic_speed
+        }
         CaptureMode.values().forEach { mode ->
-            val chip = kit.chip(mode.label, mode == captureMode) { selectMode(mode) }
+            val chip = kit.chip(mode.label, mode == captureMode, modeIcon(mode)) { selectMode(mode) }
+            chip.contentDescription = "${mode.label} mode — ${mode.desc}"
             modeChips += mode to chip
             modeRow.addView(chip, LinearLayout.LayoutParams(-2, dp(34)).apply { rightMargin = dp(6) })
         }
@@ -763,29 +969,105 @@ object OeaCameraApp {
         val captureBtn = FrameLayout(host).apply {
             background = kit.oval(Color.WHITE, palette.accent, dp(4))
             isClickable = true
+            isFocusable = true
             contentDescription = "Shutter"
         }
         val innerCapture = View(host).apply { background = kit.oval(Color.WHITE) }
         captureBtn.addView(innerCapture, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER))
+        // A shutter that does not move under the finger feels dead. The press is
+        // visual only: the click listener still does the work.
+        captureBtn.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(90).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                else -> Unit
+            }
+            false
+        }
+        fun renderShutter() {
+            // Video is a red dot; recording turns it into the stop square the whole
+            // world already knows, instead of only recolouring a circle.
+            when {
+                isRecording -> {
+                    innerCapture.setBackgroundColor(Color.rgb(255, 72, 66))
+                    (innerCapture.layoutParams as FrameLayout.LayoutParams).apply {
+                        width = dp(34); height = dp(34); gravity = Gravity.CENTER
+                    }.also { innerCapture.layoutParams = it }
+                    captureBtn.contentDescription = "Stop recording"
+                }
+                captureMode == CaptureMode.VIDEO || captureMode == CaptureMode.TIMELAPSE -> {
+                    innerCapture.background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        setColor(Color.rgb(255, 72, 66))
+                    }
+                    (innerCapture.layoutParams as FrameLayout.LayoutParams).apply {
+                        width = dp(56); height = dp(56); gravity = Gravity.CENTER
+                    }.also { innerCapture.layoutParams = it }
+                    captureBtn.contentDescription = "Start recording"
+                }
+                else -> {
+                    innerCapture.background = kit.oval(Color.WHITE)
+                    (innerCapture.layoutParams as FrameLayout.LayoutParams).apply {
+                        width = dp(56); height = dp(56); gravity = Gravity.CENTER
+                    }.also { innerCapture.layoutParams = it }
+                    captureBtn.contentDescription = "Take a photo"
+                }
+            }
+        }
+        renderShutter()
         val switchBtn = kit.circleIconButton(R.drawable.oic_refresh, "Switch camera", 0x33FFFFFF, Color.WHITE) {
             if (isRecording) {
                 toast(host, "Stop the recording before switching camera")
                 return@circleIconButton
             }
+            if (!cameraHelper.hasFacing(!front)) {
+                toast(host, if (front) "This phone has only the front camera" else "This phone has only the rear camera")
+                return@circleIconButton
+            }
             front = !front
             p.edit().putBoolean(KEY_FACING, front).apply()
             cameraHelper.switchCamera(front)
+            // A different sensor is a different lens: re-read its limit, then bring
+            // the zoom back inside it instead of leaving a stale 4× selected.
+            zoomCeiling = cameraHelper.maxZoomFor(front).coerceIn(1f, 8f)
+            if (zoom > zoomCeiling) {
+                zoom = zoomCeiling
+                p.edit().putFloat(KEY_ZOOM, zoom).apply()
+                cameraHelper.setZoom(zoom)
+            }
+            refreshZoom()
+            OeaCameraChrome.buzz(host, 14L)
         }
+        // One camera means the button is a lie; hide it rather than toast a refusal.
+        if (!cameraHelper.hasFacing(!front)) switchBtn.visibility = View.GONE
         cameraHelper.onRecordingAbandoned = { file ->
             isRecording = false
-            innerCapture.background = kit.oval(Color.WHITE)
+            recordingPill.stop()
+            renderShutter()
+            modeChips.forEach { (_, view) -> view.alpha = 1f }
+            refreshLevel()
             if (!externalCapture) {
                 MediaScannerConnection.scanFile(host, arrayOf(file.absolutePath), arrayOf("video/mp4"), null)
                 toast(host, "Recording stopped and saved: ${file.name}")
             }
         }
-        val galleryBtn = photoLibraryButton(host, kit)
-        shutterRow.addView(galleryBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
+        // The shutter row's left slot shows the newest frame, so a burst has
+        // somewhere to land and the user can check the shot without leaving. Before
+        // the first photo there is nothing to preview, so the plain library button
+        // holds the slot instead.
+        val lastShot = LastShotButton(host, kit)
+        val libraryBtn = photoLibraryButton(host, kit)
+        val lastSlot = FrameLayout(host)
+        fun paintLastSlot(extra: Int = 0) {
+            val wanted: View = if (lastShot.refresh(extra)) lastShot else libraryBtn
+            if (lastSlot.childCount == 1 && lastSlot.getChildAt(0) === wanted) return
+            lastSlot.removeAllViews()
+            lastSlot.addView(wanted, FrameLayout.LayoutParams(dp(52), dp(52)))
+        }
+        paintLastSlot()
+        refreshLastShot = { extra -> paintLastSlot(extra) }
+        shutterRow.addView(lastSlot, LinearLayout.LayoutParams(dp(52), dp(52)))
         shutterRow.addView(View(host), LinearLayout.LayoutParams(0, 1, 1f))
         shutterRow.addView(captureBtn, LinearLayout.LayoutParams(dp(80), dp(80)))
         shutterRow.addView(View(host), LinearLayout.LayoutParams(0, 1, 1f))
@@ -818,7 +1100,9 @@ object OeaCameraApp {
                 return
             }
             playShutterIfWanted()
+            savingPill.visibility = View.VISIBLE
             val orientationTag = if (bytes != null) cameraHelper.jpegOrientation() else 1
+            val mirrorSelfie = front && mirrorSelfies(host)
             val mode = captureMode
             val tone = filter
             val smoothFaces = privacyBlur(host)
@@ -836,9 +1120,11 @@ object OeaCameraApp {
                     aspect = cropAspect,
                     hdr = hdr,
                     orientationTag = orientationTag,
-                    withLocation = withLocation
+                    withLocation = withLocation,
+                    mirror = mirrorSelfie
                 )
                 host.runOnUiThread {
+                    savingPill.visibility = View.GONE
                     if (host.isDestroyed) return@runOnUiThread
                     if (externalCapture) {
                         if (saved != null && finishExternalCapture(host, captureTarget, saved, "image/jpeg")) return@runOnUiThread
@@ -852,9 +1138,11 @@ object OeaCameraApp {
                         return@runOnUiThread
                     }
                     if (!ceremony) {
+                        refreshLastShot(1)
                         toast(host, "Frame saved")
                         return@runOnUiThread
                     }
+                    refreshLastShot(1)
                     val extra = if (mode == CaptureMode.PHOTO) "" else " · ${mode.label.lowercase(Locale.getDefault())} pass"
                     toast(host, "Saved ${saved.name}$extra")
                     showCapturedSheet(host, kit, saved)
@@ -862,24 +1150,68 @@ object OeaCameraApp {
             }
         }
 
+        fun releaseShutter() {
+            shotsOutstanding = (shotsOutstanding - 1).coerceAtLeast(0)
+            if (shotsOutstanding == 0) {
+                capturing = false
+                captureBtn.alpha = 1f
+            }
+        }
+
         fun takeOne(ceremony: Boolean) {
-            cameraHelper.captureStill { bytes -> deliverStill(bytes, ceremony) }
+            shotsOutstanding += 1
+            cameraHelper.captureStill { bytes ->
+                deliverStill(bytes, ceremony)
+                // The camera is free again as soon as it hands the frame over; the
+                // file is still developing on the worker, which is what the pill says.
+                releaseShutter()
+            }
+        }
+
+        fun runBurst(shots: Int) {
+            var index = 0
+            fun next() {
+                if (host.isDestroyed || !cameraHelper.isOpen()) {
+                    capturing = false
+                    captureBtn.alpha = 1f
+                    return
+                }
+                val ceremony = index == shots - 1
+                takeOne(ceremony)
+                index += 1
+                if (index < shots) mainHandler.postDelayed({ next() }, BURST_STEP_MS)
+            }
+            next()
         }
 
         fun capturePhotos() {
+            if (capturing) return
             val shots = if (externalCapture) 1 else burstCount(host)
-            if (timer.seconds > 0) toast(host, "Capturing in ${timer.seconds}s")
-            if (shots > 1) toast(host, "$shots frames, $BURST_STEP_MS ms apart")
-            repeat(shots) { index ->
-                val at = timer.seconds * 1000L + index * BURST_STEP_MS
-                val last = index == shots - 1
-                if (at <= 0L) takeOne(last) else mainHandler.postDelayed({ takeOne(last) }, at)
+            capturing = true
+            captureBtn.alpha = 0.62f
+            OeaCameraChrome.buzz(host)
+            if (timer.seconds > 0) {
+                countdown.onFinished = {
+                    if (shots > 1) toast(host, "$shots frames, $BURST_STEP_MS ms apart")
+                    runBurst(shots)
+                }
+                countdown.onCancelled = {
+                    capturing = false
+                    captureBtn.alpha = 1f
+                    toast(host, "Timer cancelled")
+                }
+                countdown.start(timer.seconds)
+            } else {
+                runBurst(shots)
             }
         }
 
         fun stopRecording() {
             isRecording = false
-            innerCapture.background = kit.oval(Color.WHITE)
+            recordingPill.stop()
+            renderShutter()
+            modeChips.forEach { (_, view) -> view.alpha = 1f }
+            refreshLevel()
             cameraHelper.stopVideoRecording { file ->
                 if (host.isDestroyed) return@stopVideoRecording
                 if (file == null) {
@@ -910,25 +1242,36 @@ object OeaCameraApp {
                 toast(host, "Recording without sound — allow the microphone for audio")
             }
             isRecording = true
-            innerCapture.background = kit.oval(Color.RED)
+            renderShutter()
+            recordingPill.start()
+            levelView.setActive(false)
+            // While a clip is running the modes are locked, so say so instead of
+            // waiting for a tap to explain it.
+            modeChips.forEach { (_, view) -> view.alpha = 0.42f }
             cameraHelper.startVideoRecording(
                 withAudio = withAudio,
                 captureRateHz = if (captureMode == CaptureMode.TIMELAPSE) TIME_LAPSE_RATE else 0f,
                 onError = { message ->
                     isRecording = false
-                    innerCapture.background = kit.oval(Color.WHITE)
+                    recordingPill.stop()
+                    renderShutter()
+                    modeChips.forEach { (_, view) -> view.alpha = 1f }
+                    refreshLevel()
                     toast(host, message)
                 }
             )
         }
 
         captureBtn.setOnClickListener {
+            OeaCameraChrome.buzz(host, if (captureMode == CaptureMode.VIDEO || captureMode == CaptureMode.TIMELAPSE) 22L else 12L)
             when (captureMode) {
                 CaptureMode.VIDEO, CaptureMode.TIMELAPSE -> if (isRecording) stopRecording() else startRecording()
                 CaptureMode.QR -> openQrScanner(host, kit, palette) { dialog -> qrDialog = dialog }
                 else -> capturePhotos()
             }
         }
+        // From here on a mode change can repaint the shutter as well.
+        syncShutterUi = { renderShutter() }
 
         // ---- a fallback for phones whose camera refuses Camera2 entirely
         if (!cameraHelper.hasCamera()) {
@@ -943,12 +1286,99 @@ object OeaCameraApp {
             }
         }
 
+        // The countdown goes on last so a full-screen number sits above every
+        // control, and a tap anywhere on it takes the shot back.
+        root.addView(countdown, FrameLayout.LayoutParams(-1, -1))
+
+        // ---- the window itself
+        //
+        // A camera is a viewfinder, not a settings page: the picture has to reach
+        // under the status bar and beside the notch (the activity is edge-to-edge
+        // and FullBleed, so nothing above this applies the insets), while the
+        // controls must stay clear of both and of the gesture bar.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val bars = OeaInsets.bars(insets)
+            topBar.setPadding(dp(10) + bars[0], dp(14) + bars[1], dp(10) + bars[2], dp(8))
+            bottom.setPadding(dp(12) + bars[0], dp(10), dp(12) + bars[2], dp(14) + bars[3])
+            val pillTop = dp(64) + bars[1]
+            listOf(zoomBadge to pillTop, recordingPill to pillTop, savingPill to pillTop + dp(44)).forEach { (badge, top) ->
+                (badge.layoutParams as? FrameLayout.LayoutParams)?.let { params ->
+                    if (params.topMargin != top) {
+                        params.topMargin = top
+                        badge.layoutParams = params
+                    }
+                }
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+
+        // Composing a shot should not be interrupted by the screen turning off.
+        val keepAwake = runCatching {
+            host.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            true
+        }.getOrDefault(false)
+
+        root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+
+            override fun onViewDetachedFromWindow(v: View) {
+                countdown.stopQuietly()
+                recordingPill.stop()
+                savingPill.visibility = View.GONE
+                if (keepAwake) runCatching { host.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+            }
+        })
+
         return root
     }
 
     // --------------------------------------------------------------- the view bits
 
     /** The last picture, loaded through OEA's thumbnail pipeline rather than decoded whole. */
+    /**
+     * The last frame the camera saved, in the shutter row. It is a real preview of
+     * the newest file (not a static icon), it counts a burst, and a tap opens
+     * EMAGE — the same destination as the library button it replaced.
+     */
+    private class LastShotButton(private val host: Activity, private val kit: OeaKit) : FrameLayout(host) {
+        private val image = ImageView(host).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            contentDescription = "Last photo"
+        }
+        private val edge = dpOf(host, 50)
+        private var shown: String? = null
+
+        init {
+            background = kit.rounded(Color.BLACK, 12)
+            clipToOutline = true
+            isClickable = true
+            isFocusable = true
+            addView(image, LayoutParams(edge, edge))
+            setOnClickListener { openGallery(host) }
+        }
+
+        /** Returns false when there is nothing to show yet. */
+        fun refresh(extra: Int = 0): Boolean {
+            val latest = latestPhoto(host)
+            val uri = latest?.let { providerUri(host, it) }
+            if (uri == null) {
+                visibility = View.GONE
+                return false
+            }
+            visibility = View.VISIBLE
+            if (uri.toString() != shown) {
+                shown = uri.toString()
+                OeaThumbnails.load(image, uri, edge, tag = "camera-last")
+            }
+            contentDescription = when {
+                extra > 1 -> "Last photo, $extra frames just captured. Open EMAGE"
+                else -> "Last photo: ${latest.name}. Open EMAGE"
+            }
+            return true
+        }
+    }
+
     private fun photoLibraryButton(host: Activity, kit: OeaKit): View {
         val latest = latestPhoto(host)
         if (latest == null) {
@@ -975,11 +1405,20 @@ object OeaCameraApp {
     }
 
     private fun latestPhoto(host: Activity): File? = runCatching {
-        File(host.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
+        val root = host.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES) ?: return@runCatching null
+        File(root, "OEA")
             .listFiles()
             ?.filter { it.isFile && it.length() > 0L }
             ?.maxByOrNull { it.lastModified() }
     }.getOrNull()
+
+    private fun openAppSettings(host: Activity) {
+        host.startActivity(
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.fromParts("package", host.packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
 
     private fun dpOf(context: Context, value: Int): Int =
         (value * context.resources.displayMetrics.density + 0.5f).toInt()
@@ -1163,24 +1602,35 @@ object OeaCameraApp {
         aspect: Float,
         hdr: Boolean,
         orientationTag: Int,
-        withLocation: Boolean
+        withLocation: Boolean,
+        mirror: Boolean = false
     ): File? {
+        // A still from the sensor is stored sideways: the pixels are always in the
+        // sensor's landscape frame and the EXIF tag is what turns them. Every pass
+        // below — night, portrait, document, the aspect crop, a selfie mirror —
+        // therefore runs on *upright* pixels. Before this, a portrait photo's
+        // Portrait pass blurred a horizontal band across a picture that a viewer
+        // then rotated, so the band was 90° away from the tap.
+        val rotation = if (jpeg != null) OeaCameraOptics.rotationForOrientationTag(orientationTag) else 0
+        val mirrorPixels = jpeg != null && (mirror || OeaCameraOptics.orientationTagMirrors(orientationTag))
+        val needsTurn = rotation != 0 || mirrorPixels
+        val uprightAspect = OeaCameraOptics.displayAspect(aspect, rotation)
         // The Camera2 reader already chooses the requested aspect when the device
         // offers it. Do not decode/re-encode a full-resolution JPEG just because an
         // aspect ratio is selected: that used to downsample otherwise untouched
         // photos to preview-ish dimensions. Only crop when the actual JPEG buffer
-        // does not match the requested sensor-buffer ratio.
-        val jpegMatchesAspect = if (jpeg != null && aspect > 0f) {
+        // does not match the requested upright shape.
+        val jpegMatchesAspect = if (jpeg != null && uprightAspect > 0f && !needsTurn) {
             runCatching {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-                OeaCameraOptics.matchesAspect(bounds.outWidth, bounds.outHeight, aspect)
+                OeaCameraOptics.matchesAspect(bounds.outWidth, bounds.outHeight, uprightAspect)
             }.getOrDefault(false)
         } else {
             false
         }
-        val needsCrop = aspect > 0f && !jpegMatchesAspect
-        val needsPixels = filter != FilterMode.NONE || hdr || OeaCameraEffects.needed(mode, privacy) || needsCrop
+        val needsCrop = uprightAspect > 0f && !jpegMatchesAspect
+        val needsPixels = filter != FilterMode.NONE || hdr || OeaCameraEffects.needed(mode, privacy) || needsCrop || needsTurn
         if (jpeg != null && !needsPixels) {
             // Nothing to develop: the camera's own JPEG is the best possible file.
             val file = newPhotoFile(host, filter)
@@ -1193,23 +1643,40 @@ object OeaCameraApp {
             publish(host, file)
             return file
         }
-        val decoded = jpeg?.let { decodeJpeg(it, 3000) }
+        // Turning pixels costs a second copy, so the decode target drops a little
+        // when a turn is needed; 2600 px is still far more than a screen.
+        val decoded = jpeg?.let { decodeJpeg(it, if (needsTurn) 2600 else 3000) }
         val source = decoded ?: upright ?: return null
+        val turned = if (decoded != null && needsTurn) turnPixels(source, rotation, mirrorPixels) else source
         val result = saveProcessed(
             host = host,
-            source = source,
+            source = turned,
             mode = mode,
             filter = filter,
             privacy = privacy,
-            aspect = aspect,
+            aspect = if (decoded != null) uprightAspect else aspect,
             hdr = hdr,
-            orientationTag = if (decoded != null) orientationTag else 1,
+            // Turned pixels are already upright, and the preview snapshot is too.
+            orientationTag = if (decoded == null || needsTurn) 1 else orientationTag,
             withLocation = withLocation
         )
+        if (turned !== decoded && turned !== upright) turned.recycle()
         decoded?.recycle()
         upright?.recycle()
         return result
     }
+
+    /**
+     * Rotates and (optionally) mirrors pixels. The camera's own JPEG keeps its
+     * orientation in a tag, which is free until something has to read the pixels.
+     */
+    private fun turnPixels(source: Bitmap, rotation: Int, mirror: Boolean): Bitmap = runCatching {
+        val matrix = Matrix()
+        if (rotation != 0) matrix.postRotate(rotation.toFloat())
+        if (mirror) matrix.postScale(-1f, 1f)
+        val turned = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+        if (turned.width <= 0 || turned.height <= 0) source else turned
+    }.getOrDefault(source)
 
     /** Effects + filter + aspect crop + JPEG encode, on whatever thread calls it. */
     private fun saveProcessed(
@@ -1239,9 +1706,9 @@ object OeaCameraApp {
             if (pushed !== working && working !== source) working.recycle()
             working = pushed
         }
-        // The requested ratio is the sensor buffer's ratio, which is the same thing
-        // the preview size and the still size were chosen with; a rotated photo is
-        // rotated by its EXIF tag afterwards, so cropping in buffer space is right.
+        // [aspect] arrives in the pixels' own orientation: saveFrame turns a
+        // sensor-sideways still upright first, so "4:3" means 4:3 of what the user
+        // sees, not 4:3 of the buffer it came from.
         if (aspect > 0f) {
             val rect = OeaCameraOptics.cropRect(working.width, working.height, aspect)
             val croppedWidth = rect[2] - rect[0]
@@ -1284,10 +1751,12 @@ object OeaCameraApp {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }.getOrNull()
 
-    private fun applyFilter(src: Bitmap, filter: FilterMode): Bitmap = runCatching {
-        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out)
-        val paint = Paint()
+    /**
+     * The one place a filter's colour transform is defined. The saved file and the
+     * viewfinder tint both read it, so the preview cannot drift from the output.
+     * Returns null for "no filter", in which case the pixels are left alone.
+     */
+    private fun toneMatrix(filter: FilterMode): android.graphics.ColorMatrix? {
         val matrix = android.graphics.ColorMatrix()
         when (filter) {
             FilterMode.MONO -> matrix.setSaturation(0f)
@@ -1320,8 +1789,42 @@ object OeaCameraApp {
                 matrix.setSaturation(0f)
                 matrix.postConcat(android.graphics.ColorMatrix().apply { setScale(1.1f, 1.1f, 1.1f, 1f) })
             }
-            else -> return src
+            FilterMode.NONE -> return null
         }
+        return matrix
+    }
+
+    /** Colour and alpha of the viewfinder wash that approximates [filter]. */
+    private fun filterPreview(filter: FilterMode): Pair<Int, Float>? {
+        val matrix = toneMatrix(filter) ?: return null
+        // Push a mid grey through the matrix: that is the tone the filter shifts a
+        // flat scene to. The wash then pulls the preview towards it.
+        val mid = FloatArray(4)
+        matrix.mapPoints(mid, floatArrayOf(128f, 128f, 128f, 255f))
+        fun channel(v: Float) = v.toInt().coerceIn(0, 255)
+        val red = channel(mid[0])
+        val green = channel(mid[1])
+        val blue = channel(mid[2])
+        val shift = maxOf(kotlin.math.abs(red - 128), kotlin.math.abs(green - 128), kotlin.math.abs(blue - 128))
+        if (shift <= 2) {
+            // No tone shift: the filter only removes colour (Mono, Noir). A neutral
+            // grey wash is the closest a flat overlay can get to desaturation.
+            return Color.argb(255, 128, 128, 128) to 0.22f
+        }
+        // Solve the wash so a mid grey lands on the filtered grey: grey + a*(tint - grey)
+        // = filtered, with a fixed 0.35 strength, clamped to the channel range.
+        val strength = 0.35f
+        fun tintFor(filtered: Int): Int =
+            (128f + (filtered - 128f) / strength).toInt().coerceIn(0, 255)
+        val tint = Color.rgb(tintFor(red), tintFor(green), tintFor(blue))
+        return tint to strength
+    }
+
+    private fun applyFilter(src: Bitmap, filter: FilterMode): Bitmap = runCatching {
+        val matrix = toneMatrix(filter) ?: return src
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint()
         paint.colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
         canvas.drawBitmap(src, 0f, 0f, paint)
         out
@@ -1408,7 +1911,22 @@ object OeaCameraApp {
 
     private fun showCapturedSheet(host: Activity, kit: OeaKit, file: File) {
         val fileUri = providerUri(host, file) ?: return
-        kit.sheet("Photo saved", file.name) { panel, dialog ->
+        // Say what was actually saved: a picture whose pixels are 4000×3000 but
+        // which a viewer turns 90° is a portrait photo, so report the shape the
+        // user will see and the size on disk.
+        val facts = runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            val tag = ExifInterface(file.absolutePath)
+                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            val turned = OeaCameraOptics.rotationForOrientationTag(tag) == 90 ||
+                OeaCameraOptics.rotationForOrientationTag(tag) == 270
+            val width = if (turned) bounds.outHeight else bounds.outWidth
+            val height = if (turned) bounds.outWidth else bounds.outHeight
+            val megabytes = file.length() / (1024.0 * 1024.0)
+            "$width×$height · ${String.format(Locale.US, "%.1f", megabytes)} MB"
+        }.getOrNull()
+        kit.sheet("Photo saved", facts ?: file.name) { panel, dialog ->
             val preview = ImageView(host).apply {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 background = kit.rounded(Color.BLACK, 16)
@@ -1449,13 +1967,20 @@ object OeaCameraApp {
                 )
             )
             panel.addView(
-                kit.tonalButton("Delete") {
-                    dialog.dismiss()
-                    kit.confirm("Delete photo?", file.name, "Delete", destructive = true) {
-                        file.delete()
-                        runCatching { OeaThumbnails.invalidateAll() }
+                kit.buttonRow(
+                    kit.tonalButton("Open EMAGE") {
+                        dialog.dismiss()
+                        openGallery(host)
+                    },
+                    kit.tonalButton("Delete") {
+                        dialog.dismiss()
+                        kit.confirm("Delete photo?", file.name, "Delete", destructive = true) {
+                            file.delete()
+                            runCatching { OeaThumbnails.invalidateAll() }
+                            runCatching { OeaWidgetStudio.refreshWidgets(host, "camera") }
+                        }
                     }
-                },
+                ),
                 LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) }
             )
             // The modes that change pixels are also available after the fact, so a
@@ -1497,7 +2022,14 @@ object OeaCameraApp {
 
     // ------------------------------------------------------------------- settings
 
-    private fun showSettings(host: Activity, kit: OeaKit, palette: OeaPalette, aspect: AspectMode, onAspect: (AspectMode) -> Unit) {
+    private fun showSettings(
+        host: Activity,
+        kit: OeaKit,
+        palette: OeaPalette,
+        aspect: AspectMode,
+        onAspect: (AspectMode) -> Unit,
+        onVisualChange: () -> Unit = {}
+    ) {
         kit.sheet("Camera settings", "OEA's own camera preferences") { panel, _ ->
             val p = prefs(host)
             val group = kit.group(panel)
@@ -1508,6 +2040,23 @@ object OeaCameraApp {
                 "OEA smudges each face it can find before saving",
                 privacyBlur(host)
             ) { setPrivacyBlur(host, it) }
+            kit.switchRow(
+                group,
+                R.drawable.oic_person,
+                "Mirror selfies",
+                "Save a front-camera photo the way the preview showed it, instead of flipped back",
+                mirrorSelfies(host)
+            ) { setMirrorSelfies(host, it) }
+            kit.switchRow(
+                group,
+                R.drawable.oic_speed,
+                "Horizon level",
+                "A line across the middle of the still modes that turns green when the phone is straight",
+                levelEnabled(host)
+            ) { enabled ->
+                setLevelEnabled(host, enabled)
+                onVisualChange()
+            }
             kit.switchRow(
                 group,
                 R.drawable.oic_volume_up,
@@ -1571,16 +2120,69 @@ object OeaCameraApp {
             strokeWidth = 1f
             style = Paint.Style.STROKE
         }
+        // The dead band that the chosen aspect ratio will crop away. A camera that
+        // silently cuts 4:3 into 1:1 after the fact is a camera that lied to the
+        // viewfinder; this paints the truth over the preview.
+        private val cropPaint = Paint().apply {
+            color = Color.WHITE
+            alpha = 150
+            strokeWidth = 1.5f
+            style = Paint.Style.STROKE
+        }
+        private val shadePaint = Paint().apply {
+            color = Color.BLACK
+            alpha = 120
+            style = Paint.Style.FILL
+        }
+        private val labelPaint = Paint().apply {
+            color = Color.WHITE
+            alpha = 210
+            textSize = resources.displayMetrics.density * 11f
+            isAntiAlias = true
+        }
+        private var aspectRatio = 4f / 3f
 
         fun setMode(m: GridMode) {
             mode = m
             invalidate()
         }
 
+        /** [ratio] is the saved picture's width/height as the user sees it; 0 = full sensor. */
+        fun setAspect(ratio: Float) {
+            aspectRatio = ratio
+            invalidate()
+        }
+
+        private fun cropRect(w: Float, h: Float): RectF? {
+            if (aspectRatio <= 0f) return null
+            val cropWidth: Float
+            val cropHeight: Float
+            if (w / h > aspectRatio) {
+                cropHeight = h
+                cropWidth = h * aspectRatio
+            } else {
+                cropWidth = w
+                cropHeight = w / aspectRatio
+            }
+            // A crop that is within a percent of the whole frame is the frame itself.
+            if (w - cropWidth < w * 0.01f && h - cropHeight < h * 0.01f) return null
+            return RectF((w - cropWidth) / 2f, (h - cropHeight) / 2f, (w + cropWidth) / 2f, (h + cropHeight) / 2f)
+        }
+
         override fun onDraw(canvas: Canvas) {
-            if (mode == GridMode.OFF) return
             val w = width.toFloat()
             val h = height.toFloat()
+            val crop = cropRect(w, h)
+            if (crop != null) {
+                canvas.drawRect(0f, 0f, w, crop.top, shadePaint)
+                canvas.drawRect(0f, crop.bottom, w, h, shadePaint)
+                canvas.drawRect(0f, crop.top, crop.left, crop.bottom, shadePaint)
+                canvas.drawRect(crop.right, crop.top, w, crop.bottom, shadePaint)
+                canvas.drawRect(crop, cropPaint)
+                val label = "Saved area"
+                canvas.drawText(label, crop.left + 10f, crop.top + 22f, labelPaint)
+            }
+            if (mode == GridMode.OFF) return
             when (mode) {
                 GridMode.GRID_3X3 -> {
                     for (i in 1..2) {
@@ -1699,6 +2301,26 @@ object OeaCameraApp {
         }.getOrDefault(false)
 
         fun isOpen(): Boolean = device != null
+
+        /**
+         * The furthest this lens will crop, read from the camera service without
+         * opening the camera. The zoom row is built from this, so it can stop
+         * offering 4× on a lens that ends at 2×.
+         */
+        fun maxZoomFor(wantFront: Boolean): Float {
+            val cm = manager ?: runCatching { activity.getSystemService(CameraManager::class.java) }.getOrNull() ?: return 4f
+            val id = pickCameraId(cm, wantFront) ?: return 4f
+            val zoom = runCatching {
+                cm.getCameraCharacteristics(id).get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
+            }.getOrNull()
+            return (zoom ?: 4f).coerceAtLeast(1f)
+        }
+
+        /** Whether this phone has a lens facing the way asked. */
+        fun hasFacing(wantFront: Boolean): Boolean {
+            val cm = manager ?: runCatching { activity.getSystemService(CameraManager::class.java) }.getOrNull() ?: return false
+            return pickCameraId(cm, wantFront) != null
+        }
 
         fun start() {
             if (running) return

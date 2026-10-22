@@ -231,6 +231,35 @@ jobs:
           # The camera is released when the screen goes away.
           grep -Fq 'onSurfaceTextureDestroyed' "$CAMERA"
           grep -Fq 'pauseHook' "$CAMERA"
+          # The viewfinder's own chrome is wired, not decorative: level, REC pill,
+          # zoom readout, countdown, gradient scrims.
+          CHROME=$SRC/camera/OeaCameraChrome.kt
+          grep -Fq 'OeaLevelView' "$CAMERA"
+          grep -Fq 'OeaRecordingPill' "$CAMERA"
+          grep -Fq 'OeaZoomBadge' "$CAMERA"
+          grep -Fq 'OeaCountdownOverlay' "$CAMERA"
+          grep -Fq 'OeaCameraChrome.scrim(' "$CAMERA"
+          grep -Fq 'class OeaLevelView' "$CHROME"
+          grep -Fq 'class OeaRecordingPill' "$CHROME"
+          grep -Fq 'class OeaZoomBadge' "$CHROME"
+          grep -Fq 'class OeaCountdownOverlay' "$CHROME"
+          # Zoom stops at what the lens reports, and the chips go dead past it.
+          grep -Fq 'fun maxZoomFor(' "$CAMERA"
+          grep -Fq 'SCALER_AVAILABLE_MAX_DIGITAL_ZOOM' "$CAMERA"
+          grep -Fq 'zoomCeiling' "$CAMERA"
+          # A selfie is saved the way the preview showed it, and the effect passes
+          # run on upright pixels before they are cropped.
+          grep -Fq 'mirror = mirrorSelfie' "$CAMERA"
+          grep -Fq 'turnPixels' "$CAMERA"
+          grep -Fq 'rotationForOrientationTag' "$OPTICS"
+          grep -Fq 'rotationForOrientationTag' "$SRC/miniapps/OeaCameraEffects.kt"
+          # The viewfinder draws the crop it will actually keep.
+          grep -Fq 'fun setAspect(' "$CAMERA"
+          # Filters share one matrix between preview and file.
+          grep -Fq 'fun toneMatrix(' "$CAMERA"
+          # Both new preferences have a row in the settings sheet.
+          grep -Fq 'setMirrorSelfies' "$CAMERA"
+          grep -Fq 'setLevelEnabled' "$CAMERA"
           # The torch picks a camera that has a flash and reports real state.
           grep -Fq 'FLASH_INFO_AVAILABLE' "$TORCH"
           grep -Fq 'registerTorchCallback' "$TORCH"
