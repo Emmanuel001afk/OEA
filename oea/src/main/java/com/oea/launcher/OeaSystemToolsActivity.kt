@@ -1343,7 +1343,7 @@ open class OeaSystemToolsActivity : Activity() {
         } else {
             kit.switchRow(
                 group, R.drawable.oic_lock, "Cover sensor to lock screen",
-                "While the screen is on, hold your hand over the proximity sensor for about 1.2 seconds. Uncover sooner to cancel. Pauses during calls and ignores a sensor already covered when listening starts.",
+                "While the screen is on in portrait, hold your hand over the proximity sensor for about 1.2 seconds. Uncover sooner to cancel. Disabled in landscape and during calls; ignores a sensor already covered when listening starts.",
                 coverToLock
             ) { on ->
                 dataStore.setCoverToLockEnabled(on)

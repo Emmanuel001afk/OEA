@@ -5,6 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OeaCoverLockDetectorTest {
+    @Test fun coverLockIsDisabledInLandscapeAndDuringCalls() {
+        assertFalse(OeaCoverLockPolicy.isAllowed(screenOn = true, landscape = true, enabled = true, inCall = false))
+        assertFalse(OeaCoverLockPolicy.isAllowed(screenOn = true, landscape = false, enabled = true, inCall = true))
+        assertFalse(OeaCoverLockPolicy.isAllowed(screenOn = false, landscape = false, enabled = true, inCall = false))
+        assertFalse(OeaCoverLockPolicy.isAllowed(screenOn = true, landscape = false, enabled = false, inCall = false))
+        assertTrue(OeaCoverLockPolicy.isAllowed(screenOn = true, landscape = false, enabled = true, inCall = false))
+    }
+
     @Test fun alreadyCoveredAtStartupIsIgnoredUntilClearThenNewCover() {
         val detector = OeaCoverLockDetector(holdMs = 1_000L)
         assertFalse(detector.onReading(covered = true, nowMs = 100L))

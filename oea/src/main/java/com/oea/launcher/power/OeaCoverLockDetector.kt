@@ -1,5 +1,11 @@
 package com.oea.launcher.power
 
+/** Pure state gate shared by the service and tests. */
+internal object OeaCoverLockPolicy {
+    fun isAllowed(screenOn: Boolean, landscape: Boolean, enabled: Boolean, inCall: Boolean): Boolean =
+        screenOn && !landscape && enabled && !inCall
+}
+
 /**
  * Deliberate screen-on proximity cover gesture. A clear reading must be observed
  * first, so a phone that starts listening while already in a pocket cannot lock.
