@@ -407,12 +407,15 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
 
     private fun openRecents() {
         if (w.store.recentsMode() == "system") {
+            // Never silently turn a failed Android Recents request into OEA's
+            // history screen. That made the Home menu appear to open Recents
+            // inside itself when Assistant was enabled in Settings but wasn't
+            // currently bound by Android.
             if (OeaAssistant.openRecents()) return
-            if (!OeaAssistant.isEnabled(context)) {
-                showAssistantNeeded("Recent apps")
-                return
-            }
+            showAssistantNeeded("Recent apps")
+            return
         }
+        // OEA Overview is an explicit alternative only when the user selected it.
         w.openSystemTool("multitask")
     }
 
