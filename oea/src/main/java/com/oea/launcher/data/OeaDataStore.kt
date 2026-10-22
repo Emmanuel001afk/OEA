@@ -286,12 +286,31 @@ class OeaDataStore private constructor(context: Context) {
     }
 
     /**
-     * Screen-off gesture: a wave does nothing while the screen is off. It has its
-     * own binding so a screen-off wave can never run the screen-on action (or the
-     * other way round) — the two are different gestures with different patterns.
+     * Independent cover-to-lock gesture: while the screen is on, hold a hand over
+     * the proximity sensor to lock. On upgrade, the old Power-screen `lock`
+     * value is migrated here and cleared from the unrelated screen-off action.
      */
+    fun coverToLockEnabled(): Boolean {
+        if (prefs.contains(KEY_COVER_TO_LOCK)) return prefs.getBoolean(KEY_COVER_TO_LOCK, false)
+        val legacyLock = waveOffAction() == "lock"
+        val edit = prefs.edit().putBoolean(KEY_COVER_TO_LOCK, legacyLock)
+        if (legacyLock) edit.putString(KEY_WAVE_OFF_ACTION, "none")
+        edit.apply()
+        return legacyLock
+    }
+    fun setCoverToLockEnabled(enabled: Boolean) { prefs.edit().putBoolean(KEY_COVER_TO_LOCK, enabled).apply() }
+
+    /** Action bound to a deliberate hold/wave while the screen is already off. */
     fun waveOffAction() = prefs.getString(KEY_WAVE_OFF_ACTION, "none") ?: "none"
-    fun setWaveOffAction(v: String) { prefs.edit().putString(KEY_WAVE_OFF_ACTION, v).apply() }
+    fun setWaveOffAction(v: String) {
+        val edit = prefs.edit()
+        if (!prefs.contains(KEY_COVER_TO_LOCK)) {
+            // Preserve the old Power-screen lock toggle once, before this legacy
+            // preference is edited for its now-separate screen-off gesture.
+            edit.putBoolean(KEY_COVER_TO_LOCK, waveOffAction() == "lock")
+        }
+        edit.putString(KEY_WAVE_OFF_ACTION, v).apply()
+    }
 
     /** A second wave right after a long cover: off, then on, then off again. */
     fun waveTwiceOffAction() = prefs.getString(KEY_WAVE_TWICE_OFF, "none") ?: "none"
@@ -551,6 +570,7 @@ class OeaDataStore private constructor(context: Context) {
         private const val KEY_EMPTY_LONG_PRESS = "gesture_empty_long_press"
         private const val KEY_WAVE_ACTION = "gesture_wave_action"
         private const val KEY_WAVE_OFF_ACTION = "gesture_wave_off_action"
+        private const val KEY_COVER_TO_LOCK = "proximity_cover_to_lock"
         private const val KEY_WAVE_TWICE_OFF = "gesture_wave_twice_off_action"
         private const val KEY_SHAKE_ACTION = "gesture_shake_action"
         private const val KEY_FLIP_ACTION = "gesture_flip_action"

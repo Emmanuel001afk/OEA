@@ -1268,6 +1268,7 @@ open class OeaSystemToolsActivity : Activity() {
     private fun powerSummary(): String {
         val parts = mutableListOf<String>()
         if (com.oea.launcher.power.OeaPower.waveToWake(this)) parts += "wave to wake"
+        if (com.oea.launcher.data.OeaDataStore.get(this).coverToLockEnabled()) parts += "cover sensor to lock"
         if (com.oea.launcher.power.OeaPower.liftToWake(this) && com.oea.launcher.power.OeaPower.liftSensor(this) != null) parts += "lift to wake"
         if (OeaAssistant.isConnected()) parts += "lock & power menu ready"
         return if (parts.isEmpty()) "Alternatives for a faulty power or volume button" else parts.joinToString(" • ").replaceFirstChar { it.uppercase() }
@@ -1334,56 +1335,69 @@ open class OeaSystemToolsActivity : Activity() {
                 rerender()
             }
         }
-        // ---- the screen-off gesture, bound on its own row
+        kit.sectionTitle(box, "Turn the screen off")
+        group = kit.group(box)
+        val coverToLock = dataStore.coverToLockEnabled()
+        if (proximity == null) {
+            kit.row(group, R.drawable.oic_lock, "Cover sensor to lock screen", "Unavailable: this phone does not expose a proximity sensor to OEA.", chevron = false)
+        } else {
+            kit.switchRow(
+                group, R.drawable.oic_lock, "Cover sensor to lock screen",
+                "While the screen is on, hold your hand over the proximity sensor for about 1.2 seconds. Uncover sooner to cancel. Pauses during calls and ignores a sensor already covered when listening starts.",
+                coverToLock
+            ) { on ->
+                dataStore.setCoverToLockEnabled(on)
+                power.syncWakeService(this)
+                rerender()
+            }
+        }
+        if (coverToLock && !OeaAssistant.isConnected() && !power.deviceAdminCanLock(this)) {
+            kit.note(box, "The cover gesture is detected, but locking needs OEA Assistant or OEA Device Admin with Force Lock enabled.")
+        }
+
+        // Keep the existing, separate screen-off gesture configurable. It is not
+        // the screen-on cover-to-lock feature above.
         val offBound = dataStore.waveOffAction() != "none"
-        kit.switchRow(group, R.drawable.oic_lock, "Turn the screen off by gesture",
-            "Hold a hand over the screen, uncover it, then wave once within a second and a half",
-            offBound) { on ->
-            dataStore.setWaveOffAction(if (on) "lock" else "none")
+        kit.switchRow(
+            group, R.drawable.oic_gesture, "Hold gesture while the screen is off",
+            "Runs the separate Hold-and-wave (screen off) action from Gestures. This does not turn the screen off.",
+            offBound
+        ) { on ->
+            if (!on) {
+                dataStore.setWaveOffAction("none")
+            } else if (dataStore.waveOffAction() == "none") {
+                dataStore.setWaveOffAction("lock")
+            }
             power.syncWakeService(this)
             rerender()
         }
         if (offBound) {
             kit.row(group, R.drawable.oic_touch_app, "Screen-off gesture action",
-                "Its own binding: the wave gesture above can never run this, and this can never wake the screen",
-                value = labelFor(dataStore.waveOffAction(), mapOf("lock" to "Lock the screen"))) {
-                kit.choose(
-                    "What should the screen-off gesture do?",
-                    "Only actions that make sense with the screen off are listed.",
-                    listOf("Lock the screen", "Nothing"),
-                    if (dataStore.waveOffAction() == "lock") 0 else 1
-) { pick ->
-                    dataStore.setWaveOffAction(if (pick == 0) "lock" else "none")
-                    power.syncWakeService(this)
-                    rerender()
-                }
-            }
-            if (!OeaAssistant.isConnected() && !power.deviceAdminCanLock(this)) {
-                kit.note(box, "Locking by gesture needs OEA Assistant (the lock behaves like the power key) or OEA's Device admin. Without one of the two, the gesture will report that it cannot lock instead of appearing to do nothing.")
-            }
+                "Separate from cover-to-lock; configure its action under Gestures.",
+                value = com.oea.launcher.gesture.OeaGestures.actionLabel(dataStore.waveOffAction()), chevron = false)
         }
         // ---- what this phone can actually do, checked live
         kit.sectionTitle(box, "What this phone provides")
         val caps = kit.group(box)
         kit.row(caps, R.drawable.oic_visibility_off, "Proximity sensor",
-            if (proximity != null) "Available (${proximity.name}) — drives both wave gestures" else "Not exposed by this phone, so no wave gesture can work here",
+            if (proximity != null) "Available (${proximity.name}) — drives wave-to-wake and optional cover-to-lock" else "Not exposed by this phone, so proximity gestures cannot work here",
             chevron = false)
         kit.row(caps, R.drawable.oic_phone_android, "Pick-up sensor",
             if (lift != null) "Available (${lift.name})" else "Not exposed: lift to wake stays switched off",
             chevron = false)
-        kit.row(caps, R.drawable.oic_battery_charging_full, "Screen-off listening",
-            if (power.wakeFeaturesOn(this)) "On — the wake service is registered while the screen is off" else "Off — switch on a gesture above",
+        kit.row(caps, R.drawable.oic_battery_charging_full, "Sensor service",
+            if (power.wakeFeaturesOn(this)) "On — listeners are registered only for enabled gestures in the current screen state" else "Off — enable a sensor gesture above",
             chevron = false)
 
-        if (proximity != null && (power.waveToWake(this) || offBound)) {
-            val status = kit.text("Test it: cover and uncover the sensor near the front camera, or hold a hand over it and wave.", 13f, palette.textSecondary).apply {
+        if (proximity != null && (power.waveToWake(this) || offBound || coverToLock)) {
+            val status = kit.text("Live sensor test: briefly cover and uncover for wave detection. If Cover sensor to lock is enabled, a 1.2-second cover can lock the phone.", 13f, palette.textSecondary).apply {
                 setPadding(dp(18), dp(10), dp(18), dp(14))
                 setLineSpacing(dp(2).toFloat(), 1f)
             }
             group.addView(status)
             startWaveTest(proximity, status)
         }
-        kit.note(box, "OEA listens only while the screen is off and stops the moment it turns on; a quiet notification shows while wake gestures are on. On Android 14+ allow \"Turn screen on\" for OEA if waking doesn't work, and keep OEA unrestricted in battery settings. Double-tap to wake, where your phone has it, is a phone-maker feature in Android Settings.")
+        kit.note(box, "Wave/lift-to-wake sensors listen while the screen is off. The proximity sensor also listens while the screen is on only when Cover sensor to lock is enabled; it ignores a sensor already covered when listening starts and pauses during calls. A quiet notification shows while any sensor gesture is enabled. On Android 14+ allow \"Turn screen on\" for OEA if waking doesn't work, and keep OEA unrestricted in battery settings. Double-tap to wake, where your phone has it, is a phone-maker feature in Android Settings.")
         group = kit.group(box)
         kit.row(group, R.drawable.oic_settings, "Allow OEA to turn the screen on", "Android 14+ special app access; also keep battery use unrestricted") {
             runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
@@ -1453,15 +1467,6 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     /**
-     * The live sensor test: it runs the *same* detector the wake service runs, so
-     * what the user sees here is exactly what will happen with the screen off.
-     *
-     * It reports the two patterns separately, because they are two gestures: a
-     * normal wave (wake) and "hold a hand over the screen, uncover, wave again"
-     * (the screen-off gesture). Both are counted, so the row can say which gesture
-     * the phone actually recognised instead of only "no gesture yet".
-     */
-    /**
      * The single path every overlay request ends in — the toggle, the return from
      * Android Settings, and the re-check on resume.
      *
@@ -1499,23 +1504,17 @@ open class OeaSystemToolsActivity : Activity() {
         val detector = com.oea.launcher.power.OeaWaveDetector(power.sensitivity(this), power.requireTwoWaves(this), power.pocketGuard(this))
         detector.reset(android.os.SystemClock.elapsedRealtime(), false)
         var waves = 0
-        var offWaves = 0
         val listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(event: android.hardware.SensorEvent) {
                 val distance = event.values.firstOrNull() ?: return
                 val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
-                when (detector.onReading(covered, android.os.SystemClock.elapsedRealtime(), screenOffBound = true)) {
-                    com.oea.launcher.power.OeaWaveDetector.Result.ON -> waves++
-                    com.oea.launcher.power.OeaWaveDetector.Result.OFF -> offWaves++
-                    else -> Unit
-                }
+                if (detector.onReading(covered, android.os.SystemClock.elapsedRealtime()) == com.oea.launcher.power.OeaWaveDetector.Result.ON) waves++
                 val parts = mutableListOf(if (covered) "Sensor covered" else "Sensor clear")
                 if (waves > 0) parts += "wave ×$waves ✓"
-                if (offWaves > 0) parts += "hold-and-wave ×$offWaves ✓"
-                if (detector.armedForScreenOff) parts += "hold seen — now wave"
-                if (waves == 0 && offWaves == 0) parts += "no gesture yet"
+                if (waves == 0) parts += "briefly cover and uncover to test wave detection"
+                if (dataStore.coverToLockEnabled()) parts += "a 1.2-second cover can lock the screen"
                 status.text = parts.joinToString(" • ")
-                status.setTextColor(if (waves > 0 || offWaves > 0) palette.success else palette.textSecondary)
+                status.setTextColor(if (waves > 0) palette.success else palette.textSecondary)
             }
             override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
         }
