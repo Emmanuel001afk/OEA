@@ -45,7 +45,6 @@ import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
-import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -385,6 +384,10 @@ object OeaCameraApp {
         // One capture request at a time: a second tap during a slow capture used to
         // queue another shutter on top of the first.
         var capturing = false
+        // Lambdas that the early-built parts of the screen call once the later
+        // parts exist: the level's repaint and the last-shot thumbnail.
+        var refreshLevelUi: () -> Unit = {}
+        var refreshLastShot: (Int) -> Unit = {}
         // How many burst frames are still in the air; the shutter re-enables when
         // the last one has been handed back by the camera.
         var shotsOutstanding = 0
@@ -613,8 +616,6 @@ object OeaCameraApp {
         // them a pinch could not update the chips or the readout.
         var zoomCeiling = cameraHelper.maxZoomFor(front).coerceIn(1f, 8f)
         var syncZoomUi: (Float) -> Unit = {}
-        var refreshLevelUi: () -> Unit = {}
-        var refreshLastShot: (Int) -> Unit = {}
 
         // A pinch is a zoom, so it moves the same state as the chips and the
         // slider — including the lens ceiling, which pinch used to ignore.
@@ -1799,8 +1800,8 @@ object OeaCameraApp {
         val matrix = toneMatrix(filter) ?: return null
         // Push a mid grey through the matrix: that is the tone the filter shifts a
         // flat scene to. The wash then pulls the preview towards it.
-        val mid = FloatArray(4)
-        matrix.mapPoints(mid, floatArrayOf(128f, 128f, 128f, 255f))
+        val mid = floatArrayOf(128f, 128f, 128f, 255f)
+        matrix.mapPoints(mid)
         fun channel(v: Float) = v.toInt().coerceIn(0, 255)
         val red = channel(mid[0])
         val green = channel(mid[1])
