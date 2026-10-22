@@ -150,8 +150,13 @@ object OeaGameBoost {
     fun onHomeStopped(context: Context) {
         val app = context.applicationContext
         if (!OeaGameBoostStore.enabled(app) || service?.currentGame() != null) return
-        if (OeaAssistant.isConnected()) return // window events already cover this, with no query at all
-        if (!leaveHomeCheck(app) || !usageAccess(app)) return
+        // Prefer one Usage Access check on Home exit when available; this
+        // avoids keeping global accessibility events enabled just to discover
+        // games launched from Recents or notifications.
+        if (!leaveHomeCheck(app) || !usageAccess(app)) {
+            if (OeaAssistant.isConnected()) return // Assistant events are the fallback without Usage Access
+            return
+        }
         probeContext = app
         probeAttempts = 0
         main.removeCallbacks(probeRunnable)
