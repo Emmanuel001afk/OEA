@@ -122,6 +122,7 @@ object OeaMessagingApp {
         val kit = OeaKit(host, palette)
         var currentTab = "all"
         var searchQuery = ""
+        var visibleThreadLimit = 50
         var refresh: () -> Unit = {}
         val sendToRequest = host.intent?.takeIf { it.action == Intent.ACTION_SENDTO }?.let { intent ->
             (intent.data?.schemeSpecificPart?.trim().orEmpty().ifBlank { null }) to intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
@@ -159,6 +160,7 @@ object OeaMessagingApp {
         header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
             kit.prompt("Search all SMS", "Number or message text", "Search") { q ->
                 searchQuery = q.trim()
+                visibleThreadLimit = 50
                 refresh()
                 null
             }
@@ -212,7 +214,7 @@ object OeaMessagingApp {
         refresh = {
             tabBar.removeAllViews()
             listOf("all" to "All", "unread" to "Unread", "archived" to "Archived", "blocked" to "Blocked", "spam" to "Spam").forEach { (id, label) ->
-                tabBar.addView(kit.chip(label, id == currentTab) { currentTab = id; refresh() }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+                tabBar.addView(kit.chip(label, id == currentTab) { currentTab = id; visibleThreadLimit = 50; refresh() }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
             }
 
             content.removeAllViews()
@@ -255,13 +257,21 @@ object OeaMessagingApp {
                         })
                     } else {
                         val group = kit.group(content)
-                        filtered.forEach { thread ->
+                        val visibleThreads = filtered.take(visibleThreadLimit)
+                        visibleThreads.forEach { thread ->
                             val contactName = getContactName(host, thread.address)
                             val date = SimpleDateFormat("MMM d HH:mm", Locale.getDefault()).format(Date(thread.date))
                             val isSpam = spamKeywords.any { word -> thread.snippet.lowercase().contains(word) }
                             val title = if (contactName != thread.address) "$contactName • ${thread.address}" else thread.address
                             val subtitle = "${thread.snippet}\n$date • ${thread.count} SMS${if (!thread.read) " • Unread" else ""}${if (isSpam) " • Spam?" else ""}"
                             kit.row(group, R.drawable.oic_person, title, subtitle) { openConversation(host, kit, thread.address) }
+                        }
+                        if (visibleThreads.size < filtered.size) {
+                            val remaining = filtered.size - visibleThreads.size
+                            content.addView(kit.tonalButton("Show next ${minOf(50, remaining)} of $remaining more threads", R.drawable.oic_expand_more) {
+                                visibleThreadLimit = (visibleThreadLimit + 50).coerceAtMost(filtered.size)
+                                refresh()
+                            }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) })
                         }
                     }
 
@@ -328,12 +338,23 @@ object OeaMessagingApp {
                 val messages = runCatching { queryConversation(host, address) }.getOrDefault(emptyList())
                 host.runOnUiThread {
                     if (host.isDestroyed) return@runOnUiThread
-                    msgsHost.removeAllViews()
-                    if (messages.isEmpty()) {
-                        kit.note(msgsHost, "No SMS messages in this conversation.")
-                    } else {
+                    var visibleMessageCount = minOf(100, messages.size)
+                    fun renderMessages() {
+                        msgsHost.removeAllViews()
+                        if (messages.isEmpty()) {
+                            kit.note(msgsHost, "No SMS messages in this conversation.")
+                            return
+                        }
+                        val startIndex = (messages.size - visibleMessageCount).coerceAtLeast(0)
+                        if (startIndex > 0) {
+                            val earlierCount = minOf(100, startIndex)
+                            msgsHost.addView(kit.tonalButton("Load $earlierCount earlier messages", R.drawable.oic_expand_more) {
+                                visibleMessageCount = (visibleMessageCount + 100).coerceAtMost(messages.size)
+                                renderMessages()
+                            }, LinearLayout.LayoutParams(-1, kit.dp(42)).apply { bottomMargin = kit.dp(8) })
+                        }
                         var lastDate = ""
-                        messages.forEach { message ->
+                        messages.drop(startIndex).forEach { message ->
                             val dateStr = SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(message.date))
                             if (dateStr != lastDate) {
                                 msgsHost.addView(kit.text(dateStr, 12f, kit.palette.textTertiary, OeaType.medium).apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(8), 0, kit.dp(4)) })
@@ -390,6 +411,7 @@ object OeaMessagingApp {
                             }
                         }
                     }
+                    renderMessages()
                     panel.addView(kit.buttonRow(
                         kit.quietButton("Close") { dialog.dismiss() },
                         kit.tonalButton("Archive") {
