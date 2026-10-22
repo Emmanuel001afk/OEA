@@ -23,16 +23,25 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
         if (messages.isEmpty()) return
         val first = messages.first()
         val body = messages.joinToString("") { it.messageBody.orEmpty() }
+        // The SIM this arrived on. Android puts the subscription in the
+        // deliver intent ("subscription" historically, the named extra on
+        // newer releases); recording it in sub_id is what lets Messaging
+        // later answer "which SIM was this received on?" honestly.
+        val subscriptionId = subscriptionIdFrom(intent)
+        fun values(withSub: Boolean) = android.content.ContentValues().apply {
+            put(Telephony.Sms.ADDRESS, first.originatingAddress ?: "")
+            put(Telephony.Sms.BODY, body)
+            put(Telephony.Sms.DATE, first.timestampMillis)
+            put(Telephony.Sms.DATE_SENT, first.timestampMillis)
+            put(Telephony.Sms.READ, 0)
+            put(Telephony.Sms.SEEN, 0)
+            put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX)
+            if (withSub && subscriptionId >= 0) put("sub_id", subscriptionId)
+        }
         val inserted = runCatching {
-            val values = android.content.ContentValues().apply {
-                put(Telephony.Sms.ADDRESS, first.originatingAddress ?: "")
-                put(Telephony.Sms.BODY, body)
-                put(Telephony.Sms.DATE, first.timestampMillis)
-                put(Telephony.Sms.READ, 0)
-                put(Telephony.Sms.SEEN, 0)
-                put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX)
-            }
-            context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values) != null
+            context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values(true)) != null
+        }.recoverCatching {
+            context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values(false)) != null
         }.onFailure { Log.w(TAG, "Could not store incoming SMS", it) }.getOrDefault(false)
         runCatching {
             context.getSharedPreferences("oea_messaging_v2", Context.MODE_PRIVATE)
@@ -41,7 +50,23 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
                 .putInt("last_sms_parts", messages.size)
                 .apply()
         }.onFailure { Log.w(TAG, "Could not record SMS delivery", it) }
-        if (inserted) postNewMessageNotification(context, first.originatingAddress.orEmpty(), body)
+        val muted = runCatching {
+            context.getSharedPreferences("oea_messaging_v2", Context.MODE_PRIVATE)
+                .getStringSet("muted_addresses", emptySet())
+                ?.contains(first.originatingAddress.orEmpty()) == true
+        }.getOrDefault(false)
+        if (inserted && !muted) postNewMessageNotification(context, first.originatingAddress.orEmpty(), body)
+    }
+
+    private fun subscriptionIdFrom(intent: Intent): Int {
+        val extras = intent.extras ?: return -1
+        for (key in listOf("subscription", "android.telephony.extra.SUBSCRIPTION_ID", "subId", "subscription_id")) {
+            if (extras.containsKey(key)) {
+                val value = runCatching { extras.getInt(key, -1) }.getOrDefault(-1)
+                if (value >= 0) return value
+            }
+        }
+        return -1
     }
 
     private fun postNewMessageNotification(context: Context, sender: String, body: String) {

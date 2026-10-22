@@ -866,38 +866,23 @@ object OeaMediaLibrary {
 
     // --------------------------------------------------------------- date groups
 
-    /** Groups a list into Today, Yesterday, weekday, day-of-month or month buckets. */
+    /**
+     * Groups a list into date sections: Today, Yesterday, the dated days of
+     * the current month, then **one section per earlier month**. The old
+     * version bucketed by day at every age but labelled old buckets with the
+     * month alone, so one busy month repeated its name once per day with no
+     * date on any of them. [OeaMediaDateGroups] owns the rule (and its tests).
+     */
     fun days(items: List<Item>): List<Day> {
         if (items.isEmpty()) return emptyList()
-        val calendar = Calendar.getInstance()
-        val today = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val dayStarts = LinkedHashMap<Long, MutableList<Item>>()
+        val now = System.currentTimeMillis()
+        val buckets = LinkedHashMap<Long, Pair<String, MutableList<Item>>>()
         items.forEach { item ->
-            calendar.timeInMillis = item.takenAt
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            dayStarts.getOrPut(calendar.timeInMillis) { ArrayList() }.add(item)
+            val bucket = OeaMediaDateGroups.bucketFor(item.takenAt, now)
+            buckets.getOrPut(bucket.start) { bucket.label to ArrayList() }.second.add(item)
         }
-        val dayFormatter = SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
-        val monthFormatter = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-        val weekdayFormatter = SimpleDateFormat("EEEE", Locale.getDefault())
-        return dayStarts.entries.sortedByDescending { it.key }.map { (start, rows) ->
-            val age = today.timeInMillis - start
-            val label = when {
-                age == 0L -> "Today"
-                age == 86_400_000L -> "Yesterday"
-                age in 1L..5L * 86_400_000L -> weekdayFormatter.format(Date(rows.first().takenAt))
-                age < 31L * 86_400_000L -> dayFormatter.format(Date(rows.first().takenAt))
-                else -> monthFormatter.format(Date(rows.first().takenAt))
-            }
-            Day(label, start, rows)
+        return buckets.entries.sortedByDescending { it.key }.map { (start, labelled) ->
+            Day(labelled.first, start, labelled.second)
         }
     }
 
