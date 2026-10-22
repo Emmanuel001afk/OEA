@@ -115,6 +115,12 @@ open class OeaSystemToolsActivity : Activity() {
     private val stack = ArrayDeque<String>()
     private var current = "hub"
     private var currentScroll: android.widget.ScrollView? = null
+    /**
+     * Keep one Activity content root for the lifetime of Settings. Replacing the
+     * decor content on every switch used to flash the status-bar/top area and
+     * briefly detach the whole screen, making simple toggles look like reloads.
+     */
+    private var pageHost: FrameLayout? = null
     private val scrollPositions = HashMap<String, Int>()
     private var refreshOverviewOnResume = false
     private var pendingIslandOverlayEnable = false
@@ -369,6 +375,7 @@ open class OeaSystemToolsActivity : Activity() {
                 else -> showSettings()
             }
         } catch (error: Throwable) {
+            pageHost = null
             OeaScreenFailure.show(this, "OEA Settings", error)
         }
     }
@@ -386,7 +393,14 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private fun present(page: OeaKit.Page) {
-        setContentView(page.root)
+        val host = pageHost ?: FrameLayout(this).also {
+            pageHost = it
+            setContentView(it)
+        }
+        // Build the replacement page before detaching the visible one, then
+        // swap children inside a stable window instead of replacing DecorView.
+        host.removeAllViews()
+        host.addView(page.root, FrameLayout.LayoutParams(-1, -1))
         currentScroll = page.scroll
         val y = scrollPositions[current] ?: 0
         if (y > 0) page.scroll.post { page.scroll.scrollTo(0, y) }
