@@ -25,6 +25,7 @@ import android.widget.TextView
 import android.widget.ScrollView
 import android.widget.LinearLayout
 import com.oea.launcher.R
+import com.oea.launcher.model.OeaAppInfo
 import kotlin.math.abs
 
 /**
@@ -44,15 +45,15 @@ import kotlin.math.abs
  *      key events (flagRequestFilterKeyEvents) so the floating
  *      window can react to hardware keys without reading screen
  *      content;
- *   3. Combined with TYPE_APPLICATION_OVERLAY it draws a normal,
- *      touchable window that does NOT steal focus from the app or
- *      game underneath (FLAG_NOT_FOCUSABLE + FLAG_NOT_TOUCH_MODAL).
+ *   3. TYPE_ACCESSIBILITY_OVERLAY lets this service draw its own
+ *      touchable window without the separate Display-over-other-apps
+ *      special access; it does not grant control of other apps' tasks.
  *
  * The service hosts an OEA-owned floating workspace with launchable
  * app shortcuts. Android does not allow an ordinary app to embed arbitrary
- * third-party Activities inside an application overlay; those apps open as
- * normal Android tasks. Select native freeform when actual app-in-window
- * behaviour is required and supported by the device.
+ * third-party Activities inside this overlay. Android 13+ cross-app activity
+ * embedding also requires each target app to opt in. For arbitrary third-party
+ * apps, actual floating tasks must be created by Android's freeform window manager.
  *
  * THE CONTAINER (vertical stack)
  * ------------------------------
@@ -158,8 +159,8 @@ class OeaFloatingWindowService : AccessibilityService() {
      * Builds and attaches the floating window.
      *
      * LayoutParams notes (exactly as specified for this feature):
-     *  - TYPE_APPLICATION_OVERLAY: the modern overlay type (API 26+),
-     *    drawn above apps but below the system's own critical windows;
+     *  - TYPE_ACCESSIBILITY_OVERLAY: an overlay owned by this enabled
+     *    AccessibilityService; no separate overlay special access is needed;
      *  - FLAG_NOT_TOUCH_MODAL: touches OUTSIDE this window fall
      *    through to the app/game underneath — the floating window
      *    never blocks the app beneath it;
@@ -170,14 +171,6 @@ class OeaFloatingWindowService : AccessibilityService() {
      *    keyboard input; the overlay is touch-only.
      */
     private fun showWindow(animate: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
-            android.widget.Toast.makeText(
-                this,
-                "Allow Display over other apps for OEA Floating Workspace, then enable it again in OEA Settings.",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-            return
-        }
         if (windowRoot != null) {
             // Already showing; just make sure it is visible.
             windowRoot?.visibility = View.VISIBLE
@@ -200,8 +193,7 @@ class OeaFloatingWindowService : AccessibilityService() {
         val params = WindowManager.LayoutParams(
             windowWidth,
             windowHeight,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -373,10 +365,10 @@ class OeaFloatingWindowService : AccessibilityService() {
     }
 
     /**
-     * Functional OEA-owned workspace content. Android does not permit an ordinary
-     * app to embed arbitrary third-party Activities in a TYPE_APPLICATION_OVERLAY;
-     * these shortcuts therefore launch their apps as normal Android tasks. For a
-     * real floating third-party app, the native freeform method must be selected.
+     * OEA's overlay is an app launcher, not a host for another app's Activity.
+     * Taps therefore request a real Android freeform task. Android/OEM policy may
+     * refuse or ignore that request (then Android can still launch full-screen);
+     * accessibility alone cannot force another app into a task window.
      */
     private fun buildWorkspaceContent(content: FrameLayout) {
         val body = LinearLayout(this).apply {
@@ -391,7 +383,7 @@ class OeaFloatingWindowService : AccessibilityService() {
             setPadding(dp(4), dp(2), dp(4), dp(6))
         })
         body.addView(TextView(this).apply {
-            text = "Choose an app to open. Android opens it as a normal task; use Android freeform for a true floating app window."
+            text = "Tap an app to request Android freeform. This panel is a floating launcher, not an embedded app window. Android/OEM may ignore the request and open the app full-screen; tap the arrow above to hide this panel and check. Reboot after enabling freeform in Developer options."
             setTextColor(0xFFD6E2F3.toInt())
             textSize = 11f
             setPadding(dp(4), 0, dp(4), dp(8))
@@ -424,7 +416,7 @@ class OeaFloatingWindowService : AccessibilityService() {
                         cornerRadius = dp(10).toFloat()
                     }
                     setPadding(dp(8), dp(6), dp(8), dp(6))
-                    contentDescription = "Open ${info.loadLabel(packageManager)} normally"
+                    contentDescription = "Request ${info.loadLabel(packageManager)} in an Android freeform window"
                 }
                 val icon = ImageView(this).apply {
                     setImageDrawable(info.loadIcon(packageManager))
@@ -440,16 +432,12 @@ class OeaFloatingWindowService : AccessibilityService() {
                     setPadding(dp(10), 0, 0, 0)
                 }, LinearLayout.LayoutParams(0, -2, 1f))
                 row.setOnClickListener {
-                    val intent = packageManager.getLaunchIntentForPackage(info.activityInfo.packageName)
-                    if (intent == null) {
-                        android.widget.Toast.makeText(this, "This app has no launchable activity.", android.widget.Toast.LENGTH_SHORT).show()
-                    } else runCatching {
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        startActivity(intent)
-                    }.onFailure { error ->
-                        android.util.Log.w("OeaFloatingWindow", "Could not launch ${info.activityInfo.packageName}", error)
-                        android.widget.Toast.makeText(this, "Android could not open this app.", android.widget.Toast.LENGTH_SHORT).show()
-                    }
+                    val label = info.loadLabel(packageManager).toString()
+                    val result = OeaMultitaskLauncher.launchFloating(
+                        this,
+                        OeaAppInfo(info.activityInfo.packageName, info.activityInfo.name, label)
+                    )
+                    android.widget.Toast.makeText(this, result.message, android.widget.Toast.LENGTH_LONG).show()
                 }
                 list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(5) })
             }

@@ -11,9 +11,9 @@ import android.provider.Settings
  * Entry point for OEA's Floating Multitasking Window.
  *
  * The window itself lives in [OeaFloatingWindowService], an
- * AccessibilityService (the only reliable host for an always-on-top,
- * interactive container on Android Go devices whose OEM disabled the
- * native multi-window frameworks). This object is what the rest of
+ * AccessibilityService, using Android's accessibility-overlay window type.
+ * This permission is separate from OEA Assistant, and it only grants OEA's
+ * own overlay surface—not the ability to embed arbitrary apps. This object is what the rest of
  * OEA talks to: it answers "is the feature on?", "is the service
  * bound?", opens the right Settings page, and forwards show/hide
  * commands to the running service.
@@ -55,17 +55,13 @@ object OeaFloatingWindows {
             return OeaMultitaskLauncher.Result(false,
                 "OEA floating workspace is your selected default, but its optional accessibility service is off. Enable OEA Floating Window in OEA Settings only if you want to use this method.")
         }
-        if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(context)) {
-            return OeaMultitaskLauncher.Result(false,
-                "OEA floating workspace is selected, but Android has not granted Display over other apps. Enable that permission only if you want this method.")
-        }
         setEnabled(context, true)
         val service = instance()
         if (service == null) return OeaMultitaskLauncher.Result(false,
             "OEA Floating Window accessibility is enabled, but Android has not connected the service yet. Reopen OEA Settings and check its status.")
         service.expand()
         return OeaMultitaskLauncher.Result(true,
-            "Opened OEA floating workspace for ${app.label}. The workspace can launch apps, but Android opens those apps as normal tasks; select Android freeform for true third-party app windows.")
+            "Opened OEA Floating Workspace. Tap an app to request a real Android freeform task; Android/OEM policy may refuse or ignore that request. The accessibility overlay itself cannot contain another app's Activity.")
     }
 
     /** Turns the OEA-side preference on/off. */
@@ -102,16 +98,6 @@ object OeaFloatingWindows {
             enabled.any { it.id == component(context).flattenToString() }
         }.getOrDefault(false)
     }
-
-    /** Opens Android's Display over other apps page for this app. */
-    fun openOverlaySetup(context: Context): Boolean = runCatching {
-        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-            data = android.net.Uri.parse("package:${context.packageName}")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-        true
-    }.getOrDefault(false)
 
     /** Opens Android's Accessibility page, focused on this service. */
     fun openSetup(context: Context) {
