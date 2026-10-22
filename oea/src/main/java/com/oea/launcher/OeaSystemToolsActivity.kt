@@ -602,7 +602,7 @@ open class OeaSystemToolsActivity : Activity() {
                         kit.switchRow(group, R.drawable.oic_schedule, "24-hour time", "Use 00:00–23:59 instead of AM/PM", OeaWidgetStudio.clockUses24Hour(this)) { use24Hour ->
                             OeaWidgetStudio.saveClockOptions(this, use24Hour, OeaWidgetStudio.clockShowsDate(this))
                         }
-                        kit.switchRow(group, R.drawable.oic_calendar, "Show date", "Keep the date line in the clock widget", OeaWidgetStudio.clockShowsDate(this)) { showDate ->
+                        kit.switchRow(group, R.drawable.oic_schedule, "Show date", "Keep the date line in the clock widget", OeaWidgetStudio.clockShowsDate(this)) { showDate ->
                             OeaWidgetStudio.saveClockOptions(this, OeaWidgetStudio.clockUses24Hour(this), showDate)
                         }
                     }
