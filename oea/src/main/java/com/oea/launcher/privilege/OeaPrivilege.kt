@@ -101,7 +101,7 @@ data class Capability(
     val surface: Surface,
     /** What the user actually loses when [surface] is not [Surface.OVERLAY]/[Surface.HOME]. */
     val effect: String,
-    /** True when OEA can fix this itself (device owner or root), without a settings page. */
+    /** True when an already-authorized OEA channel can attempt the fix without a settings page. */
     val selfGrantable: Boolean
 ) {
     val isReady get() = granted == Grant.GRANTED

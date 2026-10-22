@@ -9,8 +9,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * OEA's own access doctor: what OEA is allowed to do, *verified*, and what it can
- * do about it without a PC or another app.
+ * OEA's own access doctor: what OEA is allowed to do, *verified*, and which
+ * permissions still need Android's consent or an available privileged channel.
  *
  * A settings screen that only reads `Settings.canDrawOverlays` is how a user ends
  * up saying "it is switched on but nothing happens": Android can report a
@@ -18,11 +18,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * firmware, a service enabled in Settings but never bound, an OEM that keeps a
  * permission in its own list). Every row here therefore carries the state OEA
  * *observed*, not the state the switch claims, and every row knows
- *  - how to fix it (OEA's own root channel, the device-owner API, or the exact
- *    Android screen),
- *  - what to do on a phone where nothing OEA has can fix it, and
- *  - the exact shell command OEA would run, so the same fix can be repeated from a
- *    PC by anyone who prefers that route — OEA never *requires* the PC.
+ *  - how to fix it (root, a paired OEA Authority session, a supported
+ *    device-owner grant, or the exact Android screen),
+ *  - what to do when no available channel can fix it, and
+ *  - the exact shell command for diagnostics or a manually approved repair.
+ * Ordinary launcher use does not require root or a paired Authority session.
  */
 object OeaAccessDoctor {
 
@@ -36,7 +36,7 @@ object OeaAccessDoctor {
         STALE,
         /** Not granted yet; the user can grant it in one tap. */
         NEEDS_TAP,
-        /** OEA can grant it itself (root or device owner). */
+        /** OEA can request it through root, paired OEA Authority, or a supported owner grant. */
         OEA_CAN_FIX,
         /** This device cannot provide it at all. */
         UNAVAILABLE,
@@ -91,6 +91,9 @@ object OeaAccessDoctor {
 
     private fun inspect(app: Context, privilege: Privilege, grant: Grant): Finding {
         val root = OeaShell.available()
+        val authority = OeaAdbAuthority.isSessionReady()
+        val privilegedShell = root || authority
+        val shellLabel = if (root) "root" else "OEA Authority"
         val owner = OeaPrivileges.isDeviceOwner(app)
         return when (privilege) {
             Privilege.OVERLAY -> {
@@ -104,11 +107,10 @@ object OeaAccessDoctor {
                         privilege, State.STALE,
                         "Android says the permission is granted, but drawing over apps was refused.",
                         "Switch Display over other apps off and on again for OEA, then press Verify. On some firmware the AppOps entry is the one that matters.",
-                        command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow")
+                        command = repairCommand(app, root, privilege)
 )
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it now.", "Tap Fix.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
-                    owner -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA is the device owner and can grant it now.", "Tap Fix.")
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Apps › OEA › Display over other apps.", command = command(root, "appops set ${app.packageName} SYSTEM_ALERT_WINDOW allow"))
+                    privilegedShell -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has $shellLabel access and can grant it now.", "Tap Fix.", command = repairCommand(app, root, privilege))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Apps › OEA › Display over other apps.", command = repairCommand(app, root, privilege))
                 }
             }
 
@@ -123,11 +125,10 @@ object OeaAccessDoctor {
                         privilege, State.STALE,
                         "OEA Assistant is switched on in Android's list but Android never bound it.",
                         "Turn OEA Assistant off and on again in Android Settings › Accessibility. If it stays greyed out, restart the phone once — Android binds accessibility services at boot.",
-                        command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}")
+                        command = repairCommand(app, root, privilege)
 )
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not enabled; OEA has root and can enable its own service.", "Tap Fix.", command = command(root, "settings put secure enabled_accessibility_services ${assistantList(app)}"))
-                    owner -> Finding(privilege, State.OEA_CAN_FIX, "Not enabled; OEA is the device owner and can enable it.", "Tap Fix.")
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not enabled.", "Turn on OEA Assistant in Android Settings › Accessibility › Installed apps.", command = "settings put secure enabled_accessibility_services ${assistantList(app)}")
+                    privilegedShell -> Finding(privilege, State.OEA_CAN_FIX, "Not enabled; OEA has $shellLabel access and can enable its service.", "Tap Fix.", command = repairCommand(app, root, privilege))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not enabled.", "Turn on OEA Assistant in Android Settings › Accessibility › Installed apps.", command = repairCommand(app, root, privilege))
                 }
             }
 
@@ -135,8 +136,8 @@ object OeaAccessDoctor {
                 val can = OeaPrivileges.canReadNotifications(app)
                 when {
                     can -> Finding(privilege, State.WORKING, "OEA can read notifications: the island, dots and Now Playing work.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it.", "Tap Fix.", command = command(root, "cmd notification allow_listener ${assistantComponent(app)}"))
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Notifications › Device & app notifications › OEA.", command = command(root, "cmd notification allow_listener ${assistantComponent(app)}"))
+                    privilegedShell -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has $shellLabel access and can grant it.", "Tap Fix.", command = repairCommand(app, root, privilege))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Notifications › Device & app notifications › OEA.", command = repairCommand(app, root, privilege))
                 }
             }
 
@@ -144,8 +145,8 @@ object OeaAccessDoctor {
                 val can = OeaPrivileges.canReadUsage(app)
                 when {
                     can -> Finding(privilege, State.WORKING, "OEA can see which app is in front and your most-used apps.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it.", "Tap Fix.", command = command(root, "appops set ${app.packageName} GET_USAGE_STATS allow"))
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Special app access › Usage access › OEA.", command = command(root, "appops set ${app.packageName} GET_USAGE_STATS allow"))
+                    privilegedShell -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has $shellLabel access and can grant it.", "Tap Fix.", command = repairCommand(app, root, privilege))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Special app access › Usage access › OEA.", command = repairCommand(app, root, privilege))
                 }
             }
 
@@ -153,8 +154,8 @@ object OeaAccessDoctor {
                 val can = OeaPrivileges.canUseDnd(app)
                 when {
                     can -> Finding(privilege, State.WORKING, "OEA can switch sound mode and Do Not Disturb.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has root and can grant it.", "Tap Fix.", command = command(root, "appops set ${app.packageName} ACCESS_NOTIFICATION_POLICY allow"))
-                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Sound & vibration › Do Not Disturb access.", command = command(root, "appops set ${app.packageName} ACCESS_NOTIFICATION_POLICY allow"))
+                    privilegedShell -> Finding(privilege, State.OEA_CAN_FIX, "Not granted; OEA has $shellLabel access and can ask Android to grant DND access.", "Tap Fix.", command = repairCommand(app, root, privilege))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Not granted.", "Android Settings › Sound & vibration › Do Not Disturb access.")
                 }
             }
 
@@ -162,8 +163,8 @@ object OeaAccessDoctor {
                 val ok = OeaPrivileges.ignoresBatteryOptimizations(app)
                 when {
                     ok -> Finding(privilege, State.WORKING, "Android will not freeze OEA in the background.", "Nothing to do.")
-                    root -> Finding(privilege, State.OEA_CAN_FIX, "Still battery-optimised; OEA has root and can exempt itself.", "Tap Fix.", command = command(root, "dumpsys deviceidle whitelist +${app.packageName}"))
-                    else -> Finding(privilege, State.NEEDS_TAP, "Battery optimisation is on.", "Android Settings › Apps › OEA › Battery › Unrestricted.", command = command(root, "dumpsys deviceidle whitelist +${app.packageName}"))
+                    privilegedShell -> Finding(privilege, State.OEA_CAN_FIX, "Still battery-optimised; OEA has $shellLabel access and can exempt itself.", "Tap Fix.", command = repairCommand(app, root, privilege))
+                    else -> Finding(privilege, State.NEEDS_TAP, "Battery optimisation is on.", "Android Settings › Apps › OEA › Battery › Unrestricted.", command = repairCommand(app, root, privilege))
                 }
             }
 
@@ -178,6 +179,8 @@ object OeaAccessDoctor {
 
             Privilege.HOME_ROLE -> if (OeaPrivileges.holdsHomeRole(app)) {
                 Finding(privilege, State.WORKING, "OEA is the default Home app.", "Nothing to do.")
+            } else if (privilegedShell) {
+                Finding(privilege, State.OEA_CAN_FIX, "OEA has $shellLabel access and can request itself as Home.", "Tap Fix.", command = repairCommand(app, root, privilege))
             } else {
                 Finding(privilege, State.NEEDS_TAP, "OEA is not the default Home app yet.", "Android Settings › Apps › Default apps › Home app.")
             }
@@ -214,7 +217,7 @@ object OeaAccessDoctor {
                 val granted = OeaPrivileges.hasRuntimePermission(app, runtimePermission(privilege))
                 when {
                     granted -> Finding(privilege, State.WORKING, "${privilege.title} is allowed.", "Nothing to do.")
-                    root && android.os.Build.VERSION.SDK_INT < 33 -> Finding(privilege, State.OEA_CAN_FIX, "Not allowed; OEA has root and can grant it.", "Tap Fix.", command = command(root, "pm grant ${app.packageName} ${runtimePermission(privilege)}"))
+                    privilegedShell && android.os.Build.VERSION.SDK_INT < 33 -> Finding(privilege, State.OEA_CAN_FIX, "Not allowed; OEA has $shellLabel access and can grant it.", "Tap Fix.", command = repairCommand(app, root, privilege))
                     else -> Finding(privilege, State.NEEDS_TAP, "Not allowed.", "Android will ask the first time OEA needs it; you can also grant it in Settings › Apps › OEA › Permissions.")
                 }
             }
@@ -263,24 +266,9 @@ object OeaAccessDoctor {
      */
     private fun command(root: Boolean, cmd: String): String = if (root) "su -c \"$cmd\"" else cmd
 
-    /**
-     * The accessibility service list OEA writes when it grants itself the
-     * assistant: the user's existing services are kept, OEA's is appended
-     * (or removed) — never replaced, which would silently switch other apps off.
-     */
-    private fun assistantList(app: Context): String {
-        val existing = runCatching {
-            android.provider.Settings.Secure.getString(app.contentResolver, "enabled_accessibility_services").orEmpty()
-        }.getOrDefault("")
-        val ours = assistantComponent(app)
-        // Android stores these as component strings ("pkg/.Service" or the long
-        // form), so the comparison has to be done on both spellings.
-        val short = ours.flattenToShortString()
-        val long = ours.flattenToString()
-        val keep = existing.split(':').map { it.trim() }
-            .filter { it.isNotEmpty() && it != short && it != long }
-        return (keep + short).joinToString(":")
-    }
+    /** Use the same package-scoped command that the grant path actually executes. */
+    private fun repairCommand(app: Context, root: Boolean, privilege: Privilege): String? =
+        OeaPrivileges.rootCommand(app, privilege)?.let { command(root, it) }
 
     /** What the doctor fixes by itself, in one pass. */
     fun fixAll(context: Context, onDone: (OeaPrivileges.Summary) -> Unit) {

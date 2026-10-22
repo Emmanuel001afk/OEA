@@ -113,13 +113,12 @@ object OeaPrivileges {
 
     fun isReady(context: Context, privilege: Privilege): Boolean = granted(context, privilege) == Grant.GRANTED
 
-    /** True when OEA can switch this on without a tap from the user. */
+    /** True when an already-authorized channel can attempt this without another user tap. */
     fun selfGrantable(context: Context, privilege: Privilege): Boolean = when (privilege) {
         Privilege.DEVICE_OWNER, Privilege.DEVICE_ADMIN, Privilege.DIALER_ROLE,
-        Privilege.CALL_SCREENING_ROLE, Privilege.DND_ACCESS, Privilege.ROOT,
-        -> false
-
-        else -> isDeviceOwner(context) && privilege.runtimePermission != null || OeaShell.available() && rootCommand(context, privilege) != null
+        Privilege.CALL_SCREENING_ROLE, Privilege.ROOT -> false
+        else -> (isDeviceOwner(context) && privilege.runtimePermission != null) ||
+            ((OeaShell.available() || OeaAdbAuthority.isSessionReady()) && rootCommand(context, privilege) != null)
     }
 
     private fun read(context: Context, privilege: Privilege): Grant = when (privilege) {
@@ -365,7 +364,7 @@ object OeaPrivileges {
     }
 
     /** The exact shell command behind a privilege, or null when no command exists. */
-    private fun rootCommand(context: Context, privilege: Privilege): String? {
+    internal fun rootCommand(context: Context, privilege: Privilege): String? {
         val pkg = OeaShell.sanitizeTarget(context.packageName, context.packageName) ?: return null
         return when (privilege) {
             Privilege.OVERLAY -> "appops set $pkg SYSTEM_ALERT_WINDOW allow"
@@ -385,6 +384,7 @@ object OeaPrivileges {
             }
 
             Privilege.BATTERY_UNRESTRICTED -> "dumpsys deviceidle whitelist +$pkg"
+            Privilege.DND_ACCESS -> "cmd notification allow_dnd $pkg"
             Privilege.HOME_ROLE -> "cmd package set-home-activity $pkg/$HOME_ACTIVITY"
             else -> privilege.runtimePermission?.let { "pm grant $pkg $it" }
         }
@@ -480,9 +480,9 @@ object OeaPrivileges {
     }
 
     /**
-     * Switches on everything OEA can switch on by itself and reports what still
-     * needs a tap. On a rooted device, or where OEA is the device owner, OEA
-     * needs no helper app at all.
+     * Attempts every privilege supported by the currently authorized channel
+     * (root, paired OEA Authority, or a supported device-owner runtime grant)
+     * and reports what still needs Android's consent.
      */
     fun repairAll(context: Context, onDone: (Summary) -> Unit) {
         val app = context.applicationContext

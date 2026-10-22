@@ -18,8 +18,8 @@ import com.oea.launcher.assistant.OeaAssistant
  * Alternatives for a faulty power (or volume) button, using only what
  * Android lets an app do:
  *  - wake the screen with a proximity wave or, where the phone has one, its
- *    low-power pick-up sensor (OEA's wake service listens only while the
- *    screen is off);
+ *    low-power pick-up sensor (wake listeners run only while the screen is off);
+ *  - lock the screen after a deliberate proximity-sensor cover while it is on;
  *  - lock / sleep the screen and open the power menu through OEA Assistant
  *    (with Device admin as a lock fallback);
  *  - volume, ringer and Do Not Disturb controls.
@@ -95,12 +95,13 @@ object OeaPower {
     }
 
     /**
-     * True when the wake service has anything at all to do: a wake gesture, or the
-     * screen-off gesture, which needs the same sensor while the screen is off.
+     * True when the service has work: wave/lift wake while off, the distinct
+     * screen-off hold action, or screen-on proximity cover-to-lock.
      */
     fun wakeFeaturesOn(context: Context): Boolean {
         if (waveToWake(context) || (liftToWake(context) && liftSensor(context) != null)) return true
-        return com.oea.launcher.data.OeaDataStore.get(context).waveOffAction() != "none"
+        val store = com.oea.launcher.data.OeaDataStore.get(context)
+        return store.waveOffAction() != "none" || store.coverToLockEnabled()
     }
 
     // ------------------------------------------------------------- sensors

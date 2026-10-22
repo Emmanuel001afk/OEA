@@ -33,10 +33,11 @@ import com.oea.launcher.data.OeaDataStore
  *
  * Android delivers sensor events only to apps in the foreground or with a
  * foreground service, so this small service (with a quiet notification) runs
- * while wave or lift to wake is switched on. It registers its sensors only
- * while the screen is off and unregisters them the moment the screen turns
- * on; with the screen on it does nothing at all. Proximity and gesture
- * sensors report by interrupt, so there is no polling.
+ * while any proximity/lift gesture is enabled. Wake sensors are registered only
+ * while the screen is off; the proximity sensor is also registered while the
+ * screen is on only when the user explicitly enables cover-to-lock. Unneeded
+ * listeners are removed on each screen transition. Sensors report by interrupt,
+ * so there is no polling.
  */
 class OeaWakeService : Service() {
     private val main = Handler(Looper.getMainLooper())
@@ -46,8 +47,24 @@ class OeaWakeService : Service() {
     private var accelerometer: Sensor? = null
     @Volatile private var landscapeOrientation = false
     private var detector: OeaWaveDetector? = null
+    private val coverLockDetector = OeaCoverLockDetector()
     private var listening = false
+    private var listeningScreenOff: Boolean? = null
     private var receiverRegistered = false
+
+    private val coverLockTimeout = Runnable {
+        val store = OeaDataStore.get(this)
+        if (!isScreenInteractive() || listeningScreenOff != false || !store.coverToLockEnabled() || !lastCovered || inCall()) {
+            coverLockDetector.reset()
+            return@Runnable
+        }
+        if (coverLockDetector.shouldLock(SystemClock.elapsedRealtime())) {
+            when (OeaPower.lockScreen(this)) {
+                OeaPower.LockResult.LOCKED -> Log.i(TAG, "Screen-on proximity cover locked the phone")
+                OeaPower.LockResult.NEEDS_SETUP -> Log.e(TAG, "Cover-to-lock recognized, but locking needs OEA Assistant or Device Admin FORCE_LOCK")
+            }
+        }
+    }
 
     private val proximityListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -56,11 +73,32 @@ class OeaWakeService : Service() {
             val covered = distance < minOf(sensor.maximumRange, 5f) * 0.6f + 0.01f
             lastCovered = covered
             val store = OeaDataStore.get(this@OeaWakeService)
-            val bound = store.waveAction() != "none"
+            if (inCall()) {
+                main.removeCallbacks(coverLockTimeout)
+                coverLockDetector.reset()
+                if (!covered && isScreenInteractive()) {
+                    coverLockDetector.onReading(covered = false, nowMs = SystemClock.elapsedRealtime())
+                }
+                return
+            }
+
+            val screenOff = listeningScreenOff ?: !isScreenInteractive()
+            if (!screenOff) {
+                if (!store.coverToLockEnabled()) {
+                    main.removeCallbacks(coverLockTimeout)
+                    coverLockDetector.reset()
+                    return
+                }
+                val started = coverLockDetector.onReading(covered, SystemClock.elapsedRealtime())
+                if (started) main.postDelayed(coverLockTimeout, OeaCoverLockDetector.HOLD_MS)
+                if (!coverLockDetector.isArmed) main.removeCallbacks(coverLockTimeout)
+                return
+            }
+
+            val bound = OeaPower.waveToWake(this@OeaWakeService) && store.waveAction() != "none"
             val offBound = store.waveOffAction() != "none"
-            if (inCall() || (!bound && !offBound)) return
-            // Screen-off hold-to-lock is intentionally portrait-only. Keep the
-            // regular wake gesture unchanged; suppress only the OFF action.
+            if (!bound && !offBound) return
+            // Screen-off hold gestures remain separate from the screen-on cover-to-lock action.
             val result = detector?.onReading(covered, SystemClock.elapsedRealtime(), screenOffBound = offBound)
             when (if (landscapeOrientation && result == OeaWaveDetector.Result.OFF) OeaWaveDetector.Result.NONE else result) {
                 OeaWaveDetector.Result.ON -> if (bound) wake("wave")
@@ -88,7 +126,7 @@ class OeaWakeService : Service() {
 
     private val liftListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
-            if (!inCall() && !pocketCovered()) wake("lift")
+            if (listeningScreenOff == true && !isScreenInteractive() && !inCall() && !pocketCovered()) wake("lift")
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -96,9 +134,9 @@ class OeaWakeService : Service() {
 
     private val liftTrigger = object : TriggerEventListener() {
         override fun onTrigger(event: TriggerEvent?) {
-            if (!inCall() && !pocketCovered()) wake("lift")
-            // One-shot sensors disarm after firing; re-arm while the screen stays off.
-            main.postDelayed({ if (listening) armLift() }, 1_500L)
+            if (listeningScreenOff == true && !isScreenInteractive() && !inCall() && !pocketCovered()) wake("lift")
+            // One-shot sensors disarm after firing; re-arm only while still in screen-off mode.
+            main.postDelayed({ if (listening && listeningScreenOff == true && !isScreenInteractive()) armLift() }, 1_500L)
         }
     }
 
@@ -107,8 +145,8 @@ class OeaWakeService : Service() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> startListening()
-                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> stopListening()
+                Intent.ACTION_SCREEN_OFF -> refreshListening(screenOff = true)
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> refreshListening(screenOff = false)
             }
         }
     }
@@ -170,10 +208,10 @@ class OeaWakeService : Service() {
                 manager?.createNotificationChannel(
                     NotificationChannel(
                         CHANNEL,
-                        "Wake gestures",
+                        "Proximity gestures",
                         NotificationManager.IMPORTANCE_MIN
                     ).apply {
-                        description = "Keeps OEA's wake gestures available."
+                        description = "Keeps OEA's configured screen gestures available."
                         setShowBadge(false)
                     }
                 )
@@ -183,8 +221,13 @@ class OeaWakeService : Service() {
         else @Suppress("DEPRECATION") Notification.Builder(this)
         return builder
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
-            .setContentTitle("OEA wake gestures")
-            .setContentText("Sensors active while screen is off")
+            .setContentTitle("OEA proximity gestures")
+            .setContentText(
+                if (OeaDataStore.get(this).coverToLockEnabled())
+                    "Cover sensor to lock while on; wake gestures while off"
+                else
+                    "Wake sensors active while screen is off"
+            )
             .setOngoing(true)
             .setShowWhen(false)
             .build()
@@ -212,38 +255,78 @@ class OeaWakeService : Service() {
 
     fun reloadSettings() {
         if (!OeaPower.wakeFeaturesOn(this)) {
+            stopListening()
             stopSelf()
             return
         }
-        val offGestureBound = OeaDataStore.get(this).waveOffAction() != "none"
-        val needProximity = offGestureBound || OeaPower.waveToWake(this) || (OeaPower.liftToWake(this) && OeaPower.pocketGuard(this))
+        val store = OeaDataStore.get(this)
+        val offGestureBound = store.waveOffAction() != "none"
+        val coverToLock = store.coverToLockEnabled()
+        val needProximity = offGestureBound || coverToLock || OeaPower.waveToWake(this) ||
+            (OeaPower.liftToWake(this) && OeaPower.pocketGuard(this))
         proximity = if (needProximity) OeaPower.proximitySensor(this) else null
         lift = if (OeaPower.liftToWake(this)) OeaPower.liftSensor(this) else null
-        accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        accelerometer = if (offGestureBound) sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) else null
         detector = OeaWaveDetector(OeaPower.sensitivity(this), OeaPower.requireTwoWaves(this), OeaPower.pocketGuard(this))
-        val screenOn = getSystemService(PowerManager::class.java)?.isInteractive != false
         stopListening()
-        if (!screenOn) startListening()
+        startListening()
+        runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification()) }
+            .onFailure { Log.w(TAG, "Could not refresh wake-gesture notification", it) }
     }
 
-    private fun startListening() {
-        if (listening) return
+    private fun isScreenInteractive(): Boolean =
+        getSystemService(PowerManager::class.java)?.isInteractive != false
+
+    private fun refreshListening(screenOff: Boolean? = null) {
+        stopListening()
+        startListening(screenOff)
+    }
+
+    private fun startListening(screenOffOverride: Boolean? = null) {
+        if (!OeaPower.wakeFeaturesOn(this)) {
+            stopListening()
+            return
+        }
+        val screenOff = screenOffOverride ?: !isScreenInteractive()
+        val store = OeaDataStore.get(this)
+        val offGestureBound = store.waveOffAction() != "none"
+        val listenForCoverToLock = !screenOff && store.coverToLockEnabled()
+        val listenForProximity = if (screenOff) {
+            OeaPower.waveToWake(this) || offGestureBound
+        } else {
+            listenForCoverToLock
+        }
+        val listenForLift = screenOff && OeaPower.liftToWake(this) && lift != null
+        val listenForOrientation = screenOff && offGestureBound && proximity != null && accelerometer != null
+        if (!listenForProximity && !listenForLift && !listenForOrientation) {
+            stopListening()
+            return
+        }
+        if (listening && listeningScreenOff == screenOff) return
+        if (listening) stopListening()
         val sm = sensorManager ?: return
         listening = true
+        listeningScreenOff = screenOff
         lastCovered = false
         detector?.reset(SystemClock.elapsedRealtime(), coveredNow = false)
-        proximity?.let { sensor ->
-            runCatching { sm.registerListener(proximityListener, sensor, SensorManager.SENSOR_DELAY_NORMAL) }
-                .onFailure { Log.w(TAG, "Proximity sensor unavailable", it) }
+        coverLockDetector.reset()
+        if (listenForProximity) {
+            proximity?.let { sensor ->
+                runCatching { sm.registerListener(proximityListener, sensor, SensorManager.SENSOR_DELAY_NORMAL) }
+                    .onFailure { Log.w(TAG, "Proximity sensor unavailable", it) }
+            }
         }
-        accelerometer?.let { sensor ->
-            runCatching { sm.registerListener(orientationListener, sensor, SensorManager.SENSOR_DELAY_NORMAL) }
-                .onFailure { Log.w(TAG, "Orientation sensor unavailable; landscape guard may be limited", it) }
+        if (listenForOrientation) {
+            accelerometer?.let { sensor ->
+                runCatching { sm.registerListener(orientationListener, sensor, SensorManager.SENSOR_DELAY_NORMAL) }
+                    .onFailure { Log.w(TAG, "Orientation sensor unavailable; landscape guard may be limited", it) }
+            }
         }
-        armLift()
+        if (listenForLift) armLift()
     }
 
     private fun armLift() {
+        if (listeningScreenOff != true || isScreenInteractive()) return
         val sm = sensorManager ?: return
         val sensor = lift ?: return
         runCatching {
@@ -253,8 +336,13 @@ class OeaWakeService : Service() {
     }
 
     private fun stopListening() {
-        if (!listening) return
+        main.removeCallbacks(coverLockTimeout)
+        coverLockDetector.reset()
+        val wasListening = listening
         listening = false
+        listeningScreenOff = null
+        lastCovered = false
+        if (!wasListening) return
         val sm = sensorManager ?: return
         runCatching { sm.unregisterListener(proximityListener) }
         runCatching { sm.unregisterListener(orientationListener) }
@@ -302,8 +390,8 @@ class OeaWakeService : Service() {
     private fun notification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
-            manager?.createNotificationChannel(NotificationChannel(CHANNEL, "Wake gestures", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "Keeps OEA's wave and lift to wake available while the screen is off."
+            manager?.createNotificationChannel(NotificationChannel(CHANNEL, "Proximity gestures", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "Keeps OEA's configured screen gestures available."
                 setShowBadge(false)
             })
         }
@@ -313,15 +401,17 @@ class OeaWakeService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 )
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this)
-        val what = listOfNotNull(
-            if (OeaPower.waveToWake(this)) "wave" else null,
-            if (OeaPower.liftToWake(this) && OeaPower.liftSensor(this) != null) "lift" else null,
-            if (OeaDataStore.get(this).waveOffAction() != "none") "single hold, then uncover" else null
-).joinToString(" or ").ifEmpty { "nothing" }
+        val store = OeaDataStore.get(this)
+        val activeGestures = listOfNotNull(
+            if (store.coverToLockEnabled()) "cover sensor to lock while screen is on" else null,
+            if (OeaPower.waveToWake(this)) "wave to wake while screen is off" else null,
+            if (OeaPower.liftToWake(this) && OeaPower.liftSensor(this) != null) "lift to wake" else null,
+            if (store.waveOffAction() != "none") "screen-off hold gesture" else null
+        ).joinToString(" • ").ifEmpty { "Sensor service active" }
         return builder
             .setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
-            .setContentTitle("Wake gestures are on")
-            .setContentText("Screen off: $what to wake. Sensors sleep while the screen is on.")
+            .setContentTitle("OEA proximity gestures are on")
+            .setContentText(activeGestures)
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(open)

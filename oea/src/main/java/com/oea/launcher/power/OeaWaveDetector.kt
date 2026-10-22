@@ -31,10 +31,6 @@ class OeaWaveDetector(
     private val cooldownMs = 2_500L
     /** Cover long enough to mean "hand over the screen", not "wave past it". */
     private val longCoverMs = 1_250L
-    /** How long after such a cover the deciding wave may come. */
-    private val armWindowMs = 1_400L
-    private var armedAt = -1L
-
     private var coveredAt = -1L
     private var lastWaveAt = -1L
     private var lastTriggerAt = -1L
@@ -47,10 +43,9 @@ class OeaWaveDetector(
      * different patterns, decided here and nowhere else:
      *
      * - [ON] — a wave (one, or two inside the double window) with the screen off.
-     * - [OFF] — a *long* cover followed by an uncover and then a second wave right
-     *   after it. The long cover is what keeps this pattern out of the way of the
-     *   wake gesture: a deliberate hand-over-the-screen is not something that
-     *   happens by accident, and a normal wave is too short to qualify.
+     * - [OFF] — a long cover (at least [longCoverMs]) followed by uncover, when
+     *   a screen-off action is bound. This is only for the display-already-off
+     *   gesture; screen-on cover-to-lock is handled by [OeaCoverLockDetector].
      * - [NONE] — anything else, including the first wave of a pair.
      */
     enum class Result { NONE, ON, OFF }
@@ -91,19 +86,11 @@ class OeaWaveDetector(
             // One deliberate hold is enough: trigger when the user uncovers the
             // sensor, rather than requiring an additional wave afterward.
             if (offCooling) return Result.NONE
-            armedAt = -1L
             offTriggerAt = nowMs
             return Result.OFF
         }
         if (pocketGuard && held >= pocketMs) return Result.NONE
         if (held < minCoverMs || held > maxCoverMs) return Result.NONE
-        if (armedAt >= 0 && screenOffBound && nowMs - armedAt <= armWindowMs) {
-            // The second wave of the off pattern. It is consumed here and never
-            // reaches the wake logic, so one pattern cannot run both actions.
-            armedAt = -1L
-            offTriggerAt = nowMs
-            return Result.OFF
-        }
         if (cooling) return Result.NONE
         if (requireTwoWaves) {
             val previous = lastWaveAt
@@ -114,7 +101,4 @@ class OeaWaveDetector(
         lastTriggerAt = nowMs
         return Result.ON
     }
-
-    /** True while a long cover has been seen and the deciding wave is still awaited. */
-    val armedForScreenOff: Boolean get() = armedAt >= 0
 }

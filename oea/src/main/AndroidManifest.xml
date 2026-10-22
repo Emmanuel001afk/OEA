@@ -745,15 +745,15 @@
             android:name="com.oea.launcher.gameboost.OeaGameCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
-        <!-- Faulty power button alternatives: wake gestures (sensors only while
-             the screen is off), Quick controls and Quick Settings tiles. -->
+        <!-- Faulty power button alternatives: screen-off wake gestures and an
+             optional screen-on proximity cover-to-lock gesture. -->
         <service
             android:name="com.oea.launcher.power.OeaWakeService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Wakes the screen with the user's enabled proximity or pick-up gesture when the power key is faulty; sensors are used only while the screen is off." />
+                android:value="Runs the user's enabled screen-off wake gestures and optional screen-on proximity cover-to-lock gesture when the power key is faulty; sensors are registered only for enabled gestures." />
         </service>
         <activity
             android:name="com.oea.launcher.power.OeaWakeActivity"
