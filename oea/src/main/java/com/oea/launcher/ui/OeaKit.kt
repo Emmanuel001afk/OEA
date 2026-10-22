@@ -37,6 +37,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.oea.launcher.R
 import com.oea.launcher.icons.OeaIconController
+import androidx.core.view.WindowInsetsCompat
 import com.oea.launcher.model.OeaAppInfo
 
 /** Typefaces shared by every OEA surface. */
@@ -59,6 +60,13 @@ object OeaInsets {
         @Suppress("DEPRECATION")
         intArrayOf(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
     }
+
+    /**
+     * The same four insets from the compat type that `ViewCompat`'s listener hands
+     * out. Kept as an overload so a caller never has to cast or unwrap by hand.
+     */
+    fun bars(insets: WindowInsetsCompat): IntArray =
+        insets.toWindowInsets()?.let { bars(it) } ?: intArrayOf(0, 0, 0, 0)
 
     fun ime(insets: WindowInsets): Int = if (Build.VERSION.SDK_INT >= 30) {
         insets.getInsets(WindowInsets.Type.ime()).bottom

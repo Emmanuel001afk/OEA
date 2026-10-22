@@ -1801,7 +1801,7 @@ object OeaCameraApp {
         // Push a mid grey through the matrix: that is the tone the filter shifts a
         // flat scene to. The wash then pulls the preview towards it.
         val mid = floatArrayOf(128f, 128f, 128f, 255f)
-        matrix.mapPoints(mid)
+        matrix.mapPoints(mid, 0, mid, 0, 4)
         fun channel(v: Float) = v.toInt().coerceIn(0, 255)
         val red = channel(mid[0])
         val green = channel(mid[1])
