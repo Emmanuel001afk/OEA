@@ -1643,6 +1643,7 @@ object OeaCameraApp {
         private var zoomValue: Float = initialZoom.coerceIn(1f, 8f)
         private var flashMode: FlashMode = initialFlash
         private var aspectMode: AspectMode = initialAspect
+        private var layoutTransformListenerInstalled = false
 
         private var recorder: MediaRecorder? = null
         private var recordingFile: File? = null
@@ -1694,10 +1695,13 @@ object OeaCameraApp {
             }
             textureView.surfaceTextureListener = surfaceListener
             // Recompute when the actual View bounds change as well as when the
-            // SurfaceTexture reports a buffer-size change. This covers startup,
-            // split/window resizing, and OEMs that deliver callbacks out of order.
-            textureView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-                applyPreviewTransform()
+            // SurfaceTexture reports a buffer-size change. Install this once;
+            // resume cycles must not accumulate duplicate listeners.
+            if (!layoutTransformListenerInstalled) {
+                textureView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    applyPreviewTransform()
+                }
+                layoutTransformListenerInstalled = true
             }
             if (textureView.isAvailable) openIfReady()
         }
