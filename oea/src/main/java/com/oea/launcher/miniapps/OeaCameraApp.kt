@@ -1163,7 +1163,22 @@ object OeaCameraApp {
         orientationTag: Int,
         withLocation: Boolean
     ): File? {
-        val needsPixels = filter != FilterMode.NONE || hdr || OeaCameraEffects.needed(mode, privacy) || aspect > 0f
+        // The Camera2 reader already chooses the requested aspect when the device
+        // offers it. Do not decode/re-encode a full-resolution JPEG just because an
+        // aspect ratio is selected: that used to downsample otherwise untouched
+        // photos to preview-ish dimensions. Only crop when the actual JPEG buffer
+        // does not match the requested sensor-buffer ratio.
+        val jpegMatchesAspect = if (jpeg != null && aspect > 0f) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+                OeaCameraOptics.matchesAspect(bounds.outWidth, bounds.outHeight, aspect)
+            }.getOrDefault(false)
+        } else {
+            false
+        }
+        val needsCrop = aspect > 0f && !jpegMatchesAspect
+        val needsPixels = filter != FilterMode.NONE || hdr || OeaCameraEffects.needed(mode, privacy) || needsCrop
         if (jpeg != null && !needsPixels) {
             // Nothing to develop: the camera's own JPEG is the best possible file.
             val file = newPhotoFile(host, filter)
