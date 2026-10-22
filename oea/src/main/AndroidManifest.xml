@@ -585,11 +585,10 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/oea_assistant" />
         </service>
-        <!-- OEA Floating Window: the custom, draggable and resizable
-             multitasking container for devices whose native
-             multi-window is disabled. Requires the accessibility
-             binding (and SYSTEM_ALERT_WINDOW, declared above, for
-             the TYPE_APPLICATION_OVERLAY window it draws). -->
+        <!-- OEA Floating Window: its own draggable/resizable launcher
+             surface, drawn as TYPE_ACCESSIBILITY_OVERLAY. Requires only
+             the user's explicit Accessibility-service enablement; this
+             does not provide windowing control over other apps' tasks. -->
         <service
             android:name="com.oea.launcher.multitask.OeaFloatingWindowService"
             android:exported="true"

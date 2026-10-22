@@ -2448,26 +2448,18 @@ open class OeaSystemToolsActivity : Activity() {
         }
 
         kit.sectionTitle(box, "OEA Floating Workspace (optional)")
-        val overlayAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
         val accessibilityAllowed = OeaFloatingWindows.isAccessibilityEnabled(this)
-        kit.row(group, R.drawable.oic_layers, "Display over other apps", if (overlayAllowed) "Allowed" else "Not allowed • required only for OEA Floating Workspace", value = if (overlayAllowed) "On" else "Off") {
-            if (!overlayAllowed && !OeaFloatingWindows.openOverlaySetup(this)) toast("Open Settings › Apps › Special app access › Display over other apps and allow OEA.")
-        }
         kit.row(group, R.drawable.oic_accessibility_new, "OEA Floating Window accessibility", if (accessibilityAllowed) "Allowed • separate from OEA Assistant" else "Off • only needed for OEA Floating Workspace", value = if (accessibilityAllowed) "On" else "Off") {
             OeaFloatingWindows.openSetup(this)
         }
         kit.switchRow(
             group, R.drawable.oic_select_window,
             "Enable OEA Floating Workspace",
-            "Show OEA's own draggable, resizable app launcher above other apps. Apps open as normal Android tasks, not embedded windows.",
+            "Show OEA's own draggable, resizable launcher above other apps. Tapping an app requests Android freeform; this overlay cannot embed third-party app windows.",
             OeaFloatingWindows.enabled(this)
         ) { on ->
             if (!on) {
                 OeaFloatingWindows.setEnabled(this, false)
-            } else if (!overlayAllowed) {
-                kit.confirm("Allow OEA overlay", "Android requires Display over other apps for this optional workspace. Android freeform remains available without this permission.", "Open permission") {
-                    if (!OeaFloatingWindows.openOverlaySetup(this)) toast("Open Settings › Apps › Special app access › Display over other apps and allow OEA.")
-                }
             } else if (!accessibilityAllowed) {
                 kit.confirm("Enable OEA Floating Window", "This optional accessibility service hosts OEA's movable/resizable workspace. It is separate from OEA Assistant and is not required for Android freeform.", "Open Accessibility") {
                     OeaFloatingWindows.openSetup(this)
@@ -2478,7 +2470,7 @@ open class OeaSystemToolsActivity : Activity() {
             }
             rerender()
         }
-        kit.note(box, "Choose the default method above. Android freeform creates real, system-managed app windows when the phone allows it. OEA Floating Workspace is a separate optional overlay containing app shortcuts; ordinary apps cannot be embedded inside it. Neither method silently switches to the other.")
+        kit.note(box, "Choose the default method above. Android freeform creates real, system-managed app windows when the phone allows it. OEA Floating Workspace draws its own launcher using the separately enabled OEA accessibility service; it does not need Display over other apps. Tapping an app requests Android freeform, but the OS may ignore that request. Neither method silently switches to the other.")
         present(page)
     }
 
