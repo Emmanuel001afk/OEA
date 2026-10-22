@@ -719,14 +719,16 @@ object OeaCameraApp {
                 toast(host, "Stop the recording before changing mode")
                 return
             }
+            val previousMode = captureMode
             captureMode = mode
             proBox.visibility = if (mode == CaptureMode.PRO) View.VISIBLE else View.GONE
             if (mode == CaptureMode.PRO) {
                 proCaption.text = cameraHelper.proStatus()
                 pushPro()
-            } else if (captureMode != mode) {
-                // Manual ISO switches auto-exposure off. Leaving Pro without
-                // handing the controls back would leave every later photo dark.
+            } else if (previousMode == CaptureMode.PRO) {
+                // Manual ISO switches auto-exposure off. Leaving Pro must restore
+                // automatic controls. Compare against the previous mode: comparing
+                // captureMode after assigning mode makes this branch unreachable.
                 isoBar.progress = 0
                 expBar.progress = 100
                 wbBar.progress = 0
