@@ -113,6 +113,10 @@ object OeaAppFreezer {
         val targets = packages.filter { it.isNotBlank() && it != context.packageName }
         if (hibernated) current.addAll(targets) else current.removeAll(targets.toSet())
         prefs.edit().putStringSet(KEY_HIBERNATED, current).apply()
+        // Recalculate whether the accessibility service must watch global app
+        // launches. Without this signal it either misses newly hibernated apps
+        // or keeps listening to every window after the last app is restored.
+        com.oea.launcher.assistant.OeaAssistant.refreshEventMask()
     }
 
     /** True when the app is frozen by either mode. */

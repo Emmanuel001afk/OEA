@@ -976,6 +976,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 main.removeCallbacks(drawerRefresh)
                 main.postDelayed(drawerRefresh, 80L)
             }
+            PrefImpact.BADGES -> {
+                main.removeCallbacks(badgesRefresh)
+                main.postDelayed(badgesRefresh, 60L)
+            }
             PrefImpact.CHROME -> {
                 main.removeCallbacks(chromeRefresh)
                 main.postDelayed(chromeRefresh, 100L)
@@ -987,15 +991,20 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
     }
 
-    private enum class PrefImpact { NONE, ISLAND, DRAWER, CHROME, FULL }
+    private enum class PrefImpact { NONE, ISLAND, DRAWER, BADGES, CHROME, FULL }
 
     private fun preferenceImpact(key: String): PrefImpact = when {
         key.startsWith("launch_count:") -> PrefImpact.NONE
         key in QUIET_KEYS -> PrefImpact.NONE
         key == "dynamic_island_enabled" || key.startsWith("island_") -> PrefImpact.ISLAND
         key in DRAWER_KEYS -> PrefImpact.DRAWER
+        key == "badge_style" -> PrefImpact.BADGES
         key in CHROME_KEYS -> PrefImpact.CHROME
-        else -> PrefImpact.FULL
+        key in HOME_LAYOUT_KEYS -> PrefImpact.FULL
+        // SharedPreferences also contains settings owned by unrelated OEA
+        // features. An unknown write must never rebuild the entire Home tree:
+        // that used to make taps, toggles and returning from other screens flash.
+        else -> PrefImpact.NONE
     }
 
     private val islandRefresh = Runnable {
@@ -1009,6 +1018,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (drawer.visibility == VISIBLE) drawer.refresh()
         hiddenSpaceRef?.refresh()
     }
+
+    private val badgesRefresh = Runnable { refreshBadges() }
 
     private val chromeRefresh = Runnable {
         palette = OeaTheme.resolve(context)
@@ -1516,19 +1527,32 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             return
         }
         stage("layout normalization") { normalizeLayout() }
+        val previousTiles = homeTiles.toList()
         homeTiles.clear()
         val target = ws.getCurrentPage()
-        pager.removeAllViews()
+        val builtPages = ArrayList<OeaCellLayout>()
+        var successfulPages = 0
         for (page in 0 until ws.pages()) {
             val built = try {
-                buildPage(page)
+                buildPage(page).also { successfulPages++ }
             } catch (error: Throwable) {
-                // One broken page must not empty the whole pager.
+                // Keep the last working pager if every page fails; a failed
+                // refresh must never turn a usable Home into a blank screen.
                 Log.e(TAG, "Home page $page failed to build; showing it empty", error)
                 emptyPage(page)
             }
-            pager.addView(built)
+            builtPages += built
         }
+        if (successfulPages == 0 || builtPages.isEmpty()) {
+            homeTiles.clear()
+            homeTiles.addAll(previousTiles)
+            Log.e(TAG, "Home rebuild produced no usable pages; preserving the previous workspace")
+            return
+        }
+        // Build the replacement tree before detaching the currently visible
+        // pages. This keeps the last good Home interactive until the new one is ready.
+        pager.removeAllViews()
+        builtPages.forEach { pager.addView(it) }
         pager.setPageImmediately(target)
         indicator.pages = ws.pages()
         indicator.position = target.toFloat()
@@ -3460,17 +3484,32 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         /** Settings writes that never change what Home shows. */
         private val QUIET_KEYS = setOf(
             "recent_launches", "last_command", "last_result", "onboarding_done", "default_home_banner_dismissed",
-            "home_layout_locked", "haptics", "gesture_swipe_down", "gesture_double_tap", "recents_mode",
-            "drawer_keyboard", "floating_window_size", "hidden_space_locked", "favorite_apps", "home_surface_enabled",
-            "wallpaper_uri", "theme_active_id", "wallpaper_blur"
+            "home_layout_locked", "haptics", "gesture_swipe_down", "gesture_touch_sensitivity",
+            "gesture_double_tap", "gesture_triple_tap", "gesture_two_finger", "gesture_empty_long_press",
+            "gesture_wave_action", "gesture_wave_off_action", "proximity_cover_to_lock", "gesture_wave_twice_off_action",
+            "gesture_shake_action", "gesture_flip_action", "wave_sensitivity_backup", "wave_enabled_backup",
+            "lift_enabled_backup", "recents_mode", "drawer_keyboard", "floating_window_size",
+            "hidden_space_locked", "favorite_apps", "home_surface_enabled", "wallpaper_uri",
+            "fault_log_enabled", "unstable_games"
 )
+        /** Only these writes alter Home's icon/page structure and require rebinding it. */
+        private val HOME_LAYOUT_KEYS = setOf(
+            "show_app_labels", "grid_columns", "grid_rows", "icon_size_dp", "hidden_apps",
+            "icon_shape", "icon_pack_package", "animation_speed", "themed_icons", "theme_mode",
+            "accent_mode", "theme_active_id", "theme_accent_dark", "theme_accent_light",
+            "theme_surface_tint", "launcher_mode", "launcher_mode_chosen"
+        )
         /** Settings that only change the app drawer and search. */
         private val DRAWER_KEYS = setOf(
             "drawer_mode", "sort_mode", "drawer_categories", "show_most_used", "drawer_wallpaper_background",
             "search_wallpaper_visible"
 )
         /** Settings that restyle Home's chrome (dock, search bar, glance, glass, page motion) without new pages. */
-        private val CHROME_KEYS = setOf("dock_style", "search_bar_position", "glance_style", "glass_style", "page_effect", "low_mode_enabled")
+        private val CHROME_KEYS = setOf(
+            "dock_style", "search_bar_position", "glance_style", "glass_style", "page_effect",
+            "low_mode_enabled", "wallpaper_source", "home_scene", "wallpaper_blur",
+            "parallax_strength", "visual_mode", "behavior_mode", "home_safe_mode"
+)
         /** Breathing room between a widget and its cell edges. */
         private const val WIDGET_INSET_DP = 6
         private const val HANDLE_NONE = 0

@@ -749,17 +749,30 @@ class OeaAssistantService : AccessibilityService() {
     private fun applyEventMask(active: Boolean) {
         val info = serviceInfo ?: return
         val pairing = com.oea.launcher.privilege.OeaWirelessPairing.isWatching()
-        // Pairing reads the dialog once its code appears, which is a content change.
-        info.eventTypes = if (active || pairing) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-        } else {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        // When Usage Access is available, Game Boost detects a game with one
+        // bounded query after Home leaves; it does not need global accessibility
+        // events for every app launch. Keep global events only when that fallback
+        // is unavailable, or when OEA Freeze has apps to guard.
+        val gameBoostWatching = com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this) &&
+            com.oea.launcher.gameboost.OeaGameBoostStore.activeGameCount(this) > 0 &&
+            !com.oea.launcher.gameboost.OeaGameBoost.usageAccess(this)
+        val freezerWatching = runCatching {
+            com.oea.launcher.applock.OeaAppFreezer.hibernatedPackages(this).isNotEmpty()
+        }.getOrDefault(false)
+        val needsWindowEvents = active || pairing || foregroundWatch != null || gameBoostWatching || freezerWatching
+
+        // Pairing reads dialog text; force-stop jobs also need content changes.
+        // Otherwise subscribe only while a feature genuinely needs window events.
+        info.eventTypes = when {
+            active || pairing -> AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            needsWindowEvents -> AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            else -> 0
         }
         info.packageNames = when {
             active -> job?.settingsPackages?.toTypedArray()
-            foregroundWatch != null -> null
-            com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this) -> null
-            else -> null // Watch all windows for frozen-app blocking and game boost, not just OEA
+            foregroundWatch != null && !gameBoostWatching && !freezerWatching && !pairing ->
+                arrayOf(foregroundWatch!!.packageName)
+            else -> null
         }
         info.notificationTimeout = when {
             pairing -> 100L
