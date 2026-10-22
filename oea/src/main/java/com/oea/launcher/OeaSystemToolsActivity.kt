@@ -397,10 +397,12 @@ open class OeaSystemToolsActivity : Activity() {
             pageHost = it
             setContentView(it)
         }
-        // Build the replacement page before detaching the visible one, then
-        // swap children inside a stable window instead of replacing DecorView.
-        host.removeAllViews()
+        // Attach the fully built page before removing the visible page. This
+        // avoids a blank frame at the top of Settings when a toggle triggers
+        // rerender(), while keeping the Activity window and system bars stable.
+        val previous = host.getChildAt(0)
         host.addView(page.root, FrameLayout.LayoutParams(-1, -1))
+        if (previous != null) host.removeView(previous)
         currentScroll = page.scroll
         val y = scrollPositions[current] ?: 0
         if (y > 0) page.scroll.post { page.scroll.scrollTo(0, y) }
