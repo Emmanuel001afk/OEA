@@ -68,6 +68,7 @@ import com.oea.launcher.wallpaper.OeaWallpaperRenderer
 import com.oea.launcher.wallpaper.OeaWallpaperStore
 import com.oea.launcher.workspace.OeaWorkspaceStore
 import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
+import com.oea.launcher.widgets.OeaWidgetStudio
 import java.util.concurrent.Executors
 
 /**
@@ -496,10 +497,71 @@ open class OeaSystemToolsActivity : Activity() {
         kit.sectionTitle(box, "Pages & widgets")
         group = kit.group(box)
         kit.row(group, R.drawable.oic_widgets, "Add a widget", "Opens the OEA widget picker on Home") { homeAction("widgets") }
+        kit.row(group, R.drawable.oic_auto_awesome, "OEA Widget Studio", "Choose an original look and surface opacity for OEA's own widgets") { openWidgetStudio() }
         kit.switchRow(group, R.drawable.oic_lock, "Lock Home layout", "Prevents icons and widgets from being moved or removed by accident", dataStore.homeLayoutLocked()) { dataStore.setHomeLayoutLocked(it) }
         kit.row(group, R.drawable.oic_home, "Default Home app", homeRoleStatus()) { requestDefaultHome() }
         kit.note(box, "Tip: long-press an empty spot on Home for wallpaper, widgets and pages. Long-press an icon for shortcuts, split screen, floating window, freeze and lock.")
         present(page)
+    }
+
+    private fun openWidgetStudio() {
+        kit.sheet("OEA Widget Studio", "A small first step toward original, personal widgets.") { panel, dialog ->
+            kit.note(panel, "These looks apply to OEA's built-in Clock, Weather, Calendar, Notes, EMAGE, VIP, Calculator and Camera widgets. Other apps' widgets are unchanged.")
+
+            var selected = OeaWidgetStudio.selected(this)
+            var opacity = OeaWidgetStudio.opacity(this)
+            val preview = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(18), dp(18), dp(18), dp(18))
+            }
+            val previewTime = kit.text("09:41", 30f, selected.primary, OeaType.medium)
+            val previewDate = kit.text("Thursday, Lagos", 12f, selected.secondary)
+            val previewDescription = kit.text(selected.description, 12.5f, palette.textSecondary)
+            preview.addView(previewTime)
+            preview.addView(previewDate)
+            fun refreshPreview() {
+                preview.background = kit.rounded(selected.surface(opacity), 22, OeaTheme.alpha(selected.accent, 0x88), 1)
+                previewTime.setTextColor(selected.primary)
+                previewDate.setTextColor(selected.secondary)
+                previewDescription.text = selected.description
+            }
+            refreshPreview()
+            panel.addView(preview, LinearLayout.LayoutParams(-1, dp(110)).apply { topMargin = dp(8); bottomMargin = dp(12) })
+
+            val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            OeaWidgetStudio.presets.forEach { preset ->
+                chips.addView(kit.chip(preset.label, preset.id == selected.id) {
+                    selected = preset
+                    refreshPreview()
+                }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(7) })
+            }
+            panel.addView(kit.hscroll(chips), LinearLayout.LayoutParams(-1, -2))
+            panel.addView(previewDescription, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+
+            val opacityLabel = kit.text("Surface opacity · $opacity%", 13f, palette.textSecondary).apply { setPadding(0, dp(12), 0, dp(2)) }
+            panel.addView(opacityLabel)
+            val opacityControl = android.widget.SeekBar(this).apply {
+                max = OeaWidgetStudio.MAX_OPACITY - OeaWidgetStudio.MIN_OPACITY
+                progress = opacity - OeaWidgetStudio.MIN_OPACITY
+                contentDescription = "Widget surface opacity"
+            }
+            opacityControl.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    opacity = OeaWidgetStudio.MIN_OPACITY + progress
+                    opacityLabel.text = "Surface opacity · $opacity%"
+                    refreshPreview()
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+            })
+            panel.addView(opacityControl, LinearLayout.LayoutParams(-1, dp(44)))
+            panel.addView(kit.primaryButton("Apply to OEA widgets", R.drawable.oic_check) {
+                OeaWidgetStudio.save(this, selected.id, opacity)
+                dialog.dismiss()
+                Toast.makeText(this, "OEA widget style updated", Toast.LENGTH_SHORT).show()
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+        }
     }
 
     private fun homeAction(action: String) {
