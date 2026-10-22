@@ -547,81 +547,151 @@ class OeaShimmer(context: Context) : View(context) {
 }
 
 /**
- * A zoomable, pannable picture view. Fit-to-screen is 1×; pinch scales to 6×; a
- * double tap jumps to 2.5× where you tapped. While zoomed, the view takes the
- * drag away from its parent, so a pager beside a zoomed picture behaves.
+ * A zoomable, pannable picture view. Fit-to-screen is 1×; pinch scales to 8×;
+ * a double tap cycles 1× → 2.5× → 5× → 1× where you tapped; [zoomBy] steps in
+ * or out for on-screen controls. While zoomed, the view takes the drag away
+ * from its parent, but hands it back at the picture's edge so a pager still
+ * turns the page when there is nothing left to pan.
+ *
+ * Two traps are closed here after they cost a release:
+ *  * the view renders through its own matrix, so it *is* [ScaleType.MATRIX]
+ *    whatever a caller asks for — setting FIT_CENTER used to silently unhook
+ *    the matrix and with it all zooming;
+ *  * the drawable's *intrinsic* size drives the maths, never its bounds:
+ *    ImageView sizes bounds to the view for other scale types, which made a
+ *    full-screen photo compute a fit scale of 1 and draw cropped.
  */
 class OeaZoomImageView(context: Context) : ImageView(context) {
 
-    private val density = context.resources.displayMetrics.density
     private val matrix = Matrix()
-    private var fitScale = 1f
     private var userScale = 1f
     private var tx = 0f
     private var ty = 0f
     private var lastX = 0f
     private var lastY = 0f
-    private var maxScale = 6f
+    private var maxScale = 8f
+    private var animator: ValueAnimator? = null
 
     var onZoomChanged: ((Boolean) -> Unit)? = null
     var onTap: (() -> Unit)? = null
 
     val isZoomed: Boolean get() = userScale > 1.02f
 
+    /** The current zoom relative to fit-to-screen (1 = whole picture visible). */
+    val zoomScale: Float get() = userScale
+
     private val tap = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            performClick()
             onTap?.invoke()
             return true
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            if (isZoomed) reset() else zoomTo(2.5f, e.x, e.y)
+            val target = when {
+                userScale <= 1.02f -> 2.5f
+                userScale < 4f -> min(5f, maxScale)
+                else -> 1f
+            }
+            animateTo(target, e.x, e.y)
             return true
         }
     })
 
     private val pinch = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val before = userScale
             val focusX = if (detector.focusX.isNaN()) width / 2f else detector.focusX
             val focusY = if (detector.focusY.isNaN()) height / 2f else detector.focusY
-            userScale = (userScale * detector.scaleFactor).coerceIn(1f, maxScale)
-            if (userScale <= 1.001f) {
-                userScale = 1f
-                tx = 0f
-                ty = 0f
-            } else {
-                val grow = userScale / before
-                tx = tx * grow + (1f - grow) * focusX
-                ty = ty * grow + (1f - grow) * focusY
-            }
-            clampAndApply()
+            zoomTo(userScale * detector.scaleFactor, focusX, focusY)
             return true
         }
     })
 
     init {
-        scaleType = ScaleType.MATRIX
+        super.setScaleType(ScaleType.MATRIX)
     }
+
+    /** Matrix rendering is the zoom mechanism; no other scale type is honoured. */
+    override fun setScaleType(scaleType: ScaleType?) {
+        super.setScaleType(ScaleType.MATRIX)
+    }
+
+    override fun performClick(): Boolean = super.performClick()
 
     fun setMaxZoom(factor: Float) {
         maxScale = factor.coerceIn(1f, 12f)
+        if (userScale > maxScale) zoomTo(maxScale, width / 2f, height / 2f)
     }
 
     fun reset() {
+        animator?.cancel()
         userScale = 1f
         tx = 0f
         ty = 0f
         applyMatrix()
     }
 
+    /** Animated reset, for an on-screen "fit" control. */
+    fun resetAnimated() = animateTo(1f, width / 2f, height / 2f)
+
+    /** One on-screen zoom step: positive zooms in, negative out. */
+    fun zoomBy(steps: Int) {
+        if (steps == 0 || width <= 0 || height <= 0) return
+        var factor = 1f
+        repeat(kotlin.math.abs(steps)) { factor *= 1.6f }
+        val target = if (steps > 0) userScale * factor else userScale / factor
+        animateTo(target.coerceIn(1f, maxScale), width / 2f, height / 2f)
+    }
+
     private fun zoomTo(scale: Float, focusX: Float, focusY: Float) {
         val before = userScale
         userScale = scale.coerceIn(1f, maxScale)
-        val grow = userScale / before
-        tx = tx * grow + (1f - grow) * focusX
-        ty = ty * grow + (1f - grow) * focusY
+        if (userScale <= 1.001f) {
+            userScale = 1f
+            tx = 0f
+            ty = 0f
+        } else if (before > 0f) {
+            // (tx, ty) is the picture centre's offset from the view centre.
+            // Keeping the image point under the focus pinned to the focus when
+            // the scale grows by `grow` gives tx' = c - (c - tx) * grow, with
+            // c the focus measured from the centre — no drift, no jump.
+            val grow = userScale / before
+            val cx = focusX - width / 2f
+            val cy = focusY - height / 2f
+            tx = cx - (cx - tx) * grow
+            ty = cy - (cy - ty) * grow
+        }
         clampAndApply()
+    }
+
+    private fun animateTo(targetScale: Float, focusX: Float, focusY: Float) {
+        animator?.cancel()
+        val startScale = userScale
+        val startTx = tx
+        val startTy = ty
+        val endScale = targetScale.coerceIn(1f, maxScale)
+        // The end translation, from the same anchor maths as a pinch step.
+        val grow = if (startScale > 0f) endScale / startScale else 1f
+        val cx = focusX - width / 2f
+        val cy = focusY - height / 2f
+        var endTx = cx - (cx - startTx) * grow
+        var endTy = cy - (cy - startTy) * grow
+        if (endScale <= 1.001f) {
+            endTx = 0f
+            endTy = 0f
+        }
+        val running = ValueAnimator.ofFloat(0f, 1f)
+        running.duration = 230L
+        running.interpolator = android.view.animation.DecelerateInterpolator(1.6f)
+        running.addUpdateListener { value ->
+            val t = value.animatedValue as Float
+            userScale = startScale + (endScale - startScale) * t
+            tx = startTx + (endTx - startTx) * t
+            ty = startTy + (endTy - startTy) * t
+            clampAndApply()
+        }
+        animator = running
+        running.start()
     }
 
     override fun setImageDrawable(d: Drawable?) {
@@ -634,21 +704,31 @@ class OeaZoomImageView(context: Context) : ImageView(context) {
         clampAndApply()
     }
 
+    override fun onDetachedFromWindow() {
+        animator?.cancel()
+        animator = null
+        super.onDetachedFromWindow()
+    }
+
+    /** The picture's own pixel size — never the drawable bounds ImageView manages. */
     private fun drawableSize(): Pair<Int, Int> {
         val d = drawable ?: return 0 to 0
-        val w = if (d.bounds.width() > 0) d.bounds.width() else d.intrinsicWidth
-        val h = if (d.bounds.height() > 0) d.bounds.height() else d.intrinsicHeight
-        return max(0, w) to max(0, h)
+        return max(0, d.intrinsicWidth) to max(0, d.intrinsicHeight)
+    }
+
+    private fun fitScale(iw: Int, ih: Int): Float =
+        if (iw <= 0 || ih <= 0 || width <= 0 || height <= 0) 1f
+        else min(width.toFloat() / iw, height.toFloat() / ih)
+
+    private fun maxOffset(): Pair<Float, Float> {
+        val (iw, ih) = drawableSize()
+        if (iw <= 0 || ih <= 0) return 0f to 0f
+        val s = fitScale(iw, ih) * userScale
+        return max(0f, (iw * s - width) / 2f) to max(0f, (ih * s - height) / 2f)
     }
 
     private fun clampAndApply() {
-        val (iw, ih) = drawableSize()
-        if (iw <= 0 || ih <= 0 || width <= 0 || height <= 0) return
-        fitScale = min(width.toFloat() / iw, height.toFloat() / ih)
-        val drawnW = iw * fitScale * userScale
-        val drawnH = ih * fitScale * userScale
-        val maxTx = max(0f, (drawnW - width) / 2f)
-        val maxTy = max(0f, (drawnH - height) / 2f)
+        val (maxTx, maxTy) = maxOffset()
         tx = tx.coerceIn(-maxTx, maxTx)
         ty = ty.coerceIn(-maxTy, maxTy)
         applyMatrix()
@@ -657,7 +737,7 @@ class OeaZoomImageView(context: Context) : ImageView(context) {
     private fun applyMatrix() {
         val (iw, ih) = drawableSize()
         if (iw <= 0 || ih <= 0 || width <= 0 || height <= 0) return
-        val s = fitScale * userScale
+        val s = fitScale(iw, ih) * userScale
         matrix.reset()
         matrix.postScale(s, s)
         matrix.postTranslate((width - iw * s) / 2f + tx, (height - ih * s) / 2f + ty)
@@ -666,37 +746,50 @@ class OeaZoomImageView(context: Context) : ImageView(context) {
         invalidate()
     }
 
+    /** True when a horizontal drag of [dx] has no picture left to pan into. */
+    private fun atHorizontalEdge(dx: Float): Boolean {
+        val (maxTx, _) = maxOffset()
+        if (maxTx <= 0.5f) return true
+        return (dx > 0f && tx >= maxTx - 0.5f) || (dx < 0f && tx <= -maxTx + 0.5f)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                animator?.cancel()
                 lastX = event.x
                 lastY = event.y
                 if (isZoomed) parent?.requestDisallowInterceptTouchEvent(true)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
+                animator?.cancel()
                 parent?.requestDisallowInterceptTouchEvent(true)
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (isZoomed && !pinch.isInProgress) {
-                    tx += event.x - lastX
-                    ty += event.y - lastY
+                if (isZoomed && !pinch.isInProgress && event.pointerCount == 1) {
+                    val dx = event.x - lastX
+                    val dy = event.y - lastY
                     lastX = event.x
                     lastY = event.y
-                    clampAndApply()
+                    if (abs(dx) > abs(dy) && atHorizontalEdge(dx)) {
+                        // The pan is finished in this direction; let a parent
+                        // pager take the rest of the swipe and turn the page.
+                        parent?.requestDisallowInterceptTouchEvent(false)
+                    } else {
+                        tx += dx
+                        ty += dy
+                        clampAndApply()
+                    }
                 }
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (userScale <= 1.06f) {
+                if (userScale <= 1.06f && userScale > 1f) {
                     userScale = 1f
-                    val settle = tx != 0f || ty != 0f
                     tx = 0f
                     ty = 0f
-                    clampAndApply()
-                    if (settle) animate().alpha(1f).setDuration(120L).start()
-                } else {
                     clampAndApply()
                 }
                 parent?.requestDisallowInterceptTouchEvent(false)
@@ -709,7 +802,4 @@ class OeaZoomImageView(context: Context) : ImageView(context) {
 
     /** Called by a parent pager so an un-zoomed picture still swipes. */
     fun shouldParentIntercept(): Boolean = !isZoomed
-
-    @Suppress("unused")
-    private fun debugScale(): Float = userScale * fitScale + abs(tx) * 0f
 }

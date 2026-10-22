@@ -330,11 +330,26 @@ internal object OeaEmageViewer {
             overScrollMode = View.OVER_SCROLL_NEVER
             addView(bottomBar, FrameLayout.LayoutParams(-2, -2))
         }
+        private val zoomLabel = TextView(host).apply {
+            setTextColor(0xE6FFFFFF.toInt())
+            textSize = 11f
+            typeface = OeaType.medium
+            gravity = Gravity.CENTER
+            text = "100%"
+        }
+        private val zoomControls = LinearLayout(host).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
         private val root = FrameLayout(host).apply {
             setBackgroundColor(Color.BLACK)
             addView(pager, FrameLayout.LayoutParams(-1, -1))
             addView(topBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
             addView(bottomScroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            addView(zoomControls, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
+                marginEnd = kit.dp(12)
+                bottomMargin = kit.dp(108)
+            })
         }
 
         private val hideChrome = Runnable { if (chromeVisible) setChrome(false) }
@@ -367,6 +382,7 @@ internal object OeaEmageViewer {
             topBar.addView(kit.circleIconButton(R.drawable.oic_more_vert, "More", 0x33FFFFFF, Color.WHITE) { more() },
                 LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { marginStart = kit.dp(6) })
             buildActions()
+            buildZoomControls()
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setContentView(root)
             dialog.setOnDismissListener {
@@ -390,6 +406,48 @@ internal object OeaEmageViewer {
             dialog.show()
             pager.scrollToPosition(position)
             autoHide()
+            hintZoomOnce()
+        }
+
+        /** Visible zoom, so nobody has to discover pinch by accident. */
+        private fun buildZoomControls() {
+            zoomControls.removeAllViews()
+            zoomControls.addView(
+                kit.circleIconButton(R.drawable.oic_zoom_in, "Zoom in", 0x33FFFFFF, Color.WHITE) {
+                    setChrome(true)
+                    currentZoomView()?.zoomBy(1)
+                },
+                LinearLayout.LayoutParams(kit.dp(48), kit.dp(48))
+            )
+            zoomControls.addView(
+                kit.circleIconButton(R.drawable.oic_zoom_out, "Zoom out", 0x33FFFFFF, Color.WHITE) {
+                    setChrome(true)
+                    currentZoomView()?.zoomBy(-1)
+                },
+                LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { topMargin = kit.dp(8) }
+            )
+            zoomControls.addView(
+                kit.circleIconButton(R.drawable.oic_open_in_full, "Fit whole picture", 0x33FFFFFF, Color.WHITE) {
+                    setChrome(true)
+                    currentZoomView()?.resetAnimated()
+                },
+                LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { topMargin = kit.dp(8) }
+            )
+            zoomControls.addView(zoomLabel, LinearLayout.LayoutParams(kit.dp(48), -2).apply { topMargin = kit.dp(5) })
+        }
+
+        private fun currentZoomView(): OeaZoomImageView? =
+            (pager.findViewHolderForAdapterPosition(position) as? PageHolder)?.zoom
+
+        private fun paintZoomState(zoom: OeaZoomImageView) {
+            zoomLabel.text = "${(zoom.zoomScale * 100f).toInt()}%"
+        }
+
+        private fun hintZoomOnce() {
+            val prefs = host.getSharedPreferences("oea_emage_viewer", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("zoom_hint_shown", false)) return
+            prefs.edit().putBoolean("zoom_hint_shown", true).apply()
+            OeaMediaLibrary.toast(host, "Pinch or double-tap to zoom — the buttons on the right work too")
         }
 
         private fun buildActions() {
@@ -451,12 +509,14 @@ internal object OeaEmageViewer {
             if (position + 2 < liveItems.size) {
                 OeaThumbnails.prefetch(host, listOf(liveItems[position + 1].uri, liveItems[position + 2].uri), kit.dp(900))
             }
+            pager.post { currentZoomView()?.let { paintZoomState(it) } }
         }
 
         private fun setChrome(visible: Boolean) {
             chromeVisible = visible
             topBar.animate().alpha(if (visible) 1f else 0f).translationY(if (visible) 0f else -kit.dpf(18f)).setDuration(170L).start()
             bottomBar.animate().alpha(if (visible) 1f else 0f).translationY(if (visible) 0f else kit.dpf(18f)).setDuration(170L).start()
+            zoomControls.animate().alpha(if (visible) 1f else 0f).translationX(if (visible) 0f else kit.dpf(18f)).setDuration(170L).start()
             handler.removeCallbacks(hideChrome)
             if (visible) autoHide()
         }
@@ -612,8 +672,11 @@ internal object OeaEmageViewer {
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PageHolder {
                 val zoom = OeaZoomImageView(host).apply {
                     layoutParams = RecyclerView.LayoutParams(-1, -1)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    // No scaleType here: the zoom view renders through its own
+                    // matrix, and asking for FIT_CENTER used to unhook that
+                    // matrix — which is why pinch and double-tap did nothing.
                     setBackgroundColor(Color.BLACK)
+                    contentDescription = "Picture. Pinch or double-tap to zoom."
                     onTap = { setChrome(!chromeVisible) }
                 }
                 val frame = FrameLayout(host).apply {
@@ -642,6 +705,9 @@ internal object OeaEmageViewer {
             override fun onBindViewHolder(holder: PageHolder, position: Int) {
                 val item = liveItems.getOrNull(position) ?: return
                 holder.zoom.rotation = 0f
+                holder.zoom.onZoomChanged = {
+                    if (holder.bindingAdapterPosition == this@Viewer.position) paintZoomState(holder.zoom)
+                }
                 holder.zoom.reset()
                 holder.loader.visibility = View.VISIBLE
                 OeaThumbnails.loadFull(holder.zoom, item.uri, bigEdge(host), false) { ok ->

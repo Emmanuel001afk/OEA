@@ -18,6 +18,7 @@ import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
+import com.oea.launcher.ui.OeaZoomImageView
 import com.oea.launcher.wallpaper.OeaHomeScene
 import com.oea.launcher.wallpaper.OeaLiveScenes
 import com.oea.launcher.wallpaper.OeaWallpaper
@@ -288,14 +289,22 @@ object OeaGalleryApp {
         render: (Int, Int) -> Bitmap?
 ) {
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-        val preview = ImageView(host).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            background = kit.rounded(Color.TRANSPARENT, 20, kit.palette.stroke, 1)
+        // Zoomable like EMAGE's own viewer: pinch, double-tap and pan, instead
+        // of a centre-cropped still you could only squint at. It fits the
+        // whole picture first (zooming starts from the full frame), over the
+        // shelf's card colour so letterbox edges read as intentional.
+        val preview = OeaZoomImageView(host).apply {
+            background = kit.rounded(kit.palette.cardHigh, 20, kit.palette.stroke, 1)
             clipToOutline = true
+            contentDescription = "$title. Pinch or double-tap to zoom."
         }
-        content.addView(preview, LinearLayout.LayoutParams(-1, kit.dp(300)))
+        content.addView(preview, LinearLayout.LayoutParams(-1, kit.dp(340)))
+        content.addView(kit.text("Pinch or double-tap to zoom", 11.5f, kit.palette.textTertiary).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, kit.dp(6), 0, 0)
+        }, LinearLayout.LayoutParams(-1, -2))
         workers.execute {
-            val bitmap = runCatching { render(kit.dp(420), kit.dp(300)) }.getOrNull()
+            val bitmap = runCatching { render(kit.dp(900), kit.dp(640)) }.getOrNull()
             if (bitmap != null) host.runOnUiThread { if (!host.isDestroyed) preview.setImageBitmap(bitmap) }
         }
 
