@@ -149,6 +149,7 @@ class OeaWakeService : Service() {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> refreshListening(screenOff = true)
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> refreshListening(screenOff = false)
+                Intent.ACTION_CONFIGURATION_CHANGED -> refreshListening()
             }
         }
     }
@@ -194,6 +195,7 @@ class OeaWakeService : Service() {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_CONFIGURATION_CHANGED)
         }
         receiverRegistered = runCatching {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -310,7 +312,7 @@ class OeaWakeService : Service() {
         val screenOff = screenOffOverride ?: !isScreenInteractive()
         val store = OeaDataStore.get(this)
         val offGestureBound = store.waveOffAction() != "none"
-        val listenForCoverToLock = !screenOff && store.coverToLockEnabled()
+        val listenForCoverToLock = !screenOff && !isLandscapeMode() && store.coverToLockEnabled()
         val listenForProximity = if (screenOff) {
             OeaPower.waveToWake(this) || offGestureBound
         } else {
