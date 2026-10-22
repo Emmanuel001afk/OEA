@@ -363,6 +363,13 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
     private var searchPending: Runnable? = null
     private var reloadPending: Runnable? = null
 
+    /** One row of a conversation. Here, not in [Conversation]: a sealed class may not live in an inner class. */
+    private sealed class ChatRow {
+        data class Earlier(val hidden: Int) : ChatRow()
+        data class Day(val label: String) : ChatRow()
+        data class Bubble(val message: OeaMessagingApp.SmsMessage, val tightTop: Boolean) : ChatRow()
+    }
+
     /** A thread plus everything its row paints, resolved off the main thread. */
     private data class ThreadRow(
         val thread: OeaMessagingApp.SmsThread,
@@ -1249,12 +1256,6 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
         private var simLines: List<OeaSimDirectory.Line> = emptyList()
         private var firstLoad = true
         private var dismissed = false
-
-        private sealed class ChatRow {
-            data class Earlier(val hidden: Int) : ChatRow()
-            data class Day(val label: String) : ChatRow()
-            data class Bubble(val message: OeaMessagingApp.SmsMessage, val tightTop: Boolean) : ChatRow()
-        }
 
         private val bubbleMaxWidth: Int
             get() = (host.resources.displayMetrics.widthPixels * 0.78f).toInt()
