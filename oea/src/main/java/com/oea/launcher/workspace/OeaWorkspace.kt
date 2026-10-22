@@ -976,6 +976,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 main.removeCallbacks(drawerRefresh)
                 main.postDelayed(drawerRefresh, 80L)
             }
+            PrefImpact.BADGES -> {
+                main.removeCallbacks(badgesRefresh)
+                main.postDelayed(badgesRefresh, 60L)
+            }
             PrefImpact.CHROME -> {
                 main.removeCallbacks(chromeRefresh)
                 main.postDelayed(chromeRefresh, 100L)
@@ -987,13 +991,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }
     }
 
-    private enum class PrefImpact { NONE, ISLAND, DRAWER, CHROME, FULL }
+    private enum class PrefImpact { NONE, ISLAND, DRAWER, BADGES, CHROME, FULL }
 
     private fun preferenceImpact(key: String): PrefImpact = when {
         key.startsWith("launch_count:") -> PrefImpact.NONE
         key in QUIET_KEYS -> PrefImpact.NONE
         key == "dynamic_island_enabled" || key.startsWith("island_") -> PrefImpact.ISLAND
         key in DRAWER_KEYS -> PrefImpact.DRAWER
+        key == "badge_style" -> PrefImpact.BADGES
         key in CHROME_KEYS -> PrefImpact.CHROME
         key in HOME_LAYOUT_KEYS -> PrefImpact.FULL
         // SharedPreferences also contains settings owned by unrelated OEA
@@ -1013,6 +1018,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (drawer.visibility == VISIBLE) drawer.refresh()
         hiddenSpaceRef?.refresh()
     }
+
+    private val badgesRefresh = Runnable { refreshBadges() }
 
     private val chromeRefresh = Runnable {
         palette = OeaTheme.resolve(context)
