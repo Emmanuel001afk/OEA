@@ -82,7 +82,7 @@ object OeaMiniApps {
             "calculator", "Calculator", "Full calculator with scientific, history and tape", R.drawable.ic_oea_calculator, OeaCalculatorActivity::class.java
         ) { host, palette -> OeaCalculatorApp.build(host, palette) },
         App(
-            "messaging", "Messaging", "SMS messaging with proper permissions and roles", R.drawable.ic_oea_messaging, OeaMessagingActivity::class.java
+            "messaging", "Messaging", "SMS history, search, conversation review and replies", R.drawable.ic_oea_messaging, OeaMessagingActivity::class.java
         ) { host, palette -> OeaMessagingApp.build(host, palette) },
         App(
             "notes", "Notes", "Notes, private notes, voice notes, search and organization", R.drawable.ic_oea_notes, OeaNotesActivity::class.java
