@@ -1,8 +1,9 @@
 package com.oea.launcher.gesture
 
+import com.oea.launcher.camera.OeaTorch
+
 import android.content.Context
 import android.content.Intent
-import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -71,7 +72,7 @@ object OeaGestures {
         Triple("wallpaper", "Wallpaper & themes", "Opens wallpaper and theme screen."),
         Triple("widgets", "Add a widget", "Opens widget picker."),
         Triple("settings", "OEA Settings", "Opens OEA settings."),
-        Triple("flashlight", "Flashlight", "Toggles flashlight via CameraManager."),
+        Triple("flashlight", "Flashlight", "Toggles the OEA flashlight."),
         Triple("camera", "Open camera", "Opens OEA Camera or system camera."),
         Triple("screenshot", "Screenshot", "Takes screenshot via Game Boost capture where available.")
 )
@@ -202,18 +203,14 @@ object OeaGestures {
         }
     }
 
-    private fun toggleFlashlight(context: Context): Boolean {
-        return try {
-            val cm = context.getSystemService(CameraManager::class.java) ?: return false
-            val id = cm.cameraIdList.firstOrNull() ?: return false
-            // We need to track state - use prefs
-            val prefs = context.getSharedPreferences("oea_gestures", Context.MODE_PRIVATE)
-            val on = !prefs.getBoolean("torch_on", false)
-            cm.setTorchMode(id, on)
-            prefs.edit().putBoolean("torch_on", on).apply()
-            true
-        } catch (_: Throwable) { false }
-    }
+    /**
+     * The same torch the Quick controls tile and the Camera screen use, so a
+     * gesture cannot leave the LED in a state another screen disagrees about.
+     * The old version remembered its own state in preferences and picked
+     * `cameraIdList.first()`, which on a phone whose first camera is the front one
+     * meant the flashlight "worked" only in OEA's own imagination.
+     */
+    private fun toggleFlashlight(context: Context): Boolean = OeaTorch.toggle(context)
 
     fun expandNotifications(context: Context): Boolean = OeaSystemActions.expandNotifications(context)
     fun expandQuickSettings(context: Context): Boolean = OeaSystemActions.expandQuickSettings(context)

@@ -1,24 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Camera widget's real layout: a last-photo thumbnail, the name of the app and
+  an honest one-line list of what the camera actually does. The provider fills
+  every id below; nothing here promises a control the widget cannot render.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
+    android:orientation="horizontal"
     android:background="#CC1A1F2B"
     android:padding="12dp">
-    <TextView
-        android:layout_width="wrap_content"
+
+    <ImageView
+        android:id="@+id/camera_thumb"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:layout_marginEnd="12dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="Last photo, opens EMAGE"
+        android:background="#33000000"
+        android:src="@drawable/oic_photo_library" />
+
+    <LinearLayout
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="Camera"
-        android:textSize="12sp"
-        android:textColor="#78D9FF"
-        android:fontFamily="sans-serif-medium"/>
-    <TextView
-        android:id="@+id/notes_content"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Pro controls • Tap to open"
-        android:textSize="13sp"
-        android:textColor="#FFFFFF"
-        android:layout_marginTop="8dp"
-        android:maxLines="4"/>
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/camera_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="OEA Camera"
+            android:textSize="12sp"
+            android:textColor="#78D9FF"
+            android:fontFamily="sans-serif-medium" />
+
+        <TextView
+            android:id="@+id/camera_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Photo · Video · QR · Document"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:layout_marginTop="6dp"
+            android:maxLines="3" />
+
+        <TextView
+            android:id="@+id/camera_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tap to shoot"
+            android:textSize="11sp"
+            android:textColor="#B8C4D8"
+            android:layout_marginTop="4dp" />
+    </LinearLayout>
 </LinearLayout>

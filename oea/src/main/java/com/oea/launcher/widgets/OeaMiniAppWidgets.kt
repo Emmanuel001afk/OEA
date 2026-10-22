@@ -4,9 +4,12 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.widget.RemoteViews
 import com.oea.launcher.R
 import com.oea.launcher.miniapps.OeaMiniApps
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -163,16 +166,76 @@ class OeaCalculatorWidgetProvider : AppWidgetProvider() {
     }
 }
 
+/**
+ * The Camera widget used to advertise "Pro controls • Filters • Grid • Timer •
+ * Video • QR • Doc • Last photo thumbnail + EMAGE integration" while rendering
+ * none of it: the widget was one paragraph of text and every tap opened the app.
+ *
+ * It now renders the two things a home-screen camera widget can honestly show —
+ * the last photo you took, and a line naming the modes the camera really has —
+ * and the thumbnail opens EMAGE while the rest opens the camera.
+ */
 class OeaCameraWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.oea_widget_notes)
-            views.setTextViewText(R.id.notes_content, "OEA Camera • Tap to open\nPro controls • Filters • Grid • Timer • Video • QR • Doc\nLast photo thumbnail + EMAGE integration")
-            val intent = OeaMiniApps.launchIntent(context, "camera")
-            val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
-            views.setOnClickPendingIntent(R.id.notes_content, pi)
-            OeaWidgetStudio.apply(views, context, "camera", R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
+            val views = RemoteViews(context.packageName, R.layout.oea_widget_camera)
+            val last = lastPhoto(context)
+            views.setTextViewText(R.id.camera_title, "OEA Camera")
+            if (last == null) {
+                views.setViewVisibility(R.id.camera_thumb, android.view.View.GONE)
+                views.setTextViewText(R.id.camera_content, "Photo · Video · Night · Portrait · Pro · QR · Document · Time-lapse")
+                views.setTextViewText(R.id.camera_hint, "No photos yet · tap to shoot")
+            } else {
+                views.setViewVisibility(R.id.camera_thumb, android.view.View.VISIBLE)
+                views.setTextViewText(R.id.camera_content, "Last photo · ${last.name}")
+                views.setTextViewText(R.id.camera_hint, "Tap the picture for EMAGE")
+                thumbnail(last)?.let { bitmap -> views.setImageViewBitmap(R.id.camera_thumb, bitmap) }
+            }
+
+            val cameraIntent = OeaMiniApps.launchIntent(context, "camera")
+            val cameraPi = android.app.PendingIntent.getActivity(
+                context, id, cameraIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            views.setOnClickPendingIntent(R.id.widget_root, cameraPi)
+            views.setOnClickPendingIntent(R.id.camera_content, cameraPi)
+            views.setOnClickPendingIntent(R.id.camera_hint, cameraPi)
+            runCatching {
+                val galleryPi = android.app.PendingIntent.getActivity(
+                    context, id + 1, OeaMiniApps.launchIntent(context, "emage"),
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.camera_thumb, galleryPi)
+            }
+            OeaWidgetStudio.apply(
+                views, context, "camera", R.id.widget_root,
+                intArrayOf(R.id.camera_content),
+                intArrayOf(R.id.camera_hint),
+                intArrayOf(R.id.camera_title)
+            )
             appWidgetManager.updateAppWidget(id, views)
         }
     }
+
+    /** The newest file OEA Camera wrote, which is the newest thing it can show. */
+    private fun lastPhoto(context: Context): File? = runCatching {
+        File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "OEA")
+            .listFiles()
+            ?.filter { it.isFile && it.length() > 0L && it.name.endsWith(".jpg", ignoreCase = true) }
+            ?.maxByOrNull { it.lastModified() }
+    }.getOrNull()
+
+    /**
+     * A thumbnail small enough to cross a Binder call: widgets are drawn by the
+     * home app, so the bitmap is decoded at the size the widget shows rather than
+     * shipping a 12-megapixel JPEG's worth of pixels through IPC.
+     */
+    private fun thumbnail(file: File): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        var sample = 1
+        val target = 128
+        while (bounds.outWidth / (sample * 2) >= target && bounds.outHeight / (sample * 2) >= target) sample *= 2
+        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+    }.getOrNull()
 }

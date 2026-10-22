@@ -1,8 +1,9 @@
 package com.oea.launcher.power
 
+import com.oea.launcher.camera.OeaTorch
+
 import android.content.Context
 import android.content.Intent
-import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -124,18 +125,14 @@ object OeaQuickControls {
         OeaFaultShield.guard("quick-controls:qs-tiles") {
             kit.sectionTitle(sheet, "Quick Settings")
             val qsGroup = kit.group(sheet)
-            // Flashlight toggle - uses CameraManager directly, no extra permission
-            var torchOn = false
-            var cameraManager: CameraManager? = null
-            try { cameraManager = context.getSystemService(CameraManager::class.java) } catch (_: Throwable) {}
+            // Flashlight: one shared owner, so the label reflects the real LED —
+            // including a change made from a Home gesture or the Camera screen.
+            var torchOn = OeaTorch.isOn()
+            val torchAvailable = OeaTorch.available(context)
             fun toggleTorch(): Boolean {
-                return try {
-                    val cm = cameraManager ?: return false
-                    val camId = cm.cameraIdList.firstOrNull() ?: return false
-                    torchOn = !torchOn
-                    cm.setTorchMode(camId, torchOn)
-                    true
-                } catch (_: Throwable) { false }
+                if (!torchAvailable) return false
+                torchOn = OeaTorch.toggle(context)
+                return true
             }
             // Each row is independent; failures are contained.
             runCatching {
