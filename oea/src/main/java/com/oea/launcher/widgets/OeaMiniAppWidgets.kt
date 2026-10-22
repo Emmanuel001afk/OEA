@@ -21,13 +21,14 @@ class OeaClockWidgetProvider : AppWidgetProvider() {
         for (id in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.oea_widget_clock)
             val now = Date()
-            views.setTextViewText(R.id.clock_time, SimpleDateFormat("HH:mm", Locale.getDefault()).format(now))
+            views.setTextViewText(R.id.clock_time, SimpleDateFormat(if (OeaWidgetStudio.clockUses24Hour(context)) "HH:mm" else "h:mm a", Locale.getDefault()).format(now))
             views.setTextViewText(R.id.clock_date, SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now))
+            views.setViewVisibility(R.id.clock_date, if (OeaWidgetStudio.clockShowsDate(context)) android.view.View.VISIBLE else android.view.View.GONE)
             val intent = OeaMiniApps.launchIntent(context, "clock")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.clock_time, pi)
             views.setOnClickPendingIntent(R.id.clock_date, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.clock_time), intArrayOf(R.id.clock_date), intArrayOf())
+            OeaWidgetStudio.apply(views, context, "clock", R.id.widget_root, intArrayOf(R.id.clock_time), intArrayOf(R.id.clock_date), intArrayOf())
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -46,7 +47,7 @@ class OeaWeatherWidgetProvider : AppWidgetProvider() {
                 try {
                     val obj = org.json.JSONObject(cache)
                     val cur = obj.optJSONObject("current")
-                    temp = "${cur?.optDouble("temperature_2m", 0.0)?.toInt() ?: 0}°C"
+                    temp = OeaWidgetStudio.temperature(cur?.optDouble("temperature_2m", 0.0) ?: 0.0, OeaWidgetStudio.weatherUsesFahrenheit(context))
                     val code = cur?.optInt("weather_code", 0) ?: 0
                     desc = when (code) {
                         0 -> "Clear"; 1 -> "Mainly clear"; 2 -> "Partly cloudy"; 3 -> "Overcast"
@@ -62,7 +63,7 @@ class OeaWeatherWidgetProvider : AppWidgetProvider() {
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.weather_city, pi)
             views.setOnClickPendingIntent(R.id.weather_temp, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.weather_temp, R.id.weather_icon), intArrayOf(R.id.weather_city), intArrayOf(R.id.weather_desc))
+            OeaWidgetStudio.apply(views, context, "weather", R.id.widget_root, intArrayOf(R.id.weather_temp, R.id.weather_icon), intArrayOf(R.id.weather_city), intArrayOf(R.id.weather_desc))
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -82,7 +83,7 @@ class OeaCalendarWidgetProvider : AppWidgetProvider() {
             val intent = OeaMiniApps.launchIntent(context, "calendar")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.calendar_month, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.calendar_month, R.id.calendar_next), intArrayOf(R.id.calendar_events), intArrayOf())
+            OeaWidgetStudio.apply(views, context, "calendar", R.id.widget_root, intArrayOf(R.id.calendar_month, R.id.calendar_next), intArrayOf(R.id.calendar_events), intArrayOf())
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -103,7 +104,7 @@ class OeaNotesWidgetProvider : AppWidgetProvider() {
             val intent = OeaMiniApps.launchIntent(context, "notes")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
+            OeaWidgetStudio.apply(views, context, "notes", R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -121,7 +122,7 @@ class OeaImageWidgetProvider : AppWidgetProvider() {
             val intent = OeaMiniApps.launchIntent(context, "emage")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
+            OeaWidgetStudio.apply(views, context, "image", R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -138,7 +139,7 @@ class OeaVideoWidgetProvider : AppWidgetProvider() {
             val intent = OeaMiniApps.launchIntent(context, "vip")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
+            OeaWidgetStudio.apply(views, context, "video", R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -156,7 +157,7 @@ class OeaCalculatorWidgetProvider : AppWidgetProvider() {
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.clock_time, pi)
             views.setOnClickPendingIntent(R.id.clock_date, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.clock_time), intArrayOf(R.id.clock_date), intArrayOf())
+            OeaWidgetStudio.apply(views, context, "calculator", R.id.widget_root, intArrayOf(R.id.clock_time), intArrayOf(R.id.clock_date), intArrayOf())
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -170,7 +171,7 @@ class OeaCameraWidgetProvider : AppWidgetProvider() {
             val intent = OeaMiniApps.launchIntent(context, "camera")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.notes_content, pi)
-            OeaWidgetStudio.apply(views, context, R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
+            OeaWidgetStudio.apply(views, context, "camera", R.id.widget_root, intArrayOf(R.id.notes_content), intArrayOf(), intArrayOf(R.id.notes_title))
             appWidgetManager.updateAppWidget(id, views)
         }
     }

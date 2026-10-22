@@ -4,9 +4,11 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.text.format.DateFormat
 import android.widget.RemoteViews
+import kotlin.math.roundToInt
 
-/** Shared visual presets for OEA's own RemoteViews widgets. */
+/** Shared looks and lightweight content controls for OEA's own RemoteViews widgets. */
 object OeaWidgetStudio {
     data class Preset(
         val id: String,
@@ -23,6 +25,21 @@ object OeaWidgetStudio {
         }
     }
 
+    data class Family(val id: String, val label: String, val description: String)
+
+    const val ALL_FAMILY = "all"
+    val families = listOf(
+        Family(ALL_FAMILY, "All OEA widgets", "Set a shared fallback style for every OEA widget."),
+        Family("clock", "Clock", "Time, date and quick access to OEA Clock."),
+        Family("weather", "Weather", "Current conditions with a selectable temperature unit."),
+        Family("calendar", "Calendar", "The current month and event summary."),
+        Family("notes", "Notes", "A compact view of your saved notes."),
+        Family("image", "EMAGE", "A shortcut and favourites count for your pictures."),
+        Family("video", "VIP", "A shortcut with favourites and playback history."),
+        Family("calculator", "Calculator", "Your most recent calculator result."),
+        Family("camera", "Camera", "A one-tap entry to OEA Camera.")
+    )
+
     val presets = listOf(
         Preset("glass", "Liquid Glass", "Cool glass with a clear cyan highlight", 0xFF181F2F.toInt(), 0xFFFFFFFF.toInt(), 0xFFB8C4D8.toInt(), 0xFF78D9FF.toInt()),
         Preset("lagoon", "Lagoon", "Deep teal with a fresh mint accent", 0xFF0D2727.toInt(), 0xFFF0FFFA.toInt(), 0xFFB6DAD2.toInt(), 0xFF70E7C0.toInt()),
@@ -33,50 +50,92 @@ object OeaWidgetStudio {
     private const val PREFS = "oea_widget_studio"
     private const val KEY_PRESET = "preset"
     private const val KEY_OPACITY = "opacity"
+    private const val KEY_CLOCK_24_HOUR = "clock_24_hour"
+    private const val KEY_CLOCK_SHOW_DATE = "clock_show_date"
+    private const val KEY_WEATHER_FAHRENHEIT = "weather_fahrenheit"
     const val MIN_OPACITY = 35
     const val MAX_OPACITY = 100
 
-    fun selected(context: Context): Preset {
-        val id = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PRESET, "glass")
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun familyKey(key: String, familyId: String) = "${key}_$familyId"
+
+    fun selected(context: Context, familyId: String = ALL_FAMILY): Preset {
+        val store = prefs(context)
+        val id = if (familyId == ALL_FAMILY) store.getString(KEY_PRESET, "glass")
+        else store.getString(familyKey(KEY_PRESET, familyId), store.getString(KEY_PRESET, "glass"))
         return presets.firstOrNull { it.id == id } ?: presets.first()
     }
 
-    fun opacity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        .getInt(KEY_OPACITY, 82).coerceIn(MIN_OPACITY, MAX_OPACITY)
-
-    fun save(context: Context, presetId: String = selected(context).id, opacityPercent: Int = opacity(context)) {
-        val normalizedId = presets.firstOrNull { it.id == presetId }?.id ?: presets.first().id
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_PRESET, normalizedId)
-            .putInt(KEY_OPACITY, opacityPercent.coerceIn(MIN_OPACITY, MAX_OPACITY))
-            .apply()
-        refreshWidgets(context)
+    fun opacity(context: Context, familyId: String = ALL_FAMILY): Int {
+        val store = prefs(context)
+        val value = if (familyId == ALL_FAMILY) store.getInt(KEY_OPACITY, 82)
+        else store.getInt(familyKey(KEY_OPACITY, familyId), store.getInt(KEY_OPACITY, 82))
+        return value.coerceIn(MIN_OPACITY, MAX_OPACITY)
     }
 
-    fun apply(views: RemoteViews, context: Context, rootId: Int, primaryIds: IntArray, secondaryIds: IntArray, accentIds: IntArray) {
-        val style = selected(context)
-        views.setInt(rootId, "setBackgroundColor", style.surface(opacity(context)))
+    /** Save a shared look and clear family overrides so “All widgets” really updates every family. */
+    fun save(context: Context, familyId: String, presetId: String, opacityPercent: Int) {
+        val validFamily = families.any { it.id == familyId }
+        val target = if (validFamily) familyId else ALL_FAMILY
+        val normalizedId = presets.firstOrNull { it.id == presetId }?.id ?: presets.first().id
+        val editor = prefs(context).edit()
+        if (target == ALL_FAMILY) {
+            editor.putString(KEY_PRESET, normalizedId).putInt(KEY_OPACITY, opacityPercent.coerceIn(MIN_OPACITY, MAX_OPACITY))
+            families.filter { it.id != ALL_FAMILY }.forEach { family ->
+                editor.remove(familyKey(KEY_PRESET, family.id))
+                editor.remove(familyKey(KEY_OPACITY, family.id))
+            }
+        } else {
+            editor.putString(familyKey(KEY_PRESET, target), normalizedId)
+                .putInt(familyKey(KEY_OPACITY, target), opacityPercent.coerceIn(MIN_OPACITY, MAX_OPACITY))
+        }
+        editor.apply()
+        refreshWidgets(context, target)
+    }
+
+    fun apply(views: RemoteViews, context: Context, familyId: String, rootId: Int, primaryIds: IntArray, secondaryIds: IntArray, accentIds: IntArray) {
+        val style = selected(context, familyId)
+        views.setInt(rootId, "setBackgroundColor", style.surface(opacity(context, familyId)))
         primaryIds.forEach { views.setTextColor(it, style.primary) }
         secondaryIds.forEach { views.setTextColor(it, style.secondary) }
         accentIds.forEach { views.setTextColor(it, style.accent) }
     }
 
-    /** Updates every currently placed OEA widget; newly added instances read the same saved preset. */
-    fun refreshWidgets(context: Context) {
+    fun clockUses24Hour(context: Context): Boolean = prefs(context).getBoolean(KEY_CLOCK_24_HOUR, DateFormat.is24HourFormat(context))
+    fun clockShowsDate(context: Context): Boolean = prefs(context).getBoolean(KEY_CLOCK_SHOW_DATE, true)
+    fun saveClockOptions(context: Context, use24Hour: Boolean, showDate: Boolean) {
+        prefs(context).edit().putBoolean(KEY_CLOCK_24_HOUR, use24Hour).putBoolean(KEY_CLOCK_SHOW_DATE, showDate).apply()
+        refreshWidgets(context, "clock")
+    }
+
+    fun weatherUsesFahrenheit(context: Context): Boolean = prefs(context).getBoolean(KEY_WEATHER_FAHRENHEIT, false)
+    fun saveWeatherUnit(context: Context, fahrenheit: Boolean) {
+        prefs(context).edit().putBoolean(KEY_WEATHER_FAHRENHEIT, fahrenheit).apply()
+        refreshWidgets(context, "weather")
+    }
+
+    fun temperature(celsius: Double, fahrenheit: Boolean): String {
+        val value = if (fahrenheit) celsiusToFahrenheit(celsius) else celsius.roundToInt()
+        return "$value°${if (fahrenheit) "F" else "C"}"
+    }
+
+    fun celsiusToFahrenheit(celsius: Double): Int = (celsius * 9.0 / 5.0 + 32.0).roundToInt()
+
+    /** Update the selected family, or every family when the shared fallback changes. */
+    fun refreshWidgets(context: Context, familyId: String? = null) {
         val appWidgetManager = AppWidgetManager.getInstance(context)
         val providers = listOf(
-            OeaClockWidgetProvider::class.java,
-            OeaWeatherWidgetProvider::class.java,
-            OeaCalendarWidgetProvider::class.java,
-            OeaNotesWidgetProvider::class.java,
-            OeaImageWidgetProvider::class.java,
-            OeaVideoWidgetProvider::class.java,
-            OeaCalculatorWidgetProvider::class.java,
-            OeaCameraWidgetProvider::class.java
+            "clock" to OeaClockWidgetProvider::class.java,
+            "weather" to OeaWeatherWidgetProvider::class.java,
+            "calendar" to OeaCalendarWidgetProvider::class.java,
+            "notes" to OeaNotesWidgetProvider::class.java,
+            "image" to OeaImageWidgetProvider::class.java,
+            "video" to OeaVideoWidgetProvider::class.java,
+            "calculator" to OeaCalculatorWidgetProvider::class.java,
+            "camera" to OeaCameraWidgetProvider::class.java
         )
-        providers.forEach { provider ->
-            val component = ComponentName(context, provider)
-            val ids = appWidgetManager.getAppWidgetIds(component)
+        providers.filter { familyId == null || familyId == ALL_FAMILY || it.first == familyId }.forEach { (_, provider) ->
+            val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, provider))
             if (ids.isEmpty()) return@forEach
             context.sendBroadcast(
                 Intent(context, provider)

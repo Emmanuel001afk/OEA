@@ -505,48 +505,139 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private fun openWidgetStudio() {
-        kit.sheet("OEA Widget Studio", "A small first step toward original, personal widgets.") { panel, dialog ->
-            kit.note(panel, "These looks apply to OEA's built-in Clock, Weather, Calendar, Notes, EMAGE, VIP, Calculator and Camera widgets. Other apps' widgets are unchanged.")
+        kit.sheet("OEA Widget Studio", "Personalize the look and a few live details of OEA's own widgets.") { panel, dialog ->
+            kit.note(panel, "Choose a widget family for its own style override. Choosing All OEA widgets sets a shared fallback and clears family overrides. Other apps' widgets are unchanged.")
 
-            var selected = OeaWidgetStudio.selected(this)
-            var opacity = OeaWidgetStudio.opacity(this)
+            var family = OeaWidgetStudio.families.first()
+            var selected = OeaWidgetStudio.selected(this, family.id)
+            var opacity = OeaWidgetStudio.opacity(this, family.id)
             val preview = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dp(18), dp(18), dp(18), dp(18))
+                setPadding(dp(18), dp(16), dp(18), dp(16))
             }
-            val previewTime = kit.text("09:41", 30f, selected.primary, OeaType.medium)
-            val previewDate = kit.text("Thursday, Lagos", 12f, selected.secondary)
-            val previewDescription = kit.text(selected.description, 12.5f, palette.textSecondary)
-            preview.addView(previewTime)
-            preview.addView(previewDate)
+            val previewPrimary = kit.text("09:41", 30f, selected.primary, OeaType.medium)
+            val previewSecondary = kit.text("Thursday · Lagos", 12f, selected.secondary)
+            val previewDescription = kit.text("", 12.5f, palette.textSecondary)
+            preview.addView(previewPrimary)
+            preview.addView(previewSecondary)
             fun refreshPreview() {
                 preview.background = kit.rounded(selected.surface(opacity), 22, OeaTheme.alpha(selected.accent, 0x88), 1)
-                previewTime.setTextColor(selected.primary)
-                previewDate.setTextColor(selected.secondary)
-                previewDescription.text = selected.description
+                previewPrimary.setTextColor(selected.primary)
+                previewSecondary.setTextColor(selected.secondary)
+                val sample = when (family.id) {
+                    "weather" -> "${OeaWidgetStudio.temperature(28.0, OeaWidgetStudio.weatherUsesFahrenheit(this))}  ·  Partly cloudy"
+                    "calendar" -> "October 2026  ·  3 events"
+                    "notes" -> "Notes  ·  Remember to…"
+                    "image" -> "EMAGE  ·  4 favourites"
+                    "video" -> "VIP  ·  2 favourites"
+                    "calculator" -> "128 + 64  =  192"
+                    "camera" -> "OEA Camera  ·  Tap to open"
+                    else -> "Thursday · Lagos"
+                }
+                previewPrimary.text = when (family.id) {
+                    "weather" -> OeaWidgetStudio.temperature(28.0, OeaWidgetStudio.weatherUsesFahrenheit(this))
+                    "calendar" -> "October 2026"
+                    "notes" -> "Notes"
+                    "image" -> "EMAGE"
+                    "video" -> "VIP"
+                    "calculator" -> "192"
+                    "camera" -> "Camera"
+                    else -> "09:41"
+                }
+                previewSecondary.text = sample
+                previewDescription.text = "${family.description}  ${selected.description}"
             }
             refreshPreview()
-            panel.addView(preview, LinearLayout.LayoutParams(-1, dp(110)).apply { topMargin = dp(8); bottomMargin = dp(12) })
+            panel.addView(preview, LinearLayout.LayoutParams(-1, dp(112)).apply { topMargin = dp(8); bottomMargin = dp(8) })
+            panel.addView(previewDescription, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
 
-            val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            OeaWidgetStudio.presets.forEach { preset ->
-                chips.addView(kit.chip(preset.label, preset.id == selected.id) {
-                    selected = preset
-                    refreshPreview()
-                }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(7) })
+            val familyBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            panel.addView(kit.hscroll(familyBar), LinearLayout.LayoutParams(-1, -2))
+            var renderFamilyBar: () -> Unit = {}
+            var renderPresetBar: () -> Unit = {}
+            var renderFamilyOptions: () -> Unit = {}
+            var opacityControl: android.widget.SeekBar? = null
+            var opacityLabelView: TextView? = null
+            var applyButtonView: TextView? = null
+
+            renderFamilyBar = {
+                familyBar.removeAllViews()
+                OeaWidgetStudio.families.forEach { option ->
+                    familyBar.addView(kit.chip(option.label, option.id == family.id) {
+                        family = option
+                        selected = OeaWidgetStudio.selected(this, family.id)
+                        opacity = OeaWidgetStudio.opacity(this, family.id)
+                        opacityControl?.progress = opacity - OeaWidgetStudio.MIN_OPACITY
+                        opacityLabelView?.text = "Surface opacity · $opacity%"
+                        applyButtonView?.text = "Apply to ${family.label}"
+                        renderFamilyBar()
+                        renderPresetBar()
+                        renderFamilyOptions()
+                        refreshPreview()
+                    }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(7) })
+                }
             }
-            panel.addView(kit.hscroll(chips), LinearLayout.LayoutParams(-1, -2))
-            panel.addView(previewDescription, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+
+            val presetBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            panel.addView(kit.hscroll(presetBar), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            renderPresetBar = {
+                presetBar.removeAllViews()
+                OeaWidgetStudio.presets.forEach { preset ->
+                    presetBar.addView(kit.chip(preset.label, preset.id == selected.id) {
+                        selected = preset
+                        renderPresetBar()
+                        refreshPreview()
+                    }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(7) })
+                }
+            }
+
+            val options = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            panel.addView(options, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            renderFamilyOptions = {
+                options.removeAllViews()
+                when (family.id) {
+                    "clock" -> {
+                        val group = kit.group(options)
+                        kit.switchRow(group, R.drawable.oic_schedule, "24-hour time", "Use 00:00–23:59 instead of AM/PM", OeaWidgetStudio.clockUses24Hour(this)) { use24Hour ->
+                            OeaWidgetStudio.saveClockOptions(this, use24Hour, OeaWidgetStudio.clockShowsDate(this))
+                        }
+                        kit.switchRow(group, R.drawable.oic_schedule, "Show date", "Keep the date line in the clock widget", OeaWidgetStudio.clockShowsDate(this)) { showDate ->
+                            OeaWidgetStudio.saveClockOptions(this, OeaWidgetStudio.clockUses24Hour(this), showDate)
+                        }
+                    }
+                    "weather" -> {
+                        kit.sectionTitle(options, "Temperature unit")
+                        val unitChoices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                        val fahrenheit = OeaWidgetStudio.weatherUsesFahrenheit(this)
+                        unitChoices.addView(kit.chip("Celsius · °C", !fahrenheit) {
+                            OeaWidgetStudio.saveWeatherUnit(this, false)
+                            renderFamilyOptions()
+                            refreshPreview()
+                        }, LinearLayout.LayoutParams(-2, dp(36)).apply { rightMargin = dp(7) })
+                        unitChoices.addView(kit.chip("Fahrenheit · °F", fahrenheit) {
+                            OeaWidgetStudio.saveWeatherUnit(this, true)
+                            renderFamilyOptions()
+                            refreshPreview()
+                        }, LinearLayout.LayoutParams(-2, dp(36)))
+                        options.addView(unitChoices)
+                    }
+                }
+            }
+            renderFamilyBar()
+            renderPresetBar()
+            renderFamilyOptions()
 
             val opacityLabel = kit.text("Surface opacity · $opacity%", 13f, palette.textSecondary).apply { setPadding(0, dp(12), 0, dp(2)) }
+            opacityLabelView = opacityLabel
             panel.addView(opacityLabel)
-            val opacityControl = android.widget.SeekBar(this).apply {
+            val opacitySeekBar = android.widget.SeekBar(this).apply {
                 max = OeaWidgetStudio.MAX_OPACITY - OeaWidgetStudio.MIN_OPACITY
                 progress = opacity - OeaWidgetStudio.MIN_OPACITY
                 contentDescription = "Widget surface opacity"
             }
-            opacityControl.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            opacityControl = opacitySeekBar
+            opacitySeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                     opacity = OeaWidgetStudio.MIN_OPACITY + progress
                     opacityLabel.text = "Surface opacity · $opacity%"
@@ -555,12 +646,14 @@ open class OeaSystemToolsActivity : Activity() {
                 override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
                 override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
             })
-            panel.addView(opacityControl, LinearLayout.LayoutParams(-1, dp(44)))
-            panel.addView(kit.primaryButton("Apply to OEA widgets", R.drawable.oic_check) {
-                OeaWidgetStudio.save(this, selected.id, opacity)
+            panel.addView(opacitySeekBar, LinearLayout.LayoutParams(-1, dp(44)))
+            val applyButton = kit.primaryButton("Apply to ${family.label}", R.drawable.oic_check) {
+                OeaWidgetStudio.save(this, family.id, selected.id, opacity)
                 dialog.dismiss()
-                Toast.makeText(this, "OEA widget style updated", Toast.LENGTH_SHORT).show()
-            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+                Toast.makeText(this, "${family.label} style updated", Toast.LENGTH_SHORT).show()
+            }
+            applyButtonView = applyButton
+            panel.addView(applyButton, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         }
     }
 
