@@ -35,6 +35,7 @@ object OeaShell {
     private val lock = Any()
     @Volatile private var probed = false
     @Volatile private var hasSu = false
+    @Volatile private var probing = false
     @Volatile var lastError: String? = null
         private set
 
@@ -43,9 +44,57 @@ object OeaShell {
         val failed get() = !ok
     }
 
-    /** True when a su binary answers on this device. Probed once per process. */
+    private val suPlaces = listOf(
+        "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su", "/system/sbin/su",
+        "/vendor/bin/su", "/data/local/xbin/su", "/data/local/bin/su", "/debug_ramdisk/su"
+    )
+
+    /** Cheap file check: spawning su on a phone that has none is wasted work. */
+    private fun suBinaryPresent(): Boolean = runCatching {
+        suPlaces.any { java.io.File(it).exists() } ||
+            System.getenv("PATH").orEmpty().split(':').any { it.isNotBlank() && java.io.File(it, "su").exists() }
+    }.getOrDefault(false)
+
+    /**
+     * True when a su binary answers on this device. Probed once per process.
+     *
+     * The old probe spawned `su` and waited up to [PROBE_TIMEOUT_MS] on whatever
+     * thread asked. [OeaPrivileges.snapshot] asks for every privilege from
+     * `OeaApplication.onCreate`, so on a phone that has a su binary which is not
+     * granted (or that shows a prompt) Home's first frame waited up to ~900 ms on
+     * every cold start. A status read on the UI thread now answers from the cache
+     * and finishes the probe in the background; [run] still waits, because a
+     * command needs a definite answer.
+     */
     fun available(): Boolean {
         if (probed) return hasSu
+        if (!suBinaryPresent()) {
+            synchronized(lock) { probed = true; hasSu = false }
+            return false
+        }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            probeInBackground()
+            return hasSu
+        }
+        return probeNow()
+    }
+
+    private fun probeInBackground() {
+        // Several status reads can arrive between the first call and the probe
+        // finishing; only one background probe should ever run.
+        if (probed || probing) return
+        probing = true
+        Thread({
+            runCatching { probeNow() }
+            probing = false
+        }, "OeaRootProbe").apply { isDaemon = true }.start()
+    }
+
+    private fun probeNow(): Boolean {
+        if (!suBinaryPresent()) {
+            synchronized(lock) { probed = true; hasSu = false }
+            return false
+        }
         synchronized(lock) {
             if (probed) return hasSu
             hasSu = runCatching {
@@ -77,7 +126,10 @@ object OeaShell {
      * a missing su, a denied grant and a crash all come back as a failed [Output].
      */
     fun run(command: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Output {
-        if (!available()) return Output(false, "This device has no root access, so OEA cannot run the command.", -1)
+        // A command needs a definite answer, so this waits even on the UI thread
+        // (callers that matter already run it off the main thread).
+        val root = if (probed) hasSu else probeNow()
+        if (!root) return Output(false, "This device has no root access, so OEA cannot run the command.", -1)
         return runCatching {
             val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
             val captured = AtomicReference("")

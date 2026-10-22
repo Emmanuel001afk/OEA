@@ -1924,12 +1924,35 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 if (runCatching { activity.startActivityForResult(rm.createRequestRoleIntent(RoleManager.ROLE_HOME), REQUEST_HOME_ROLE) }.isSuccess) return
             }
         }
-        startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
+        // Not every skin ships Android's "Home app" page: several OEM builds have no
+        // activity for ACTION_HOME_SETTINGS at all, which used to make this tap do
+        // nothing on those phones. Try the pages that do exist, in order, and say so
+        // when the device offers none of them instead of failing silently.
+        if (openFirstAvailable(
+                Intent(Settings.ACTION_HOME_SETTINGS),
+                Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+                Intent(Settings.ACTION_APPLICATION_SETTINGS)
+            )
+        ) return
+        toast("This phone has no default-app screen OEA can open. Set OEA as Home from Android Settings › Apps.")
+    }
+
+    /** Opens the first of [intents] that this device actually implements. */
+    internal fun openFirstAvailable(vararg intents: Intent): Boolean {
+        for (intent in intents) {
+            val resolves = runCatching {
+                context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null
+            }.getOrDefault(false)
+            if (resolves && startSafely(intent)) return true
+        }
+        return false
     }
 
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode == REQUEST_HOME_ROLE) {
-            if (!isDefaultHome() && resultCode != Activity.RESULT_OK) startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
+            if (!isDefaultHome() && resultCode != Activity.RESULT_OK) {
+                openFirstAvailable(Intent(Settings.ACTION_HOME_SETTINGS), Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+            }
             renderBanner()
             return true
         }

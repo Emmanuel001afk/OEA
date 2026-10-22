@@ -766,8 +766,12 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
                 downX = ev.x
                 downY = ev.y
                 lastX = ev.x
-                dragging = !scroller.isFinished && abs(scroller.finalX - scroller.currX) > slop
-                if (dragging) scroller.forceFinished(true)
+                // A snap that is still running must not own the touch: intercepting
+                // here made the first tap after a page swipe do nothing, so the app
+                // only opened on the second tap. The page keeps settling, the tap
+                // reaches the icon underneath, and a real drag takes the pager over
+                // (and stops the snap) from the first movement.
+                dragging = false
                 velocityTracker?.recycle()
                 velocityTracker = VelocityTracker.obtain().also { it.addMovement(ev) }
             }
@@ -777,6 +781,7 @@ class OeaPagedView(context: Context) : ViewGroup(context) {
                 val dy = abs(ev.y - downY)
                 if (!dragging && dx > slop && dx > dy * 1.1f) {
                     dragging = true
+                    if (!scroller.isFinished) scroller.forceFinished(true)
                     lastX = ev.x
                     parent?.requestDisallowInterceptTouchEvent(true)
                 }
