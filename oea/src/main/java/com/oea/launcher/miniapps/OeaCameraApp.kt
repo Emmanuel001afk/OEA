@@ -389,7 +389,13 @@ object OeaCameraApp {
         }
 
         // ---- viewfinder: full-bleed, grid / filter / status layered on top
-        val textureView = TextureView(host)
+        val textureView = TextureView(host).apply {
+            // A transformed camera buffer may not cover every view pixel on all
+            // vendor TextureView implementations. Transparent uncovered pixels
+            // let the root/background and overlays compose correctly instead of
+            // TextureView's opaque black fill hiding the intended preview.
+            isOpaque = false
+        }
         root.addView(textureView, FrameLayout.LayoutParams(-1, -1))
         val gridOverlay = GridOverlayView(host, grid)
         root.addView(gridOverlay, FrameLayout.LayoutParams(-1, -1))
@@ -1687,6 +1693,12 @@ object OeaCameraApp {
                 handler = Handler(created.looper)
             }
             textureView.surfaceTextureListener = surfaceListener
+            // Recompute when the actual View bounds change as well as when the
+            // SurfaceTexture reports a buffer-size change. This covers startup,
+            // split/window resizing, and OEMs that deliver callbacks out of order.
+            textureView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                applyPreviewTransform()
+            }
             if (textureView.isAvailable) openIfReady()
         }
 
