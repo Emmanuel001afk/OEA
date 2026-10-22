@@ -1975,12 +1975,17 @@ object OeaCameraApp {
                 report("The camera refused a preview request")
                 return
             }
+            // The repeating request is preview-only. Sending every preview frame
+            // to the JPEG ImageReader wastes bandwidth and can trigger unstable
+            // vendor flash/AE behaviour; the reader remains a session output for
+            // explicit still-capture requests below.
             builder.addTarget(surface)
-            if (reader != null) builder.addTarget(reader.surface)
             val previewBuilder = builder
             set(previewBuilder, CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
             applyFocusDefaults(previewBuilder)
-            set(previewBuilder, CaptureRequest.CONTROL_AE_MODE, aeMode(flashMode))
+            // AUTO/ON flash is a still-capture decision, never a repeating-preview
+            // decision. Only explicit TORCH mode may keep the LED continuously lit.
+            set(previewBuilder, CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
             set(previewBuilder, CaptureRequest.FLASH_MODE, if (flashMode == FlashMode.TORCH) CameraMetadata.FLASH_MODE_TORCH else CameraMetadata.FLASH_MODE_OFF)
             applyZoom(previewBuilder)
             previewRequest = previewBuilder
