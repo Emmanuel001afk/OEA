@@ -1799,13 +1799,15 @@ object OeaCameraApp {
     private fun filterPreview(filter: FilterMode): Pair<Int, Float>? {
         val matrix = toneMatrix(filter) ?: return null
         // Push a mid grey through the matrix: that is the tone the filter shifts a
-        // flat scene to. The wash then pulls the preview towards it.
-        val mid = floatArrayOf(128f, 128f, 128f, 255f)
-        matrix.mapPoints(mid, 0, mid, 0, 4)
+        // flat scene to. The wash then pulls the preview towards it. The matrix is
+        // read as its 4×5 row-major array rather than through mapPoints, so the
+        // arithmetic is explicit and can be reasoned about (and tested) on its own.
+        val m = matrix.array
+        fun row(r: Int): Float = m[r * 5] * 128f + m[r * 5 + 1] * 128f + m[r * 5 + 2] * 128f + m[r * 5 + 3] * 255f + m[r * 5 + 4]
         fun channel(v: Float) = v.toInt().coerceIn(0, 255)
-        val red = channel(mid[0])
-        val green = channel(mid[1])
-        val blue = channel(mid[2])
+        val red = channel(row(0))
+        val green = channel(row(1))
+        val blue = channel(row(2))
         val shift = maxOf(kotlin.math.abs(red - 128), kotlin.math.abs(green - 128), kotlin.math.abs(blue - 128))
         if (shift <= 2) {
             // No tone shift: the filter only removes colour (Mono, Noir). A neutral
