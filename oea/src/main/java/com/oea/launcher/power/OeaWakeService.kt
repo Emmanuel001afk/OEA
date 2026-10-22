@@ -10,6 +10,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
+import android.view.Surface
+import android.view.WindowManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -53,8 +56,7 @@ class OeaWakeService : Service() {
     private var receiverRegistered = false
 
     private val coverLockTimeout = Runnable {
-        val store = OeaDataStore.get(this)
-        if (!isScreenInteractive() || listeningScreenOff != false || !store.coverToLockEnabled() || !lastCovered || inCall()) {
+        if (!coverToLockAllowed() || listeningScreenOff != false || !lastCovered) {
             coverLockDetector.reset()
             return@Runnable
         }
@@ -84,7 +86,7 @@ class OeaWakeService : Service() {
 
             val screenOff = listeningScreenOff ?: !isScreenInteractive()
             if (!screenOff) {
-                if (!store.coverToLockEnabled()) {
+                if (!coverToLockAllowed()) {
                     main.removeCallbacks(coverLockTimeout)
                     coverLockDetector.reset()
                     return
@@ -276,6 +278,24 @@ class OeaWakeService : Service() {
 
     private fun isScreenInteractive(): Boolean =
         getSystemService(PowerManager::class.java)?.isInteractive != false
+
+    /** Use the current display configuration; fall back to display rotation only if undefined. */
+    private fun isLandscapeMode(): Boolean = when (resources.configuration.orientation) {
+        Configuration.ORIENTATION_LANDSCAPE -> true
+        Configuration.ORIENTATION_PORTRAIT -> false
+        else -> {
+            @Suppress("DEPRECATION")
+            val rotation = (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.rotation
+            rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270
+        }
+    }
+
+    private fun coverToLockAllowed(): Boolean = OeaCoverLockPolicy.isAllowed(
+        screenOn = isScreenInteractive(),
+        landscape = isLandscapeMode(),
+        enabled = OeaDataStore.get(this).coverToLockEnabled(),
+        inCall = inCall()
+    )
 
     private fun refreshListening(screenOff: Boolean? = null) {
         stopListening()
