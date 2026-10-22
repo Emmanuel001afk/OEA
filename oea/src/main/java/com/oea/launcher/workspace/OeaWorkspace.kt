@@ -1527,19 +1527,32 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             return
         }
         stage("layout normalization") { normalizeLayout() }
+        val previousTiles = homeTiles.toList()
         homeTiles.clear()
         val target = ws.getCurrentPage()
-        pager.removeAllViews()
+        val builtPages = ArrayList<OeaCellLayout>()
+        var successfulPages = 0
         for (page in 0 until ws.pages()) {
             val built = try {
-                buildPage(page)
+                buildPage(page).also { successfulPages++ }
             } catch (error: Throwable) {
-                // One broken page must not empty the whole pager.
+                // Keep the last working pager if every page fails; a failed
+                // refresh must never turn a usable Home into a blank screen.
                 Log.e(TAG, "Home page $page failed to build; showing it empty", error)
                 emptyPage(page)
             }
-            pager.addView(built)
+            builtPages += built
         }
+        if (successfulPages == 0 || builtPages.isEmpty()) {
+            homeTiles.clear()
+            homeTiles.addAll(previousTiles)
+            Log.e(TAG, "Home rebuild produced no usable pages; preserving the previous workspace")
+            return
+        }
+        // Build the replacement tree before detaching the currently visible
+        // pages. This keeps the last good Home interactive until the new one is ready.
+        pager.removeAllViews()
+        builtPages.forEach { pager.addView(it) }
         pager.setPageImmediately(target)
         indicator.pages = ws.pages()
         indicator.position = target.toFloat()
