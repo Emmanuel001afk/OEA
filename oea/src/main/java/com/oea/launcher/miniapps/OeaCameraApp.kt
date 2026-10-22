@@ -389,7 +389,13 @@ object OeaCameraApp {
         }
 
         // ---- viewfinder: full-bleed, grid / filter / status layered on top
-        val textureView = TextureView(host)
+        val textureView = TextureView(host).apply {
+            // A transformed camera buffer may not cover every view pixel on all
+            // vendor TextureView implementations. Transparent uncovered pixels
+            // let the root/background and overlays compose correctly instead of
+            // TextureView's opaque black fill hiding the intended preview.
+            isOpaque = false
+        }
         root.addView(textureView, FrameLayout.LayoutParams(-1, -1))
         val gridOverlay = GridOverlayView(host, grid)
         root.addView(gridOverlay, FrameLayout.LayoutParams(-1, -1))
@@ -1157,7 +1163,22 @@ object OeaCameraApp {
         orientationTag: Int,
         withLocation: Boolean
     ): File? {
-        val needsPixels = filter != FilterMode.NONE || hdr || OeaCameraEffects.needed(mode, privacy) || aspect > 0f
+        // The Camera2 reader already chooses the requested aspect when the device
+        // offers it. Do not decode/re-encode a full-resolution JPEG just because an
+        // aspect ratio is selected: that used to downsample otherwise untouched
+        // photos to preview-ish dimensions. Only crop when the actual JPEG buffer
+        // does not match the requested sensor-buffer ratio.
+        val jpegMatchesAspect = if (jpeg != null && aspect > 0f) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+                OeaCameraOptics.matchesAspect(bounds.outWidth, bounds.outHeight, aspect)
+            }.getOrDefault(false)
+        } else {
+            false
+        }
+        val needsCrop = aspect > 0f && !jpegMatchesAspect
+        val needsPixels = filter != FilterMode.NONE || hdr || OeaCameraEffects.needed(mode, privacy) || needsCrop
         if (jpeg != null && !needsPixels) {
             // Nothing to develop: the camera's own JPEG is the best possible file.
             val file = newPhotoFile(host, filter)
@@ -1637,6 +1658,7 @@ object OeaCameraApp {
         private var zoomValue: Float = initialZoom.coerceIn(1f, 8f)
         private var flashMode: FlashMode = initialFlash
         private var aspectMode: AspectMode = initialAspect
+        private var layoutTransformListenerInstalled = false
 
         private var recorder: MediaRecorder? = null
         private var recordingFile: File? = null
@@ -1687,6 +1709,15 @@ object OeaCameraApp {
                 handler = Handler(created.looper)
             }
             textureView.surfaceTextureListener = surfaceListener
+            // Recompute when the actual View bounds change as well as when the
+            // SurfaceTexture reports a buffer-size change. Install this once;
+            // resume cycles must not accumulate duplicate listeners.
+            if (!layoutTransformListenerInstalled) {
+                textureView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    applyPreviewTransform()
+                }
+                layoutTransformListenerInstalled = true
+            }
             if (textureView.isAvailable) openIfReady()
         }
 
