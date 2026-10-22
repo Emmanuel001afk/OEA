@@ -303,7 +303,7 @@ object OeaCameraApp {
                 mode = CaptureMode.PHOTO,
                 filter = FilterMode.NONE,
                 privacy = false,
-                aspect = AspectMode.FULL,
+                aspect = AspectMode.FULL.ratio,
                 hdr = false,
                 orientationTag = 1,
                 withLocation = false
@@ -460,11 +460,13 @@ object OeaCameraApp {
         // camera: a permission dialog, a share sheet or another app must not leave
         // the sensor open behind them.
         val miniApp = host as? OeaMiniAppActivity
-        miniApp?.pauseHook = {
-            runCatching { qrDialog?.dismiss() }
-            cameraHelper.pauseNow()
+        if (miniApp != null) {
+            miniApp.pauseHook = {
+                runCatching { qrDialog?.dismiss() }
+                cameraHelper.pauseNow()
+            }
+            miniApp.resumeHook = { cameraHelper.resumeNow() }
         }
-        miniApp?.resumeHook = { cameraHelper.resumeNow() }
 
         cameraHelper.start()
         root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -1842,11 +1844,11 @@ object OeaCameraApp {
                 runCatching { camera.close() }
                 report(
                     when (error) {
-                        ERROR_CAMERA_IN_USE -> "Another app is using the camera"
-                        ERROR_MAX_CAMERAS_IN_USE -> "This phone cannot open another camera right now"
-                        ERROR_CAMERA_DISABLED -> "The camera is disabled on this phone"
-                        ERROR_CAMERA_DEVICE -> "The camera reported a hardware fault"
-                        ERROR_CAMERA_SERVICE -> "The camera service stopped responding"
+                        CameraDevice.ERROR_CAMERA_IN_USE -> "Another app is using the camera"
+                        CameraDevice.ERROR_MAX_CAMERAS_IN_USE -> "This phone cannot open another camera right now"
+                        CameraDevice.ERROR_CAMERA_DISABLED -> "The camera is disabled on this phone"
+                        CameraDevice.ERROR_CAMERA_DEVICE -> "The camera reported a hardware fault"
+                        CameraDevice.ERROR_CAMERA_SERVICE -> "The camera service stopped responding"
                         else -> "The camera could not start (error $error)"
                     }
                 )

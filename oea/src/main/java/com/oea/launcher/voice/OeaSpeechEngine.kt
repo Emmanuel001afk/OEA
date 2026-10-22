@@ -1,7 +1,5 @@
 package com.oea.launcher.voice
 
-import com.oea.launcher.camera.OeaTorch
-
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +9,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import com.oea.launcher.camera.OeaTorch
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean

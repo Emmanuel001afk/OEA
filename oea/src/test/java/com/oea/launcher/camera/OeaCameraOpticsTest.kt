@@ -1,5 +1,6 @@
 package com.oea.launcher.camera
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -42,9 +43,10 @@ class OeaCameraOpticsTest {
     }
 
     @Test fun exifTagMatchesTheRotationItDescribes() {
+        // 6 = "turn 90° clockwise", 8 = "turn 270° clockwise", 3 = "turn 180°".
         assertEquals(6, OeaCameraOptics.exifOrientation(90, 0, frontFacing = false))
-        assertEquals(3, OeaCameraOptics.exifOrientation(90, 180, frontFacing = false))
-        assertEquals(8, OeaCameraOptics.exifOrientation(90, 270, frontFacing = false))
+        assertEquals(8, OeaCameraOptics.exifOrientation(90, 180, frontFacing = false))
+        assertEquals(3, OeaCameraOptics.exifOrientation(90, 270, frontFacing = false))
         assertEquals(1, OeaCameraOptics.exifOrientation(90, 90, frontFacing = false))
     }
 
@@ -59,8 +61,8 @@ class OeaCameraOpticsTest {
         assertEquals(4032 to 3024, OeaCameraOptics.bestAspectSize(sizes, 4f / 3f))
         assertEquals(1920 to 1080, OeaCameraOptics.bestAspectSize(sizes, 16f / 9f))
         // A square request has no exact answer here, so the closest shape wins
-        // instead of returning nothing.
-        assertEquals(1600 to 1200, OeaCameraOptics.bestAspectSize(sizes, 1f))
+        // (4:3), and among equally close shapes the largest is chosen.
+        assertEquals(4032 to 3024, OeaCameraOptics.bestAspectSize(sizes, 1f))
     }
 
     @Test fun aspectSizeRespectsThePixelBudget() {
@@ -93,15 +95,15 @@ class OeaCameraOpticsTest {
     @Test fun cropTakesTheWantedShapeFromTheMiddle() {
         // 4:3 sensor frame asked for 16:9: trim top and bottom, keep full width.
         val wide = OeaCameraOptics.cropRect(4000, 3000, 16f / 9f)
-        assertEquals(intArrayOf(0, 375, 4000, 2625), wide)
+        assertArrayEquals(intArrayOf(0, 375, 4000, 2625), wide)
 
         // 4:3 frame asked for 1:1: trim the sides, keep full height.
         val square = OeaCameraOptics.cropRect(4000, 3000, 1f)
-        assertEquals(intArrayOf(500, 0, 3500, 3000), square)
+        assertArrayEquals(intArrayOf(500, 0, 3500, 3000), square)
 
         // Already the right shape: untouched.
         val same = OeaCameraOptics.cropRect(4000, 3000, 4f / 3f)
-        assertEquals(intArrayOf(0, 0, 4000, 3000), same)
+        assertArrayEquals(intArrayOf(0, 0, 4000, 3000), same)
     }
 
     @Test fun cropNeverExceedsTheFrame() {

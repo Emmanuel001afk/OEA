@@ -1,7 +1,5 @@
 package com.oea.launcher.gesture
 
-import com.oea.launcher.camera.OeaTorch
-
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -9,6 +7,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import com.oea.launcher.OeaLauncherActivity
 import com.oea.launcher.assistant.OeaSystemActions
+import com.oea.launcher.camera.OeaTorch
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.perf.OeaLowMode

@@ -1,7 +1,5 @@
 package com.oea.launcher.power
 
-import com.oea.launcher.camera.OeaTorch
-
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -17,6 +15,7 @@ import com.oea.launcher.OeaSystemToolsActivity
 import com.oea.launcher.R
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.assistant.OeaSystemActions
+import com.oea.launcher.camera.OeaTorch
 import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette

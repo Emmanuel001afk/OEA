@@ -68,15 +68,22 @@ object OeaCameraOptics {
 
     /**
      * The biggest offered size that matches [aspect] inside a pixel budget.
-     * When nothing matches, the closest shape wins, so a phone that only offers
-     * 4:3 still gives a picture for a 16:9 request instead of nothing.
+     *
+     * When nothing matches exactly, the closest shape wins — a phone that only
+     * offers 4:3 still gives a picture for a 16:9 request instead of returning
+     * nothing — and among equally close shapes the biggest wins, because a crop
+     * from a larger frame is still a better picture.
      */
     fun bestAspectSize(sizes: List<Pair<Int, Int>>, aspect: Float, maxPixels: Long = Long.MAX_VALUE): Pair<Int, Int>? {
         val usable = sizes.filter { it.first > 0 && it.second > 0 && it.first.toLong() * it.second <= maxPixels }
         if (usable.isEmpty()) return null
         if (aspect <= 0f) return usable.maxByOrNull { it.first.toLong() * it.second }
-        return usable.filter { matchesAspect(it.first, it.second, aspect) }.maxByOrNull { it.first.toLong() * it.second }
-            ?: usable.minByOrNull { kotlin.math.abs(aspectOf(it.first, it.second) - aspect) }
+        val exact = usable.filter { matchesAspect(it.first, it.second, aspect) }
+        if (exact.isNotEmpty()) return exact.maxByOrNull { it.first.toLong() * it.second }
+        val closest = usable.minOfOrNull { kotlin.math.abs(aspectOf(it.first, it.second) - aspect) } ?: return null
+        return usable
+            .filter { kotlin.math.abs(aspectOf(it.first, it.second) - aspect) <= closest + 0.0001f }
+            .maxByOrNull { it.first.toLong() * it.second }
     }
 
     /**

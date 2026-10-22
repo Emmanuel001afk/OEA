@@ -1,7 +1,5 @@
 package com.oea.launcher.phone
 
-import com.oea.launcher.camera.OeaTorch
-
 import android.Manifest
 import android.app.KeyguardManager
 import android.app.NotificationChannel
@@ -22,6 +20,7 @@ import android.telecom.VideoProfile
 import androidx.core.app.NotificationCompat
 import com.oea.launcher.R
 import com.oea.launcher.callblocker.OeaCallBlockRules
+import com.oea.launcher.camera.OeaTorch
 import java.lang.ref.WeakReference
 
 class OeaInCallService : InCallService() {
