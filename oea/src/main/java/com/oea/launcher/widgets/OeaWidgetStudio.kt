@@ -40,11 +40,21 @@ object OeaWidgetStudio {
         Family("camera", "Camera", "A one-tap entry to OEA Camera.")
     )
 
+    /**
+     * Curated, named widget looks. These are deliberately color/surface presets rather than
+     * claiming to be independent layouts: every preset works with every supported OEA widget.
+     */
     val presets = listOf(
-        Preset("glass", "Liquid Glass", "Cool glass with a clear cyan highlight", 0xFF181F2F.toInt(), 0xFFFFFFFF.toInt(), 0xFFB8C4D8.toInt(), 0xFF78D9FF.toInt()),
+        Preset("glass", "Liquid Glass", "Translucent slate with a cyan highlight", 0xFF181F2F.toInt(), 0xFFFFFFFF.toInt(), 0xFFB8C4D8.toInt(), 0xFF78D9FF.toInt()),
         Preset("lagoon", "Lagoon", "Deep teal with a fresh mint accent", 0xFF0D2727.toInt(), 0xFFF0FFFA.toInt(), 0xFFB6DAD2.toInt(), 0xFF70E7C0.toInt()),
         Preset("ember", "Ember", "Warm dusk surfaces and soft coral light", 0xFF2A191E.toInt(), 0xFFFFF3EC.toInt(), 0xFFE3C0B8.toInt(), 0xFFFFAD83.toInt()),
-        Preset("pixel", "Pixel Night", "High-contrast monochrome with a gold signal", 0xFF111216.toInt(), 0xFFF5F5F5.toInt(), 0xFFB7B8C0.toInt(), 0xFFFFD166.toInt())
+        Preset("pixel", "Pixel Night", "High-contrast dark monochrome with gold", 0xFF111216.toInt(), 0xFFF5F5F5.toInt(), 0xFFB7B8C0.toInt(), 0xFFFFD166.toInt()),
+        Preset("arctic", "Arctic", "Cool navy with ice-blue details", 0xFF101F32.toInt(), 0xFFF4FAFF.toInt(), 0xFFB9D0E6.toInt(), 0xFF82CFFF.toInt()),
+        Preset("rose", "Rose Quartz", "Plum glass with a soft rose accent", 0xFF2A1B2A.toInt(), 0xFFFFF5FB.toInt(), 0xFFE6C9DE.toInt(), 0xFFFF9ECF.toInt()),
+        Preset("forest", "Forest", "Deep evergreen with a lime-mint signal", 0xFF14271D.toInt(), 0xFFF2FFF5.toInt(), 0xFFB9D7C2.toInt(), 0xFFA5E887.toInt()),
+        Preset("sunset", "Sunset", "Dark aubergine with peach and amber", 0xFF2A1B2D.toInt(), 0xFFFFF5F0.toInt(), 0xFFE5C4BB.toInt(), 0xFFFFB36B.toInt()),
+        Preset("paper", "Soft Paper", "Light warm surface with readable dark text", 0xFFF2EEE6.toInt(), 0xFF252A32.toInt(), 0xFF5D6470.toInt(), 0xFF176E8A.toInt()),
+        Preset("midnight", "Midnight Blue", "Minimal midnight blue with violet signal", 0xFF17172D.toInt(), 0xFFF7F6FF.toInt(), 0xFFC5C3E6.toInt(), 0xFFB4A1FF.toInt())
     )
 
     private const val PREFS = "oea_widget_studio"
