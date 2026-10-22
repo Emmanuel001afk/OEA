@@ -10,6 +10,7 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.PointF
 import android.graphics.BitmapFactory
 import android.media.FaceDetector
+import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.roundToInt
@@ -417,8 +418,30 @@ internal object OeaCameraEffects {
             file.absolutePath,
             BitmapFactory.Options().apply { inSampleSize = sample }
         ) ?: return false
-        val working = decoded.copy(Bitmap.Config.ARGB_8888, true) ?: decoded
-        if (working !== decoded) decoded.recycle()
+        // The file's pixels are stored the way the sensor wrote them; the EXIF tag
+        // is what turns them. A pass that ignores the tag works sideways — the
+        // Portrait band lands across the picture instead of down it — so the pixels
+        // are turned upright first and the tag is reset afterwards.
+        val tag = runCatching {
+            ExifInterface(file.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val rotation = com.oea.launcher.camera.OeaCameraOptics.rotationForOrientationTag(tag)
+        val mirrored = com.oea.launcher.camera.OeaCameraOptics.orientationTagMirrors(tag)
+        val upright = if (rotation != 0 || mirrored) {
+            runCatching {
+                val matrix = Matrix().apply {
+                    if (rotation != 0) postRotate(rotation.toFloat())
+                    if (mirrored) postScale(-1f, 1f)
+                }
+                Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true).also {
+                    if (it !== decoded) decoded.recycle()
+                }
+            }.getOrDefault(decoded)
+        } else {
+            decoded
+        }
+        val working = upright.copy(Bitmap.Config.ARGB_8888, true) ?: upright
+        if (working !== upright) upright.recycle()
         when (mode) {
             OeaCameraApp.CaptureMode.NIGHT -> night(working)
             OeaCameraApp.CaptureMode.PORTRAIT -> portrait(working)
@@ -431,6 +454,15 @@ internal object OeaCameraEffects {
             true
         }.getOrDefault(false)
         working.recycle()
+        if (written && (rotation != 0 || mirrored)) {
+            // The pixels now carry the turn, so the tag must not apply it twice.
+            runCatching {
+                ExifInterface(file.absolutePath).apply {
+                    setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
+                    saveAttributes()
+                }
+            }
+        }
         return written
     }
 

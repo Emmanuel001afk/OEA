@@ -2,6 +2,7 @@ package com.oea.launcher.camera
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -123,6 +124,31 @@ class OeaCameraOpticsTest {
         assertEquals(near, OeaCameraOptics.focusDioptres(near, 100), 0.0001f)
         // A lens that cannot focus manually must not be handed a fabricated value.
         assertEquals(0f, OeaCameraOptics.focusDioptres(0f, 100), 0.0001f)
+    }
+
+    @Test fun exifTagsBecomeTheRotationTheyDescribe() {
+        assertEquals(0, OeaCameraOptics.rotationForOrientationTag(1))
+        assertEquals(180, OeaCameraOptics.rotationForOrientationTag(3))
+        assertEquals(90, OeaCameraOptics.rotationForOrientationTag(6))
+        assertEquals(270, OeaCameraOptics.rotationForOrientationTag(8))
+        // The transposed pair still needs a real rotation.
+        assertEquals(90, OeaCameraOptics.rotationForOrientationTag(5))
+        assertEquals(270, OeaCameraOptics.rotationForOrientationTag(7))
+        assertTrue(OeaCameraOptics.orientationTagMirrors(2))
+        assertTrue(OeaCameraOptics.orientationTagMirrors(7))
+        assertFalse(OeaCameraOptics.orientationTagMirrors(6))
+    }
+
+    @Test fun croppingTurnsWithUprightPixels() {
+        // A 4:3 sensor frame shown upright at 90 degrees is a 3:4 picture, so a
+        // "4:3" request must crop the turned frame to 3:4 — not to 4:3, which
+        // would slice the top and bottom off every portrait photo.
+        assertEquals(3f / 4f, OeaCameraOptics.displayAspect(4f / 3f, 90), 0.0001f)
+        assertEquals(3f / 4f, OeaCameraOptics.displayAspect(4f / 3f, 270), 0.0001f)
+        assertEquals(4f / 3f, OeaCameraOptics.displayAspect(4f / 3f, 0), 0.0001f)
+        assertEquals(4f / 3f, OeaCameraOptics.displayAspect(4f / 3f, 180), 0.0001f)
+        // "Full" stays full whatever the rotation.
+        assertEquals(0f, OeaCameraOptics.displayAspect(0f, 90), 0.0001f)
     }
 
     @Test fun aspectHelpersSurviveRubbish() {

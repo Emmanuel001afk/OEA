@@ -22,6 +22,7 @@ can check in this tree, or is marked as unverified.
 | Entry | `OeaCameraActivity : OeaMiniAppActivity` (`miniapps/OeaMiniAppActivities.kt`) | Registered as the `camera` mini-app (`OeaMiniApps.kt`), `Style.FullBleed`, also answers `IMAGE_CAPTURE` / `VIDEO_CAPTURE` |
 | Screen | `miniapps/OeaCameraApp.kt` | View hierarchy, settings, capture pipeline, Camera2 helper |
 | Pixel work | `miniapps/OeaCameraEffects.kt` | Night, Portrait, Document, face blur |
+| Chrome | `camera/OeaCameraChrome.kt` (**new**) | Scrims, horizon level, recording pill, zoom readout, timer countdown, haptics |
 | Math | `camera/OeaCameraOptics.kt` (**new**) | Rotation, EXIF orientation, aspect choice, cover scale, crop, focus slider |
 | Torch | `camera/OeaTorch.kt` (**new**) | One owner for the LED, one source of truth for its state |
 | Thumbnails | `ui/OeaThumbnails.kt` | Cache + correct-size decodes for the last-photo button and the saved-photo sheet |
@@ -276,6 +277,23 @@ both now have JVM tests:
     widget updates.
 15. **Camera busy** — open the camera, then open another app's camera; OEA shows
     "Another app took the camera · tap to try again" and recovers on tap.
+16. **Zoom that admits its limit** — on a 2× sensor, the 4× chip is dimmed and does
+    nothing, the slider stops at 2×, and the readout says "This lens stops here"
+    if you pinch past it.
+17. **Timer** — press the shutter with a 3 s timer: a large 3, 2, 1 counts down over
+    the viewfinder, the shutter is disabled while it runs, and tapping the number
+    cancels without taking a picture.
+18. **Recording HUD** — start a clip: the shutter becomes a stop square, a pill at
+    the top counts up, the mode chips dim, and leaving the screen stops and saves.
+19. **Level and mirror** — turn on the horizon level in settings: a line across the
+    still modes turns green within a degree of level and tilts with the phone. Turn
+    "Mirror selfies" off, take a front-camera photo, and the file is flipped
+    relative to the preview instead of matching it.
+20. **Last shot** — take a photo: the shutter row's left slot becomes that photo; a
+    3-frame burst updates it three times. Delete it from EMAGE, return: the slot
+    falls back to the library icon.
+21. **Crop guide** — choose 1:1: the viewfinder shades the part of the frame that
+    will be cropped and outlines what will be kept.
 
 ---
 
@@ -292,14 +310,120 @@ both now have JVM tests:
   the JPEG reader is detached for the duration and recreated afterwards.
 * **Front-camera video is not mirrored** (stills are, via the preview transform;
   `setOrientationHint` handles only rotation).
-* **Effects run on the unrotated pixels**, so the Portrait band is measured in
-  buffer space; on a portrait phone the band is horizontal in the file, which
-  matches the preview only after rotation is applied by a viewer. Practically
-  invisible for a band blur, but it is a real detail.
+* **Effects no longer run on the unrotated pixels** (fixed below, §6): the still
+  is turned upright before any pass, and the orientation tag is reset to 1 so a
+  viewer does not turn it twice.
 * **`TEMPLATE_STILL_CAPTURE` fallback**: if a camera refuses the JPEG reader, the
   shutter falls back to the preview snapshot at view resolution instead of failing.
-* **No burst review UI**: burst frames are saved individually and the last one
-  opens in the sheet.
+* **Burst review is the last frame only**: the shutter row's left slot shows the
+  newest file and a burst saves each frame individually, but there is no grid to
+  compare them.
 * **The widget thumbnail is read synchronously** in `onUpdate`; it is a small
   decode and a short list, but a phone with thousands of photos would benefit from
   a metadata index.
+
+---
+
+## 6. The viewfinder pass (second round, same day)
+
+The first round fixed what was *broken*. This round is about what was *missing or
+doubtful* in the camera as a screen: the controls said less than they knew, and a
+few conveniences a camera is expected to have were not there at all. Everything
+below is wired to real behaviour — no control exists that does not do something.
+
+### 6.1 New chrome, in `camera/OeaCameraChrome.kt`
+
+A small file of drawn parts, each independent of the camera session so one can
+fail without taking the viewfinder down:
+
+| Part | What it is | Wired to |
+| --- | --- | --- |
+| `OeaCameraChrome.scrim(forTop)` | gradient behind the top and bottom bands | added under both bands, so white controls stay readable against a bright sky |
+| `OeaLevelView` | horizon line, tilts with the phone, turns green inside 1° | lives only in Photo / Portrait / Night / Pro / Document; its `OrientationEventListener` is enabled only while it is visible and attached |
+| `OeaRecordingPill` | blinking dot + `0:07` clock | started by `startRecording`, stopped by `stopRecording`, by an error callback, and by detach |
+| `OeaZoomBadge` | `2.0×` readout | shown for ~1.1 s after any zoom change (pinch, chip, slider) |
+| `OeaCountdownOverlay` | the self-timer as a number | driven by `OeaCountdownOverlay.start(seconds)`; `onFinished` runs the burst, `onCancelled` re-enables the shutter |
+| `OeaCameraChrome.buzz` | 12 ms haptic | shutter press, mode change, camera switch, timer cancel |
+
+### 6.2 What the controls now say
+
+* **Zoom is lens-aware.** `AdvancedCameraHelper.maxZoomFor(front)` reads
+  `SCALER_AVAILABLE_MAX_DIGITAL_ZOOM` for the chosen camera *without opening it*, so
+  the chip row is built against the real ceiling: chips past it are dimmed and
+  disabled, the slider's maximum is `(ceiling − 1) × 100`, and a pinch is clamped to
+  the same number. Switching camera re-reads the ceiling and pulls a stale zoom back
+  inside it. The old row offered 1×/2×/4× and a slider to 8× on every phone, which
+  on a 2× sensor made half the row decorative.
+* **The shutter shows state.** Press it and it scales; in video it is a red dot, and
+  while recording it becomes the stop square every camera uses. A second tap while
+  a capture is in flight is ignored (`capturing` / `shotsOutstanding`), which also
+  covers a burst frame that has not been handed back yet.
+* **Bursts run.** `burstCount` frames are taken `BURST_STEP_MS` apart; the shutter
+  is dimmed for the whole run and restored when the last frame returns.
+* **Saving is visible.** A "Saving…" pill sits under the recording pill between the
+  capture callback and the finished file, so a slow effect pass no longer looks like
+  a dropped shutter.
+* **The camera switch disappears** when the phone has only one lens, instead of
+  offering a button that toasts a refusal.
+* **The shutter row previews the last frame** (`LastShotButton`): a real thumbnail of
+  the newest file that counts a burst and falls back to the library icon when there
+  is nothing to show.
+* **The saved-photo sheet tells the truth**: the shape the picture will be seen in
+  (EXIF-aware), its size in MB, plus "Open EMAGE" and "Delete" — the delete also
+  refreshes the widgets.
+* **The top chips are icons plus their value** (aspect, flash, timer, grid, filter)
+  with real content descriptions, and each mode chip carries its own icon and the
+  sentence that describes the mode.
+* **The viewfinder draws the crop** it will actually keep: `GridOverlayView` shades
+  the dead band for any aspect other than the sensor's own, so 1:1 is never a
+  surprise after the fact.
+* **The permission screen is a screen**, not a black column: icon, explanation, and
+  — once Android has stopped offering its own dialog
+  (`KEY_PERMISSION_ASKED` + `shouldShowRequestPermissionRationale`) — an
+  "Open app settings" button instead of a "Allow" button that would do nothing.
+
+### 6.3 Pixel correctness this round
+
+* **Stills are turned upright before they are developed.** `saveFrame` reads
+  `JPEG_ORIENTATION`, turns (and mirrors) the pixels with `turnPixels`, then runs
+  night / portrait / document / filter / face blur / crop on upright pixels, and
+  finally writes orientation `1`. The visible consequence: a Portrait shot's blur
+  band now follows the face in the file as well as in the preview, and a "4:3"
+  request no longer slices the top and bottom off a portrait photo (`displayAspect`
+  inverts the ratio for a quarter turn).
+* **A selfie is saved the way the preview showed it.** The front preview is mirrored;
+  the sensor JPEG is not. `saveFrame(..., mirror = mirrorSelfie)` mirrors the pixels
+  when the new "Mirror selfies" preference is on (default on), so the file and the
+  preview agree instead of being opposites.
+* **`OeaCameraEffects.applyToFile` uses the same rule.** For the capture-once path
+  (a picture chosen from elsewhere), the file's pixels are turned upright using its
+  EXIF tag, the pass runs, and the tag is reset to `ORIENTATION_NORMAL` so no viewer
+  turns it a second time.
+* **One filter matrix.** `toneMatrix(filter)` is the single definition used by both
+  the saved file and the viewfinder tint; the tint's colour and strength are
+  *derived* from that matrix (a mid grey pushed through it) rather than hand-picked.
+
+### 6.4 Preferences added
+
+Both have a row in the camera settings sheet, and both take effect immediately:
+
+* **Mirror selfies** (`KEY_MIRROR_SELFIE`, default on) — as above.
+* **Horizon level** (`KEY_LEVEL`, default on) — turning it off hides the level at
+  once, without leaving the camera.
+
+### 6.5 Verification for this round
+
+* `tools/check-kotlin.py` — brackets balanced, `OeaKit` calls resolve, OEA symbols
+  declared, manifests consistent (222 sources).
+* `OeaCameraOpticsTest` — two new JVM tests:
+  `exifTagsBecomeTheRotationTheyDescribe` (all eight EXIF tags → rotation + mirror)
+  and `croppingTurnsWithUprightPixels` (`displayAspect(4/3, 90) == 3/4`, and 0 stays
+  0).
+* The CI step "Verify the camera and the torch" now also asserts this round's
+  wiring: `OeaLevelView`, `OeaRecordingPill`, `OeaZoomBadge`,
+  `OeaCountdownOverlay`, `OeaCameraChrome.scrim(`, `maxZoomFor`, `zoomCeiling`,
+  `mirror = mirrorSelfie`, `turnPixels`, `rotationForOrientationTag` in both the
+  camera and the effects file, `setAspect(`, `toneMatrix(`, `setMirrorSelfies` and
+  `setLevelEnabled`.
+* Still **not device-tested**: no Android device or emulator in the environment.
+  The checklist in §4 items 16–21 is what to run first.
