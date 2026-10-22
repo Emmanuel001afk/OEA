@@ -749,10 +749,13 @@ class OeaAssistantService : AccessibilityService() {
     private fun applyEventMask(active: Boolean) {
         val info = serviceInfo ?: return
         val pairing = com.oea.launcher.privilege.OeaWirelessPairing.isWatching()
-        val gameBoostWatching = com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this)
-        // Window events are global and fire whenever any app opens. Do not keep
-        // the accessibility pipeline subscribed on every launch when neither
-        // Game Boost nor OEA Freeze needs to observe other apps.
+        // When Usage Access is available, Game Boost detects a game with one
+        // bounded query after Home leaves; it does not need global accessibility
+        // events for every app launch. Keep global events only when that fallback
+        // is unavailable, or when OEA Freeze has apps to guard.
+        val gameBoostWatching = com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this) &&
+            com.oea.launcher.gameboost.OeaGameBoostStore.activeGameCount(this) > 0 &&
+            !com.oea.launcher.gameboost.OeaGameBoost.usageAccess(this)
         val freezerWatching = runCatching {
             com.oea.launcher.applock.OeaAppFreezer.hibernatedPackages(this).isNotEmpty()
         }.getOrDefault(false)
@@ -765,7 +768,12 @@ class OeaAssistantService : AccessibilityService() {
             needsWindowEvents -> AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
             else -> 0
         }
-        info.packageNames = if (active) job?.settingsPackages?.toTypedArray() else null
+        info.packageNames = when {
+            active -> job?.settingsPackages?.toTypedArray()
+            foregroundWatch != null && !gameBoostWatching && !freezerWatching && !pairing ->
+                arrayOf(foregroundWatch!!.packageName)
+            else -> null
+        }
         info.notificationTimeout = when {
             pairing -> 100L
             active -> 60L
