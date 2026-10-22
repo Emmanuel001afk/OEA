@@ -3438,7 +3438,19 @@ open class OeaSystemToolsActivity : Activity() {
                 if (runCatching { startActivity(rm.createRequestRoleIntent(RoleManager.ROLE_HOME)) }.isSuccess) return
             }
         }
-        runCatching { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
+        // See OeaWorkspace.requestDefaultHome: not every skin implements Android's
+        // "Home app" page, so fall back through the pages that do exist and report
+        // it when the device has none, rather than swallowing the failure.
+        val pages = listOf(
+            Intent(Settings.ACTION_HOME_SETTINGS),
+            Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+            Intent(Settings.ACTION_APPLICATION_SETTINGS)
+        )
+        val opened = pages.any { intent ->
+            runCatching { packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null }.getOrDefault(false) &&
+                runCatching { startActivity(intent) }.isSuccess
+        }
+        if (!opened) toast("This phone has no default-app screen OEA can open. Set OEA as Home from Android Settings › Apps.")
     }
 
     // ================================================================= about

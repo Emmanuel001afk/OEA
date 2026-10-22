@@ -436,8 +436,15 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
         return if (c in 'A'..'Z') c else '#'
     }
 
+    /**
+     * Compiled once: [normalize] runs for every app on every keystroke while the
+     * user types in search, and building a Regex (which compiles a Pattern) there
+     * made typing cost grow with the app count.
+     */
+    private val combiningMarks = Regex("\\p{Mn}+")
+
     private fun normalize(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD)
-        .replace(Regex("\\p{Mn}+"), "").lowercase(Locale.getDefault())
+        .replace(combiningMarks, "").lowercase(Locale.getDefault())
 
     /** Prefix > word-start > initials > substring > package name. */
     private fun rank(apps: List<OeaAppInfo>, query: String): List<OeaAppInfo> {

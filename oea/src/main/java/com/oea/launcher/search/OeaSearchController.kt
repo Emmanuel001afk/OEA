@@ -67,7 +67,12 @@ class OeaSearchController(private val context: Context) {
         SettingEntry("Sound & vibration", Settings.ACTION_SOUND_SETTINGS, listOf("sound", "volume", "ringtone", "vibrat", "silent"), R.drawable.oic_music_note),
         SettingEntry("Battery", Intent.ACTION_POWER_USAGE_SUMMARY, listOf("battery", "power", "saver", "charging"), R.drawable.oic_battery_full),
         SettingEntry("Storage", Settings.ACTION_INTERNAL_STORAGE_SETTINGS, listOf("storage", "space", "memory", "files"), R.drawable.oic_memory),
-        SettingEntry("Apps", Settings.ACTION_APPLICATION_SETTINGS, listOf("apps", "applications", "permissions", "default apps"), R.drawable.oic_apps),
+        SettingEntry("Apps", Settings.ACTION_APPLICATION_SETTINGS, listOf("apps", "applications", "permissions"), R.drawable.oic_apps),
+        // "default" and "home" used to land on the general Apps list, which is not
+        // where Android changes the launcher. These are the two pages that actually
+        // do it, so a search for either word shows the screen the user is looking for.
+        SettingEntry("Default Home app", Settings.ACTION_HOME_SETTINGS, listOf("default", "home", "home app", "home screen", "launcher", "default launcher"), R.drawable.oic_home),
+        SettingEntry("Default apps", Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS, listOf("default", "default apps", "default home", "home app", "launcher", "browser", "dialer"), R.drawable.oic_apps),
         SettingEntry("Notifications", "android.settings.NOTIFICATION_SETTINGS", listOf("notification", "alerts", "badges"), R.drawable.oic_notifications),
         SettingEntry("Location", Settings.ACTION_LOCATION_SOURCE_SETTINGS, listOf("location", "gps"), R.drawable.oic_map),
         SettingEntry("Security & privacy", Settings.ACTION_SECURITY_SETTINGS, listOf("security", "lock", "fingerprint", "face", "password", "privacy"), R.drawable.oic_shield),
