@@ -1843,12 +1843,14 @@ object OeaCameraApp {
                 if (device === camera) device = null
                 runCatching { camera.close() }
                 report(
+                    // These constants are declared on CameraDevice.StateCallback, which
+                    // this object implements, so they are visible unqualified.
                     when (error) {
-                        CameraDevice.ERROR_CAMERA_IN_USE -> "Another app is using the camera"
-                        CameraDevice.ERROR_MAX_CAMERAS_IN_USE -> "This phone cannot open another camera right now"
-                        CameraDevice.ERROR_CAMERA_DISABLED -> "The camera is disabled on this phone"
-                        CameraDevice.ERROR_CAMERA_DEVICE -> "The camera reported a hardware fault"
-                        CameraDevice.ERROR_CAMERA_SERVICE -> "The camera service stopped responding"
+                        ERROR_CAMERA_IN_USE -> "Another app is using the camera"
+                        ERROR_MAX_CAMERAS_IN_USE -> "This phone cannot open another camera right now"
+                        ERROR_CAMERA_DISABLED -> "The camera is disabled on this phone"
+                        ERROR_CAMERA_DEVICE -> "The camera reported a hardware fault"
+                        ERROR_CAMERA_SERVICE -> "The camera service stopped responding"
                         else -> "The camera could not start (error $error)"
                     }
                 )
