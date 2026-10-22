@@ -13,7 +13,9 @@ class OeaWidgetStudioTest {
     }
 
     @Test fun originalPresetsHaveDifferentSurfacesAndAccents() {
-        assertEquals(4, OeaWidgetStudio.presets.map { it.id }.distinct().size)
+        assertEquals(10, OeaWidgetStudio.presets.map { it.id }.distinct().size)
+        assertEquals(10, OeaWidgetStudio.presets.map { it.label }.distinct().size)
+        assertEquals(setOf("glass", "lagoon", "ember", "pixel", "arctic", "rose", "forest", "sunset", "paper", "midnight"), OeaWidgetStudio.presets.map { it.id }.toSet())
         assertNotEquals(OeaWidgetStudio.presets[0].background, OeaWidgetStudio.presets[1].background)
         assertNotEquals(OeaWidgetStudio.presets[0].accent, OeaWidgetStudio.presets[2].accent)
     }
