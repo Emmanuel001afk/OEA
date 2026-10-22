@@ -9,6 +9,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import com.oea.launcher.camera.OeaTorch
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -396,14 +397,27 @@ object OeaSpeechEngine {
                     true
                 }
                 LauncherCommand.Type.TOGGLE_FLASHLIGHT -> {
-                    val cm = context.getSystemService(android.hardware.camera2.CameraManager::class.java)
-                    try {
-                        val id = cm.cameraIdList.firstOrNull() ?: return false
-                        val isOn = command.raw.lowercase().contains("on") || !command.raw.lowercase().contains("off")
-                        cm.setTorchMode(id, isOn)
-                        speak(context, if (isOn) "Flashlight on" else "Flashlight off")
-                        true
-                    } catch (_: Throwable) { false }
+                    // "turn the flashlight off" must not be read as "on" merely
+                    // because the word "on" appears somewhere in the sentence, so
+                    // the two words are matched as whole words and "off" wins.
+                    if (!OeaTorch.available(context)) {
+                        speak(context, "This phone has no flashlight I can switch")
+                        return false
+                    }
+                    val spoken = command.raw.lowercase(java.util.Locale.US)
+                    val words = spoken.split(Regex("[^a-z]+"))
+                    val wantsOn = words.contains("on") && !words.contains("off")
+                    val wantsOff = words.contains("off")
+                    val state = when {
+                        wantsOff -> {
+                            OeaTorch.set(context, false)
+                            false
+                        }
+                        wantsOn -> OeaTorch.set(context, true)
+                        else -> OeaTorch.toggle(context)
+                    }
+                    speak(context, if (state) "Flashlight on" else "Flashlight off")
+                    true
                 }
                 LauncherCommand.Type.CHANGE_MODE -> {
                     val mode = com.oea.launcher.ui.OeaMode.entries.firstOrNull { it.id == command.query.lowercase() }

@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -21,12 +20,12 @@ import android.telecom.VideoProfile
 import androidx.core.app.NotificationCompat
 import com.oea.launcher.R
 import com.oea.launcher.callblocker.OeaCallBlockRules
+import com.oea.launcher.camera.OeaTorch
 import java.lang.ref.WeakReference
 
 class OeaInCallService : InCallService() {
     private val handler = Handler(Looper.getMainLooper())
     private var flashOn = false
-    private var flashCameraId: String? = null
     private var observed: Call? = null
     private val flashPulse = object : Runnable {
         override fun run() {
@@ -39,15 +38,11 @@ class OeaInCallService : InCallService() {
                 return
             }
             runCatching {
-                val manager = getSystemService(CameraManager::class.java)
-                val id = flashCameraId ?: manager.cameraIdList.firstOrNull { camera ->
-                    manager.getCameraCharacteristics(camera).get(
-                        android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE
-                    ) == true
-                }?.also { flashCameraId = it }
-                if (id != null) {
+                // Same torch owner as everywhere else in OEA, so the ring alert
+                // cannot fight a flashlight the user turned on themselves.
+                if (OeaTorch.available(this@OeaInCallService)) {
                     flashOn = !flashOn
-                    manager.setTorchMode(id, flashOn)
+                    OeaTorch.set(this@OeaInCallService, flashOn)
                 }
             }
             handler.postDelayed(this, 450L)
@@ -238,9 +233,7 @@ class OeaInCallService : InCallService() {
     private fun stopFlash() {
         handler.removeCallbacks(flashPulse)
         if (flashOn) {
-            runCatching {
-                flashCameraId?.let { getSystemService(CameraManager::class.java).setTorchMode(it, false) }
-            }
+            runCatching { OeaTorch.set(this, false) }
         }
         flashOn = false
     }

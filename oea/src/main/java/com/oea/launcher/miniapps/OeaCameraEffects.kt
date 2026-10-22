@@ -25,6 +25,12 @@ import kotlin.math.roundToInt
  * [FaceDetector] over the picture and smudges what it finds, which is what you
  * want before sending a photo of a street to anyone.
  *
+ * "Document" is the fourth pass and it is also the one that earns its name: the
+ * frame is flattened to luminance, its black and white points are taken from its
+ * own histogram (2nd and 98th percentile, so one bright window or one dark chair
+ * cannot wash out the page), and a mild gamma pushes the paper towards white while
+ * keeping the ink. That is a real scan, not a filter on top of a photo.
+ *
  * Everything runs on a copy capped at [WORK_MAX] pixels on the long edge, so a
  * 108-megapixel file cannot turn the shutter into a two-second wait.
  */
@@ -34,7 +40,10 @@ internal object OeaCameraEffects {
 
     /** True when this picture needs any work at all, so the shutter stays instant. */
     fun needed(mode: OeaCameraApp.CaptureMode, blurFaces: Boolean): Boolean =
-        blurFaces || mode == OeaCameraApp.CaptureMode.NIGHT || mode == OeaCameraApp.CaptureMode.PORTRAIT
+        blurFaces ||
+            mode == OeaCameraApp.CaptureMode.NIGHT ||
+            mode == OeaCameraApp.CaptureMode.PORTRAIT ||
+            mode == OeaCameraApp.CaptureMode.DOC
 
     /**
      * Returns a new bitmap, or the same instance when nothing applied. The caller
@@ -64,6 +73,7 @@ internal object OeaCameraEffects {
         when (mode) {
             OeaCameraApp.CaptureMode.NIGHT -> night(mutable)
             OeaCameraApp.CaptureMode.PORTRAIT -> portrait(mutable, focusY)
+            OeaCameraApp.CaptureMode.DOC -> document(mutable)
             else -> Unit
         }
         if (blurFaces) blurFaces(mutable)
@@ -228,6 +238,66 @@ internal object OeaCameraEffects {
         vignette(bitmap)
     }
 
+    /**
+     * Flattens the frame into something that looks like paper.
+     *
+     * The black and white points come from the picture's own luminance histogram
+     * rather than from fixed numbers: the 2nd percentile becomes black and the
+     * 98th becomes white, so a page shot under a desk lamp and one shot in daylight
+     * both come out with a white background and readable ink. A concave curve
+     * (gamma 0.85) is applied after the stretch so paper lifts to pure white and
+     * dark ink keeps its edges. Colour
+     * is thrown away on purpose — a scan of a page is a page, and keeping the
+     * yellow of indoor lighting would only make it look like a photo again.
+     */
+    private fun document(bitmap: Bitmap) {
+        val width = bitmap.width
+        val height = bitmap.height
+        val count = width * height
+        val pixels = IntArray(count)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        val histogram = IntArray(256)
+        val luma = IntArray(count)
+        for (i in 0 until count) {
+            val c = pixels[i]
+            val y = (((c shr 16) and 0xFF) * 299 + ((c shr 8) and 0xFF) * 587 + (c and 0xFF) * 114) / 1000
+            luma[i] = y
+            histogram[y]++
+        }
+        val lowCut = (count * 2) / 100
+        val highCut = count - lowCut
+        var running = 0
+        var black = 0
+        var white = 255
+        for (value in 0..255) {
+            running += histogram[value]
+            if (running >= lowCut && black == 0) black = value
+            if (running >= highCut) {
+                white = value
+                break
+            }
+        }
+        // A frame with almost no contrast (a blank wall) must not be blown up into
+        // noise: a minimum span keeps the stretch harmless.
+        if (white - black < 24) {
+            black = (black - 12).coerceAtLeast(0)
+            white = (white + 12).coerceAtMost(255)
+        }
+        val span = (white - black).coerceAtLeast(1)
+        val curve = IntArray(256)
+        for (value in 0..255) {
+            val stretched = ((value - black) * 255 / span).coerceIn(0, 255) / 255f
+            // Concave curve: near-white becomes paper-white, ink keeps its edge.
+            curve[value] = if (stretched > 0.96f) 255
+            else (Math.pow(stretched.toDouble(), 0.85) * 255).roundToInt().coerceIn(0, 255)
+        }
+        for (i in 0 until count) {
+            val v = curve[luma[i]]
+            pixels[i] = Color.rgb(v, v, v)
+        }
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+    }
+
     private fun vignette(bitmap: Bitmap) {
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -352,6 +422,7 @@ internal object OeaCameraEffects {
         when (mode) {
             OeaCameraApp.CaptureMode.NIGHT -> night(working)
             OeaCameraApp.CaptureMode.PORTRAIT -> portrait(working)
+            OeaCameraApp.CaptureMode.DOC -> document(working)
             else -> Unit
         }
         if (blurFaces) blurFaces(working)

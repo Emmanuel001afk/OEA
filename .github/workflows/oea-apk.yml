@@ -189,7 +189,54 @@ jobs:
           grep -Fq 'TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE' $SRC/phone/OeaPhoneActivity.kt
           grep -Fq 'Compact floating card' $SRC/phone/OeaPhoneActivity.kt
           grep -Fq 'Incoming-call flash alert' $SRC/phone/OeaPhoneActivity.kt
-          grep -Fq 'setTorchMode' $SRC/phone/OeaInCallService.kt
+          # The ring-flash alert, the Quick controls tile, the Home gesture and the
+          # voice command all go through the one torch owner, and that owner is what
+          # actually calls setTorchMode. Checking the pref here proves the alert is
+          # still gated on the user's choice.
+          grep -Fq 'OeaTorch' $SRC/phone/OeaInCallService.kt
+          grep -Fq 'flash_alert' $SRC/phone/OeaInCallService.kt
+          grep -Fq 'setTorchMode' $SRC/camera/OeaTorch.kt
+      - name: Verify the camera and the torch
+        run: |
+          set -euo pipefail
+          SRC=oea/src/main/java/com/oea/launcher
+          CAMERA=$SRC/miniapps/OeaCameraApp.kt
+          OPTICS=$SRC/camera/OeaCameraOptics.kt
+          TORCH=$SRC/camera/OeaTorch.kt
+          # A still is captured from the sensor, not screenshotted from the preview.
+          grep -Fq 'TEMPLATE_STILL_CAPTURE' "$CAMERA"
+          grep -Fq 'ImageFormat.JPEG' "$CAMERA"
+          grep -Fq 'JPEG_ORIENTATION' "$CAMERA"
+          # The preview snapshot is only a fallback, and it is the transformed one;
+          # the old preview-screenshot saver is gone.
+          ! grep -Fq 'fun saveBitmap(' "$CAMERA"
+          grep -Fq 'val matrix = previewMatrix ?: return raw' "$CAMERA"
+          # The preview is transformed, so it is upright and cropped, not stretched.
+          grep -Fq 'textureView.setTransform' "$CAMERA"
+          grep -Fq 'fun rotationDegrees(' "$OPTICS"
+          grep -Fq 'fun coverScale(' "$OPTICS"
+          # Focus re-arms, and zoom respects what the lens declares.
+          grep -Fq 'CONTROL_AF_TRIGGER_IDLE' "$CAMERA"
+          grep -Fq 'SCALER_AVAILABLE_MAX_DIGITAL_ZOOM' "$CAMERA"
+          # Video is oriented and can carry sound.
+          grep -Fq 'TEMPLATE_RECORD' "$CAMERA"
+          grep -Fq 'setOrientationHint' "$CAMERA"
+          grep -Fq 'RECORD_AUDIO' "$CAMERA"
+          # QR uses OEA's own engine scanner, never an external zxing client.
+          grep -Fq 'QrScannerView(host)' "$CAMERA"
+          grep -Fq 'QrCodes.decode(' "$CAMERA"
+          ! grep -Fq 'com.google.zxing.client.android' "$CAMERA"
+          # Document mode really flattens the page.
+          grep -Fq 'CaptureMode.DOC -> document(' $SRC/miniapps/OeaCameraEffects.kt
+          # The camera is released when the screen goes away.
+          grep -Fq 'onSurfaceTextureDestroyed' "$CAMERA"
+          grep -Fq 'pauseHook' "$CAMERA"
+          # The torch picks a camera that has a flash and reports real state.
+          grep -Fq 'FLASH_INFO_AVAILABLE' "$TORCH"
+          grep -Fq 'registerTorchCallback' "$TORCH"
+          # The widget renders a thumbnail instead of promising controls it lacks.
+          grep -Fq '@+id/camera_thumb' oea/src/main/res/layout/oea_widget_camera.xml
+          grep -Fq 'setImageViewBitmap' $SRC/widgets/OeaMiniAppWidgets.kt
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail
