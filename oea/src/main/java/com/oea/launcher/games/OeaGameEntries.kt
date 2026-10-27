@@ -52,16 +52,19 @@ class OeaSendOffActivity : OeaStandaloneGameActivity() {
         "⊕" to "ADS: aim down the sights — zoomed in, steadier, slower",
         "↑" to "Jump",
         "▼" to "Crouch: smaller, steadier, harder to spot",
+        "⏱" to "Hold crouch for a half-second to go PRONE — flat, slow, steadiest aim (also Z)",
         "R" to "Reload the active weapon",
         "+" to "Use a medkit to heal",
-        "💣" to "Throw a frag grenade along your aim (also G)",
+        "💣" to "Tap FRAG for a normal throw; hold it to COOK the fuse and throw early (also G)",
         "✳" to "Throw a smoke grenade to hide (also H)",
+        "⚡" to "Throw a stun grenade to slow everyone it flashes (also I)",
         "◎" to "Pick up loot when the PICK button appears",
         "1 / 2" to "Switch weapon slot (also Y on gamepad)",
+        "☰" to "Pause → Pack to see your kit and reload all weapons",
     )
 
     override val keyLegend: List<String> = listOf(
-        "Mouse look · Shift ADS · Space jump · C crouch · R reload · G frag · H smoke · E pick · 1/2 weapons · Esc pause",
+        "Mouse look · Shift ADS · Space jump · C crouch · Z prone · R reload · G frag · H smoke · I stun · E pick · 1/2 weapons · Esc pause",
     )
 
     override fun onMatchStarted(gameId: String) {

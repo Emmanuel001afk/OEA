@@ -122,7 +122,8 @@ class OeaArena : OeaGame() {
     private val reloadBtn = VirtualButton(0.74f, 0.78f, radiusDp = 24f, label = "R")
     private val healBtn = VirtualButton(0.55f, 0.8f, radiusDp = 23f, label = "+")
     private val pickupBtn = VirtualButton(0.6f, 0.62f, radiusDp = 30f, label = "PICK", color = 0xFF57C8FF.toInt())
-    /** Throwable pack: frag and smoke grenades, each with its own count. */
+    /** Throwable pack: frag, smoke and stun grenades, each with its own count. */
+    private val stunBtn = VirtualButton(0.22f, 0.92f, radiusDp = 28f, label = "STUN", color = 0xFF42A5F5.toInt())
     private val fragBtn = VirtualButton(0.3f, 0.92f, radiusDp = 28f, label = "FRAG", color = 0xFFFF7043.toInt())
     private val smokeBtn = VirtualButton(0.38f, 0.92f, radiusDp = 28f, label = "SMK", color = 0xFF9E9E9E.toInt())
     private var lookYaw = 0f
@@ -131,10 +132,19 @@ class OeaArena : OeaGame() {
     private var crouchOn = false
     private var jumpLatch = false
     private var reloadLatch = false
-    /** One-shot grenade throw: 0 frag, 1 smoke, -1 idle. */
+    /** One-shot grenade throw: 0 frag, 1 smoke, 2 stun, -1 idle. */
     private var grenadeLatch = -1
+    /** How long the frag button has been held — past 0.3 s it cooks the fuse. */
+    private var cookTimer = 0f
+    private var cookAmount = 0f
+    private var wasFragHeld = false
+    /** Prone: long-press crouch for 0.5 s. */
+    private var proneOn = false
+    private var crouchHold = 0f
     /** Camera shake from nearby explosions. */
     private var shake = 0f
+    /** Set by the pause menu's reload-all; rides the next command packet. */
+    private var pendingReloadAll = false
     private var slotLatch = -1
     private var pickupLatch = -1
     private val inputNow = PlayerInput()
@@ -415,16 +425,24 @@ class OeaArena : OeaGame() {
             net?.broadcast(EV_OVER) { it.u8(winner?.id ?: 255) }
             endMatch(winner?.id ?: -1, winner?.name)
         }
-        override fun onGrenade(x: Float, y: Float, z: Float, frag: Boolean) {
+        override fun onGrenade(x: Float, y: Float, z: Float, type: Int) {
             ctx.audio.play(sHit, 0.9f, pitch = 0.6f)
-            if (frag) {
-                vfx.sparksAt(x, y, z, 40, dirY = 0.9f, hot = 0xFFFFC27A.toInt())
-                vfx.light(x, y + 0.4f, z, 0xFFFFD9A0.toInt(), 3.2f, 9f)
-                vfx.smokeColumn(x, y + 0.4f, z, 1.2f)
-                val me = local
-                if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 12f) shake = 0.5f else shake = max(shake, 0.12f)
-            } else {
-                vfx.smokeColumn(x, y + 0.4f, z, 2.6f)
+            when (type) {
+                0 -> {
+                    vfx.sparksAt(x, y, z, 40, dirY = 0.9f, hot = 0xFFFFC27A.toInt())
+                    vfx.light(x, y + 0.4f, z, 0xFFFFD9A0.toInt(), 3.2f, 9f)
+                    vfx.smokeColumn(x, y + 0.4f, z, 1.2f)
+                    val me = local
+                    if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 12f) shake = 0.5f else shake = max(shake, 0.12f)
+                }
+                1 -> vfx.smokeColumn(x, y + 0.4f, z, 2.6f)
+                else -> {
+                    // Stun: a white flash and a crackle — no damage, but the legs go heavy.
+                    vfx.sparksAt(x, y, z, 24, dirY = 1.2f, hot = 0xFFFFFFFF.toInt())
+                    vfx.light(x, y + 0.3f, z, 0xFFFFFFFF.toInt(), 2.5f, 5f)
+                    val me = local
+                    if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 6f) shake = max(shake, 0.25f)
+                }
             }
         }
     }
@@ -481,7 +499,7 @@ class OeaArena : OeaGame() {
                 if (inputNow.crouch) 1f else 0f, if (inputNow.jump) 1f else 0f, if (inputNow.ads) 1f else 0f))
             sendCommand(inputNow)
         }
-        jumpLatch = false; reloadLatch = false; slotLatch = -1; pickupLatch = -1; grenadeLatch = -1
+        jumpLatch = false; reloadLatch = false; slotLatch = -1; pickupLatch = -1; grenadeLatch = -1; cookAmount = 0f
     }
 
     private val aim = FloatArray(2)
@@ -514,7 +532,7 @@ class OeaArena : OeaGame() {
             inp.moveX = 0f; inp.moveY = 0f
             inp.fire = false; inp.ads = false; inp.jump = false; inp.crouch = false
             inp.reload = false; inp.slot = -1; inp.heal = false; inp.pickup = -1
-            inp.grenade = false; inp.smoke = false
+            inp.grenade = false; inp.smoke = false; inp.stun = false; inp.cook = 0f; inp.prone = false; inp.reloadAll = false
             if (me != null) aimAngles(me, aim) else { aim[0] = lookYaw; aim[1] = lookPitch }
             inp.yaw = aim[0]
             inp.pitch = aim[1]
@@ -535,6 +553,11 @@ class OeaArena : OeaGame() {
         inp.pickup = pickupLatch
         inp.grenade = grenadeLatch == 0
         inp.smoke = grenadeLatch == 1
+        inp.stun = grenadeLatch == 2
+        inp.cook = cookAmount
+        inp.prone = proneOn
+        inp.reloadAll = pendingReloadAll
+        pendingReloadAll = false
     }
 
     private fun sendCommand(inp: PlayerInput) {
@@ -542,6 +565,7 @@ class OeaArena : OeaGame() {
         val w = ByteWriter(24)
         w.u16(inp.seq).q8(inp.moveX, -1f, 1f).q8(inp.moveY, -1f, 1f).angle(inp.yaw).q16(inp.pitch, -1.3f, 1.3f)
             .u8((if (inp.fire) 1 else 0) or (if (inp.ads) 2 else 0) or (if (inp.jump) 4 else 0) or (if (inp.crouch) 8 else 0) or (if (inp.reload) 16 else 0) or (if (inp.heal) 32 else 0) or (if (inp.grenade) 64 else 0) or (if (inp.smoke) 128 else 0))
+            .u8((if (inp.stun) 1 else 0) or (if (inp.reloadAll) 2 else 0) or (if (inp.prone) 4 else 0))
             .u8(if (inp.slot in 0..1) inp.slot else 255).varint(inp.pickup + 1)
         sentCmds.addLast(w.toByteArray())
         while (sentCmds.size > 3) sentCmds.removeFirst()
@@ -560,12 +584,12 @@ class OeaArena : OeaGame() {
             w.u8(sim.players.size)
             for (p in sim.players.values) {
                 val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or
-                    (if (p.parachute) 16 else 0) or (if (p.healProgress > 0f) 32 else 0)
+                    (if (p.parachute) 16 else 0) or (if (p.healProgress > 0f) 32 else 0) or (if (p.prone) 64 else 0)
                 w.u8(p.id).u8(flags).f32(p.pos.x).f32(p.pos.y).f32(p.pos.z).angle(p.yaw).q16(p.pitch, -1.3f, 1.3f)
                     .u8(p.health.toInt().coerceIn(0, 255)).u8(p.armor).u8(p.helmet)
                     .u8(p.slots[0].ordinal).u8(p.slots[1].ordinal).u8(p.active).u8(p.mags[0]).u8(p.mags[1])
                 p.ammo.forEach { w.u16(it.coerceIn(0, 65535)) }
-                w.u8(p.medkits).u8(p.grenades).u8(p.smokes).u8(p.shots and 0xFF).u8(p.kills).u16(p.lastAck and 0xFFFF)
+                w.u8(p.medkits).u8(p.grenades).u8(p.smokes).u8(p.stuns).u8(p.shots and 0xFF).u8(p.kills).u16(p.lastAck and 0xFFFF)
                     .q8(p.healProgress, 0f, 1f).q8(p.reloadLeft, 0f, 4f)
                 w.u8(p.team).u8(p.gunLevel)
             }
@@ -590,6 +614,8 @@ class OeaArena : OeaGame() {
                         val b = r.u8()
                         inp.fire = b and 1 != 0; inp.ads = b and 2 != 0; inp.jump = b and 4 != 0; inp.crouch = b and 8 != 0; inp.reload = b and 16 != 0; inp.heal = b and 32 != 0
                         inp.grenade = b and 64 != 0; inp.smoke = b and 128 != 0
+                        val b2 = r.u8()
+                        inp.stun = b2 and 1 != 0; inp.reloadAll = b2 and 2 != 0; inp.prone = b2 and 4 != 0
                         inp.slot = r.u8().let { if (it == 255) -1 else it }
                         inp.pickup = r.varint() - 1
                         val newest = q.lastOrNull()?.seq ?: last
@@ -640,7 +666,7 @@ class OeaArena : OeaGame() {
             val health = r.u8(); val armor = r.u8(); val helmet = r.u8()
             val s0 = r.u8(); val s1 = r.u8(); val active = r.u8(); val m0 = r.u8(); val m1 = r.u8()
             val ammo = IntArray(4) { r.u16() }
-            val meds = r.u8(); val grens = r.u8(); val smokes = r.u8(); val shots = r.u8(); val kills = r.u8(); val ack = r.u16()
+            val meds = r.u8(); val grens = r.u8(); val smokes = r.u8(); val stuns = r.u8(); val shots = r.u8(); val kills = r.u8(); val ack = r.u16()
             val heal = r.q8(0f, 1f); val reload = r.q8(0f, 4f)
             val team = r.u8(); val gunLevel = r.u8()
             val a = actors.getOrPut(id) { Actor(id, "Player $id", EngineColors[id % EngineColors.size]) }
@@ -657,7 +683,7 @@ class OeaArena : OeaGame() {
             a.buffer.push(now, floatArrayOf(x, y, z, yaw, pitch))
             if (id == localId) {
                 local?.let { it.team = team; it.gunLevel = gunLevel }
-                reconcile(x, y, z, flags, health, armor, helmet, s0, s1, active, m0, m1, ammo, meds, kills, ack, heal, reload, grens, smokes)
+                reconcile(x, y, z, flags, health, armor, helmet, s0, s1, active, m0, m1, ammo, meds, kills, ack, heal, reload, grens, smokes, stuns)
             }
         }
         sim.teamScore[0] = r.u8(); sim.teamScore[1] = r.u8()
@@ -666,12 +692,13 @@ class OeaArena : OeaGame() {
 
     /** Client: accept the authority's view of our player and replay unacknowledged inputs. */
     private fun reconcile(x: Float, y: Float, z: Float, flags: Int, health: Int, armor: Int, helmet: Int, s0: Int, s1: Int, active: Int,
-                          m0: Int, m1: Int, ammo: IntArray, meds: Int, kills: Int, ack: Int, heal: Float, reload: Float, grens: Int, smokes: Int) {
+                          m0: Int, m1: Int, ammo: IntArray, meds: Int, kills: Int, ack: Int, heal: Float, reload: Float, grens: Int, smokes: Int, stuns: Int) {
         val me = local ?: return
         me.health = health.toFloat(); me.armor = armor; me.helmet = helmet
         me.slots[0] = Weapon.entries[s0]; me.slots[1] = Weapon.entries[s1]; me.active = active; me.mags[0] = m0; me.mags[1] = m1
         ammo.copyInto(me.ammo); me.medkits = meds; me.kills = kills; me.healProgress = heal; me.reloadLeft = reload
-        me.grenades = grens; me.smokes = smokes
+        me.grenades = grens; me.smokes = smokes; me.stuns = stuns
+        me.prone = flags and 64 != 0
         val wasAlive = me.alive
         me.alive = flags and 1 != 0
         me.skydiving = flags and 8 != 0
@@ -842,12 +869,13 @@ class OeaArena : OeaGame() {
         // In the Character Studio the game controls stand down completely so
         // every tap lands on the studio overlay instead of the fire button.
         val controlsPaused = studio.open
-        for (b in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, fragBtn, smokeBtn)) {
+        for (b in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, stunBtn, fragBtn, smokeBtn)) {
             b.enabled = alive
             b.paused = controlsPaused
             b.update(ctx.input, w, h, d, sl, sr)
         }
         // Throwable pack: the buttons carry their own counts.
+        stunBtn.label = if ((me?.stuns ?: 0) > 0) "STUN ${me!!.stuns}" else "—"
         fragBtn.label = if ((me?.grenades ?: 0) > 0) "FRAG ${me!!.grenades}" else "—"
         smokeBtn.label = if ((me?.smokes ?: 0) > 0) "SMK ${me!!.smokes}" else "—"
         joystick.paused = controlsPaused
@@ -896,9 +924,38 @@ class OeaArena : OeaGame() {
         if (reloadBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_R) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_X)) reloadLatch = true
         if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_G) && me?.alive == true && !me.skydiving) grenadeLatch = 0
         if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_H) && me?.alive == true && !me.skydiving) grenadeLatch = 1
+        if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_I) && me?.alive == true && !me.skydiving) grenadeLatch = 2
         if (pickupBtn.justPressed && near != null) pickupLatch = near.id
-        if (fragBtn.justPressed && me?.alive == true && !me.skydiving) grenadeLatch = 0
+        // Frag: a tap throws on the normal fuse; holding cooks the fuse and the
+        // throw fires on release with whatever is left — the pull-pin mechanic.
+        if (fragBtn.pressed) {
+            if (!wasFragHeld) cookTimer = 0f
+            cookTimer += dt
+            if (cookTimer > 0.3f) fragBtn.highlight = true
+        } else {
+            fragBtn.highlight = false
+            if (wasFragHeld && me?.alive == true && !me.skydiving) {
+                grenadeLatch = 0
+                cookAmount = if (cookTimer >= 0.3f) cookTimer else 0f
+            }
+            cookTimer = 0f
+        }
+        wasFragHeld = fragBtn.pressed
         if (smokeBtn.justPressed && me?.alive == true && !me.skydiving) grenadeLatch = 1
+        if (stunBtn.justPressed && me?.alive == true && !me.skydiving) grenadeLatch = 2
+        // Prone: hold crouch for half a second to lie flat; tap to crouch back.
+        if (crouchBtn.justPressed) {
+            if (proneOn) { proneOn = false; crouchOn = true } else crouchOn = !crouchOn
+            crouchHold = 0f
+        }
+        if (crouchBtn.pressed) {
+            crouchHold += dt
+            if (crouchHold >= 0.5f && !proneOn) { proneOn = true; crouchOn = false }
+        } else crouchHold = 0f
+        if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_Z) && me?.alive == true) {
+            proneOn = !proneOn
+            if (proneOn) crouchOn = false
+        }
         if (gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) { slotLatch = 1 - (me?.active ?: 0); if (slotLatch >= 0) switchDip = 0.25f }
         if (me?.weapon == Weapon.PAN) adsOn = false
         if (me != null && me.alive && me.recoil != 0f) {
@@ -1012,7 +1069,11 @@ class OeaArena : OeaGame() {
         val skydive = me?.skydiving == true && me.alive
         val ads = adsOn && me?.alive == true && !skydive
         val zoom = if (ads) me?.weapon?.zoom ?: 1f else 1f
-        val eyeY = py + (if (me?.crouching == true) 1.15f else 1.7f)
+        val eyeY = py + when {
+            me?.prone == true -> 0.8f
+            me?.crouching == true -> 1.15f
+            else -> 1.7f
+        }
         val fx = sin(yaw); val fz = cos(yaw)
         val rx = -fz; val rz = fx
         // ADS blends the whole camera: field of view, offset and stance.
@@ -1125,6 +1186,7 @@ class OeaArena : OeaGame() {
             MenuItem("turn", turnLabel),
             MenuItem("invert", "Invert look · " + if (invertY) "On" else "Off"),
             MenuItem("studio", "Character studio"),
+            MenuItem("pack", "Pack · weapons & throwables"),
             MenuItem("info", "Match & controls"),
             MenuItem("exit", if (net != null) "Leave match" else "Quit match", destructive = true),
         )
@@ -1156,11 +1218,37 @@ class OeaArena : OeaGame() {
                     openPauseMenu()
                 }
                 "studio" -> studio.open = true
+                "pack" -> openPackMenu()
                 "info" -> ctx.ui.menu("Match & controls", modeBlurb(), listOf(MenuItem("back", "Back"))) { openPauseMenu() }
                 "exit" -> {
                     ctx.storage.putInt("xp", xpTotal)
                     ctx.ui.exit(GameResult("Left Send Off", local?.kills?.toLong() ?: 0))
                 }
+            }
+        }
+    }
+
+    /** The pack: the kit as it stands — weapons, ammo, consumables and throwables —
+     *  with a reload-all for the next push. Mirrors the Free Fire bag / PUBG inventory. */
+    private fun openPackMenu() {
+        val me = local ?: return
+        val items = ArrayList<MenuItem>()
+        for (slot in 0..1) {
+            val w = me.slots[slot]
+            val reserve = if (w.ammo >= 0) me.ammo[w.ammo] else 0
+            items += MenuItem("w$slot", (if (slot == me.active) "★ " else "") + w.name + " · mag ${me.mags[slot]} · reserve $reserve")
+        }
+        items += MenuItem("meds", "Medkits · ${me.medkits}")
+        items += MenuItem("frags", "Frag grenades · ${me.grenades}")
+        items += MenuItem("smokes", "Smoke grenades · ${me.smokes}")
+        items += MenuItem("stuns", "Stun grenades · ${me.stuns}")
+        items += MenuItem("reloadall", "Reload all weapons")
+        items += MenuItem("back", "Back")
+        ctx.ui.menu("Send Off · Pack", "Your kit, as it stands", items) { id ->
+            when (id) {
+                "reloadall" -> pendingReloadAll = true
+                "back" -> openPauseMenu()
+                else -> openPackMenu() // refresh — counts change as the match runs
             }
         }
     }
@@ -1233,7 +1321,7 @@ class OeaArena : OeaGame() {
                 val x = if (pr != null) MathX.lerp(pr[0], p.pos.x, alpha) else p.pos.x
                 val y = if (pr != null) MathX.lerp(pr[1], p.pos.y, alpha) else p.pos.y
                 val z = if (pr != null) MathX.lerp(pr[2], p.pos.z, alpha) else p.pos.z
-                val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or (if (p.parachute) 16 else 0)
+                val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or (if (p.parachute) 16 else 0) or (if (p.prone) 64 else 0)
                 drawSoldier(r, x, y, z, if (p.id == localId) lookYaw else p.yaw, p.pitch, p.color, flags, p.weapon, p.armor, p.helmet, p.ctrl.position.dstXZ(tmp.set(pr?.get(0) ?: x, 0f, pr?.get(2) ?: z)) * 0f + walkPhase(p), walkSpeeds[p.id] ?: 0f, team = p.team, id = p.id,
                     fx = if (p.id == localId) myFx else actorFx.getOrPut(p.id) { CharFx() })
             }
@@ -1241,7 +1329,7 @@ class OeaArena : OeaGame() {
             val me = local
             if (me != null && !(me.alive && adsOn && me.weapon.zoom > 2f)) {
                 val (x, y, z) = viewTarget().takeIf { me.alive } ?: Triple(me.pos.x, me.pos.y, me.pos.z)
-                val flags = (if (me.alive) 1 else 0) or (if (crouchOn) 2 else 0) or (if (adsOn) 4 else 0) or (if (me.skydiving) 8 else 0) or (if (me.parachute) 16 else 0)
+                val flags = (if (me.alive) 1 else 0) or (if (crouchOn) 2 else 0) or (if (adsOn) 4 else 0) or (if (me.skydiving) 8 else 0) or (if (me.parachute) 16 else 0) or (if (proneOn) 64 else 0)
                 drawSoldier(r, x, y, z, lookYaw, lookPitch, me.color, flags, me.weapon, me.armor, me.helmet, walkPhase(me), walkSpeeds[me.id] ?: 0f, team = me.team, id = me.id, fx = myFx)
             }
             for (a in actors.values) {
@@ -1366,6 +1454,7 @@ class OeaArena : OeaGame() {
     private fun drawSoldier(r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, pitch: Float, color: Int, flags: Int, weapon: Weapon, armor: Int, helmet: Int, walk: Float, speed01: Float = 0f, team: Int = 0, id: Int = 0, fx: CharFx? = null) {
         val alive = flags and 1 != 0
         val crouch = flags and 2 != 0
+        val prone = flags and 64 != 0
         val sky = flags and 8 != 0
         val chute = flags and 16 != 0
         // Teams wear their colours; free-for-all keeps the player's own.
@@ -1406,7 +1495,9 @@ class OeaArena : OeaGame() {
         // arms raised onto the weapon, run cycle when moving.
         rigPose.phase = walk * 1.15f
         rigPose.speed = if (chute) 0f else speed01
-        rigPose.crouch = crouch
+        // Prone folds into the crouch pose — the rig has no flat-ly pose, so the
+        // body sits lower and smaller: reads as lying down at a glance.
+        rigPose.crouch = crouch || prone
         rigPose.airborne = chute
         rigPose.aimHold = !chute
         rigPose.aimPitch = MathX.clamp(pitch, -0.9f, 0.9f)
@@ -1414,14 +1505,15 @@ class OeaArena : OeaGame() {
         rigPose.headYaw = 0f
         rigPose.detail = true
         val rig = rigFor(kit, id)
+        val bodyY = y - if (prone) 0.2f else 0f
         // Skinned body + armor/headwear/pack meshes, one skeleton for all.
         rig.drawSkinned(
-            r, x, y, z, yaw, rigPose, vscale, fx,
+            r, x, bodyY, z, yaw, rigPose, vscale * (if (prone) 0.92f else 1f), fx,
             vest = armor > 0,
             helmet = helmet > 0 || sim.teams || (rig.spec != null && rig.spec.outfit.headwear.partId != "none"),
             pack = rig.pack != null || (rig.spec != null && rig.spec.outfit.back.partId != "none"),
         )
-        val hip = y + (if (crouch) 0.55f else 0.9f) * vscale
+        val hip = bodyY + (if (prone) 0.42f else if (crouch) 0.55f else 0.9f) * vscale
         val torsoY = hip + 0.36f * vscale
         // Haunted: the undead carry a sick-green glow so they read through the fog.
         if (rules == "haunted" && id != localId && alive) {
@@ -1543,7 +1635,7 @@ class OeaArena : OeaGame() {
         adsBtn.highlight = adsOn; crouchBtn.highlight = crouchOn
         reloadBtn.progress = if (me.reloadLeft > 0f) 1f - me.reloadLeft / me.weapon.reload.coerceAtLeast(0.1f) else -1f
         healBtn.label = "+${me.medkits}"
-        for (btn in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, fragBtn, smokeBtn)) btn.draw(b, hud.fontBold, hud.density)
+        for (btn in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, stunBtn, fragBtn, smokeBtn)) btn.draw(b, hud.fontBold, hud.density)
         // Weapon slots (tap to switch), bottom-right.
         val d = hud.density
         val sw = 112f * d; val sh = 46f * d

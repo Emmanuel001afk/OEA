@@ -62,6 +62,11 @@ private const val TEAM_SCORE_WIN = 40
 
 internal enum class LootKind { WEAPON, AMMO, MEDKIT, ARMOR, HELMET, GRENADE }
 
+/** Grenade types: 0 frag (damage), 1 smoke (cloud), 2 stun (flash + slow). */
+private const val GRENADE_FRAG = 0
+private const val GRENADE_SMOKE = 1
+private const val GRENADE_STUN = 2
+
 internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Float, var y: Float, var z: Float) {
     var taken = false
     val label: String get() = when (kind) {
@@ -70,7 +75,11 @@ internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Floa
         LootKind.MEDKIT -> "Medkit"
         LootKind.ARMOR -> "Vest lv.$value"
         LootKind.HELMET -> "Helmet lv.$value"
-        LootKind.GRENADE -> if (value == 0) "Frag grenade" else "Smoke grenade"
+        LootKind.GRENADE -> when (value) {
+            GRENADE_FRAG -> "Frag grenade"
+            GRENADE_SMOKE -> "Smoke grenade"
+            else -> "Stun grenade"
+        }
     }
 }
 
@@ -82,8 +91,9 @@ internal class Grenade(
     var x: Float, var y: Float, var z: Float,
     var vx: Float, var vy: Float, var vz: Float,
     val type: Int,
+    fuse: Float = 2.4f,
 ) {
-    var fuse = 2.4f
+    var fuse = fuse
     var bounces = 0
     var dead = false
     /** Blinks faster as the fuse burns down — the last half-second screams. */
@@ -108,11 +118,19 @@ internal class PlayerInput {
     /** One-shot throw commands: grenade (bit 6) and smoke (bit 7). */
     var grenade = false
     var smoke = false
+    /** Stun throwable (second flags byte, bit 0). */
+    var stun = false
+    /** One-shot: reload every weapon in the pack (second flags byte, bit 1). */
+    var reloadAll = false
+    /** How long the frag fuse was cooked before the throw (0 = none). */
+    var cook = 0f
+    /** Prone state (long-press crouch). */
+    var prone = false
 
     fun copyFrom(o: PlayerInput) {
         seq = o.seq; moveX = o.moveX; moveY = o.moveY; yaw = o.yaw; pitch = o.pitch; fire = o.fire; ads = o.ads
         jump = o.jump; crouch = o.crouch; reload = o.reload; slot = o.slot; heal = o.heal; pickup = o.pickup
-        grenade = o.grenade; smoke = o.smoke
+        grenade = o.grenade; smoke = o.smoke; stun = o.stun; cook = o.cook; prone = o.prone; reloadAll = o.reloadAll
     }
 }
 
@@ -136,6 +154,12 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     /** Frag grenades (value 0) and smoke grenades (value 1) in the pack. */
     var grenades = 0
     var smokes = 0
+    /** Stun grenades (value 2) in the pack. */
+    var stuns = 0
+    /** Seconds left of stun from a stun grenade — movement crawls, spread opens. */
+    var stunTimer = 0f
+    /** Lying flat: slower than crouch, steadier aim, smaller than crouch. */
+    var prone = false
     var healProgress = 0f
     var cooldown = 0f
     var reloadLeft = 0f
@@ -179,8 +203,8 @@ internal interface ArenaEvents {
     fun onLootSpawned(loot: Loot) {}
     fun onZone(phase: Int, shrinking: Boolean) {}
     fun onMatchOver(winner: ArenaPlayer?) {}
-    /** A grenade went off: frag = true bursts with damage, false is a smoke cloud. */
-    fun onGrenade(x: Float, y: Float, z: Float, frag: Boolean) {}
+    /** A grenade went off: type 0 = frag burst with damage, 1 = smoke cloud, 2 = stun flash. */
+    fun onGrenade(x: Float, y: Float, z: Float, type: Int) {}
 }
 
 /** Safe zone that shrinks in phases, damaging players outside. */
@@ -314,12 +338,14 @@ internal class ArenaSim(
                 r < 0.97f -> LootKind.HELMET
                 else -> LootKind.GRENADE
             }
+            // Throwable mix: frag most common, then smoke, then stun.
+            val grenValue = if (rng.chance(0.6f)) GRENADE_FRAG else if (rng.chance(0.6f)) GRENADE_SMOKE else GRENADE_STUN
             val value = when (kind) {
                 LootKind.WEAPON -> pool[rng.weighted(weights)].ordinal
                 LootKind.AMMO -> rng.nextInt(4)
             LootKind.ARMOR, LootKind.HELMET -> 1 + rng.weighted(floatArrayOf(1f, 0.5f, 0.18f))
-            LootKind.MEDKIT -> 1
-            LootKind.GRENADE -> if (rng.chance(0.6f)) 0 else 1
+                LootKind.MEDKIT -> 1
+                LootKind.GRENADE -> grenValue
             }
             loot += Loot(lootIds++, kind, value, s[0] + rng.range(-0.6f, 0.6f), s[1], s[2] + rng.range(-0.6f, 0.6f))
             if (kind == LootKind.WEAPON) {
@@ -419,6 +445,7 @@ internal class ArenaSim(
         time += dt
         for (p in players.values) {
             if (p.spawnGuard > 0f) p.spawnGuard -= dt
+            if (p.stunTimer > 0f) p.stunTimer -= dt
             if (!p.alive) {
                 if (respawnMode && p.respawnAt > 0f && time >= p.respawnAt) respawn(p)
                 continue
@@ -494,19 +521,27 @@ internal class ArenaSim(
             }
             return false
         }
-        p.crouching = inp.crouch
+        p.crouching = inp.crouch && !inp.prone
+        p.prone = inp.prone
         p.aiming = inp.ads && p.weapon != Weapon.PAN
-        val sprint = my > 0.92f && !p.aiming && !p.crouching && !inp.fire
+        val sprint = my > 0.92f && !p.aiming && !p.crouching && !p.prone && !inp.fire
         // Heavier guns slow you down whether hip-firing, sprinting or aiming;
         // the held weapon is part of the movement balance, not only an ADS penalty.
         val weight = p.weapon.moveSpeed
+        // A stun grenade's flash crawls the legs; prone is the slowest, steadiest stance.
         val speed = when {
+            p.stunTimer > 0f -> (if (p.crouching) 2.6f else 5.4f) * weight * 0.45f
+            p.prone -> 1.8f * weight
             p.crouching -> 2.6f * weight
             p.aiming -> 3.4f * weight
             sprint -> 7.0f * weight
             else -> 5.4f * weight
         }
-        p.ctrl.height = if (p.crouching) 1.2f else 1.8f
+        p.ctrl.height = when {
+            p.prone -> 0.65f
+            p.crouching -> 1.2f
+            else -> 1.8f
+        }
         // Vault assist: jumping while pressed against an obstacle (a low wall,
         // a crate, a window sill) gives extra lift so the jump actually clears
         // it instead of bouncing off — this is what makes windows and ledges
@@ -546,9 +581,11 @@ internal class ArenaSim(
             p.reloadLeft = w.reload
         }
         val moving = len > 0.2f
-        val target = (if (p.aiming) w.spreadAds else w.spreadHip) * (if (moving) 1.6f else 1f) * (if (!p.ctrl.grounded) 2.2f else 1f) * (if (p.crouching) 0.7f else 1f)
+        // Prone is the steadiest stance; a stun opens the spread right up.
+        val stance = if (p.prone) 0.55f else if (p.crouching) 0.7f else 1f
+        val target = (if (p.aiming) w.spreadAds else w.spreadHip) * (if (moving) 1.6f else 1f) * (if (!p.ctrl.grounded) 2.2f else 1f) * stance * (if (p.stunTimer > 0f) 1.8f else 1f)
         p.spread = MathX.damp(p.spread, target, 8f, dt)
-        if (inp.fire && p.cooldown <= 0f && p.reloadLeft <= 0f && p.switchLeft <= 0f) {
+        if (inp.fire && p.cooldown <= 0f && p.reloadLeft <= 0f && p.switchLeft <= 0f && p.stunTimer <= 0f) {
             if (w == Weapon.PAN || p.mags[p.active] > 0) fire(p)
             if (!w.auto) inp.fire = false
         }
@@ -560,9 +597,23 @@ internal class ArenaSim(
         // Pick-ups.
         autoPickup(p)
         if (inp.pickup >= 0) { pickup(p, inp.pickup); inp.pickup = -1 }
-        // One-shot throws: frag or smoke, gated by what's left in the pack.
-        if (inp.grenade) { throwGrenade(p, 0); inp.grenade = false }
-        if (inp.smoke) { throwGrenade(p, 1); inp.smoke = false }
+        // One-shot throws: frag (with its cook time), smoke, or stun.
+        if (inp.grenade) { throwGrenade(p, GRENADE_FRAG, inp.cook); inp.grenade = false; inp.cook = 0f }
+        if (inp.smoke) { throwGrenade(p, GRENADE_SMOKE); inp.smoke = false }
+        if (inp.stun) { throwGrenade(p, GRENADE_STUN); inp.stun = false }
+        if (inp.reloadAll) { reloadAll(p); inp.reloadAll = false }
+    }
+
+    /** Reload-all: top up every weapon in the pack from the reserves, instantly. */
+    fun reloadAll(p: ArenaPlayer) {
+        for (slot in 0..1) {
+            val w = p.slots[slot]
+            if (w == Weapon.PAN || w.ammo < 0) continue
+            val need = w.mag - p.mags[slot]
+            if (need <= 0) continue
+            val take = min(need, p.ammo[w.ammo])
+            p.mags[slot] += take; p.ammo[w.ammo] -= take
+        }
     }
 
     private fun fire(p: ArenaPlayer) {
@@ -715,7 +766,11 @@ internal class ArenaSim(
             LootKind.MEDKIT -> p.medkits++
             LootKind.ARMOR -> p.armor = l.value
             LootKind.HELMET -> p.helmet = l.value
-            LootKind.GRENADE -> if (l.value == 0) p.grenades++ else p.smokes++
+            LootKind.GRENADE -> when (l.value) {
+                GRENADE_FRAG -> p.grenades++
+                GRENADE_SMOKE -> p.smokes++
+                else -> p.stuns++
+            }
             LootKind.WEAPON -> {
                 val slot = if (p.slots[0] == Weapon.PAN) 0 else 1
                 p.slots[slot] = Weapon.entries[l.value]
@@ -738,21 +793,35 @@ internal class ArenaSim(
         return best
     }
 
-    /** Throws one grenade of the given type (0 frag, 1 smoke) along the aim. */
-    fun throwGrenade(p: ArenaPlayer, type: Int) {
-        if (type == 0) { if (p.grenades <= 0) return; p.grenades-- } else { if (p.smokes <= 0) return; p.smokes-- }
+    /** Throws one grenade of the given type (0 frag, 1 smoke, 2 stun) along the aim.
+     *  `cook` shortens the fuse (hold-to-cook): the longer held, the sooner it goes off. */
+    fun throwGrenade(p: ArenaPlayer, type: Int, cook: Float = 0f) {
+        if (type == GRENADE_FRAG) { if (p.grenades <= 0) return; p.grenades-- }
+        else if (type == GRENADE_SMOKE) { if (p.smokes <= 0) return; p.smokes-- }
+        else { if (p.stuns <= 0) return; p.stuns-- }
         val cp = cos(p.pitch)
         val dx = sin(p.yaw) * cp; val dy = sin(p.pitch); val dz = cos(p.yaw) * cp
         val power = 9.5f
-        grenades += Grenade(p.pos.x, p.pos.y + 1.35f, p.pos.z, dx * power, dy * power + 4.2f, dz * power, type)
+        grenades += Grenade(p.pos.x, p.pos.y + 1.35f, p.pos.z, dx * power, dy * power + 4.2f, dz * power, type, fuse = max(0.7f, 2.4f - cook * 1.6f))
     }
 
-    /** Frag: a 4.6 m damage radius. Smoke: a cloud, no damage. */
+    /** Frag: a 4.6 m damage radius. Smoke: a cloud. Stun: a flash that slows everyone in range. */
     private fun explode(g: Grenade) {
         g.dead = true
-        if (g.type == 1) {
+        if (g.type == GRENADE_STUN) {
+            events?.onGrenade(g.x, g.y, g.z, GRENADE_STUN)
+            val r = 3.2f
+            for (p in players.values) {
+                if (!p.alive) continue
+                val dx = p.pos.x - g.x; val dz = p.pos.z - g.z; val dy = p.pos.y + 1.0f - g.y
+                val d = sqrt(dx * dx + dy * dy + dz * dz)
+                if (d < r) p.stunTimer = max(p.stunTimer, 3f)
+            }
+            return
+        }
+        if (g.type == GRENADE_SMOKE) {
             smokes += floatArrayOf(g.x, g.y, g.z, 10f)
-            events?.onGrenade(g.x, g.y, g.z, false)
+            events?.onGrenade(g.x, g.y, g.z, GRENADE_SMOKE)
             return
         }
         val r = 4.6f
@@ -765,7 +834,7 @@ internal class ArenaSim(
                 damage(p, null, 80f * falloff * falloff, Weapon.PAN, false, true, cause = -2)
             }
         }
-        events?.onGrenade(g.x, g.y, g.z, true)
+        events?.onGrenade(g.x, g.y, g.z, GRENADE_FRAG)
     }
 
     fun lineOfSight(a: ArenaPlayer, b: ArenaPlayer): Boolean =
