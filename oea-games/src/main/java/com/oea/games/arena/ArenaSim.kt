@@ -22,16 +22,18 @@ internal enum class Weapon(
     val spreadHip: Float, val spreadAds: Float, val range: Float, val pellets: Int, val auto: Boolean, val ammo: Int, val zoom: Float, val recoil: Float,
     /** Movement multiplier while this weapon is held/aimed (heavy guns slow you down). */
     val moveSpeed: Float = 1f,
+    /** Clash Squad shop price. */
+    val price: Int = 0,
 ) {
-    PAN("Pan", "◍", 45f, 1.4f, 90f, 0, 0f, 0f, 0f, 2.2f, 1, false, -1, 1f, 0f),
-    PISTOL("Pistol", "P", 26f, 1.8f, 380f, 12, 1.4f, 0.035f, 0.012f, 60f, 1, false, 0, 1.25f, 0.02f),
-    SMG("SMG", "S", 17f, 1.6f, 820f, 30, 1.9f, 0.06f, 0.03f, 45f, 1, true, 0, 1.3f, 0.012f),
-    RIFLE("Assault rifle", "A", 30f, 1.9f, 600f, 30, 2.3f, 0.045f, 0.012f, 110f, 1, true, 1, 1.6f, 0.018f),
-    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f, 0.96f),
-    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f),
-    REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f),
-    MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f),
-    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f);
+    PAN("Pan", "◍", 45f, 1.4f, 90f, 0, 0f, 0f, 0f, 2.2f, 1, false, -1, 1f, 0f, price = 100),
+    PISTOL("Pistol", "P", 26f, 1.8f, 380f, 12, 1.4f, 0.035f, 0.012f, 60f, 1, false, 0, 1.25f, 0.02f, price = 500),
+    SMG("SMG", "S", 17f, 1.6f, 820f, 30, 1.9f, 0.06f, 0.03f, 45f, 1, true, 0, 1.3f, 0.012f, price = 800),
+    RIFLE("Assault rifle", "A", 30f, 1.9f, 600f, 30, 2.3f, 0.045f, 0.012f, 110f, 1, true, 1, 1.6f, 0.018f, price = 1200),
+    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f, 0.96f, price = 900),
+    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f, price = 1600),
+    REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f, price = 1000),
+    MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f, price = 1300),
+    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500);
 
     val interval get() = 60f / rpm
 
@@ -66,6 +68,13 @@ internal enum class LootKind { WEAPON, AMMO, MEDKIT, ARMOR, HELMET, GRENADE }
 private const val GRENADE_FRAG = 0
 private const val GRENADE_SMOKE = 1
 private const val GRENADE_STUN = 2
+/** Clash Squad shop prices. */
+internal const val SHOP_MEDKIT = 300
+internal const val SHOP_FRAG = 400
+internal const val SHOP_SMOKE = 500
+internal const val SHOP_STUN = 450
+internal const val SHOP_VEST = 600
+internal const val SHOP_HELMET = 500
 
 internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Float, var y: Float, var z: Float) {
     var taken = false
@@ -127,10 +136,26 @@ internal class PlayerInput {
     /** Prone state (long-press crouch). */
     var prone = false
 
+    /** One-shot: deploy the next round (the host starts it). */
+    var deployRound = false
+    /** One-shot: the client left the round-over screen — the host opens the shop. */
+    var advancePrep = false
+    /** Clash Squad shop purchases — applied by the host during the prep phase. */
+    var buySlot = -1
+    var buyMedkits = 0
+    var buyFrags = 0
+    var buySmokes = 0
+    var buyStuns = 0
+    var buyVest = 0
+    var buyHelmet = 0
+
     fun copyFrom(o: PlayerInput) {
         seq = o.seq; moveX = o.moveX; moveY = o.moveY; yaw = o.yaw; pitch = o.pitch; fire = o.fire; ads = o.ads
         jump = o.jump; crouch = o.crouch; reload = o.reload; slot = o.slot; heal = o.heal; pickup = o.pickup
         grenade = o.grenade; smoke = o.smoke; stun = o.stun; cook = o.cook; prone = o.prone; reloadAll = o.reloadAll
+        deployRound = o.deployRound; advancePrep = o.advancePrep
+        buySlot = o.buySlot; buyMedkits = o.buyMedkits; buyFrags = o.buyFrags; buySmokes = o.buySmokes
+        buyStuns = o.buyStuns; buyVest = o.buyVest; buyHelmet = o.buyHelmet
     }
 }
 
@@ -156,6 +181,8 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     var smokes = 0
     /** Stun grenades (value 2) in the pack. */
     var stuns = 0
+    /** Clash Squad money: earned by kills and round results, spent in the shop. */
+    var cash = 0
     /** Seconds left of stun from a stun grenade — movement crawls, spread opens. */
     var stunTimer = 0f
     /** Lying flat: slower than crouch, steadier aim, smaller than crouch. */
@@ -205,6 +232,12 @@ internal interface ArenaEvents {
     fun onMatchOver(winner: ArenaPlayer?) {}
     /** A grenade went off: type 0 = frag burst with damage, 1 = smoke cloud, 2 = stun flash. */
     fun onGrenade(x: Float, y: Float, z: Float, type: Int) {}
+    /** A round started (round modes only). */
+    fun onRoundStart(round: Int) {}
+    /** A round ended: winTeam took it (round modes only). */
+    fun onRoundOver(winTeam: Int, round: Int) {}
+    /** Warfare: a capture point flipped to `team`. */
+    fun onPointCaptured(x: Float, z: Float, team: Int) {}
 }
 
 /** Safe zone that shrinks in phases, damaging players outside. */
@@ -288,10 +321,34 @@ internal class ArenaSim(
         private set
     /** Team scores for [rules] == "tdm" (index 0/1). */
     val teamScore = IntArray(2)
-    val teams = rules == "tdm"
+    /** Warfare: capture events per team (first to [WARFARE_WIN] takes the match). */
+    val captures = IntArray(2)
+    private const val WARFARE_WIN = 5
+    val teams = rules == "tdm" || rules == "cs" || rules == "warfare" || rules == "wolf"
     val gunGame = rules == "gun"
-    val respawnMode = teams || gunGame
+    /** Respawn after death — except the round-based duels, which respawn at round start. */
+    val respawnMode = rules == "tdm" || rules == "gun" || rules == "warfare" || rules == "br_res"
     val survival = rules == "last_day" || rules == "lights_out" || rules == "haunted"
+    /** Round-based modes (Clash Squad, Lone Wolf): best-of-N, shop/pick between rounds. */
+    val roundMode = rules == "cs" || rules == "wolf"
+    /** Delta Force-style objective warfare: respawn with kit, capture the points. */
+    val warfare = rules == "warfare"
+    /** CoD-style royale: the zone closes, but you come back. */
+    val resurgence = rules == "br_res"
+    var round = 1
+    /** 0 combat · 1 round over · 2 shop/pick prep (round modes only). */
+    var roundPhase = 0
+    val roundsWon = IntArray(2)
+    /** First to this many round wins takes the match (4 = best of 7, 3 = best of 5). */
+    val roundsToWin = if (rules == "wolf") 3 else 4
+    /** Warfare capture points: three objectives spread across the map. */
+    val points = ArrayList<CapturePoint>(3)
+
+    /** A warfare objective: who holds it, and how full the capture bar is. */
+    class CapturePoint(val x: Float, val z: Float, val r: Float = 4.5f) {
+        var owner = -1
+        var progress = 0f
+    }
     private var lootIds = 0
     private val rng = Rng(seed xor 0xA4E7A)
     private val hit = RayHit()
@@ -319,10 +376,22 @@ internal class ArenaSim(
     }
 
     init {
-        if (respawnMode || survival) zone.enabled = false
+        if (respawnMode || survival || roundMode || warfare) zone.enabled = false
         // TDM and Gun Game are clean competitive arenas: they start with a
         // deliberate kit and never turn the score race into a loot sweep.
         if (!gunGame && !teams) spawnLoot()
+        if (warfare) {
+            // Three objectives: prefer real towns; fall back to a triangle around the center.
+            val towns = map.towns
+            if (towns.size >= 3) {
+                points += CapturePoint(towns[0][0], towns[0][1])
+                points += CapturePoint(towns[towns.size / 2][0], towns[towns.size / 2][1])
+                points += CapturePoint(towns.last()[0], towns.last()[1])
+            } else {
+                val c = ArenaMap.SIZE * 0.5f; val o = ArenaMap.SIZE * 0.3f
+                points += CapturePoint(c - o, c - o); points += CapturePoint(c + o, c - o); points += CapturePoint(c, c + o)
+            }
+        }
     }
 
     private fun spawnLoot() {
@@ -358,15 +427,19 @@ internal class ArenaSim(
     fun addPlayer(id: Int, name: String, color: Int, bot: Boolean): ArenaPlayer {
         val p = ArenaPlayer(id, name, color, bot)
         if (teams) p.team = players.size % 2
-        if (respawnMode) {
-            // TDM and Gun Game are competitive arenas, not a second battle
-            // royale: spawn on a town with a complete kit and protection.
+        // TDM / Gun Game / Warfare / round modes are competitive arenas: spawn
+        // on a town with a kit. Resurgence keeps the royale skydive but comes back.
+        val competitive = (respawnMode && !resurgence) || roundMode || warfare
+        if (competitive) {
             val s = spawnSpot(p)
             p.ctrl.teleport(s[0], s[1], s[2])
             p.skydiving = false
             p.parachute = false
             p.spawnGuard = 3f
-            if (gunGame) equipGunGameLoadout(p) else equipTeamLoadout(p)
+            if (roundMode) p.cash = 1000
+            if (gunGame) equipGunGameLoadout(p)
+            else if (roundMode) equipRoundKit(p)
+            else equipTeamLoadout(p)
         } else {
             // Battle Royale and survival modes begin with the readable skydive
             // drop; the player earns the loadout from the island.
@@ -419,7 +492,106 @@ internal class ArenaSim(
         p.grenades = 1
     }
 
+    /** Round-mode starting kit: a pistol, two medkits, a frag and a smoke —
+     *  the shop refines it before every round. */
+    private fun equipRoundKit(p: ArenaPlayer) {
+        p.ammo.fill(0)
+        p.mags.fill(0)
+        p.slots[0] = Weapon.PISTOL
+        p.slots[1] = Weapon.PAN
+        p.mags[0] = Weapon.PISTOL.mag
+        p.active = 0
+        p.ammo[0] = 60
+        p.medkits = 2
+        p.grenades = 1
+        p.smokes = 1
+        p.armor = 1
+        p.helmet = 1
+    }
+
+    /** Start (or restart) a round: everyone respawns at their team's area, kit applied. */
+    fun startRound() {
+        roundPhase = 0
+        for (p in players.values) {
+            p.alive = true
+            p.health = 100f
+            p.healProgress = 0f
+            p.reloadLeft = 0f
+            p.stunTimer = 0f
+            p.skydiving = false
+            p.parachute = false
+            p.cooldown = 0f
+            p.switchLeft = 0f
+            p.spread = 0f
+            p.recoil = 0f
+            val s = spawnSpot(p)
+            p.ctrl.teleport(s[0], s[1], s[2])
+            p.ctrl.velocity.setZero()
+        }
+        if (roundMode) events?.onRoundStart(round)
+    }
+
+    /** Clash Squad shop: spend the player's cash on weapons and consumables. */
+    private fun applyBuys(p: ArenaPlayer, inp: PlayerInput) {
+        if (inp.buySlot >= 0) {
+            val w = Weapon.entries.getOrNull(inp.buySlot)
+            // Wolf picks are free (the duel is about the gun, not the budget).
+            if (w != null && w != Weapon.PAN && (w.price <= p.cash || rules == "wolf")) {
+                p.cash -= w.price
+                p.slots[0] = w
+                p.mags[0] = w.mag
+                p.active = 0
+                p.ammo.fill(0)
+                if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 3
+            }
+            inp.buySlot = -1
+        }
+        if (inp.buyMedkits > 0 && p.cash >= SHOP_MEDKIT) { p.medkits += inp.buyMedkits; p.cash -= SHOP_MEDKIT * inp.buyMedkits; inp.buyMedkits = 0 }
+        if (inp.buyFrags > 0 && p.cash >= SHOP_FRAG) { p.grenades += inp.buyFrags; p.cash -= SHOP_FRAG * inp.buyFrags; inp.buyFrags = 0 }
+        if (inp.buySmokes > 0 && p.cash >= SHOP_SMOKE) { p.smokes += inp.buySmokes; p.cash -= SHOP_SMOKE * inp.buySmokes; inp.buySmokes = 0 }
+        if (inp.buyStuns > 0 && p.cash >= SHOP_STUN) { p.stuns += inp.buyStuns; p.cash -= SHOP_STUN * inp.buyStuns; inp.buyStuns = 0 }
+        if (inp.buyVest > 0 && p.armor < 3 && p.cash >= SHOP_VEST) { p.armor++; p.cash -= SHOP_VEST; inp.buyVest = 0 }
+        if (inp.buyHelmet > 0 && p.helmet < 3 && p.cash >= SHOP_HELMET) { p.helmet++; p.cash -= SHOP_HELMET; inp.buyHelmet = 0 }
+    }
+
+    /** The bots' shop run: a gun the budget allows, then support items — once per prep. */
+    private fun botBuy(p: ArenaPlayer) {
+        if (p.slots[0] != Weapon.PISTOL) return // already shopped this prep
+        val pool = Weapon.lootPool(loadout)
+        val affordable = pool.filter { it.price <= p.cash }
+        val w = affordable.let { if (it.isEmpty()) return else it[rng.nextInt(it.size)] }
+        p.cash -= w.price
+        p.slots[0] = w
+        p.mags[0] = w.mag
+        p.ammo.fill(0)
+        if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 3
+        if (p.cash > 500) { p.medkits++; p.cash -= SHOP_MEDKIT }
+        if (p.cash > 700) { p.grenades++; p.cash -= SHOP_FRAG }
+        if (p.cash > 900) { p.smokes++; p.cash -= SHOP_SMOKE }
+        p.armor = min(3, p.armor + 1)
+        p.helmet = min(3, p.helmet + 1)
+    }
+
     private fun respawn(p: ArenaPlayer) {
+        if (resurgence) {
+            // Royale resurgence: the kit survives the death; only position and health change.
+            val s = spawnSpot(p)
+            p.ctrl.teleport(s[0], s[1], s[2])
+            p.ctrl.velocity.setZero()
+            p.health = 100f
+            p.alive = true
+            p.skydiving = false
+            p.parachute = false
+            p.healProgress = 0f
+            p.reloadLeft = 0f
+            p.cooldown = 0f
+            p.switchLeft = 0f
+            p.respawnAt = 0f
+            p.spawnGuard = 3f
+            p.spread = 0f
+            p.recoil = 0f
+            return
+        }
         val s = spawnSpot(p)
         p.ctrl.teleport(s[0], s[1], s[2])
         p.ctrl.velocity.setZero()
@@ -450,9 +622,10 @@ internal class ArenaSim(
                 if (respawnMode && p.respawnAt > 0f && time >= p.respawnAt) respawn(p)
                 continue
             }
-            p.bot?.think(this, dt)
+            if (roundPhase == 2 && p.isBot) { botBuy(p); continue }
+            if (roundPhase == 0) p.bot?.think(this, dt)
             applyInput(p, dt)
-            p.history.record((time * 1000f).toLong(), p.pos.x, p.pos.y, p.pos.z)
+            if (roundPhase == 0) p.history.record((time * 1000f).toLong(), p.pos.x, p.pos.y, p.pos.z)
         }
         if (zone.enabled && zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
         if (zone.enabled) for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, true)
@@ -475,13 +648,65 @@ internal class ArenaSim(
         // Smoke clouds linger for a while — they hide whoever stands in them.
         for (s in smokes) s[3] -= dt
         smokes.removeAll { it[3] <= 0f }
+        // Round modes: a wiped team ends the round; cash settles and the shop follows.
+        if (roundMode && !over && roundPhase == 0) {
+            val t0 = players.values.count { it.alive && it.team == 0 }
+            val t1 = players.values.count { it.alive && it.team == 1 }
+            if (t0 == 0 || t1 == 0) {
+                val winTeam = if (t0 == 0) 1 else 0
+                roundsWon[winTeam]++
+                roundPhase = 1
+                round++
+                events?.onRoundOver(winTeam, round)
+                for (p in players.values) p.cash += if (p.team == winTeam) 300 else 100
+                if (roundsWon[winTeam] >= roundsToWin || round > 7) {
+                    over = true
+                    val w = players.values.maxByOrNull { it.kills + (if (it.team == winTeam) 1000 else 0) } ?: players.values.first()
+                    w.place = 1
+                    winner = w
+                    events?.onMatchOver(w)
+                }
+            }
+        }
+        // Warfare: standing on an objective fills the capture bar for your team.
+        if (warfare && !over) {
+            for (pt in points) {
+                var attackers = 0; var attackTeam = -1; var holders = 0
+                for (p in players.values) {
+                    if (!p.alive) continue
+                    val dx = p.pos.x - pt.x; val dz = p.pos.z - pt.z
+                    if (dx * dx + dz * dz < pt.r * pt.r) {
+                        if (pt.owner == p.team) holders++
+                        else { attackers++; attackTeam = p.team }
+                    }
+                }
+                if (attackers > 0 && attackers >= holders) {
+                    pt.progress = min(1f, pt.progress + dt * 0.9f)
+                    if (pt.progress >= 1f) {
+                        pt.owner = attackTeam
+                        pt.progress = 0f
+                        captures[attackTeam]++
+                        events?.onPointCaptured(pt.x, pt.z, attackTeam)
+                        if (captures[attackTeam] >= WARFARE_WIN) {
+                            over = true
+                            val w = players.values.maxByOrNull { it.kills + (if (it.team == attackTeam) 1000 else 0) } ?: players.values.first()
+                            w.place = 1
+                            winner = w
+                            events?.onMatchOver(w)
+                        }
+                    }
+                } else if (holders > 0) {
+                    pt.progress = max(0f, pt.progress - dt * 0.5f)
+                }
+            }
+        }
         if (!over && teams && (teamScore[0] >= TEAM_SCORE_WIN || teamScore[1] >= TEAM_SCORE_WIN)) {
             over = true
             val winning = if (teamScore[0] >= teamScore[1]) 0 else 1
             winner = players.values.filter { it.team == winning }.maxByOrNull { it.kills }
             winner?.place = 1
             events?.onMatchOver(winner)
-        } else if (!over && !respawnMode && players.size > 1 && aliveCount <= 1) {
+        } else if (!over && !respawnMode && !roundMode && players.size > 1 && aliveCount <= 1) {
             over = true
             winner = players.values.firstOrNull { it.alive }
             winner?.place = 1
@@ -554,6 +779,17 @@ internal class ArenaSim(
 
     private fun applyInput(p: ArenaPlayer, dt: Float) {
         val inp = p.input
+        // Prep / round-over (round modes): only shop purchases and the deploy command matter.
+        if (roundPhase != 0) {
+            if (roundPhase == 2) {
+                applyBuys(p, inp)
+                if (inp.deployRound) { startRound(); inp.deployRound = false }
+            } else if (inp.advancePrep) {
+                roundPhase = 2
+                inp.advancePrep = false
+            }
+            return
+        }
         if (!move(p, inp, dt)) return
         val len = sqrt(inp.moveX * inp.moveX + inp.moveY * inp.moveY)
         // Weapons.
@@ -685,7 +921,7 @@ internal class ArenaSim(
             v.alive = false
             v.deaths++
             v.killedBy = from?.id ?: cause
-            from?.let { it.kills++ }
+            from?.let { it.kills++; if (roundMode || warfare) it.cash += 150 }
             if (teams && from != null && from.team != v.team) teamScore[from.team]++
             if (gunGame) {
                 if (from != null) {
@@ -704,6 +940,11 @@ internal class ArenaSim(
             } else if (teams) {
                 v.place = 0
                 v.respawnAt = time + 4f
+            } else if (resurgence) {
+                v.place = aliveCount + 1
+                dropLoot(v)
+                // CoD-style royale: a 20-second comeback window, then you're back on a town.
+                v.respawnAt = time + 20f
             } else {
                 v.place = aliveCount + 1
                 dropLoot(v)
