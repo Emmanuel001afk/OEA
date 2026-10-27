@@ -24,6 +24,7 @@ Call of Duty / Free Fire battle royales — and what was built in Send Off from 
 | **Clash Squad** (`cs`) | Free Fire CS | 4v4, best-of-7, first to 4 rounds; buy shop between rounds (cash from kills + round results); deploy starts each round |
 | **Lone Wolf** (`wolf`) | Free Fire Lone Wolf | 1v1, best-of-5; weapon pick every 2 rounds; pistol kit + medkits/grenades |
 | **Warfare** (`warfare`) | Delta Force Warfare | 6v6 objective play: three capture points, first to 5 captures; respawn with kit; points render as rings + beams and show on the minimap |
+| **King of the Hill** (`warfare_koth`) | Delta Force Warfare (KoTH) | 6v6, one hill on a town: the owning team scores while holding it uncontested (1.2 pts/s, first to 200); the capture bar still flips the hill when contested; respawn with kit; vehicles spawn like warfare |
 | **Resurgence Royale** (`br_res`) | CoD Resurgence | The royale zone closes, but death is a 20-second comeback with the loadout intact; last one standing wins |
 
 Retained: Battle Royale, Team Deathmatch, Gun Game, Last Day / Lights Out / Haunted.
@@ -49,10 +50,14 @@ Delta Force's M1A4 / LAV-G1 family and Farlight 84's vehicle system informed thi
 | Jeep | fast transport | 180 | rams enemies at speed, no weapon |
 | Tank (M1A4-style) | breakthrough | 420 | 105 mm splash cannon (4.5 m blast), slow |
 | Mobile turret | missile support | 240 | fires lock-on homing missiles, nearly stationary |
+| Helo | air transport / ram | 200 | stick climbs/dives, always flies forward, terrain clearance 2 m, ceiling 55 m; can't be boarded while airborne; rams only near the ground |
 
 - Mount with **E** / the MOUNT touch button when standing next to an empty vehicle;
   press again to dismount. The driver's stick steers (moveX) and throttles (moveY).
+  The helo reinterprets the stick: up climbs, down dives, and the craft always
+  flies forward — altitude is the stick, direction is the yaw.
 - Bullets damage vehicles; warheads (rockets, missiles, frags) hit them hardest.
+  A high-flying helo is immune to ground fire by altitude alone.
 - A destroyed vehicle kills its crew and explodes into a 5 m blast; warfare
   vehicles respawn at their spawn point after 12 s.
 
@@ -97,7 +102,8 @@ vehicle state for LAN play.
 
 ## 8. Deferred
 
-- Delta Force's air vehicles (helos/jets) and boats — the vehicle system is ground-only.
-- Attack & Defend tickets / King of the Hill variants (warfare covers the objective feel).
+- Jets and boats — the helo landed (air wing in warfare); boats need water
+  physics the vehicle system doesn't have.
+- Attack & Defend tickets (King of the Hill landed as `warfare_koth` — see the mode table).
 - Blood Strike's separate ranked ladders — ranking systems are out of scope.
 - Extraction (Hazard Operations) — a different game shape, not a mode variant.

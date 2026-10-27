@@ -267,6 +267,25 @@ class OeaArena : OeaGame() {
         mb.withTransform(Mat4().setTRS(0f, 1.9f, 0f)) { mb.box(0f, 0f, 0f, 0.3f, 0.18f, 0.4f) }
         mb.build()
     }
+    private val heloMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.6f, 0f, 4.4f, 1.0f, 1.7f)          // fuselage
+        mb.box(0f, 0.5f, -2.3f, 1.0f, 0.5f, 0.5f)        // tail boom
+        mb.box(0f, 0.85f, -2.3f, 1.7f, 0.14f, 0.24f)     // tail fin
+        mb.box(0f, 1.05f, -0.6f, 0.8f, 0.1f, 0.5f)       // tail rotor hub
+        mb.box(0f, 0.22f, 0.85f, 4.4f, 0.14f, 0.24f)     // skids
+        for (wx in floatArrayOf(-0.85f, 0.85f)) {
+            mb.withTransform(Mat4().setTRS(wx, 0.6f, 0.85f)) { mb.cylinder(0f, 0f, 0f, 0.07f, 0.45f, 6) }
+        }
+        mb.build()
+    }
+    /** Spinning main rotor — drawn separately so it can spin about Y. */
+    private val heloRotorMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0f, 0f, 6.0f, 0.09f, 0.3f)
+        mb.box(0f, 0f, 0f, 0.3f, 0.09f, 6.0f)
+        mb.build()
+    }
     private val vehicleMat: Material by lazy { Material(color = 0xFF8D6E4F.toInt(), specular = 0.5f) }
     private val vehicleMatTank: Material by lazy { Material(color = 0xFF5D4A3A.toInt(), specular = 0.5f) }
     private val pointMatFree = Material(color = 0xFF8A9BB5.toInt(), emissive = 0xFF8A9BB5.toInt(), emissiveStrength = 0.7f, unlit = true, transparent = true, additive = true, depthWrite = false, fog = false)
@@ -360,7 +379,7 @@ class OeaArena : OeaGame() {
             // Day turns to night while wave after wave lands on the island.
             "last_day" -> { env.copyFrom(envDay); sim.zone.enabled = false }
             // Competitive daylight: crisper air, quicker reads.
-            "tdm", "gun", "cs", "wolf", "warfare" -> { env.copyFrom(envDay); env.fogDensity = 0.0034f }
+            "tdm", "gun", "cs", "wolf", "warfare", "warfare_koth" -> { env.copyFrom(envDay); env.fogDensity = 0.0034f }
             else -> env.copyFrom(envDay)
         }
         if (rules == "last_day" || rules == "haunted" || rules == "lights_out") {
@@ -392,7 +411,7 @@ class OeaArena : OeaGame() {
                 // Clash Squad is a 4v4 squad; Lone Wolf a 1v1 duel; Warfare a 6v6.
                 "cs" -> (8 - humanCount).coerceAtLeast(0)
                 "wolf" -> (2 - humanCount).coerceAtLeast(0)
-                "warfare" -> (12 - humanCount).coerceAtLeast(0)
+                "warfare", "warfare_koth" -> (12 - humanCount).coerceAtLeast(0)
                 else -> 0
             }
             repeat(max(configuredBots, minimumBots)) { i -> sim.addPlayer(sim.allocBotId(), BOT_NAMES[i % BOT_NAMES.size], EngineColors[(i + 2) % EngineColors.size], true) }
@@ -696,6 +715,10 @@ class OeaArena : OeaGame() {
                 for (k in 0 until 11) w.u8(p.upLevels[k])
             }
             w.u8(sim.teamScore[0].coerceIn(0, 255)).u8(sim.teamScore[1].coerceIn(0, 255))
+            // Warfare scores (captures / King of the Hill points) — synced so
+            // clients show the live score, not a local zero.
+            w.u8(sim.captures[0].coerceIn(0, 255)).u8(sim.captures[1].coerceIn(0, 255))
+            w.u16(sim.kothScore[0].coerceIn(0f, 65535f).toInt()).u16(sim.kothScore[1].coerceIn(0f, 65535f).toInt())
             w.u8(sim.vehicles.size)
             for (v in sim.vehicles) {
                 w.u8(v.id).u8(if (v.dead) 1 else 0).f32(v.x).f32(v.y).f32(v.z).angle(v.yaw).f32(v.health)
@@ -806,6 +829,8 @@ class OeaArena : OeaGame() {
             }
         }
         sim.teamScore[0] = r.u8(); sim.teamScore[1] = r.u8()
+        sim.captures[0] = r.u8(); sim.captures[1] = r.u8()
+        sim.kothScore[0] = r.u16().toFloat(); sim.kothScore[1] = r.u16().toFloat()
         val nv = r.u8()
         sim.vehicles.clear()
         repeat(nv) {
@@ -974,6 +999,7 @@ class OeaArena : OeaGame() {
             winnerId == localId && rules == "cs" -> "Victory! The series is yours"
             winnerId == localId && rules == "wolf" -> "Victory! The duel is yours"
             winnerId == localId && rules == "warfare" -> "Victory! Every sector secured"
+            winnerId == localId && rules == "warfare_koth" -> "Victory! The hill is yours"
             winnerId == localId && rules == "br_res" -> "Victory! Last one standing"
             winnerId == localId -> "Victory! Last one standing"
             rules == "tdm" -> (if (sim.teamScore[0] > sim.teamScore[1]) "Blue" else "Orange") + " team wins"
@@ -981,6 +1007,7 @@ class OeaArena : OeaGame() {
             rules == "cs" -> (if (sim.roundsWon[0] > sim.roundsWon[1]) "Blue" else "Orange") + " squad takes the series"
             rules == "wolf" -> (if (sim.roundsWon[0] > sim.roundsWon[1]) "Blue" else "Orange") + " duelist takes the duel"
             rules == "warfare" -> (if (sim.captures[0] > sim.captures[1]) "Blue" else "Orange") + " holds the field"
+            rules == "warfare_koth" -> (if (sim.kothScore[0] > sim.kothScore[1]) "Blue" else "Orange") + " holds the hill"
             sim.survival -> "The waves won · you reached wave $waveNumber"
             else -> "${name ?: "Nobody"} won the match"
         }
@@ -1510,6 +1537,7 @@ class OeaArena : OeaGame() {
         "cs" -> "Clash Squad — two squads of four, best of seven. Between rounds, spend your cash in the shop on weapons, medkits, grenades and armor. A round ends when a squad is wiped. Deploy from the shop to start each round."
         "wolf" -> "Lone Wolf — 1v1 duels, best of five. Every two rounds you pick the weapon both duelists use. No looting, no zone: just you, the island and one opponent."
         "warfare" -> "Warfare — two squads of six fight over three capture points. Stand on an objective to fill its bar; the first squad to five captures takes the field. You respawn with your kit."
+        "warfare_koth" -> "King of the Hill — two squads of six, one hill. Stand on it to score for your team; the first squad to 200 takes the hill. You respawn with your kit."
         "br_res" -> "Resurgence Royale — the zone closes like Battle Royale, but death is not the end: you come back on a town 20 s later with your loadout. The last one standing still wins."
         "last_day" -> "Last Day Survival — no zone. Day turns to night while waves keep landing on the island. Survive as long as you can; every wave is worth XP."
         "lights_out" -> "Lights Out — permanent night with tight fog. Your muzzle flash is the light."
@@ -1612,9 +1640,18 @@ class OeaArena : OeaGame() {
         // Vehicles (Warfare motor pool).
         for (v in sim.vehicles) {
             if (v.dead) continue
-            val mesh = when (v.kind) { 1 -> tankMesh; 2 -> turretMesh; else -> jeepMesh }
+            val mesh = when (v.kind) { 1 -> tankMesh; 2 -> turretMesh; 3 -> heloMesh; else -> jeepMesh }
             r.draw(mesh, if (v.kind == 1) vehicleMatTank else vehicleMat, v.x, v.y, v.z, v.yaw, 1f)
-            r.blobShadow(v.x, v.y - 0.1f, v.z, v.radius * 0.9f, 0.35f)
+            if (v.kind == 3) {
+                // The rotor spins about Y; the whole craft yaws with the driver.
+                r.draw(heloRotorMesh, vehicleMat, v.x, v.y + 2.2f, v.z, v.yaw + ctx.time.elapsed.toFloat() * 30f, 1f)
+            }
+            // A helo's shadow belongs on the ground below it, fading with height.
+            if (v.kind == 3) {
+                val alt = (v.y - map.physics.groundHeight(v.x, v.z, v.y)).coerceAtLeast(0f)
+                val k = (1f - min(1f, alt / 30f)) * 0.5f + 0.15f
+                r.blobShadow(v.x, map.physics.groundHeight(v.x, v.z, v.y), v.z, v.radius * 0.9f * k, 0.35f * k)
+            } else r.blobShadow(v.x, v.y - 0.1f, v.z, v.radius * 0.9f, 0.35f)
         }
         // Warfare objectives: a ring on the ground plus a beam that stands up as
         // the capture bar fills — the sector is visible from across the map.
@@ -1979,7 +2016,7 @@ class OeaArena : OeaGame() {
             val v = sim.vehicles.getOrNull(me.vehicle)
             if (v != null && !v.dead) {
                 hud.bar(bx, y + 19f * d, bw, 6f * d, MathX.clamp01(v.health / v.maxHealth), if (v.isTank) 0xFFFFB74D.toInt() else 0xFF8BC34A.toInt())
-                val kindName = when { v.isTank -> "Tank"; v.isTurret -> "Turret"; else -> "Jeep" }
+                val kindName = when { v.isTank -> "Tank"; v.isTurret -> "Turret"; v.isHelo -> "Helo"; else -> "Jeep" }
                 hud.text("$kindName ${v.health.toInt()} HP", bx + bw + 6f * d, y + 19f * d, 10.5f, 0xCCFFFFFF.toInt(), shadow = false)
             }
         }
@@ -2003,10 +2040,17 @@ class OeaArena : OeaGame() {
             }
             sim.warfare -> {
                 hud.panel(mx, y, mw, 46f * d, 0x99101418.toInt(), 12f)
-                hud.text("WARFARE", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
-                hud.text("${sim.captures[0]}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
-                hud.text("${sim.captures[1]}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
-                hud.text("first to 5", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+                if (sim.koth) {
+                    hud.text("KING OF THE HILL", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.kothScore[0].toInt()}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.kothScore[1].toInt()}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                    hud.text("first to 200", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+                } else {
+                    hud.text("WARFARE", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.captures[0]}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.captures[1]}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                    hud.text("first to 5", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+                }
             }
             sim.teams -> {
                 hud.panel(mx, y, mw, 46f * d, 0x99101418.toInt(), 12f)
@@ -2242,6 +2286,7 @@ class OeaArena : OeaGame() {
                     Choice("cs", "Clash Squad", "4v4 · buy shop · first to 4 rounds"),
                     Choice("wolf", "Lone Wolf", "1v1 duel · pick guns · best of 5"),
                     Choice("warfare", "Warfare", "6v6 · capture points · first to 5"),
+                    Choice("warfare_koth", "King of the Hill", "6v6 · hold the hill · first to 200"),
                     Choice("gun", "Gun Game", "One kill = next gun · pan finish"),
                     Choice("last_day", "Last Day Survival", "Day turns to night · endless waves"),
                     Choice("lights_out", "Lights Out", "Permanent night · tight fog"),

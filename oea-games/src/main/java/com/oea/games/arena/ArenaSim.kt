@@ -141,6 +141,7 @@ internal class Vehicle(
 ) {
     val isTank get() = kind == 1
     val isTurret get() = kind == 2
+    val isHelo get() = kind == 3
 }
 
 /** Input for one simulation tick (from touch controls, a client's packet or a bot). */
@@ -368,15 +369,21 @@ internal class ArenaSim(
     /** Warfare: capture events per team (first to [WARFARE_WIN] takes the match). */
     val captures = IntArray(2)
     private const val WARFARE_WIN = 5
-    val teams = rules == "tdm" || rules == "cs" || rules == "warfare" || rules == "wolf"
+    /** King of the Hill: score accumulated while holding the single hill. */
+    val kothScore = FloatArray(2)
+    private const val KOTH_WIN = 200
+    private const val KOTH_RATE = 1.2f
+    val teams = rules == "tdm" || rules == "cs" || rules == "warfare" || rules == "wolf" || rules == "warfare_koth"
     val gunGame = rules == "gun"
     /** Respawn after death — except the round-based duels, which respawn at round start. */
-    val respawnMode = rules == "tdm" || rules == "gun" || rules == "warfare" || rules == "br_res"
+    val respawnMode = rules == "tdm" || rules == "gun" || rules == "warfare" || rules == "br_res" || rules == "warfare_koth"
     val survival = rules == "last_day" || rules == "lights_out" || rules == "haunted"
     /** Round-based modes (Clash Squad, Lone Wolf): best-of-N, shop/pick between rounds. */
     val roundMode = rules == "cs" || rules == "wolf"
     /** Delta Force-style objective warfare: respawn with kit, capture the points. */
-    val warfare = rules == "warfare"
+    val warfare = rules == "warfare" || rules == "warfare_koth"
+    /** Warfare variant: one hill, score while you hold it. */
+    val koth = rules == "warfare_koth"
     /** CoD-style royale: the zone closes, but you come back. */
     val resurgence = rules == "br_res"
     var round = 1
@@ -425,16 +432,23 @@ internal class ArenaSim(
         // deliberate kit and never turn the score race into a loot sweep.
         if (!gunGame && !teams) spawnLoot()
         if (warfare) {
-            // Three objectives: prefer real towns; fall back to a triangle around the center.
+            // Objective towns: prefer real towns; fall back to a triangle around the center.
             val towns = map.towns
             val pool: List<FloatArray> = if (towns.size >= 3) towns
             else {
                 val c = ArenaMap.SIZE * 0.5f; val o = ArenaMap.SIZE * 0.3f
                 listOf(floatArrayOf(c - o, c - o), floatArrayOf(c + o, c - o), floatArrayOf(c, c + o))
             }
-            points += CapturePoint(pool[0][0], pool[0][1])
-            points += CapturePoint(pool[1][0], pool[1][1])
-            points += CapturePoint(pool[2][0], pool[2][1])
+            if (koth) {
+                // King of the Hill: one hill on a town (or the map centre),
+                // with a wide radius so a squad can actually hold it.
+                val t = pool[0]
+                points += CapturePoint(t[0], t[1], r = 6f)
+            } else {
+                points += CapturePoint(pool[0][0], pool[0][1])
+                points += CapturePoint(pool[1][0], pool[1][1])
+                points += CapturePoint(pool[2][0], pool[2][1])
+            }
             // Warfare motor pool (Delta Force style): jeeps for fast transit, a
             // tank for breakthroughs, a mobile turret for lock-on missile support.
             for (k in 0..1) {
@@ -445,6 +459,8 @@ internal class ArenaSim(
             vehicles += Vehicle(vehicles.size, tt[0], map.heightAt(tt[0], tt[1]), tt[1], 0f, kind = 1, radius = 2.6f, maxHealth = 420f, speed = 9f)
             val tc = ArenaMap.SIZE * 0.5f
             vehicles += Vehicle(vehicles.size, tc, map.heightAt(tc, tc), tc, 0f, kind = 2, radius = 2.0f, maxHealth = 240f, speed = 3f)
+            // Air wing: one helo at the centre for fast crossings and high-altitude ram runs.
+            vehicles += Vehicle(vehicles.size, tc + 8f, map.heightAt(tc + 8f, tc), tc + 8f, 0f, kind = 3, radius = 2.8f, maxHealth = 200f, speed = 14f)
         }
     }
 
@@ -757,6 +773,8 @@ internal class ArenaSim(
             if (v.dead) {
                 if (warfare && v.respawnAt > 0f && time >= v.respawnAt) {
                     v.dead = false; v.health = v.maxHealth; v.driver = -1; v.speedNow = 0f
+                    // A helo must not respawn floating where it died.
+                    v.y = map.heightAt(v.x, v.z)
                 }
                 continue
             }
@@ -764,14 +782,26 @@ internal class ArenaSim(
             if (d == null) { v.speedNow = 0f; continue }
             v.yaw += d.input.moveX * 2.4f * dt
             val throttle = d.input.moveY.coerceIn(-1f, 1f)
-            v.speedNow = v.speed * throttle
-            v.x += sin(v.yaw) * v.speedNow * dt
-            v.z += cos(v.yaw) * v.speedNow * dt
-            v.x = v.x.coerceIn(0f, ArenaMap.SIZE); v.z = v.z.coerceIn(0f, ArenaMap.SIZE)
-            v.y = map.heightAt(v.x, v.z)
-            d.pos.x = v.x; d.pos.z = v.z; d.pos.y = v.y; d.yaw = v.yaw
-            // Ramming: fast vehicles hurt players they clip.
-            if (abs(v.speedNow) > 4f) {
+            if (v.kind == 3) {
+                // Helo: the stick climbs/dives (gravity-assisted), the craft
+                // always flies forward; terrain keeps it from going under.
+                v.speedNow = v.speed
+                v.y = (v.y + d.input.moveY * 9f * dt).coerceIn(map.heightAt(v.x, v.z) + 2f, 55f)
+                v.x += sin(v.yaw) * v.speed * dt
+                v.z += cos(v.yaw) * v.speed * dt
+                v.x = v.x.coerceIn(0f, ArenaMap.SIZE); v.z = v.z.coerceIn(0f, ArenaMap.SIZE)
+                d.pos.x = v.x; d.pos.z = v.z; d.pos.y = v.y + 1.3f; d.yaw = v.yaw
+            } else {
+                v.speedNow = v.speed * throttle
+                v.x += sin(v.yaw) * v.speedNow * dt
+                v.z += cos(v.yaw) * v.speedNow * dt
+                v.x = v.x.coerceIn(0f, ArenaMap.SIZE); v.z = v.z.coerceIn(0f, ArenaMap.SIZE)
+                v.y = map.heightAt(v.x, v.z)
+                d.pos.x = v.x; d.pos.z = v.z; d.pos.y = v.y; d.yaw = v.yaw
+            }
+            // Ramming: fast vehicles hurt players they clip. A helo only ram
+            // hugs the ground — at altitude it flies over everyone.
+            if (abs(v.speedNow) > 4f && (v.kind != 3 || v.y - map.heightAt(v.x, v.z) < 3f)) {
                 for (o in players.values) {
                     if (!o.alive || o === d || o.skydiving) continue
                     if (teams && o.team == d.team) continue
@@ -825,7 +855,7 @@ internal class ArenaSim(
                         pt.progress = 0f
                         captures[attackTeam]++
                         events?.onPointCaptured(pt.x, pt.z, attackTeam)
-                        if (captures[attackTeam] >= WARFARE_WIN) {
+                        if (!koth && captures[attackTeam] >= WARFARE_WIN) {
                             over = true
                             val w = players.values.maxByOrNull { it.kills + (if (it.team == attackTeam) 1000 else 0) } ?: players.values.first()
                             w.place = 1
@@ -835,6 +865,19 @@ internal class ArenaSim(
                     }
                 } else if (holders > 0) {
                     pt.progress = max(0f, pt.progress - dt * 0.5f)
+                }
+                // King of the Hill: the team that owns the hill scores while it
+                // holds it uncontested — contested holds score nothing, the
+                // capture bar decides who takes the hill.
+                if (koth && holders > 0) {
+                    kothScore[pt.owner] += dt * KOTH_RATE
+                    if (kothScore[pt.owner] >= KOTH_WIN) {
+                        over = true
+                        val w = players.values.maxByOrNull { it.kills + (if (it.team == pt.owner) 1000 else 0) } ?: players.values.first()
+                        w.place = 1
+                        winner = w
+                        events?.onMatchOver(w)
+                    }
                 }
             }
         }
@@ -993,6 +1036,8 @@ internal class ArenaSim(
         var best: Vehicle? = null; var bestD = 4f * 4f
         for (v in vehicles) {
             if (v.dead || v.driver >= 0) continue
+            // A flying helo can't be boarded mid-air.
+            if (v.isHelo && v.y - map.heightAt(v.x, v.z) > 2f) continue
             val dx = v.x - p.pos.x; val dz = v.z - p.pos.z
             val d2 = dx * dx + dz * dz
             if (d2 < bestD) { bestD = d2; best = v }
