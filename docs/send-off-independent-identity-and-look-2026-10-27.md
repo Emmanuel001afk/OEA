@@ -150,6 +150,23 @@ The user's "Controls and inventory" directive took two systems from partial to c
 | TDM kit | Team Deathmatch loadouts now carry one frag — the deliberate kit includes a throwable |
 | Pickup | The PICK prompt picks up weapons and grenades |
 
+## 5d. Controls & inventory — second pass (reference-informed)
+
+Investigated PUBG Mobile / CoD Mobile / Free Fire conventions (see
+`docs/send-off-controls-inventory-intelligence-2026-10-27.md`) and applied the
+five adopted enhancements:
+
+| Enhancement | What it does |
+|---|---|
+| Stun grenade | Third throwable: white flash + 3 s of crawling movement (×0.45 speed, ×1.8 spread, no firing) inside 3.2 m; STUN button + I key; loot mix is now frag 60% / smoke 24% / stun 16% |
+| Cook-off | Hold FRAG past 0.3 s cooks the fuse (button glows), release to throw early — the pull-pin mechanic from PUBG / Free Fire |
+| Prone | Long-press crouch 0.5 s or Z to lie flat: 1.8 m/s, steadiest aim (×0.55 spread), camera and body drop low |
+| Reload-all | Pause → Pack → Reload all weapons tops up every gun from reserves |
+| Pack screen | Pause → Pack lists weapons with mag/reserve, medkits and all three throwables — the Free Fire bag / PUBG inventory |
+
+Controls legend (Send Off activity) now documents all of the above, including
+the hold-to-cook and long-press-to-prone gestures.
+
 ## 6. Send Off mode & content checklist (current)
 
 | Mode | Zone | Respawn | Notes |
@@ -163,4 +180,4 @@ The user's "Controls and inventory" directive took two systems from partial to c
 
 Levels: Green Island / Highlands / Badlands. Weapons: 8 classes with per-weapon handling.
 Players: 1–12, SOLO / LAN / ONLINE, bots 0/5/9/15 × 3 difficulties.
-Controls: twin-stick touch, gamepad, keyboard; ADS/crouch/sprint; throwables (frag/smoke) with buttons and keys.
+Controls: twin-stick touch, gamepad, keyboard; ADS/crouch/prone/sprint; throwables (frag/smoke/stun) with buttons, keys and cook-off; pause pack with reload-all.
