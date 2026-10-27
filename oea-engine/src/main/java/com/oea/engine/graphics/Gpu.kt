@@ -94,6 +94,8 @@ class Shader(val name: String, private val vertexSource: String, private val fra
     fun set3fv(u: String, v: FloatArray, offset: Int = 0) { val l = loc(u); if (l >= 0) GLES30.glUniform3fv(l, 1, v, offset) }
     fun set4fv(u: String, v: FloatArray, offset: Int = 0) { val l = loc(u); if (l >= 0) GLES30.glUniform4fv(l, 1, v, offset) }
     fun setMat4(u: String, m: FloatArray, offset: Int = 0) { val l = loc(u); if (l >= 0) GLES30.glUniformMatrix4fv(l, 1, false, m, offset) }
+    /** Uploads an array of mat4s (bone palettes) — [n] matrices from [m] at [offset]. */
+    fun setMat4n(u: String, n: Int, m: FloatArray, offset: Int = 0) { val l = loc(u); if (l >= 0) GLES30.glUniformMatrix4fv(l, n, false, m, offset) }
 
     private fun compile() {
         generation = Gpu.generation

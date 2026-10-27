@@ -45,6 +45,48 @@ void main() {
 }
 """
 
+    // ------------------------------------------------------------------ skinned character
+    // Same fragment interface as STD_VERT so the lit pipeline is shared.
+    // Vertices carry 4 bone indices + weights; the skeleton's uniform palette
+    // supplies the matrices. GLSL ES 3.00 allows dynamic indexing here.
+
+    val SKIN_VERT = HEADER + """
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec3 a_normal;
+layout(location = 2) in vec2 a_uv;
+layout(location = 3) in vec4 a_color;
+layout(location = 4) in vec4 a_boneIds;
+layout(location = 5) in vec4 a_boneWeights;
+uniform mat4 u_viewProj;
+uniform mat4 u_lightViewProj;
+uniform mat4 u_model;
+uniform mat4 u_bones[19];
+uniform vec4 u_uvTransform;
+out vec3 v_worldPos;
+out vec3 v_normal;
+out vec2 v_uv;
+out vec4 v_color;
+out vec4 v_lightPos;
+void main() {
+    mat4 skin = u_bones[int(a_boneIds.x)] * a_boneWeights.x
+        + u_bones[int(a_boneIds.y)] * a_boneWeights.y
+        + u_bones[int(a_boneIds.z)] * a_boneWeights.z
+        + u_bones[int(a_boneIds.w)] * a_boneWeights.w;
+    vec4 skinned = skin * vec4(a_pos, 1.0);
+    vec3 sn = mat3(skin) * a_normal;
+    sn = sn / max(sqrt(dot(sn, sn)), 1e-8);
+    vec4 world = u_model * skinned;
+    v_worldPos = world.xyz;
+    mat3 m3 = mat3(u_model);
+    vec3 s2 = vec3(dot(m3[0], m3[0]), dot(m3[1], m3[1]), dot(m3[2], m3[2]));
+    v_normal = m3 * (sn / max(s2, vec3(1e-8)));
+    v_uv = a_uv * u_uvTransform.xy + u_uvTransform.zw;
+    v_color = a_color;
+    v_lightPos = u_lightViewProj * world;
+    gl_Position = u_viewProj * world;
+}
+"""
+
     val STD_FRAG = HEADER + """
 precision highp sampler2DShadow;
 in vec3 v_worldPos;

@@ -33,6 +33,7 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
     private val std = Shader("standard", Shaders.STD_VERT, Shaders.STD_FRAG)
     private val depth = Shader("shadow-depth", Shaders.DEPTH_VERT, Shaders.DEPTH_FRAG)
     private val sky = Shader("sky", Shaders.SKY_VERT, Shaders.SKY_FRAG)
+    private val skin = Shader("skin", Shaders.SKIN_VERT, Shaders.STD_FRAG)
 
     private var capacity = 512
     private var meshes = arrayOfNulls<Mesh>(capacity)
@@ -50,6 +51,21 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
     private var runStart = IntArray(256)
     private var runCount = IntArray(256)
     private var runs = 0
+
+    // ---- skinned characters (non-batched; bone matrices ride in the vertex stream)
+    private class SkinnedDraw {
+        var mesh: SkeletalMesh? = null
+        var material: Material? = null
+        val transform = Mat4()
+        var tint = Colors.WHITE
+        var bones: FloatArray? = null
+    }
+    private var skinned = arrayOfNulls<SkinnedDraw>(64)
+    private var skinnedCount = 0
+    private var charCapsule: Mesh? = null
+    private val whiteTint = FloatArray(4).also { Colors.toLinear(Colors.WHITE, it) }
+    private val lin2 = FloatArray(4)
+    private val capIndices = ArrayList<Int>()
 
     private val particleSystems = ArrayList<ParticleSystem>()
 
@@ -93,6 +109,23 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         draw(mesh, material, tmpMat, tint)
     }
 
+    /**
+     * Queues a vertex-skinned mesh (bones live in the vertex stream; the
+     * skeleton's packed bone matrices are uploaded per draw). Draws are
+     * non-batched — one call per part per character — because characters are
+     * few and each part has its own material.
+     */
+    fun drawSkinned(mesh: SkeletalMesh, material: Material, bones: FloatArray, transform: Mat4, tint: Int = Colors.WHITE) {
+        if (skinnedCount == skinned.size) skinned = skinned.copyOf(skinnedCount * 2)
+        val i = skinnedCount++
+        val d = skinned[i] ?: SkinnedDraw().also { skinned[i] = it }
+        d.mesh = mesh
+        d.material = material
+        System.arraycopy(transform.m, 0, d.transform.m, 0, 16)
+        d.tint = tint
+        d.bones = bones
+    }
+
     /** A solid tube between two points (unit cylinder stretched), e.g. tracers, edges of 4D shapes. */
     fun drawLine(ax: Float, ay: Float, az: Float, bx: Float, by: Float, bz: Float, radius: Float, material: Material, tint: Int = Colors.WHITE) {
         val dx = bx - ax; val dy = by - ay; val dz = bz - az
@@ -132,6 +165,7 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         this.camera = camera
         this.env = environment
         count = 0
+        skinnedCount = 0
         particleSystems.clear()
     }
 
@@ -174,6 +208,7 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         lastMaterial = null
         for (i in 0 until count) { meshes[i] = null; materials[i] = null }
         count = 0
+        skinnedCount = 0
         camera = null
     }
 
@@ -250,6 +285,29 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
             shadowStream.add(matrices, i * 16, tints, i * 4)
             runCount[runs - 1]++
         }
+        // Skinned characters cast a capsule shadow: a rigid capsule instance per
+        // character (the depth shader needs no bones). Same capsule for everyone.
+        var capsuleMesh = charCapsule
+        if (capsuleMesh == null) {
+            capsuleMesh = MeshBuilder().capsule(0f, 0f, 0f, 0.42f, 1.7f, 12).build()
+            charCapsule = capsuleMesh
+        }
+        capIndices.clear()
+        for (k in 0 until skinnedCount) {
+            val d = skinned[k]!!
+            val mat = d.material ?: continue
+            if (!mat.castShadows || mat.transparent) continue
+            val t = d.transform.m
+            if (!lightFrustum.sphereVisible(t[12], t[13], t[14], 1.1f)) continue
+            capIndices += k
+        }
+        if (capIndices.isNotEmpty()) {
+            addRun(capsuleMesh, null, shadowStream.count)
+            for (k in capIndices) {
+                shadowStream.add(skinned[k]!!.transform.m, 0, whiteTint, 0)
+            }
+            runCount[runs - 1] = capIndices.size
+        }
         if (!map.begin()) return false
         if (!depth.bind()) { map.end(); return false }
         depth.setMat4("u_lightViewProj", lightViewProj.m)
@@ -260,8 +318,10 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         for (rI in 0 until runs) {
             val mesh = runMesh[rI]!!
             if (!mesh.bind()) continue
-            mesh.bindInstances(vbo, runStart[rI] * Mesh.INSTANCE_BYTES)
-            mesh.drawInstanced(runCount[rI])
+            if (mesh is Mesh) {
+                mesh.bindInstances(vbo, runStart[rI] * Mesh.INSTANCE_BYTES)
+                mesh.drawInstanced(runCount[rI])
+            }
             stats.drawCalls++
         }
         stats.shadowCasters += n
@@ -311,13 +371,49 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         buildRuns(n)
 
         val vbo = mainStream.upload()
-        if (!std.bind()) return
+        if (!std.bind()) { skinnedCount = 0; return }
         setPassUniforms(cam)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glDepthFunc(GLES30.GL_LEQUAL)
         GLES30.glEnable(GLES30.GL_CULL_FACE)
         GLES30.glCullFace(GLES30.GL_BACK)
         for (r in 0 until opaqueRuns) drawRun(r, vbo)
+        // Skinned characters: non-batched draws after the batched opaque runs.
+        if (skinnedCount > 0) {
+            if (skin.bind()) {
+                setPassUniforms(skin)
+                GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+                GLES30.glDepthFunc(GLES30.GL_LEQUAL)
+                GLES30.glEnable(GLES30.GL_CULL_FACE)
+                GLES30.glCullFace(GLES30.GL_BACK)
+                for (k in 0 until skinnedCount) {
+                    val d = skinned[k]!!
+                    val mesh = d.mesh ?: continue
+                    val t = d.transform.m
+                    val cc = mesh.center
+                    val cx = t[0] * cc.x + t[4] * cc.y + t[8] * cc.z + t[12]
+                    val cy = t[1] * cc.x + t[5] * cc.y + t[9] * cc.z + t[13]
+                    val cz = t[2] * cc.x + t[6] * cc.y + t[10] * cc.z + t[14]
+                    val dx = cx - cam.position.x; val dy = cy - cam.position.y; val dz = cz - cam.position.z
+                    val s = sqrt(maxOf(t[0] * t[0] + t[1] * t[1] + t[2] * t[2],
+                        t[4] * t[4] + t[5] * t[5] + t[6] * t[6],
+                        t[8] * t[8] + t[9] * t[9] + t[10] * t[10]))
+                    val r = mesh.boundingRadius * s
+                    if ((dx * dx + dy * dy + dz * dz) > cam.far * cam.far * 1.2f + r * r * 4f || !cam.frustum.sphereVisible(cx, cy, cz, r)) continue
+                    if (!mesh.bind()) continue
+                    val m = d.material ?: continue
+                    if (m !== lastMaterial) { applyMaterial(skin, m); lastMaterial = m }
+                    Colors.toLinear(d.tint, lin2)
+                    skin.set4f("u_baseColor", lin[0] * lin2[0], lin[1] * lin2[1], lin[2] * lin2[2], lin[3] * lin2[3])
+                    val bones = d.bones ?: continue
+                    skin.setMat4("u_model", t)
+                    skin.setMat4n("u_bones", bones.size / 16, bones)
+                    mesh.draw()
+                    stats.drawCalls++
+                    stats.triangles += mesh.indexCount / 3
+                }
+            }
+        }
         if (env.drawSky) drawSky(cam)
         if (runs > opaqueRuns) {
             std.bind()
@@ -349,7 +445,7 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
     private fun drawRun(r: Int, vbo: Int) {
         val mesh = runMesh[r]!!
         val mat = runMaterial[r]!!
-        if (mat !== lastMaterial) { applyMaterial(mat); lastMaterial = mat }
+        if (mat !== lastMaterial) { applyMaterial(std, mat); lastMaterial = mat }
         if (!mesh.bind()) return
         mesh.bindInstances(vbo, runStart[r] * Mesh.INSTANCE_BYTES)
         mesh.drawInstanced(runCount[r])
@@ -358,40 +454,40 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         stats.triangles += (if (mesh.indexCount > 0) mesh.indexCount else mesh.vertexCount) / 3 * runCount[r]
     }
 
-    private fun setPassUniforms(cam: Camera) {
-        std.setMat4("u_viewProj", cam.viewProj.m)
-        std.setMat4("u_lightViewProj", lightViewProj.m)
-        std.set3f("u_camPos", cam.position.x, cam.position.y, cam.position.z)
+    private fun setPassUniforms(cam: Camera, s: Shader = std) {
+        s.setMat4("u_viewProj", cam.viewProj.m)
+        s.setMat4("u_lightViewProj", lightViewProj.m)
+        s.set3f("u_camPos", cam.position.x, cam.position.y, cam.position.z)
         val sd = env.sunDirection
-        std.set3f("u_sunDir", sd.x, sd.y, sd.z)
+        s.set3f("u_sunDir", sd.x, sd.y, sd.z)
         Colors.toLinear(env.sunColor, lin)
-        std.set3f("u_sunColor", lin[0] * env.sunIntensity, lin[1] * env.sunIntensity, lin[2] * env.sunIntensity)
+        s.set3f("u_sunColor", lin[0] * env.sunIntensity, lin[1] * env.sunIntensity, lin[2] * env.sunIntensity)
         Colors.toLinear(env.skyAmbient, lin)
-        std.set3f("u_skyAmbient", lin[0] * env.ambientIntensity, lin[1] * env.ambientIntensity, lin[2] * env.ambientIntensity)
+        s.set3f("u_skyAmbient", lin[0] * env.ambientIntensity, lin[1] * env.ambientIntensity, lin[2] * env.ambientIntensity)
         Colors.toLinear(env.groundAmbient, lin)
-        std.set3f("u_groundAmbient", lin[0] * env.ambientIntensity, lin[1] * env.ambientIntensity, lin[2] * env.ambientIntensity)
+        s.set3f("u_groundAmbient", lin[0] * env.ambientIntensity, lin[1] * env.ambientIntensity, lin[2] * env.ambientIntensity)
         Colors.toLinear(env.fogColor, lin)
-        std.set4f("u_fog", lin[0], lin[1], lin[2], env.fogDensity)
-        std.set1f("u_exposure", env.exposure)
-        std.set1i("u_tex", 0)
-        std.set1i("u_shadowMap", 1)
-        uploadPointLights(cam)
+        s.set4f("u_fog", lin[0], lin[1], lin[2], env.fogDensity)
+        s.set1f("u_exposure", env.exposure)
+        s.set1i("u_tex", 0)
+        s.set1i("u_shadowMap", 1)
+        uploadPointLights(s, cam)
         val map = shadowMap
         if (shadowsThisPass && map != null) {
             map.bindTexture(1)
-            std.set4f("u_shadowParams", 1f, 1f / map.size, 0.0012f, env.shadowStrength)
+            s.set4f("u_shadowParams", 1f, 1f / map.size, 0.0012f, env.shadowStrength)
         } else {
             ShadowMap.bindDummy(1)
-            std.set4f("u_shadowParams", 0f, 0f, 0f, 0f)
+            s.set4f("u_shadowParams", 0f, 0f, 0f, 0f)
         }
     }
 
     /** Strongest few point lights near the camera; the rest fade out silently. */
-    private fun uploadPointLights(cam: Camera) {
+    private fun uploadPointLights(s: Shader, cam: Camera) {
         val lights = env.pointLights
         val n = lights.size
         if (n == 0) {
-            for (i in 0 until 8) std.set4f("u_pointColor[$i]", 0f, 0f, 0f, 0f)
+            for (i in 0 until 8) s.set4f("u_pointColor[$i]", 0f, 0f, 0f, 0f)
             return
         }
         // Importance = intensity / (1 + distance²/radius²); sort the few we keep.
@@ -408,27 +504,27 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         var i = 0
         while (i < 8 && i < n) {
             val l = lights[i]
-            std.set4f("u_pointPos[$i]", l.x, l.y, l.z, l.radius)
+            s.set4f("u_pointPos[$i]", l.x, l.y, l.z, l.radius)
             Colors.toLinear(l.color, lin)
-            std.set4f("u_pointColor[$i]", lin[0] * l.intensity, lin[1] * l.intensity, lin[2] * l.intensity, 1f)
+            s.set4f("u_pointColor[$i]", lin[0] * l.intensity, lin[1] * l.intensity, lin[2] * l.intensity, 1f)
             i++
         }
         while (i < 8) {
-            std.set4f("u_pointColor[$i]", 0f, 0f, 0f, 0f)
+            s.set4f("u_pointColor[$i]", 0f, 0f, 0f, 0f)
             i++
         }
     }
 
-    private fun applyMaterial(m: Material) {
+    private fun applyMaterial(s: Shader, m: Material) {
         Colors.toLinear(m.color, lin)
-        std.set4f("u_baseColor", lin[0], lin[1], lin[2], lin[3])
+        s.set4f("u_baseColor", lin[0], lin[1], lin[2], lin[3])
         Colors.toLinear(m.emissive, lin)
         val es = if (m.emissive == Colors.BLACK) 0f else m.emissiveStrength
-        std.set3f("u_emissive", lin[0] * es, lin[1] * es, lin[2] * es)
-        std.set4f("u_params", m.specular, m.shininess, m.rim, if (m.unlit) 1f else 0f)
+        s.set3f("u_emissive", lin[0] * es, lin[1] * es, lin[2] * es)
+        s.set4f("u_params", m.specular, m.shininess, m.rim, if (m.unlit) 1f else 0f)
         val tex = m.texture
-        std.set4f("u_flags", if (tex != null) 1f else 0f, if (m.receiveShadows) 1f else 0f, if (m.fog) 1f else 0f, m.alphaCutoff)
-        std.set4f("u_uvTransform", m.uvScaleX, m.uvScaleY, m.uvOffsetX, m.uvOffsetY)
+        s.set4f("u_flags", if (tex != null) 1f else 0f, if (m.receiveShadows) 1f else 0f, if (m.fog) 1f else 0f, m.alphaCutoff)
+        s.set4f("u_uvTransform", m.uvScaleX, m.uvScaleY, m.uvOffsetX, m.uvOffsetY)
         (tex ?: Textures.white).bind(0)
         if (m.transparent || m.additive) {
             GLES30.glEnable(GLES30.GL_BLEND)
