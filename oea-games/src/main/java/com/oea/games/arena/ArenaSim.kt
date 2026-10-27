@@ -60,7 +60,7 @@ internal val GUN_LADDER = listOf(
 /** Kills needed to win Team Deathmatch. */
 private const val TEAM_SCORE_WIN = 40
 
-internal enum class LootKind { WEAPON, AMMO, MEDKIT, ARMOR, HELMET }
+internal enum class LootKind { WEAPON, AMMO, MEDKIT, ARMOR, HELMET, GRENADE }
 
 internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Float, var y: Float, var z: Float) {
     var taken = false
@@ -70,7 +70,24 @@ internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Floa
         LootKind.MEDKIT -> "Medkit"
         LootKind.ARMOR -> "Vest lv.$value"
         LootKind.HELMET -> "Helmet lv.$value"
+        LootKind.GRENADE -> if (value == 0) "Frag grenade" else "Smoke grenade"
     }
+}
+
+/**
+ * A thrown grenade: arcs on gravity, bounces once off the terrain, then
+ * explodes on its fuse (type 0 = frag with a damage radius, 1 = smoke cloud).
+ */
+internal class Grenade(
+    var x: Float, var y: Float, var z: Float,
+    var vx: Float, var vy: Float, var vz: Float,
+    val type: Int,
+) {
+    var fuse = 2.4f
+    var bounces = 0
+    var dead = false
+    /** Blinks faster as the fuse burns down — the last half-second screams. */
+    val fuseLeft: Float get() = fuse
 }
 
 /** Input for one simulation tick (from touch controls, a client's packet or a bot). */
@@ -88,10 +105,14 @@ internal class PlayerInput {
     var slot = -1
     var heal = false
     var pickup = -1
+    /** One-shot throw commands: grenade (bit 6) and smoke (bit 7). */
+    var grenade = false
+    var smoke = false
 
     fun copyFrom(o: PlayerInput) {
         seq = o.seq; moveX = o.moveX; moveY = o.moveY; yaw = o.yaw; pitch = o.pitch; fire = o.fire; ads = o.ads
         jump = o.jump; crouch = o.crouch; reload = o.reload; slot = o.slot; heal = o.heal; pickup = o.pickup
+        grenade = o.grenade; smoke = o.smoke
     }
 }
 
@@ -112,6 +133,9 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     var active = 0
     val ammo = IntArray(4)
     var medkits = 0
+    /** Frag grenades (value 0) and smoke grenades (value 1) in the pack. */
+    var grenades = 0
+    var smokes = 0
     var healProgress = 0f
     var cooldown = 0f
     var reloadLeft = 0f
@@ -155,6 +179,8 @@ internal interface ArenaEvents {
     fun onLootSpawned(loot: Loot) {}
     fun onZone(phase: Int, shrinking: Boolean) {}
     fun onMatchOver(winner: ArenaPlayer?) {}
+    /** A grenade went off: frag = true bursts with damage, false is a smoke cloud. */
+    fun onGrenade(x: Float, y: Float, z: Float, frag: Boolean) {}
 }
 
 /** Safe zone that shrinks in phases, damaging players outside. */
@@ -225,6 +251,9 @@ internal class ArenaSim(
 ) {
     val players = LinkedHashMap<Int, ArenaPlayer>()
     val loot = ArrayList<Loot>()
+    val grenades = ArrayList<Grenade>()
+    /** Smoke clouds: [x, y, z, ttl-seconds] — the cloud hides anyone inside it. */
+    val smokes = ArrayList<FloatArray>(4)
     val zone = Zone(seed, ArenaMap.SIZE * 0.5f, fastZone)
     var time = 0f
         private set
@@ -282,13 +311,15 @@ internal class ArenaSim(
                 r < 0.68f -> LootKind.AMMO
                 r < 0.84f -> LootKind.MEDKIT
                 r < 0.93f -> LootKind.ARMOR
-                else -> LootKind.HELMET
+                r < 0.97f -> LootKind.HELMET
+                else -> LootKind.GRENADE
             }
             val value = when (kind) {
                 LootKind.WEAPON -> pool[rng.weighted(weights)].ordinal
                 LootKind.AMMO -> rng.nextInt(4)
-                LootKind.ARMOR, LootKind.HELMET -> 1 + rng.weighted(floatArrayOf(1f, 0.5f, 0.18f))
-                LootKind.MEDKIT -> 1
+            LootKind.ARMOR, LootKind.HELMET -> 1 + rng.weighted(floatArrayOf(1f, 0.5f, 0.18f))
+            LootKind.MEDKIT -> 1
+            LootKind.GRENADE -> if (rng.chance(0.6f)) 0 else 1
             }
             loot += Loot(lootIds++, kind, value, s[0] + rng.range(-0.6f, 0.6f), s[1], s[2] + rng.range(-0.6f, 0.6f))
             if (kind == LootKind.WEAPON) {
@@ -359,6 +390,7 @@ internal class ArenaSim(
         p.ammo[0] = 90
         p.ammo[1] = 48
         p.medkits = 1
+        p.grenades = 1
     }
 
     private fun respawn(p: ArenaPlayer) {
@@ -397,6 +429,25 @@ internal class ArenaSim(
         }
         if (zone.enabled && zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
         if (zone.enabled) for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, true)
+        // Grenades: arc on gravity, bounce once off the terrain, then go off on the fuse.
+        for (g in grenades) {
+            if (g.dead) continue
+            g.vy -= 21f * dt
+            g.x += g.vx * dt; g.y += g.vy * dt; g.z += g.vz * dt
+            val gy = map.heightAt(g.x, g.z)
+            if (g.y < gy) {
+                g.y = gy; g.vy = -g.vy * 0.35f; g.vx *= 0.55f; g.vz *= 0.55f
+                g.bounces++
+                if (g.bounces >= 1) g.fuse = min(g.fuse, 0.6f)
+            }
+            g.vx *= (1f - 1.2f * dt); g.vz *= (1f - 1.2f * dt)
+            g.fuse -= dt
+            if (g.fuse <= 0f) explode(g)
+        }
+        grenades.removeAll { it.dead }
+        // Smoke clouds linger for a while — they hide whoever stands in them.
+        for (s in smokes) s[3] -= dt
+        smokes.removeAll { it[3] <= 0f }
         if (!over && teams && (teamScore[0] >= TEAM_SCORE_WIN || teamScore[1] >= TEAM_SCORE_WIN)) {
             over = true
             val winning = if (teamScore[0] >= teamScore[1]) 0 else 1
@@ -509,6 +560,9 @@ internal class ArenaSim(
         // Pick-ups.
         autoPickup(p)
         if (inp.pickup >= 0) { pickup(p, inp.pickup); inp.pickup = -1 }
+        // One-shot throws: frag or smoke, gated by what's left in the pack.
+        if (inp.grenade) { throwGrenade(p, 0); inp.grenade = false }
+        if (inp.smoke) { throwGrenade(p, 1); inp.smoke = false }
     }
 
     private fun fire(p: ArenaPlayer) {
@@ -541,7 +595,7 @@ internal class ArenaSim(
                 val th = Intersect.raySphere(ex, ey, ez, dx, dy, dz, rewind.x, rewind.y + oy + 0.02f, rewind.z, 0.24f)
                 val tb = Intersect.rayCapsule(ex, ey, ez, dx, dy, dz, rewind.x, rewind.y + 0.3f, rewind.z, rewind.x, rewind.y + oy - 0.3f, rewind.z, 0.36f)
                 val t = when { th >= 0f && (tb < 0f || th <= tb) -> th; else -> tb }
-                if (t in 0f..dist) { dist = t; victim = o; head = t == th }
+                if (t in 0f..dist && !inSmoke(ex, ey, ez, dx, dy, dz, t)) { dist = t; victim = o; head = t == th }
             }
             val hx = ex + dx * dist; val hy = ey + dy * dist; val hz = ez + dz * dist
             if (victim != null) {
@@ -561,7 +615,7 @@ internal class ArenaSim(
     /** How far back to rewind for a human shooter (their latency + interpolation delay). */
     var compensation: (ArenaPlayer) -> Long = { 0L }
 
-    fun damage(v: ArenaPlayer, from: ArenaPlayer?, amount: Float, w: Weapon, head: Boolean, zoneDamage: Boolean = false) {
+    fun damage(v: ArenaPlayer, from: ArenaPlayer?, amount: Float, w: Weapon, head: Boolean, zoneDamage: Boolean = false, cause: Int = -1) {
         if (!v.alive) return
         // Spawn protection: freshly respawned players get a few honest seconds.
         if (!zoneDamage && v.spawnGuard > 0f) return
@@ -579,7 +633,7 @@ internal class ArenaSim(
             v.health = 0f
             v.alive = false
             v.deaths++
-            v.killedBy = from?.id ?: -1
+            v.killedBy = from?.id ?: cause
             from?.let { it.kills++ }
             if (teams && from != null && from.team != v.team) teamScore[from.team]++
             if (gunGame) {
@@ -661,6 +715,7 @@ internal class ArenaSim(
             LootKind.MEDKIT -> p.medkits++
             LootKind.ARMOR -> p.armor = l.value
             LootKind.HELMET -> p.helmet = l.value
+            LootKind.GRENADE -> if (l.value == 0) p.grenades++ else p.smokes++
             LootKind.WEAPON -> {
                 val slot = if (p.slots[0] == Weapon.PAN) 0 else 1
                 p.slots[slot] = Weapon.entries[l.value]
@@ -683,8 +738,63 @@ internal class ArenaSim(
         return best
     }
 
+    /** Throws one grenade of the given type (0 frag, 1 smoke) along the aim. */
+    fun throwGrenade(p: ArenaPlayer, type: Int) {
+        if (type == 0) { if (p.grenades <= 0) return; p.grenades-- } else { if (p.smokes <= 0) return; p.smokes-- }
+        val cp = cos(p.pitch)
+        val dx = sin(p.yaw) * cp; val dy = sin(p.pitch); val dz = cos(p.yaw) * cp
+        val power = 9.5f
+        grenades += Grenade(p.pos.x, p.pos.y + 1.35f, p.pos.z, dx * power, dy * power + 4.2f, dz * power, type)
+    }
+
+    /** Frag: a 4.6 m damage radius. Smoke: a cloud, no damage. */
+    private fun explode(g: Grenade) {
+        g.dead = true
+        if (g.type == 1) {
+            smokes += floatArrayOf(g.x, g.y, g.z, 10f)
+            events?.onGrenade(g.x, g.y, g.z, false)
+            return
+        }
+        val r = 4.6f
+        for (p in players.values) {
+            if (!p.alive) continue
+            val dx = p.pos.x - g.x; val dz = p.pos.z - g.z; val dy = p.pos.y + 1.0f - g.y
+            val d = sqrt(dx * dx + dy * dy + dz * dz)
+            if (d < r) {
+                val falloff = 1f - d / r
+                damage(p, null, 80f * falloff * falloff, Weapon.PAN, false, true, cause = -2)
+            }
+        }
+        events?.onGrenade(g.x, g.y, g.z, true)
+    }
+
     fun lineOfSight(a: ArenaPlayer, b: ArenaPlayer): Boolean =
-        map.physics.lineOfSight(a.pos.x, a.pos.y + a.eyeHeight, a.pos.z, b.pos.x, b.pos.y + 1.2f, b.pos.z, Layers.WORLD or Layers.PROPS, hit)
+        map.physics.lineOfSight(a.pos.x, a.pos.y + a.eyeHeight, a.pos.z, b.pos.x, b.pos.y + 1.2f, b.pos.z, Layers.WORLD or Layers.PROPS, hit) &&
+            !smokeBetween(a.pos.x, a.pos.y + a.eyeHeight, a.pos.z, b.pos.x, b.pos.y + 1.2f, b.pos.z)
+
+    /** True when the point at distance t along the ray sits inside a smoke cloud. */
+    private fun inSmoke(ex: Float, ey: Float, ez: Float, dx: Float, dy: Float, dz: Float, t: Float): Boolean {
+        for (s in smokes) {
+            val px = ex + dx * t; val py = ey + dy * t; val pz = ez + dz * t
+            val dx2 = px - s[0]; val dy2 = py - (s[1] + 1.2f); val dz2 = pz - s[2]
+            if (dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < 1.6f * 1.6f) return true
+        }
+        return false
+    }
+
+    /** True when the segment passes through any active smoke cloud. */
+    private fun smokeBetween(ax: Float, ay: Float, az: Float, bx: Float, by: Float, bz: Float): Boolean {
+        val segX = bx - ax; val segY = by - ay; val segZ = bz - az
+        val segLen2 = segX * segX + segY * segY + segZ * segZ + 1e-6f
+        for (s in smokes) {
+            var t = ((s[0] - ax) * segX + (s[1] + 1.2f - ay) * segY + (s[2] - az) * segZ) / segLen2
+            t = MathX.clamp(t, 0f, 1f)
+            val px = ax + segX * t; val py = ay + segY * t; val pz = az + segZ * t
+            val dx2 = px - s[0]; val dy2 = py - (s[1] + 1.2f); val dz2 = pz - s[2]
+            if (dx2 * dx2 + dy2 * dy2 + dz2 * dz2 < 1.8f * 1.8f) return true
+        }
+        return false
+    }
 
     @Suppress("unused") private fun unused() = atan2(0f, 1f) + tmp.x
 }
