@@ -84,6 +84,8 @@ class CharRig(
         var headYaw = 0f
         /** Extra parts: joint spheres, belly blend, shoulder pads, hair cap. */
         var detail = true
+        /** 0..1 (1 = just pressed): the arms drop to the weapon — the reload pose. */
+        var reload = 0f
     }
 
     // ---------------------------------------------------------------- spec plumbing
@@ -568,7 +570,7 @@ class CharRig(
         // the draw scale stretches it with the body.
         val crouchK = if (p.crouch) 0.22f else 0f
         val bob = if (p.airborne || p.crouch) 0f else p.speed * 0.055f * abs(cos(p.phase))
-        skeleton.update(p.phase, p.speed, p.airborne, p.crouch, p.lean, p.aimHold, p.aimPitch, p.headYaw, bob - crouchK)
+        skeleton.update(p.phase, p.speed, p.airborne, p.crouch, p.lean, p.aimHold, p.aimPitch, p.headYaw, bob - crouchK, p.reload)
         tmp.setPosYaw(x, y, z, yaw, scale)
         val bones = skeleton.matrices
         r.drawSkinned(h.body, mSkin, bones, tmp)
@@ -582,9 +584,16 @@ class CharRig(
         if (lod < 1 && pack) r.drawSkinned(h.pack, mBack, bones, tmp)
         // Eyes: own skinned mesh on the HEAD bone; the blink squashes it in Y.
         // The mesh is centered on the eye line (y = 0), so it draws at head height.
+        // The small extra yaw/pitch makes the eyes glance toward the aim.
         if (lod < 1 && h.face.vertexCount > 0) {
-            tmp2.setTRS(x, y + 1.632f * scale, z, yaw, 0f, 0f, scale, scale * blinkK, scale)
+            tmp2.setTRS(x, y + 1.632f * scale, z, yaw + p.headYaw * 0.08f, p.aimPitch * 0.12f, 0f, scale, scale * blinkK, scale)
             r.drawSkinned(h.face, mEye, bones, tmp2)
+        }
+        // Brows: own mesh, flattened in Y with aiming/running tension (furrow).
+        if (lod < 1 && h.brows.vertexCount > 0) {
+            val tension = (0.25f + abs(p.aimPitch) * 0.5f + p.speed * 0.35f + if (p.crouch) 0.15f else 0f).coerceAtMost(1f)
+            tmp2.setTRS(x, y + 1.632f * scale, z, yaw, 0f, 0f, scale, scale * (1f - 0.5f * tension), scale)
+            r.drawSkinned(h.brows, mHair, bones, tmp2)
         }
     }
 

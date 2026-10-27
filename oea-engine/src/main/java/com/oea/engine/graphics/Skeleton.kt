@@ -81,6 +81,9 @@ class Skeleton {
      * rotation about local X by `a` moves a down-pointing tip to
      * z = -L·sin(a) (backward for positive a) and an up-pointing top to
      * z = +L·sin(a) (forward for positive a).
+     *
+     * [reload] 0..1 (1 = just pressed): the arms drop to the weapon at waist
+     * height — the reload pose.
      */
     fun update(
         phase: Float,
@@ -92,6 +95,7 @@ class Skeleton {
         aimPitch: Float,
         headYaw: Float,
         hipOffsetY: Float,
+        reload: Float,
     ) {
         val s = speed.coerceIn(0f, 1f)
         val ph = phase
@@ -135,6 +139,11 @@ class Skeleton {
             } else {
                 ua = sin(ph * 0.24f + side) * 0.06f
                 el = 0.22f
+            }
+            // Reload: the arms drop to the weapon at waist height.
+            if (reload > 0f) {
+                ua = MathX.lerp(ua, 0.45f, reload)
+                el = MathX.lerp(el, 0.85f, reload)
             }
             setLocal(sho, side * 0.18f, 0.04f, 0f, 0f, 0f, 0f)
             setLocal(arm, 0f, -0.26f, 0f, -ua, 0f, 0f)

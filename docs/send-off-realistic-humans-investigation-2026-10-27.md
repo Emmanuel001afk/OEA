@@ -214,7 +214,27 @@ be called shipped.
   `drawSoldier`): lod1 skips vest/headwear/pack, lod2 additionally skips
   outer/hair. Body/shirt/pants/shoes always draw.
 
-**Still open:** eye look-at + brow/jaw shapes (Tier 2.7 rest), clip library
-with real blending (Tier 2.6 — the current blend is implicit in the pose math,
-no clips), knee/elbow bulge correctives (Tier 2.8 rest), DeviceProfile tiering,
-all of Tier 3, and the build/device verification of everything above.
+**Second pass (d725f05 + follow-up):**
+
+- **Tier 2.7 (rest, mostly) — facial animation.** Eye look-at: the face mesh
+  rotates slightly toward the aim (head-yaw/aim-pitch glance). Brow tension:
+  brows moved into their own HEAD-bound mesh and flattened in Y with a furrow
+  driven by aim pitch, run speed and crouch. Jaw/mouth shapes remain open.
+- **Tier 2.8 (rest) — joint bulge.** The limb tubes gain a smooth radius bump
+  near the joint end (thighs 14%, upper arms 11%, forearms/shins 10%, clothing
+  shells 9%): invisible when straight, reads as muscle/cloth deformation when
+  the knee or elbow bends. (The joints already blend two bones per vertex.)
+- **Tier 2.6 (partial) — reload pose.** `Pose.reload` drops the arms to the
+  weapon at waist height and the weapon mesh dips with them. The local player's
+  client runs the timer from the weapon's reload time (with the upgrade
+  discount); remote players' reload state is not in the snapshot, so they aim
+  normally.
+- **Tier 2.9 (rest) — DeviceProfile tiering.** The LOD distance thresholds ride
+  `QualitySettings.detailDistance` (0.7× on Low → 1.25× on Ultra): weak devices
+  cull armor/pack/headwear detail closer in.
+
+**Still open:** jaw/mouth shapes and remote-player reload poses (need snapshot
+state), a clip library with real transitions (the current blend is implicit in
+the pose math), belly/breast corrective shapes, DeviceProfile tiering for the
+skinned-mesh complexity itself, all of Tier 3, and the build/device verification
+of everything above.

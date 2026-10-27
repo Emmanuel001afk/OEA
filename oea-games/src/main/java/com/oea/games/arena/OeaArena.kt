@@ -134,6 +134,9 @@ class OeaArena : OeaGame() {
     private var crouchOn = false
     private var jumpLatch = false
     private var reloadLatch = false
+    /** Local reload cosmetic timer (seconds left); the pose drops the weapon. */
+    private var localReloadT = 0f
+    private var localReloadTotal = 1f
     private var mountLatch = false
     /** One-shot grenade throw: 0 frag, 1 smoke, 2 stun, -1 idle. */
     private var grenadeLatch = -1
@@ -587,6 +590,7 @@ class OeaArena : OeaGame() {
             sendCommand(inputNow)
         }
         jumpLatch = false; reloadLatch = false; mountLatch = false; slotLatch = -1; pickupLatch = -1; grenadeLatch = -1; cookAmount = 0f
+        localReloadT = 0f
     }
 
     private val aim = FloatArray(2)
@@ -635,6 +639,16 @@ class OeaArena : OeaGame() {
         inp.jump = jumpLatch
         inp.crouch = crouchOn
         inp.reload = reloadLatch
+        // Local reload cosmetic: the client knows the weapon's reload time (and
+        // the upgrade discount), so it plays the lowered-weapon pose for the
+        // same duration the sim uses. One press = one attempt: consume the latch.
+        if (reloadLatch) {
+            val w = me?.let { Weapon.entries.getOrElse(it.weapon) { Weapon.PAN } } ?: Weapon.PAN
+            val lv = me?.upLevels?.getOrElse(w.ordinal) { 0 } ?: 0
+            localReloadT = w.reload * (1f - 0.08f * lv)
+            localReloadTotal = localReloadT
+        }
+        reloadLatch = false
         inp.mount = mountLatch
         mountLatch = false
         inp.slot = slotLatch
@@ -991,6 +1005,8 @@ class OeaArena : OeaGame() {
         val w = g.width.toFloat(); val h = g.height.toFloat(); val d = g.density
         val me = local
         val alive = me?.alive == true && !matchOver
+        // Local reload cosmetic timer ticks down with the frame rate.
+        if (localReloadT > 0f) localReloadT = (localReloadT - dt).coerceAtLeast(0f)
         val sl = g.safeInsets[0].toFloat(); val sr = g.safeInsets[2].toFloat()
         // Round modes: phase 1 = round over (result, then shop), phase 2 = shop/pick prep.
         if (sim.roundMode && !studio.open) {
@@ -1749,7 +1765,10 @@ class OeaArena : OeaGame() {
         rig0.faceUpdate(ctx.time.elapsed.toFloat())
         val ddx0 = x - camera.position.x; val ddz0 = z - camera.position.z
         val d2 = ddx0 * ddx0 + ddz0 * ddz0
-        val lod = if (d2 > 45f * 45f) 2 else if (d2 > 20f * 20f) 1 else 0
+        // LOD distances ride the quality tier's detail-distance multiplier:
+        // weak devices cull armor/pack detail closer in.
+        val k = ctx.graphics.quality.detailDistance
+        val lod = if (d2 > (45f * k) * (45f * k)) 2 else if (d2 > (20f * k) * (20f * k)) 1 else 0
         if (!alive) {
             r.draw(Mesh.unitCube, body, x, y + 0.15f, z, yaw, MathX.HALF_PI, 0f, 0.5f, 0.6f, 0.28f)
             r.draw(Mesh.unitCube, pants, x, y + 0.12f, z - cos(yaw) * 0.0f, yaw, MathX.HALF_PI, 0f, 0.42f, 1.4f, 0.2f)
@@ -1766,6 +1785,7 @@ class OeaArena : OeaGame() {
             rigPose.lean = 0f
             rigPose.headYaw = 0f
             rigPose.detail = true
+            rigPose.reload = 0f
             val skyRig = rigFor(kit, id)
             skyRig.drawSkinned(
                 r, x, y, z, yaw, rigPose, vscale, fx,
@@ -1794,6 +1814,9 @@ class OeaArena : OeaGame() {
         rigPose.lean = 0f
         rigPose.headYaw = 0f
         rigPose.detail = true
+        // Reload pose: only the local player's client knows it is reloading
+        // (the sim's reload state is not in the snapshot); everyone else aims.
+        rigPose.reload = if (id == localId && localReloadT > 0f) localReloadT / localReloadTotal else 0f
         val rig = rigFor(kit, id)
         val bodyY = y - if (prone) 0.2f else 0f
         // Skinned body + armor/headwear/pack meshes, one skeleton for all.
@@ -1815,7 +1838,8 @@ class OeaArena : OeaGame() {
         val rightX = -forwardZ; val rightZ = forwardX
         val gunPitch = MathX.clamp(pitch, -0.9f, 0.9f)
         val sx = x + rightX * 0.22f + forwardX * 0.25f; val sz = z + rightZ * 0.22f + forwardZ * 0.25f
-        m.setTRS(sx, torsoY + 0.18f, sz, yaw, gunPitch, 0f)
+        // Reload: the weapon dips to waist height with the arms.
+        m.setTRS(sx, torsoY + 0.18f - rigPose.reload * 0.28f * vscale, sz, yaw, gunPitch, 0f)
         m.translate(0f, 0f, 0.18f)
         val gm = m.copy()
         r.draw(gunMesh(weapon), gunMat, gm.translate(-0.05f, 0.02f, 0.12f))

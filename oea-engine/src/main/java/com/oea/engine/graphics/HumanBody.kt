@@ -27,6 +27,8 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
     val body: SkeletalMesh
     /** Eyes on their own skinned mesh (HEAD bone): the draw squashes it in Y to blink. */
     val face: SkeletalMesh
+    /** Brows on their own mesh so tension can flatten them (furrow) independently of the blink. */
+    val brows: SkeletalMesh
     val shirt: SkeletalMesh
     val pants: SkeletalMesh
     val hair: SkeletalMesh
@@ -91,6 +93,7 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
             limbT, skinColor, topPart.coverage, bottomCov, form,
         )
         face = buildFace(eyeS, eyeSp, eyeColor, faceW, faceL)
+        brows = buildBrows(eyeSp, browR)
         shirt = buildShirt(topPart, chestK, shoulderK, waistK, hipK)
         pants = buildPants(bottomPart, hipK, limbT)
         hair = buildHair(hairStyle, hairColor, faceW, faceL, browR, eyeSp, jawW, form?.facialHair ?: 0f)
@@ -133,6 +136,9 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         rA: Float, rB: Float, segs: Int, rings: Int,
         boneA: Int, boneB: Int, color: Int,
         depthA: Float = 1f, depthB: Float = 1f,
+        /** Joint bulge: a radius bump near the boneB end — reads as muscle/
+         * clothing deformation when the joint bends, invisible when straight. */
+        bulge: Float = 0f,
     ) {
         val dx = bx - ax; val dy = by - ay; val dz = bz - az
         val len = sqrt(dx * dx + dy * dy + dz * dz)
@@ -146,7 +152,10 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         for (j in 0..rings) {
             val t = j / rings.toFloat()
             val px = ax + dx * t; val py = ay + dy * t; val pz = az + dz * t
-            val r = rA + (rB - rA) * t
+            // Joint bulge: a smooth bump near the boneB end (the joint), fading
+            // at the very tip where the next limb takes over.
+            val b = 1f + bulge * MathX.smoothstep(0.55f, 0.92f, t) * (1f - MathX.smoothstep(0.92f, 1f, t))
+            val r = (rA + (rB - rA) * t) * b
             val d = depthA + (depthB - depthA) * t
             val wb = MathX.smoothstep(0.72f, 1f, t)
             for (k in 0..segs) {
@@ -322,7 +331,7 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
             val fore = if (side < 0) FORE_R else FORE_L
             val hand = if (side < 0) HAND_R else HAND_L
             val sx = side * 0.18f
-            tube(g, sx, 1.18f, 0f, sx, 0.92f, 0f, 0.058f * limbT, 0.046f * limbT, 10, 4, arm, fore, skin)
+            tube(g, sx, 1.18f, 0f, sx, 0.92f, 0f, 0.058f * limbT, 0.046f * limbT, 10, 4, arm, fore, skin, bulge = 0.10f)
             partialSphere(g, sx, 0.87f, 0.01f, 0.052f * limbT, 0.052f * limbT, 0.03f * limbT, 10, 6, hand, skin)
         }
         // bare upper arms under tank tops
@@ -330,7 +339,7 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
             for (side in intArrayOf(1, -1)) {
                 val sho = if (side < 0) SHOUL_R else SHOUL_L
                 val arm = if (side < 0) ARM_R else ARM_L
-                tube(g, side * 0.18f, 1.44f, 0f, side * 0.18f, 1.18f, 0f, 0.082f * limbT, 0.066f * limbT, 10, 4, sho, arm, skin)
+                tube(g, side * 0.18f, 1.44f, 0f, side * 0.18f, 1.18f, 0f, 0.082f * limbT, 0.066f * limbT, 10, 4, sho, arm, skin, bulge = 0.11f)
             }
         }
         // bare shins under shorts/skirts
@@ -338,7 +347,7 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
             for (side in intArrayOf(1, -1)) {
                 val shin = if (side < 0) SHIN_R else SHIN_L
                 val foot = if (side < 0) FOOT_R else FOOT_L
-                tube(g, side * 0.10f, 0.44f, 0f, side * 0.10f, 0.02f, 0f, 0.09f * limbT, 0.06f * limbT, 10, 4, shin, foot, skin)
+                tube(g, side * 0.10f, 0.44f, 0f, side * 0.10f, 0.02f, 0f, 0.09f * limbT, 0.06f * limbT, 10, 4, shin, foot, skin, bulge = 0.10f)
             }
         }
         return g.build()
@@ -352,7 +361,7 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
             for (side in intArrayOf(1, -1)) {
                 val sho = if (side < 0) SHOUL_R else SHOUL_L
                 val arm = if (side < 0) ARM_R else ARM_L
-                tube(g, side * 0.18f, 1.44f, 0f, side * 0.18f, 1.18f, 0f, 0.085f, 0.068f, 10, 4, sho, arm, WHITE)
+                tube(g, side * 0.18f, 1.44f, 0f, side * 0.18f, 1.18f, 0f, 0.085f, 0.068f, 10, 4, sho, arm, WHITE, bulge = 0.09f)
             }
         }
         if (topPart.collar) {
@@ -399,9 +408,9 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
             val foot = if (side < 0) FOOT_R else FOOT_L
             val sx = side * 0.10f
             val legEnd = if (bottomPart.coverage < 0.75f) 0.55f else 0.02f
-            tube(g, sx, 0.88f, 0f, sx, legEnd, 0f, 0.124f * limbT, 0.100f * limbT, 10, 5, thigh, shin, WHITE)
+            tube(g, sx, 0.88f, 0f, sx, legEnd, 0f, 0.124f * limbT, 0.100f * limbT, 10, 5, thigh, shin, WHITE, bulge = 0.14f)
             if (legEnd <= 0.02f) {
-                tube(g, sx, 0.44f, 0f, sx, 0.02f, 0f, 0.092f * limbT, 0.062f * limbT, 10, 4, shin, foot, WHITE)
+                tube(g, sx, 0.44f, 0f, sx, 0.02f, 0f, 0.092f * limbT, 0.062f * limbT, 10, 4, shin, foot, WHITE, bulge = 0.10f)
             }
         }
         return g.build()
@@ -417,6 +426,17 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         val eyeZ = 0.102f * faceL
         partialSphere(g, 0.045f * eyeSp, 0f, eyeZ, 0.021f * eyeS, 0.021f * eyeS, 0.014f * eyeS, 8, 6, HEAD, eyeColor)
         partialSphere(g, -0.045f * eyeSp, 0f, eyeZ, 0.021f * eyeS, 0.021f * eyeS, 0.014f * eyeS, 8, 6, HEAD, eyeColor)
+        return g.build()
+    }
+
+    /**
+     * The brows as their own skinned mesh (HEAD bone), centered on the eye
+     * line like the eyes. The draw flattens them in Y to furrow.
+     */
+    private fun buildBrows(eyeSp: Float, browR: Float): SkeletalMesh {
+        val g = SkeletalMesh.Builder()
+        partialSphere(g, 0.045f * eyeSp, 0.03f, 0.096f, 0.022f * browR, 0.009f, 0.012f, 8, 3, HEAD, WHITE)
+        partialSphere(g, -0.045f * eyeSp, 0.03f, 0.096f, 0.022f * browR, 0.009f, 0.012f, 8, 3, HEAD, WHITE)
         return g.build()
     }
 
@@ -455,9 +475,6 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
                 partialSphere(g, cx, cy, cz, rx, ry, rz, 16, 12, HEAD, WHITE, phiMax = MathX.PI_F * 0.68f, theta0, MathX.TAU - theta0)
             }
         }
-        // brows
-        partialSphere(g, 0.045f * eyeSp, 1.662f, 0.096f, 0.022f * browR, 0.009f, 0.012f, 8, 3, HEAD, WHITE)
-        partialSphere(g, -0.045f * eyeSp, 1.662f, 0.096f, 0.022f * browR, 0.009f, 0.012f, 8, 3, HEAD, WHITE)
         // facial hair
         if (facial > 0f) {
             val beardK = if (facial > 0.5f) 1f else 0.55f
