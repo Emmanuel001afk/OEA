@@ -77,6 +77,8 @@ class OeaArena : OeaGame() {
         var walk = 0f
         var lastX = 0f; var lastZ = 0f
         var speed01 = 0f
+        /** Reload progress 0..1 from the snapshot (drives the reload pose). */
+        var reloadN = 0f
         /** Weather/wind state for this soldier (wet, dusty, hair in the wind). */
         val fx = CharFx()
         val alive get() = flags and 1 != 0
@@ -134,9 +136,6 @@ class OeaArena : OeaGame() {
     private var crouchOn = false
     private var jumpLatch = false
     private var reloadLatch = false
-    /** Local reload cosmetic timer (seconds left); the pose drops the weapon. */
-    private var localReloadT = 0f
-    private var localReloadTotal = 1f
     private var mountLatch = false
     /** One-shot grenade throw: 0 frag, 1 smoke, 2 stun, -1 idle. */
     private var grenadeLatch = -1
@@ -590,7 +589,6 @@ class OeaArena : OeaGame() {
             sendCommand(inputNow)
         }
         jumpLatch = false; reloadLatch = false; mountLatch = false; slotLatch = -1; pickupLatch = -1; grenadeLatch = -1; cookAmount = 0f
-        localReloadT = 0f
     }
 
     private val aim = FloatArray(2)
@@ -639,16 +637,6 @@ class OeaArena : OeaGame() {
         inp.jump = jumpLatch
         inp.crouch = crouchOn
         inp.reload = reloadLatch
-        // Local reload cosmetic: the client knows the weapon's reload time (and
-        // the upgrade discount), so it plays the lowered-weapon pose for the
-        // same duration the sim uses. One press = one attempt: consume the latch.
-        if (reloadLatch) {
-            val w = me?.let { Weapon.entries.getOrElse(it.weapon) { Weapon.PAN } } ?: Weapon.PAN
-            val lv = me?.upLevels?.getOrElse(w.ordinal) { 0 } ?: 0
-            localReloadT = w.reload * (1f - 0.08f * lv)
-            localReloadTotal = localReloadT
-        }
-        reloadLatch = false
         inp.mount = mountLatch
         mountLatch = false
         inp.slot = slotLatch
@@ -809,6 +797,7 @@ class OeaArena : OeaGame() {
                 addTracer(x, y + (if (flags and 2 != 0) 1.05f else 1.6f) - 0.15f, z, lookYaw, camPos.x + sin(lookYaw) * 60f, camPos.y + sin(lookPitch) * 60f, camPos.z + cos(lookYaw) * 60f)
             }
             a.flags = flags; a.health = health; a.armor = armor; a.helmet = helmet; a.weapon = (if (active == 0) s0 else s1); a.shots = shots; a.kills = kills
+            a.reloadN = reload
             a.team = team; a.gunLevel = gunLevel
             a.buffer.push(now, floatArrayOf(x, y, z, yaw, pitch))
             if (id == localId) {
@@ -1005,8 +994,6 @@ class OeaArena : OeaGame() {
         val w = g.width.toFloat(); val h = g.height.toFloat(); val d = g.density
         val me = local
         val alive = me?.alive == true && !matchOver
-        // Local reload cosmetic timer ticks down with the frame rate.
-        if (localReloadT > 0f) localReloadT = (localReloadT - dt).coerceAtLeast(0f)
         val sl = g.safeInsets[0].toFloat(); val sr = g.safeInsets[2].toFloat()
         // Round modes: phase 1 = round over (result, then shop), phase 2 = shop/pick prep.
         if (sim.roundMode && !studio.open) {
@@ -1814,9 +1801,10 @@ class OeaArena : OeaGame() {
         rigPose.lean = 0f
         rigPose.headYaw = 0f
         rigPose.detail = true
-        // Reload pose: only the local player's client knows it is reloading
-        // (the sim's reload state is not in the snapshot); everyone else aims.
-        rigPose.reload = if (id == localId && localReloadT > 0f) localReloadT / localReloadTotal else 0f
+        // Reload pose: the snapshot carries the sim's reload progress for every
+        // player (local via reconcile, remotes via the actor), so everyone
+        // lowers the weapon when reloading.
+        rigPose.reload = (if (id == localId) (local?.reloadLeft ?: 0f) * 0.25f else actors[id]?.reloadN ?: 0f).coerceIn(0f, 1f)
         val rig = rigFor(kit, id)
         val bodyY = y - if (prone) 0.2f else 0f
         // Skinned body + armor/headwear/pack meshes, one skeleton for all.
