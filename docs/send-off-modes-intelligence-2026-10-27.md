@@ -40,9 +40,53 @@ Retained: Battle Royale, Team Deathmatch, Gun Game, Last Day / Lights Out / Haun
 - Warfare capture logic: standing inside a point fills the bar toward your team;
   a point flips when attackers outnumber holders; holding decays enemy progress.
 
-## 4. Deferred
+## 4. Vehicles (Warfare motor pool)
 
-- Delta Force's vehicles (tanks/helos) — no vehicle system in the engine.
+Delta Force's M1A4 / LAV-G1 family and Farlight 84's vehicle system informed this:
+
+| Vehicle | Role | Health | Notes |
+|---|---|---|---|
+| Jeep | fast transport | 180 | rams enemies at speed, no weapon |
+| Tank (M1A4-style) | breakthrough | 420 | 105 mm splash cannon (4.5 m blast), slow |
+| Mobile turret | missile support | 240 | fires lock-on homing missiles, nearly stationary |
+
+- Mount with **E** / the MOUNT touch button when standing next to an empty vehicle;
+  press again to dismount. The driver's stick steers (moveX) and throttles (moveY).
+- Bullets damage vehicles; warheads (rockets, missiles, frags) hit them hardest.
+- A destroyed vehicle kills its crew and explodes into a 5 m blast; warfare
+  vehicles respawn at their spawn point after 12 s.
+
+## 5. Weapons & how they work
+
+New launcher classes (Farlight 84's Anti-Vehicle Rocket / Homing Cannon, Delta
+Force's 105 mm gun-launched missile and ATGMs):
+
+| Weapon | How it works |
+|---|---|
+| **Rocket launcher** | Fires an unguided rocket at 55 m/s; explodes on contact with a 4.5 m splash (140 dmg falloff). Anti-vehicle tool — bullets glance off tanks, rockets wreck them. |
+| **Guided missile** | The "tap to fire, it homes" missile: launch toward an enemy and it steers (up to 45 m/s) onto the nearest living target in front, re-locking if the target dies. 3.5 m splash (120 dmg). |
+
+Both use special ammo (6 per pack), single-shot mags, and appear in the Clash
+Squad shop for $2,200 / $2,600.
+
+## 6. Upgrades & enhancements
+
+Clash Squad cash now buys weapon upgrades (up to level 3 each):
+
+| Level | Damage | Mag | Reload |
+|---|---|---|---|
+| 0 (base) | — | — | — |
+| 1 | +10% | +10% | −8% |
+| 2 | +20% | +20% | −16% |
+| 3 | +30% | +30% | −24% |
+
+Costs: $250 / $500 / $750 per weapon. Upgrades persist through the match and
+re-apply to the round kit at each round start. Snapshots sync upgrade levels and
+vehicle state for LAN play.
+
+## 7. Deferred
+
+- Delta Force's air vehicles (helos/jets) and boats — the vehicle system is ground-only.
 - Attack & Defend tickets / King of the Hill variants (warfare covers the objective feel).
 - Blood Strike's separate ranked ladders — ranking systems are out of scope.
 - Extraction (Hazard Operations) — a different game shape, not a mode variant.
