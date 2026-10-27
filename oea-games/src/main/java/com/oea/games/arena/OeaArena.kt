@@ -379,7 +379,7 @@ class OeaArena : OeaGame() {
             // Day turns to night while wave after wave lands on the island.
             "last_day" -> { env.copyFrom(envDay); sim.zone.enabled = false }
             // Competitive daylight: crisper air, quicker reads.
-            "tdm", "gun", "cs", "wolf", "warfare", "warfare_koth" -> { env.copyFrom(envDay); env.fogDensity = 0.0034f }
+            "tdm", "gun", "cs", "wolf", "warfare", "warfare_koth", "warfare_ad" -> { env.copyFrom(envDay); env.fogDensity = 0.0034f }
             else -> env.copyFrom(envDay)
         }
         if (rules == "last_day" || rules == "haunted" || rules == "lights_out") {
@@ -411,7 +411,7 @@ class OeaArena : OeaGame() {
                 // Clash Squad is a 4v4 squad; Lone Wolf a 1v1 duel; Warfare a 6v6.
                 "cs" -> (8 - humanCount).coerceAtLeast(0)
                 "wolf" -> (2 - humanCount).coerceAtLeast(0)
-                "warfare", "warfare_koth" -> (12 - humanCount).coerceAtLeast(0)
+                "warfare", "warfare_koth", "warfare_ad" -> (12 - humanCount).coerceAtLeast(0)
                 else -> 0
             }
             repeat(max(configuredBots, minimumBots)) { i -> sim.addPlayer(sim.allocBotId(), BOT_NAMES[i % BOT_NAMES.size], EngineColors[(i + 2) % EngineColors.size], true) }
@@ -719,6 +719,7 @@ class OeaArena : OeaGame() {
             // clients show the live score, not a local zero.
             w.u8(sim.captures[0].coerceIn(0, 255)).u8(sim.captures[1].coerceIn(0, 255))
             w.u16(sim.kothScore[0].coerceIn(0f, 65535f).toInt()).u16(sim.kothScore[1].coerceIn(0f, 65535f).toInt())
+            w.f32(sim.adTimer).u16(sim.adTickets.coerceIn(0, 65535))
             w.u8(sim.vehicles.size)
             for (v in sim.vehicles) {
                 w.u8(v.id).u8(if (v.dead) 1 else 0).f32(v.x).f32(v.y).f32(v.z).angle(v.yaw).f32(v.health)
@@ -831,6 +832,7 @@ class OeaArena : OeaGame() {
         sim.teamScore[0] = r.u8(); sim.teamScore[1] = r.u8()
         sim.captures[0] = r.u8(); sim.captures[1] = r.u8()
         sim.kothScore[0] = r.u16().toFloat(); sim.kothScore[1] = r.u16().toFloat()
+        sim.adTimer = r.f32(); sim.adTickets = r.u16()
         val nv = r.u8()
         sim.vehicles.clear()
         repeat(nv) {
@@ -1000,6 +1002,7 @@ class OeaArena : OeaGame() {
             winnerId == localId && rules == "wolf" -> "Victory! The duel is yours"
             winnerId == localId && rules == "warfare" -> "Victory! Every sector secured"
             winnerId == localId && rules == "warfare_koth" -> "Victory! The hill is yours"
+            winnerId == localId && rules == "warfare_ad" -> "Victory! The tickets are drained"
             winnerId == localId && rules == "br_res" -> "Victory! Last one standing"
             winnerId == localId -> "Victory! Last one standing"
             rules == "tdm" -> (if (sim.teamScore[0] > sim.teamScore[1]) "Blue" else "Orange") + " team wins"
@@ -1008,6 +1011,7 @@ class OeaArena : OeaGame() {
             rules == "wolf" -> (if (sim.roundsWon[0] > sim.roundsWon[1]) "Blue" else "Orange") + " duelist takes the duel"
             rules == "warfare" -> (if (sim.captures[0] > sim.captures[1]) "Blue" else "Orange") + " holds the field"
             rules == "warfare_koth" -> (if (sim.kothScore[0] > sim.kothScore[1]) "Blue" else "Orange") + " holds the hill"
+            rules == "warfare_ad" -> (if (sim.adTickets <= 0) "Blue" else "Orange") + " takes the objective"
             sim.survival -> "The waves won · you reached wave $waveNumber"
             else -> "${name ?: "Nobody"} won the match"
         }
@@ -1538,6 +1542,7 @@ class OeaArena : OeaGame() {
         "wolf" -> "Lone Wolf — 1v1 duels, best of five. Every two rounds you pick the weapon both duelists use. No looting, no zone: just you, the island and one opponent."
         "warfare" -> "Warfare — two squads of six fight over three capture points. Stand on an objective to fill its bar; the first squad to five captures takes the field. You respawn with your kit."
         "warfare_koth" -> "King of the Hill — two squads of six, one hill. Stand on it to score for your team; the first squad to 200 takes the hill. You respawn with your kit."
+        "warfare_ad" -> "Attack & Defend — team Orange defends with 300 tickets, team Blue assaults. Every sector Blue captures drains 50 tickets; if the clock runs out, Orange holds. Both sides respawn with their kit."
         "br_res" -> "Resurgence Royale — the zone closes like Battle Royale, but death is not the end: you come back on a town 20 s later with your loadout. The last one standing still wins."
         "last_day" -> "Last Day Survival — no zone. Day turns to night while waves keep landing on the island. Survive as long as you can; every wave is worth XP."
         "lights_out" -> "Lights Out — permanent night with tight fog. Your muzzle flash is the light."
@@ -2045,6 +2050,11 @@ class OeaArena : OeaGame() {
                     hud.text("${sim.kothScore[0].toInt()}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
                     hud.text("${sim.kothScore[1].toInt()}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
                     hud.text("first to 200", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+                } else if (sim.ad) {
+                    hud.text("ATTACK & DEFEND", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.adTickets}", mx + 12f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                    hud.text("${(sim.adTimer).toInt()}s", mx + 58f * d, y + 22f * d, 15f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                    hud.text("drain 300", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
                 } else {
                     hud.text("WARFARE", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
                     hud.text("${sim.captures[0]}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
@@ -2287,6 +2297,7 @@ class OeaArena : OeaGame() {
                     Choice("wolf", "Lone Wolf", "1v1 duel · pick guns · best of 5"),
                     Choice("warfare", "Warfare", "6v6 · capture points · first to 5"),
                     Choice("warfare_koth", "King of the Hill", "6v6 · hold the hill · first to 200"),
+                    Choice("warfare_ad", "Attack & Defend", "6v6 · drain the tickets · 10 min"),
                     Choice("gun", "Gun Game", "One kill = next gun · pan finish"),
                     Choice("last_day", "Last Day Survival", "Day turns to night · endless waves"),
                     Choice("lights_out", "Lights Out", "Permanent night · tight fog"),

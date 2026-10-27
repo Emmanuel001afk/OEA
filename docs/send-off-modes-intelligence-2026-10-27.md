@@ -25,6 +25,7 @@ Call of Duty / Free Fire battle royales — and what was built in Send Off from 
 | **Lone Wolf** (`wolf`) | Free Fire Lone Wolf | 1v1, best-of-5; weapon pick every 2 rounds; pistol kit + medkits/grenades |
 | **Warfare** (`warfare`) | Delta Force Warfare | 6v6 objective play: three capture points, first to 5 captures; respawn with kit; points render as rings + beams and show on the minimap |
 | **King of the Hill** (`warfare_koth`) | Delta Force Warfare (KoTH) | 6v6, one hill on a town: the owning team scores while holding it uncontested (1.2 pts/s, first to 200); the capture bar still flips the hill when contested; respawn with kit; vehicles spawn like warfare |
+| **Attack & Defend** (`warfare_ad`) | Delta Force Warfare (A&D) | 6v6: team 0 (Blue) assaults, team 1 (Orange) defends 300 tickets; every sector Blue captures drains 50; the 10-minute attack clock wins it for Orange if it runs out; both sides respawn with kit; vehicles spawn like warfare |
 | **Resurgence Royale** (`br_res`) | CoD Resurgence | The royale zone closes, but death is a 20-second comeback with the loadout intact; last one standing wins |
 
 Retained: Battle Royale, Team Deathmatch, Gun Game, Last Day / Lights Out / Haunted.
@@ -104,6 +105,7 @@ vehicle state for LAN play.
 
 - Jets and boats — the helo landed (air wing in warfare); boats need water
   physics the vehicle system doesn't have.
-- Attack & Defend tickets (King of the Hill landed as `warfare_koth` — see the mode table).
+- Attack & Defend tickets (landed as `warfare_ad` — see the mode table; a lobby
+  side picker is the natural next step if players want to choose assault/defend).
 - Blood Strike's separate ranked ladders — ranking systems are out of scope.
 - Extraction (Hazard Operations) — a different game shape, not a mode variant.

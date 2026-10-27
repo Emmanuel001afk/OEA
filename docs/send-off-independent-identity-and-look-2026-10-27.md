@@ -178,6 +178,7 @@ the hold-to-cook and long-press-to-prone gestures.
 | Lone Wolf | none | round | 1v1, best-of-5, weapon pick every 2 rounds |
 | Warfare | none | ✔ | 6v6, three capture points, first to 5 |
 | King of the Hill | none | ✔ | 6v6, one hill, score while holding, first to 200 |
+| Attack & Defend | none | ✔ | 6v6, assault vs defend, drain 300 tickets, 10 min clock |
 | Resurgence Royale | shrinking | ✔ 20s | BR zone + comeback with loadout intact |
 | Last Day | none | ✔ | day→night cycles, endless waves |
 | Lights Out | none | ✔ | permanent night, tight fog |

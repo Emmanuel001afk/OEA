@@ -373,17 +373,24 @@ internal class ArenaSim(
     val kothScore = FloatArray(2)
     private const val KOTH_WIN = 200
     private const val KOTH_RATE = 1.2f
-    val teams = rules == "tdm" || rules == "cs" || rules == "warfare" || rules == "wolf" || rules == "warfare_koth"
+    val teams = rules == "tdm" || rules == "cs" || rules == "warfare" || rules == "wolf" || rules == "warfare_koth" || rules == "warfare_ad"
     val gunGame = rules == "gun"
     /** Respawn after death — except the round-based duels, which respawn at round start. */
-    val respawnMode = rules == "tdm" || rules == "gun" || rules == "warfare" || rules == "br_res" || rules == "warfare_koth"
+    val respawnMode = rules == "tdm" || rules == "gun" || rules == "warfare" || rules == "br_res" || rules == "warfare_koth" || rules == "warfare_ad"
     val survival = rules == "last_day" || rules == "lights_out" || rules == "haunted"
     /** Round-based modes (Clash Squad, Lone Wolf): best-of-N, shop/pick between rounds. */
     val roundMode = rules == "cs" || rules == "wolf"
     /** Delta Force-style objective warfare: respawn with kit, capture the points. */
-    val warfare = rules == "warfare" || rules == "warfare_koth"
+    val warfare = rules == "warfare" || rules == "warfare_koth" || rules == "warfare_ad"
     /** Warfare variant: one hill, score while you hold it. */
     val koth = rules == "warfare_koth"
+    /** Attack & Defend: team 0 assaults, team 1 defends with finite tickets. */
+    val ad = rules == "warfare_ad"
+    /** Defender tickets — attackers drain them by capturing sectors. */
+    var adTickets = 300
+    /** Attack time limit: defenders win when it runs out. */
+    var adTimer = 600f
+    private const val AD_DRAIN = 50
     /** CoD-style royale: the zone closes, but you come back. */
     val resurgence = rules == "br_res"
     var round = 1
@@ -703,6 +710,18 @@ internal class ArenaSim(
         }
         if (zone.enabled && zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
         if (zone.enabled) for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, true)
+        // Attack & Defend: the attack clock runs down; at zero the defenders hold.
+        if (ad && !over) {
+            adTimer -= dt
+            if (adTimer <= 0f) {
+                adTimer = 0f
+                over = true
+                val w = players.values.maxByOrNull { it.kills + (if (it.team == 1) 1000 else 0) } ?: players.values.first()
+                w.place = 1
+                winner = w
+                events?.onMatchOver(w)
+            }
+        }
         // Grenades: arc on gravity, bounce once off the terrain, then go off on the fuse.
         // Rockets and guided missiles fly straight (or steer) instead of arcing.
         for (g in grenades) {
@@ -855,7 +874,19 @@ internal class ArenaSim(
                         pt.progress = 0f
                         captures[attackTeam]++
                         events?.onPointCaptured(pt.x, pt.z, attackTeam)
-                        if (!koth && captures[attackTeam] >= WARFARE_WIN) {
+                        // Attack & Defend: attacker captures drain defender tickets.
+                        if (ad && attackTeam == 0) {
+                            adTickets -= AD_DRAIN
+                            if (adTickets <= 0) {
+                                adTickets = 0
+                                over = true
+                                val w = players.values.maxByOrNull { it.kills + (if (it.team == 0) 1000 else 0) } ?: players.values.first()
+                                w.place = 1
+                                winner = w
+                                events?.onMatchOver(w)
+                            }
+                        }
+                        if (!koth && !ad && captures[attackTeam] >= WARFARE_WIN) {
                             over = true
                             val w = players.values.maxByOrNull { it.kills + (if (it.team == attackTeam) 1000 else 0) } ?: players.values.first()
                             w.place = 1
@@ -881,7 +912,7 @@ internal class ArenaSim(
                 }
             }
         }
-        if (!over && teams && (teamScore[0] >= TEAM_SCORE_WIN || teamScore[1] >= TEAM_SCORE_WIN)) {
+        if (!over && teams && !ad && (teamScore[0] >= TEAM_SCORE_WIN || teamScore[1] >= TEAM_SCORE_WIN)) {
             over = true
             val winning = if (teamScore[0] >= teamScore[1]) 0 else 1
             winner = players.values.filter { it.team == winning }.maxByOrNull { it.kills }
