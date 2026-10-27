@@ -174,6 +174,10 @@ the hold-to-cook and long-press-to-prone gestures.
 | Battle Royale | shrinking | — | skydive, loot, last standing |
 | Team Deathmatch | none | ✔ | 2 teams, first to 40 |
 | Gun Game | none | — | kill = next gun, pan finish |
+| Clash Squad | none | round | 4v4, best-of-7, buy shop between rounds |
+| Lone Wolf | none | round | 1v1, best-of-5, weapon pick every 2 rounds |
+| Warfare | none | ✔ | 6v6, three capture points, first to 5 |
+| Resurgence Royale | shrinking | ✔ 20s | BR zone + comeback with loadout intact |
 | Last Day | none | ✔ | day→night cycles, endless waves |
 | Lights Out | none | ✔ | permanent night, tight fog |
 | Haunted | none | ✔ | green fog, endless undead |
