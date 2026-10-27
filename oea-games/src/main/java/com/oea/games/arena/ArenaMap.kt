@@ -106,10 +106,13 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
             val ridge = noise.ridged(x * 0.02f + 7f, z * 0.02f, 3)
             // Terrain presets change the actual walkable island profile, not just its label.
             var h = when (terrainStyle) {
-                "highlands" -> broad * 15f + ridge * 11f + 4f
-                "badlands" -> broad * 7f + ridge * 14f + 2.5f
-                else -> broad * 10f + ridge * 5f + 3.5f
+                "highlands" -> broad * 22f + ridge * 14f + 6f
+                "badlands" -> broad * 9f + ridge * 18f + 3f
+                else -> broad * 14f + ridge * 8f + 5f
             }
+            // Mid-frequency micro relief: hills and hollows at walking scale, so
+            // the island reads as terrain and not a smooth blob.
+            h += (noise.fbm(x * 0.045f, z * 0.045f, 3) - 0.5f) * 7f
             // Island falloff into the sea.
             val edge = MathX.smoothstep(0.72f, 0.98f, r)
             h = MathX.lerp(h, -4f, edge)
@@ -333,8 +336,10 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
                 val mid = (xa + xb) / 2f
                 segment(walls, xa, h.floor, z0, mid - 0.8f, y1, z1)
                 segment(walls, mid + 0.8f, h.floor, z0, xb, y1, z1)
-                segment(walls, mid - 0.8f, h.floor, z0, mid + 0.8f, h.floor + 1.0f, z1)
-                segment(walls, mid - 0.8f, h.floor + 2.1f, z0, mid + 0.8f, y1, z1)
+                // A jumpable opening: a low sill and the lintel up at the wall top,
+                // so a vaulting player clears it mid-arc instead of bonking.
+                segment(walls, mid - 0.8f, h.floor, z0, mid + 0.8f, h.floor + 0.5f, z1)
+                segment(walls, mid - 0.8f, h.floor + 3.2f, z0, mid + 0.8f, y1, z1)
             } else segment(walls, xa, h.floor, z0, xb, y1, z1)
         }
         fun wallZ(x0: Float, x1: Float, za: Float, zb: Float, withDoor: Boolean, withWindow: Boolean) {
@@ -347,8 +352,9 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
                 val mid = (za + zb) / 2f
                 segment(walls, x0, h.floor, za, x1, y1, mid - 0.8f)
                 segment(walls, x0, h.floor, mid + 0.8f, x1, y1, zb)
-                segment(walls, x0, h.floor, mid - 0.8f, x1, h.floor + 1.0f, mid + 0.8f)
-                segment(walls, x0, h.floor + 2.1f, mid - 0.8f, x1, y1, mid + 0.8f)
+                // Same jumpable window opening as wallX.
+                segment(walls, x0, h.floor, mid - 0.8f, x1, h.floor + 0.5f, mid + 0.8f)
+                segment(walls, x0, h.floor + 3.2f, mid - 0.8f, x1, y1, mid + 0.8f)
             } else segment(walls, x0, h.floor, za, x1, y1, zb)
         }
         wallX(h.z0, h.z0 + th, h.x0, h.x1, h.doorSide == 0, h.doorSide != 0)
@@ -392,6 +398,7 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
         val res = RES
         val base = mb.vertexCount
         val n = com.oea.engine.math.Vec3()
+        val detailNoise = Noise(seed)
         for (j in 0 until res) for (i in 0 until res) {
             val x = terrain.originX + i * terrain.cellSize; val z = terrain.originZ + j * terrain.cellSize
             val h = terrain.heights[j * res + i]
@@ -444,6 +451,10 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
                 val dirt = if (terrainStyle == "badlands") 0xFF9A6B48.toInt() else 0xFF8A6F4E.toInt()
                 c = Colors.lerp(c, dirt, (1f - MathX.smoothstep(1.4f, 3.2f, rd)) * 0.85f)
             }
+            // Per-vertex colour jitter: every patch of ground gets a slightly
+            // different shade so the terrain never reads as a flat solid.
+            val j = (detailNoise.fbm(x * 0.16f, z * 0.16f, 2) - 0.5f) * 0.2f
+            c = Colors.scale(c, 1f + j)
             mb.color = c
             mb.vertex(x, h, z, n.x, n.y, n.z, i * 0.25f, j * 0.25f)
         }
@@ -456,7 +467,7 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
 
     companion object {
         const val SIZE = 230f
-        const val RES = 116
+        const val RES = 140
         val CONTAINER_COLORS = intArrayOf(0xFFB23A2F.toInt(), 0xFF2F6FB2.toInt(), 0xFF2F9A5E.toInt(), 0xFFD9A23A.toInt(), 0xFF7A7F87.toInt())
 
         val treeTrunk: Mesh by lazy { MeshBuilder().cylinder(0f, 0f, 0f, 0.28f, 2.6f, 8).build() }

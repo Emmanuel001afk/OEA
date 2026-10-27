@@ -84,7 +84,18 @@ Costs: $250 / $500 / $750 per weapon. Upgrades persist through the match and
 re-apply to the round kit at each round start. Snapshots sync upgrade levels and
 vehicle state for LAN play.
 
-## 7. Deferred
+## 7. Movement & terrain fixes
+
+- **Wall sliding**: the character controller now resolves each movement axis
+  separately, so a blocked axis still slides along the wall — no push-out
+  "clutching" jitter against buildings.
+- **Jumpable windows**: house windows are now a 2.7 m opening (0.5 m sill, lintel
+  at the wall top) — a vaulting player clears them mid-arc instead of bonking.
+- **Terrain**: relief amplitude raised, a mid-frequency micro-relief layer added,
+  the height grid refined (116 → 140 cells), and per-vertex colour jitter so the
+  ground no longer reads as a flat solid.
+
+## 8. Deferred
 
 - Delta Force's air vehicles (helos/jets) and boats — the vehicle system is ground-only.
 - Attack & Defend tickets / King of the Hill variants (warfare covers the objective feel).
