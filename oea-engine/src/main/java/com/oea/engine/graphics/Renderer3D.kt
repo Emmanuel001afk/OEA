@@ -65,6 +65,9 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
     private var charCapsule: Mesh? = null
     private val whiteTint = FloatArray(4).also { Colors.toLinear(Colors.WHITE, it) }
     private val lin2 = FloatArray(4)
+    /** Linearized SSS tint for skinned draws (kept off [lin] — that one holds
+     * the material base colour between applyMaterial calls). */
+    private val sssLin = FloatArray(4)
     private val capIndices = ArrayList<Int>()
 
     private val particleSystems = ArrayList<ParticleSystem>()
@@ -405,6 +408,12 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
                     if (m !== lastMaterial) { applyMaterial(skin, m); lastMaterial = m }
                     Colors.toLinear(d.tint, lin2)
                     skin.set4f("u_baseColor", lin[0] * lin2[0], lin[1] * lin2[1], lin[2] * lin2[2], lin[3] * lin2[3])
+                    // Subsurface scattering for skinned draws: the material's tint
+                    // carries through, strength fixed (the shader gates on w).
+                    if (m.subsurface != 0) {
+                        Colors.toLinear(m.subsurface, sssLin)
+                        skin.set4f("u_subsurface", sssLin[0], sssLin[1], sssLin[2], 0.35f)
+                    } else skin.set4f("u_subsurface", 0f, 0f, 0f, 0f)
                     val bones = d.bones ?: continue
                     skin.setMat4("u_model", t)
                     skin.setMat4n("u_bones", bones.size / 16, bones)

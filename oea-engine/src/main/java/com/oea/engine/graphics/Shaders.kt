@@ -107,6 +107,8 @@ uniform vec3 u_skyAmbient;
 uniform vec3 u_groundAmbient;
 uniform vec4 u_fog;         // rgb, density
 uniform vec4 u_shadowParams; // enabled, texel, bias, strength
+// Subsurface scattering: rgb = skin tint (linear), w = strength (0 = off).
+uniform vec4 u_subsurface;
 uniform float u_exposure;
 // Dynamic point lights (fire, sparks, magic, muzzle flashes): the light that
 // VFX actually throws onto skin, cloth and terrain.
@@ -172,6 +174,13 @@ void main() {
         vec3 h2 = normalize(ln + v);
         float spec2 = pow(max(dot(n, h2), 0.0), u_params.y) * u_params.x;
         color += u_pointColor[i].rgb * on * att * (base.rgb * ndl2 + vec3(spec2) * 0.7 + base.rgb * 0.08);
+    }
+    // Subsurface scattering: light that leaks through thin skin — the cheek,
+    // ear and nose glow warm when the sun is behind. One term kills the
+    // "plastic statue" look on faces and bare skin.
+    if (u_subsurface.w > 0.01) {
+        float sss = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 3.0);
+        color += u_subsurface.rgb * sss * u_subsurface.w;
     }
     if (u_flags.z > 0.5 && u_fog.a > 0.0) {
         float d = length(u_camPos - v_worldPos) * u_fog.a;

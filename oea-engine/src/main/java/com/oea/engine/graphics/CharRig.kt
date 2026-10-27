@@ -52,9 +52,16 @@ class CharRig(
     val skeleton = Skeleton()
     var human: HumanBody? = null
     private val tmp = Mat4()
+    private val tmp2 = Mat4()
 
     init {
-        if (spec == null) human = HumanBody(null, feminine, hairStyle)
+        if (spec == null) {
+            human = HumanBody(null, feminine, hairStyle)
+            // Legacy rigs still get the SSS skin term on the skinned path: the
+            // default body should read as flesh, not plastic.
+            mSkin = Material(color = skin.color, texture = skin.texture, specular = skin.specular,
+                shininess = skin.shininess, rim = skin.rim, subsurface = skin.color)
+        }
     }
 
     /**
@@ -114,7 +121,7 @@ class CharRig(
         formRev = sp.revision
         val f = sp.form()
         form = f
-        mSkin = Material(color = f.skinColor, texture = CharTextures.forKey(f.skinTexture), specular = 0.18f, rim = 0.12f)
+        mSkin = Material(color = f.skinColor, texture = CharTextures.forKey(f.skinTexture), specular = 0.18f, rim = 0.12f, subsurface = f.skinColor)
         mHair = Material(color = f.hairColor, texture = CharTextures.forKey("hair"), specular = 0.42f, shininess = 48f, rim = 0.18f)
         mTop = Material(color = f.topColor, texture = CharTextures.forKey(f.topTexture), specular = 0.22f, rim = 0.14f)
         mBottom = Material(color = f.bottomColor, texture = CharTextures.forKey(f.bottomTexture), specular = 0.18f, rim = 0.1f)
@@ -552,6 +559,7 @@ class CharRig(
     fun drawSkinned(
         r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, p: Pose, scale: Float = 1f, fx: CharFx? = null,
         vest: Boolean = false, helmet: Boolean = false, pack: Boolean = false, vestMat: Material? = null,
+        lod: Int = 0,
     ) {
         val h = human ?: return
         if (spec != null) ensureForm()
@@ -565,13 +573,52 @@ class CharRig(
         val bones = skeleton.matrices
         r.drawSkinned(h.body, mSkin, bones, tmp)
         r.drawSkinned(h.shirt, mTop, bones, tmp)
-        if (spec != null && form?.outer != "none") r.drawSkinned(h.outer, mOuter, bones, tmp)
+        if (lod < 2 && spec != null && form?.outer != "none") r.drawSkinned(h.outer, mOuter, bones, windTmp(x, y, z, yaw, scale, fx))
         r.drawSkinned(h.pants, mBottom, bones, tmp)
-        if (spec != null || hair != null) r.drawSkinned(h.hair, mHair, bones, tmp)
+        if (lod < 2 && (spec != null || hair != null)) r.drawSkinned(h.hair, mHair, bones, windTmp(x, y, z, yaw, scale, fx))
         r.drawSkinned(h.shoes, mShoes, bones, tmp)
-        if (vest) r.drawSkinned(h.vest, vestMat ?: mOuter, bones, tmp)
-        if (helmet) r.drawSkinned(h.headwear, mHead, bones, tmp)
-        if (pack) r.drawSkinned(h.pack, mBack, bones, tmp)
+        if (lod < 1 && vest) r.drawSkinned(h.vest, vestMat ?: mOuter, bones, tmp)
+        if (lod < 1 && helmet) r.drawSkinned(h.headwear, mHead, bones, tmp)
+        if (lod < 1 && pack) r.drawSkinned(h.pack, mBack, bones, tmp)
+        // Eyes: own skinned mesh on the HEAD bone; the blink squashes it in Y.
+        // The mesh is centered on the eye line (y = 0), so it draws at head height.
+        if (lod < 1 && h.face.vertexCount > 0) {
+            tmp2.setTRS(x, y + 1.632f * scale, z, yaw, 0f, 0f, scale, scale * blinkK, scale)
+            r.drawSkinned(h.face, mEye, bones, tmp2)
+        }
+    }
+
+    /** Hair and coat shells sway with the wind: a hair-trigger rotation about the
+     * character's feet — small angles, so the head barely moves. */
+    private fun windTmp(x: Float, y: Float, z: Float, yaw: Float, scale: Float, fx: CharFx?): Mat4 {
+        if (fx != null && (fx.windX != 0f || fx.windZ != 0f)) {
+            tmp2.setTRS(x, y, z, yaw + fx.windX * 0.01f, -fx.windZ * 0.015f, 0f, scale, scale, scale)
+        } else tmp2.setPosYaw(x, y, z, yaw, scale)
+        return tmp2
+    }
+
+    // ---------------------------------------------------------------- face: blink
+
+    private val rnd = java.util.Random()
+    private var blinkNext = 0f
+    private var blinkUntil = 0f
+    /** 1 = eyes open, ~0.08 = blinking. Drives the face mesh's Y scale. */
+    var blinkK = 1f
+
+    /**
+     * Advances the blink schedule from absolute game time (seconds). Blinks
+     * every 2–6 s, each blink is a 0.14 s smooth close/open. Call once per
+     * frame per rig; the draw reads [blinkK].
+     */
+    fun faceUpdate(t: Float) {
+        if (t >= blinkNext) {
+            blinkUntil = t + 0.05f
+            blinkNext = t + 2.0f + rnd.nextFloat() * 4.0f
+        }
+        blinkK = if (t < blinkUntil + 0.14f) {
+            val k = (t - blinkUntil) / 0.14f  // 0..1 across the blink
+            1f - 0.92f * (1f - abs(k * 2f - 1f))  // smooth close and open
+        } else 1f
     }
 
     // ---------------------------------------------------------------- primitive helpers

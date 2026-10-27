@@ -25,6 +25,8 @@ import kotlin.math.sqrt
  */
 class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
     val body: SkeletalMesh
+    /** Eyes on their own skinned mesh (HEAD bone): the draw squashes it in Y to blink. */
+    val face: SkeletalMesh
     val shirt: SkeletalMesh
     val pants: SkeletalMesh
     val hair: SkeletalMesh
@@ -85,9 +87,10 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         val eyeColor = form?.eyeColor ?: EYE
 
         body = buildBody(
-            faceW, faceL, jawW, jawD, chinL, eyeS, eyeSp, eyeD, noseW, mouthW, browR, earS,
-            limbT, skinColor, eyeColor, topPart.coverage, bottomCov, form,
+            faceW, faceL, jawW, jawD, chinL, noseW, mouthW, browR, earS,
+            limbT, skinColor, topPart.coverage, bottomCov, form,
         )
+        face = buildFace(eyeS, eyeSp, eyeColor, faceW, faceL)
         shirt = buildShirt(topPart, chestK, shoulderK, waistK, hipK)
         pants = buildPants(bottomPart, hipK, limbT)
         hair = buildHair(hairStyle, hairColor, faceW, faceL, browR, eyeSp, jawW, form?.facialHair ?: 0f)
@@ -260,8 +263,8 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
 
     private fun buildBody(
         faceW: Float, faceL: Float, jawW: Float, jawD: Float, chinL: Float,
-        eyeS: Float, eyeSp: Float, eyeD: Float, noseW: Float, mouthW: Float, browR: Float, earS: Float,
-        limbT: Float, skin: Int, eyeColor: Int, topCov: Float, bottomCov: Float, form: CharForm?,
+        noseW: Float, mouthW: Float, browR: Float, earS: Float,
+        limbT: Float, skin: Int, topCov: Float, bottomCov: Float, form: CharForm?,
     ): SkeletalMesh {
         val g = SkeletalMesh.Builder()
         // pelvis block (under the shirt)
@@ -288,11 +291,6 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         // ears
         partialSphere(g, 0.103f * faceW, 1.595f, -0.005f, 0.028f * earS, 0.042f * earS, 0.02f * earS, 8, 6, HEAD, skin)
         partialSphere(g, -0.103f * faceW, 1.595f, -0.005f, 0.028f * earS, 0.042f * earS, 0.02f * earS, 8, 6, HEAD, skin)
-        // eyes on the sphere surface
-        val eyeY = 1.632f
-        val eyeZ = 0.102f * faceL
-        partialSphere(g, 0.045f * eyeSp, eyeY, eyeZ, 0.021f * eyeS, 0.021f * eyeS, 0.014f * eyeS, 8, 6, HEAD, eyeColor)
-        partialSphere(g, -0.045f * eyeSp, eyeY, eyeZ, 0.021f * eyeS, 0.021f * eyeS, 0.014f * eyeS, 8, 6, HEAD, eyeColor)
         // mouth on the jaw
         partialSphere(g, 0f, 1.528f + (chinL - 1f) * 0.02f, 0.098f,
             0.026f * mouthW, 0.008f, 0.009f * mouthW + 0.006f, 10, 3, HEAD, MOUTH)
@@ -406,6 +404,19 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
                 tube(g, sx, 0.44f, 0f, sx, 0.02f, 0f, 0.092f * limbT, 0.062f * limbT, 10, 4, shin, foot, WHITE)
             }
         }
+        return g.build()
+    }
+
+    /**
+     * The eyes as their own skinned mesh, bound to the HEAD bone. Geometry is
+     * centered on the eye line (y = 0) so the draw can squash the mesh in Y to
+     * blink — the rest of the face stays put. Brows stay in the hair cap.
+     */
+    private fun buildFace(eyeS: Float, eyeSp: Float, eyeColor: Int, faceW: Float, faceL: Float): SkeletalMesh {
+        val g = SkeletalMesh.Builder()
+        val eyeZ = 0.102f * faceL
+        partialSphere(g, 0.045f * eyeSp, 0f, eyeZ, 0.021f * eyeS, 0.021f * eyeS, 0.014f * eyeS, 8, 6, HEAD, eyeColor)
+        partialSphere(g, -0.045f * eyeSp, 0f, eyeZ, 0.021f * eyeS, 0.021f * eyeS, 0.014f * eyeS, 8, 6, HEAD, eyeColor)
         return g.build()
     }
 

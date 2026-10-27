@@ -38,11 +38,13 @@ class Material(
     var uvScaleY: Float = 1f,
     var uvOffsetX: Float = 0f,
     var uvOffsetY: Float = 0f,
+    /** Subsurface-scatter tint (linear rgb); nonzero enables the SSS skin term. */
+    var subsurface: Int = 0,
 ) {
     val id = ids.incrementAndGet()
 
     fun copy(): Material = Material(color, texture, emissive, emissiveStrength, specular, shininess, rim, unlit, transparent, additive,
-        doubleSided, castShadows, receiveShadows, fog, depthWrite, alphaCutoff, uvScaleX, uvScaleY, uvOffsetX, uvOffsetY)
+        doubleSided, castShadows, receiveShadows, fog, depthWrite, alphaCutoff, uvScaleX, uvScaleY, uvOffsetX, uvOffsetY, subsurface)
 
     companion object {
         private val ids = AtomicInteger()

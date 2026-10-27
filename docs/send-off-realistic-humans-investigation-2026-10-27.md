@@ -178,3 +178,43 @@ Start Tier 1, step 1: a real skinned humanoid mesh generated from `CharSpec` wit
 hardware skinning in the existing GLES 3.0 shader — this is the single change that
 makes the rest of the roadmap possible and that immediately ends "shapes" for the
 player. Then the skin shader (step 4) and real locomotion (step 3) land together.
+
+## 8. Status after the first implementation pass (2026-10-27)
+
+The skeletal pipeline is written and wired into Send Off's character draw path
+(`CharRig.drawSkinned`, called from `OeaArena.drawSoldier` for every soldier —
+ground and sky). **Nothing in this section has been compiled** — the sandbox has
+no JDK/Android SDK; every item needs a build-machine + device pass before it can
+be called shipped.
+
+**Landed (commit b812557, then this pass):**
+
+- **Tier 1.1 — skeletal mesh from `CharSpec`.** `HumanBody` builds ten skinned
+  parts from one spec (body, shirt, pants, hair, shoes, outer, headwear, vest,
+  pack, face): proportions from the studio sliders, face from the FaceSpec
+  dimensions, clothing from the `CharParts` catalog.
+- **Tier 1.2 — hardware skinning.** `SkeletalMesh` (stride-20 vertex stream with
+  4 bone indices + weights), `Renderer3D.drawSkinned` with a 19-bone uniform
+  palette, `SKIN_VERT` doing the linear blend in the shader.
+- **Tier 1.3 — procedural locomotion on bones.** `Skeleton.update` derives every
+  joint rotation from the same `Pose` fields the primitive rig used (phase,
+  speed, airborne, crouch, lean, aim, head yaw), plus bob/breathing sway.
+- **Tier 1.4 — SSS-ish skin shader.** `u_subsurface` on the shared lit shader:
+  a grazing-angle warm leak-through term, tinted per character and gated on the
+  material (skin only). One uniform, no new pass.
+- **Tier 1.5 — hair/cloth as meshes.** Hair caps/styles, outer shells, vest,
+  pack, headwear are all generated meshes skinned to the skeleton.
+- **Tier 2.7 (partial) — facial animation.** The eyes moved into their own
+  HEAD-bound skinned mesh so they can blink: `CharRig.faceUpdate(t)` runs a
+  2–6 s random blink schedule, the draw squashes the mesh in Y. Eye look-at,
+  brow tension and jaw shapes are NOT implemented.
+- **Tier 2.8 (partial) — cloth-ish motion.** Hair and outer shells sway with
+  the world wind (`CharFx.windX/windZ`, fed by `VfxSystem`).
+- **Tier 2.9 — LODs.** `drawSkinned` takes `lod` (0/1/2 by camera distance in
+  `drawSoldier`): lod1 skips vest/headwear/pack, lod2 additionally skips
+  outer/hair. Body/shirt/pants/shoes always draw.
+
+**Still open:** eye look-at + brow/jaw shapes (Tier 2.7 rest), clip library
+with real blending (Tier 2.6 — the current blend is implicit in the pose math,
+no clips), knee/elbow bulge correctives (Tier 2.8 rest), DeviceProfile tiering,
+all of Tier 3, and the build/device verification of everything above.

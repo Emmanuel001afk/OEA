@@ -1743,6 +1743,13 @@ class OeaArena : OeaGame() {
         val kit = if (sim.teams && team in TEAM_COLORS.indices) TEAM_COLORS[team] else color
         val body = shirt(kit)
         val vscale = 0.95f + (id % 5) * 0.025f
+        // Face: the blink schedule rides on absolute time. LOD cuts the armor,
+        // pack and headwear draws for far soldiers — draw calls, not pixels.
+        val rig0 = rigFor(kit, id)
+        rig0.faceUpdate(ctx.time.elapsed.toFloat())
+        val ddx0 = x - camera.position.x; val ddz0 = z - camera.position.z
+        val d2 = ddx0 * ddx0 + ddz0 * ddz0
+        val lod = if (d2 > 45f * 45f) 2 else if (d2 > 20f * 20f) 1 else 0
         if (!alive) {
             r.draw(Mesh.unitCube, body, x, y + 0.15f, z, yaw, MathX.HALF_PI, 0f, 0.5f, 0.6f, 0.28f)
             r.draw(Mesh.unitCube, pants, x, y + 0.12f, z - cos(yaw) * 0.0f, yaw, MathX.HALF_PI, 0f, 0.42f, 1.4f, 0.2f)
@@ -1765,6 +1772,7 @@ class OeaArena : OeaGame() {
                 vest = armor > 0,
                 helmet = helmet > 0 || sim.teams || (skyRig.spec != null && skyRig.spec.outfit.headwear.partId != "none"),
                 pack = skyRig.pack != null || (skyRig.spec != null && skyRig.spec.outfit.back.partId != "none"),
+                lod = lod,
             )
             return
         }
@@ -1794,6 +1802,7 @@ class OeaArena : OeaGame() {
             vest = armor > 0,
             helmet = helmet > 0 || sim.teams || (rig.spec != null && rig.spec.outfit.headwear.partId != "none"),
             pack = rig.pack != null || (rig.spec != null && rig.spec.outfit.back.partId != "none"),
+            lod = lod,
         )
         val hip = bodyY + (if (prone) 0.42f else if (crouch) 0.55f else 0.9f) * vscale
         val torsoY = hip + 0.36f * vscale
