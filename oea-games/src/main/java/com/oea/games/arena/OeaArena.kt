@@ -126,12 +126,15 @@ class OeaArena : OeaGame() {
     private val stunBtn = VirtualButton(0.22f, 0.92f, radiusDp = 28f, label = "STUN", color = 0xFF42A5F5.toInt())
     private val fragBtn = VirtualButton(0.3f, 0.92f, radiusDp = 28f, label = "FRAG", color = 0xFFFF7043.toInt())
     private val smokeBtn = VirtualButton(0.38f, 0.92f, radiusDp = 28f, label = "SMK", color = 0xFF9E9E9E.toInt())
+    /** Mount / dismount a vehicle (Warfare). */
+    private val mountBtn = VirtualButton(0.12f, 0.92f, radiusDp = 28f, label = "MOUNT", color = 0xFF66BB6A.toInt())
     private var lookYaw = 0f
     private var lookPitch = 0f
     private var adsOn = false
     private var crouchOn = false
     private var jumpLatch = false
     private var reloadLatch = false
+    private var mountLatch = false
     /** One-shot grenade throw: 0 frag, 1 smoke, 2 stun, -1 idle. */
     private var grenadeLatch = -1
     /** How long the frag button has been held — past 0.3 s it cooks the fuse. */
@@ -150,6 +153,7 @@ class OeaArena : OeaGame() {
     private var shopOpen = false
     /** Pending Clash Squad purchases — applied through the command stream. */
     private var pendingBuySlot = -1
+    private var pendingBuyUpSlot = -1
     private var pendingBuyMedkits = 0
     private var pendingBuyFrags = 0
     private var pendingBuySmokes = 0
@@ -234,6 +238,35 @@ class OeaArena : OeaGame() {
     /** Warfare objectives: a flat ring on the ground and a beam that stands up as the bar fills. */
     private val captureRing: Mesh by lazy { MeshBuilder().torus(0f, 0f, 0f, 1f, 0.05f, 48, 6).build() }
     private val captureBeam: Mesh by lazy { MeshBuilder().cylinder(0f, 0f, 0f, 1f, 1f, 16, caps = false).build() }
+    private val jeepMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.55f, 0f, 4.4f, 0.6f, 2.0f)
+        mb.box(0f, 1.0f, -0.35f, 2.1f, 0.55f, 1.5f)
+        for (wx in floatArrayOf(-1.4f, 1.4f)) for (wz in floatArrayOf(1.0f, -1.0f)) {
+            mb.withTransform(Mat4().setTRS(wx, 0.28f, wz, yaw = MathX.HALF_PI)) { mb.cylinder(0f, 0f, 0f, 0.42f, 0.35f, 12) }
+        }
+        mb.build()
+    }
+    private val tankMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.7f, 0f, 5.0f, 0.7f, 3.2f)
+        mb.box(0f, 0.2f, 1.5f, 5.0f, 0.4f, 0.45f)
+        mb.box(0f, 0.2f, -1.5f, 5.0f, 0.4f, 0.45f)
+        mb.box(0f, 1.2f, 0f, 3.0f, 0.45f, 2.2f)
+        mb.withTransform(Mat4().setTRS(0f, 1.2f, 2.3f, pitch = MathX.HALF_PI)) { mb.cylinder(0f, 0f, 0f, 0.11f, 3.6f, 10) }
+        mb.withTransform(Mat4().setTRS(0f, 1.6f, 0f)) { mb.box(0f, 0f, 0f, 0.26f, 0.16f, 0.4f) }
+        mb.build()
+    }
+    private val turretMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.9f, 0f, 3.6f, 0.8f, 3.6f)
+        mb.box(0f, 1.6f, 0f, 1.8f, 0.6f, 1.8f)
+        mb.withTransform(Mat4().setTRS(0f, 1.55f, 1.5f, pitch = MathX.HALF_PI)) { mb.cylinder(0f, 0f, 0f, 0.12f, 2.4f, 10) }
+        mb.withTransform(Mat4().setTRS(0f, 1.9f, 0f)) { mb.box(0f, 0f, 0f, 0.3f, 0.18f, 0.4f) }
+        mb.build()
+    }
+    private val vehicleMat: Material by lazy { Material(color = 0xFF8D6E4F.toInt(), specular = 0.5f) }
+    private val vehicleMatTank: Material by lazy { Material(color = 0xFF5D4A3A.toInt(), specular = 0.5f) }
     private val pointMatFree = Material(color = 0xFF8A9BB5.toInt(), emissive = 0xFF8A9BB5.toInt(), emissiveStrength = 0.7f, unlit = true, transparent = true, additive = true, depthWrite = false, fog = false)
     private val pointMatBlue = Material(color = 0x5542A5F5.toInt(), emissive = 0xFF42A5F5.toInt(), emissiveStrength = 1.1f, unlit = true, transparent = true, additive = true, depthWrite = false, fog = false)
     private val pointMatOrange = Material(color = 0x55FF7043.toInt(), emissive = 0xFFFF7043.toInt(), emissiveStrength = 1.1f, unlit = true, transparent = true, additive = true, depthWrite = false, fog = false)
@@ -241,6 +274,8 @@ class OeaArena : OeaGame() {
     private val grenadeMatSmoke = Material(color = 0xFF616161.toInt(), specular = 0.25f)
     /** The blinking warning light near the end of the fuse. */
     private val grenadeBlinkMat = Material(color = 0x66FF3B3B.toInt(), emissive = 0xFFFF3B3B.toInt(), emissiveStrength = 1.6f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    private val rocketMat = Material(color = 0xFFE0E0E0.toInt(), emissive = 0xFFFF7043.toInt(), emissiveStrength = 1.2f, specular = 0.6f)
+    private val rocketTrailMat = Material(color = 0x88FFFFFF.toInt(), emissive = 0xFFFFFFFF.toInt(), emissiveStrength = 0.8f, unlit = true, transparent = true, additive = true, depthWrite = false, castShadows = false, fog = false)
     /** A smoke grenade's lasting cloud: a soft grey volume standing over where the air went thick. */
     private val smokeCloudMat = Material(color = 0x99909090.toInt(), unlit = true, transparent = true, doubleSided = true, depthWrite = false, castShadows = false)
     private fun grenadeMat(type: Int) = if (type == 0) grenadeMatFrag else grenadeMatSmoke
@@ -462,6 +497,15 @@ class OeaArena : OeaGame() {
                     if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 12f) shake = 0.5f else shake = max(shake, 0.12f)
                 }
                 1 -> vfx.smokeColumn(x, y + 0.4f, z, 2.6f)
+                3 -> {
+                    // Rocket / missile warhead: a bigger blast with fire and a ground scorch.
+                    vfx.sparksAt(x, y, z, 70, dirY = 1.4f, hot = 0xFFFF8A3D.toInt())
+                    vfx.light(x, y + 0.6f, z, 0xFFFF9D3C.toInt(), 5f, 14f)
+                    vfx.smokeColumn(x, y + 0.4f, z, 3.0f)
+                    ctx.audio.play(sHit, 0.6f, pitch = 0.35f)
+                    val me = local
+                    if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 18f) shake = 0.7f else shake = max(shake, 0.2f)
+                }
                 else -> {
                     // Stun: a white flash and a crackle — no damage, but the legs go heavy.
                     vfx.sparksAt(x, y, z, 24, dirY = 1.2f, hot = 0xFFFFFFFF.toInt())
@@ -542,7 +586,7 @@ class OeaArena : OeaGame() {
             }
             sendCommand(inputNow)
         }
-        jumpLatch = false; reloadLatch = false; slotLatch = -1; pickupLatch = -1; grenadeLatch = -1; cookAmount = 0f
+        jumpLatch = false; reloadLatch = false; mountLatch = false; slotLatch = -1; pickupLatch = -1; grenadeLatch = -1; cookAmount = 0f
     }
 
     private val aim = FloatArray(2)
@@ -591,6 +635,8 @@ class OeaArena : OeaGame() {
         inp.jump = jumpLatch
         inp.crouch = crouchOn
         inp.reload = reloadLatch
+        inp.mount = mountLatch
+        mountLatch = false
         inp.slot = slotLatch
         inp.heal = healBtn.pressed
         inp.pickup = pickupLatch
@@ -603,9 +649,11 @@ class OeaArena : OeaGame() {
         pendingReloadAll = false
         inp.buySlot = pendingBuySlot; inp.buyMedkits = pendingBuyMedkits; inp.buyFrags = pendingBuyFrags
         inp.buySmokes = pendingBuySmokes; inp.buyStuns = pendingBuyStuns; inp.buyVest = pendingBuyVest; inp.buyHelmet = pendingBuyHelmet
+        inp.buyUpSlot = pendingBuyUpSlot
         inp.deployRound = pendingDeploy
         inp.advancePrep = pendingAdvancePrep
         pendingBuySlot = -1; pendingBuyMedkits = 0; pendingBuyFrags = 0; pendingBuySmokes = 0; pendingBuyStuns = 0; pendingBuyVest = 0; pendingBuyHelmet = 0
+        pendingBuyUpSlot = -1
         pendingDeploy = false
         pendingAdvancePrep = false
     }
@@ -615,9 +663,9 @@ class OeaArena : OeaGame() {
         val w = ByteWriter(24)
         w.u16(inp.seq).q8(inp.moveX, -1f, 1f).q8(inp.moveY, -1f, 1f).angle(inp.yaw).q16(inp.pitch, -1.3f, 1.3f)
             .u8((if (inp.fire) 1 else 0) or (if (inp.ads) 2 else 0) or (if (inp.jump) 4 else 0) or (if (inp.crouch) 8 else 0) or (if (inp.reload) 16 else 0) or (if (inp.heal) 32 else 0) or (if (inp.grenade) 64 else 0) or (if (inp.smoke) 128 else 0))
-            .u8((if (inp.stun) 1 else 0) or (if (inp.reloadAll) 2 else 0) or (if (inp.prone) 4 else 0) or (if (inp.advancePrep) 16 else 0))
+            .u8((if (inp.stun) 1 else 0) or (if (inp.reloadAll) 2 else 0) or (if (inp.prone) 4 else 0) or (if (inp.mount) 8 else 0) or (if (inp.advancePrep) 16 else 0))
             .u8(if (inp.slot in 0..1) inp.slot else 255).varint(inp.pickup + 1)
-            .u8(if (inp.buySlot >= 0) inp.buySlot else 255).u8(inp.buyMedkits).u8(inp.buyFrags).u8(inp.buySmokes).u8(inp.buyStuns).u8(inp.buyVest).u8(inp.buyHelmet).u8(if (inp.deployRound) 1 else 0)
+            .u8(if (inp.buySlot >= 0) inp.buySlot else 255).u8(inp.buyMedkits).u8(inp.buyFrags).u8(inp.buySmokes).u8(inp.buyStuns).u8(inp.buyVest).u8(inp.buyHelmet).u8(if (inp.buyUpSlot >= 0) inp.buyUpSlot else 255).u8(if (inp.deployRound) 1 else 0)
         sentCmds.addLast(w.toByteArray())
         while (sentCmds.size > 3) sentCmds.removeFirst()
         // Each packet repeats the last commands, so a lost packet costs nothing.
@@ -642,9 +690,15 @@ class OeaArena : OeaGame() {
                 p.ammo.forEach { w.u16(it.coerceIn(0, 65535)) }
                 w.u8(p.medkits).u8(p.grenades).u8(p.smokes).u8(p.stuns).u16(p.cash).u8(p.shots and 0xFF).u8(p.kills).u16(p.lastAck and 0xFFFF)
                     .q8(p.healProgress, 0f, 1f).q8(p.reloadLeft, 0f, 4f)
-                w.u8(p.team).u8(p.gunLevel)
+                w.u8(p.team).u8(p.gunLevel).u8(if (p.vehicle >= 0) p.vehicle else 255)
+                for (k in 0 until 11) w.u8(p.upLevels[k])
             }
             w.u8(sim.teamScore[0].coerceIn(0, 255)).u8(sim.teamScore[1].coerceIn(0, 255))
+            w.u8(sim.vehicles.size)
+            for (v in sim.vehicles) {
+                w.u8(v.id).u8(if (v.dead) 1 else 0).f32(v.x).f32(v.y).f32(v.z).angle(v.yaw).f32(v.health)
+                    .u8(if (v.driver >= 0) v.driver else 255).u8(v.kind)
+            }
         }
     }
 
@@ -666,11 +720,12 @@ class OeaArena : OeaGame() {
                         inp.fire = b and 1 != 0; inp.ads = b and 2 != 0; inp.jump = b and 4 != 0; inp.crouch = b and 8 != 0; inp.reload = b and 16 != 0; inp.heal = b and 32 != 0
                         inp.grenade = b and 64 != 0; inp.smoke = b and 128 != 0
                         val b2 = r.u8()
-                        inp.stun = b2 and 1 != 0; inp.reloadAll = b2 and 2 != 0; inp.prone = b2 and 4 != 0; inp.advancePrep = b2 and 16 != 0
+                        inp.stun = b2 and 1 != 0; inp.reloadAll = b2 and 2 != 0; inp.prone = b2 and 4 != 0; inp.mount = b2 and 8 != 0; inp.advancePrep = b2 and 16 != 0
                         inp.slot = r.u8().let { if (it == 255) -1 else it }
                         inp.pickup = r.varint() - 1
                         inp.buySlot = r.u8().let { if (it == 255) -1 else it }
                         inp.buyMedkits = r.u8(); inp.buyFrags = r.u8(); inp.buySmokes = r.u8(); inp.buyStuns = r.u8(); inp.buyVest = r.u8(); inp.buyHelmet = r.u8()
+                        inp.buyUpSlot = r.u8().let { if (it == 255) -1 else it }
                         inp.deployRound = r.u8() != 0
                         val newest = q.lastOrNull()?.seq ?: last
                         if (InputHistory.seqDiff(inp.seq, newest) > 0) q.addLast(inp)
@@ -724,10 +779,12 @@ class OeaArena : OeaGame() {
             val x = r.f32(); val y = r.f32(); val z = r.f32(); val yaw = r.angle(); val pitch = r.q16(-1.3f, 1.3f)
             val health = r.u8(); val armor = r.u8(); val helmet = r.u8()
             val s0 = r.u8(); val s1 = r.u8(); val active = r.u8(); val m0 = r.u8(); val m1 = r.u8()
-            val ammo = IntArray(4) { r.u16() }
+            val ammo = IntArray(5) { r.u16() }
             val meds = r.u8(); val grens = r.u8(); val smokes = r.u8(); val stuns = r.u8(); val cash = r.u16(); val shots = r.u8(); val kills = r.u8(); val ack = r.u16()
             val heal = r.q8(0f, 1f); val reload = r.q8(0f, 4f)
             val team = r.u8(); val gunLevel = r.u8()
+            val veh = r.u8().let { if (it == 255) -1 else it }
+            val ups = IntArray(11) { r.u8() }
             val a = actors.getOrPut(id) { Actor(id, "Player $id", EngineColors[id % EngineColors.size]) }
             if (id != localId && a.shots != shots && a.alive) onRemoteShots(a, (shots - a.shots) and 0xFF)
             if (id == localId && a.shots != shots) local?.let { me ->
@@ -741,11 +798,20 @@ class OeaArena : OeaGame() {
             a.team = team; a.gunLevel = gunLevel
             a.buffer.push(now, floatArrayOf(x, y, z, yaw, pitch))
             if (id == localId) {
-                local?.let { it.team = team; it.gunLevel = gunLevel }
+                local?.let { it.team = team; it.gunLevel = gunLevel; it.vehicle = veh; for (k in 0 until 11) it.upLevels[k] = ups[k] }
                 reconcile(x, y, z, flags, health, armor, helmet, s0, s1, active, m0, m1, ammo, meds, kills, ack, heal, reload, grens, smokes, stuns, cash)
             }
         }
         sim.teamScore[0] = r.u8(); sim.teamScore[1] = r.u8()
+        val nv = r.u8()
+        sim.vehicles.clear()
+        repeat(nv) {
+            val id = r.u8(); val dead = r.u8() != 0
+            val x = r.f32(); val y = r.f32(); val z = r.f32(); val yaw = r.angle()
+            val health = r.f32(); val driver = r.u8().let { if (it == 255) -1 else it }; val kind = r.u8()
+            val v = sim.vehicles.getOrPut(id) { com.oea.games.arena.Vehicle(id, x, y, z, yaw, kind, 2.4f, 300f, 12f) }
+            v.x = x; v.y = y; v.z = z; v.yaw = yaw; v.health = health; v.driver = driver; v.dead = dead
+        }
         @Suppress("UNUSED_VARIABLE") val unused = time
     }
 
@@ -1004,6 +1070,7 @@ class OeaArena : OeaGame() {
         if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_H) && me?.alive == true && !me.skydiving) grenadeLatch = 1
         if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_I) && me?.alive == true && !me.skydiving) grenadeLatch = 2
         if (pickupBtn.justPressed && near != null) pickupLatch = near.id
+        if (mountBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_E) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) mountLatch = true
         // Frag: a tap throws on the normal fuse; holding cooks the fuse and the
         // throw fires on release with whatever is left — the pull-pin mechanic.
         if (fragBtn.pressed) {
@@ -1375,6 +1442,14 @@ class OeaArena : OeaGame() {
         items += MenuItem("stun", "Stun grenade · $SHOP_STUN")
         items += MenuItem("vest", "Vest upgrade · $SHOP_VEST (lv ${me.armor}/3)")
         items += MenuItem("helmet", "Helmet upgrade · $SHOP_HELMET (lv ${me.helmet}/3)")
+        // Weapon upgrades: spend cash to make the gun hit harder, hold more, reload faster.
+        for (slot in 0..1) {
+            val w = me.slots[slot]
+            if (w == Weapon.PAN) continue
+            val lv = me.upLevels[w.ordinal]
+            items += if (lv >= UP_MAX) MenuItem("up$slot", "${w.label} · fully upgraded (lv $lv/$UP_MAX)")
+            else MenuItem("up$slot", "Upgrade ${w.label} · lv ${lv}→${lv + 1}/$UP_MAX · $${sim.upgradeCost(me, w)}")
+        }
         items += MenuItem("deploy", "Deploy to round ${sim.round}")
         ctx.ui.menu("Send Off · Shop", "Cash $${me.cash} · round ${sim.round}", items) { id ->
             when (id) {
@@ -1382,6 +1457,7 @@ class OeaArena : OeaGame() {
                 else -> {
                     when {
                         id.startsWith("buy") -> pendingBuySlot = id.removePrefix("buy").toInt()
+                        id.startsWith("up") -> pendingBuyUpSlot = id.removePrefix("up").toInt()
                         "medkit" -> pendingBuyMedkits = 1
                         "frag" -> pendingBuyFrags = 1
                         "smoke" -> pendingBuySmokes = 1
@@ -1517,12 +1593,26 @@ class OeaArena : OeaGame() {
         // as the fuse burns down — the last half-second is obvious.
         val tg = ctx.time.elapsed.toFloat()
         for (g in sim.grenades) {
-            r.draw(Mesh.unitSphere, grenadeMat(g.type), g.x, g.y, g.z, tg * 7f, 0f, 0f, 0.17f, 0.22f, 0.17f)
-            if (g.fuse < 0.7f && sin(tg * 18f) > 0f) r.draw(Mesh.unitSphere, grenadeBlinkMat, g.x, g.y + 0.12f, g.z, 0f, 0f, 0f, 0.34f, 0.34f, 0.34f)
+            if (g.rocket || g.missile) {
+                // Warheads: a glowing missile with a smoke trail behind it.
+                r.draw(Mesh.unitSphere, rocketMat, g.x, g.y, g.z, tg * 10f, 0f, 0f, 0.26f, 0.26f, 0.26f)
+                val nl = sqrt(g.vx * g.vx + g.vz * g.vz) + 1e-4f
+                r.draw(Mesh.unitCube, rocketTrailMat, g.x - g.vx / nl * 0.8f, g.y, g.z - g.vz / nl * 0.8f, 0f, 0f, 0f, 0.8f, 0.24f, 0.8f)
+            } else {
+                r.draw(Mesh.unitSphere, grenadeMat(g.type), g.x, g.y, g.z, tg * 7f, 0f, 0f, 0.17f, 0.22f, 0.17f)
+                if (g.fuse < 0.7f && sin(tg * 18f) > 0f) r.draw(Mesh.unitSphere, grenadeBlinkMat, g.x, g.y + 0.12f, g.z, 0f, 0f, 0f, 0.34f, 0.34f, 0.34f)
+            }
         }
         // Smoke clouds linger and mark where the air is thick — whoever stands
         // inside one is hidden from sight and from fire.
         for (s in sim.smokes) r.draw(Mesh.unitSphere, smokeCloudMat, s[0], s[1] + 1.4f, s[2], 0f, 0f, 0f, 4f, 3.2f, 4f)
+        // Vehicles (Warfare motor pool).
+        for (v in sim.vehicles) {
+            if (v.dead) continue
+            val mesh = when (v.kind) { 1 -> tankMesh; 2 -> turretMesh; else -> jeepMesh }
+            r.draw(mesh, if (v.kind == 1) vehicleMatTank else vehicleMat, v.x, v.y, v.z, v.yaw, 1f)
+            r.blobShadow(v.x, v.y - 0.1f, v.z, v.radius * 0.9f, 0.35f)
+        }
         // Warfare objectives: a ring on the ground plus a beam that stands up as
         // the capture bar fills — the sector is visible from across the map.
         if (sim.warfare) {
@@ -1598,6 +1688,13 @@ class OeaArena : OeaGame() {
             Weapon.LMG -> { mb.box(0f, 0f, 0.15f, 0.09f, 0.13f, 0.62f); mb.withTransform(Mat4().setTRS(0f, 0.01f, 0.52f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.028f, 0.32f, 8) }
                 mb.box(0f, -0.14f, 0.1f, 0.08f, 0.12f, 0.16f); mb.box(0f, -0.08f, -0.08f, 0.1f, 0.1f, 0.22f)
                 mb.box(0f, -0.05f, -0.26f, 0.07f, 0.14f, 0.2f); mb.box(0f, 0.12f, 0.02f, 0.05f, 0.05f, 0.2f) }
+            Weapon.ROCKET -> { mb.box(0f, 0f, 0.12f, 0.13f, 0.17f, 0.95f)
+                mb.withTransform(Mat4().setTRS(0f, 0.03f, 0.6f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.06f, 0.32f, 12) }
+                mb.box(0f, -0.14f, 0.22f, 0.09f, 0.15f, 0.11f); mb.box(0f, -0.06f, -0.38f, 0.09f, 0.16f, 0.2f) }
+            Weapon.MISSILE -> { mb.box(0f, 0f, 0.07f, 0.12f, 0.16f, 0.8f)
+                mb.withTransform(Mat4().setTRS(0f, 0.03f, 0.5f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.05f, 0.26f, 12) }
+                mb.withTransform(Mat4().setTRS(0f, 0.07f, 0.24f, pitch = MathX.HALF_PI)) { cone(0f, 0f, 0f, 0.05f, 0.14f, 12) }
+                mb.box(0f, -0.13f, 0.17f, 0.08f, 0.14f, 0.1f); mb.box(0f, -0.05f, -0.32f, 0.09f, 0.15f, 0.19f) }
         }
         mb.build()
     }
@@ -1820,7 +1917,7 @@ class OeaArena : OeaGame() {
         adsBtn.highlight = adsOn; crouchBtn.highlight = crouchOn
         reloadBtn.progress = if (me.reloadLeft > 0f) 1f - me.reloadLeft / me.weapon.reload.coerceAtLeast(0.1f) else -1f
         healBtn.label = "+${me.medkits}"
-        for (btn in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, stunBtn, fragBtn, smokeBtn)) btn.draw(b, hud.fontBold, hud.density)
+        for (btn in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, stunBtn, fragBtn, smokeBtn, mountBtn)) btn.draw(b, hud.fontBold, hud.density)
         // Weapon slots (tap to switch), bottom-right.
         val d = hud.density
         val sw = 112f * d; val sh = 46f * d
@@ -1856,6 +1953,15 @@ class OeaArena : OeaGame() {
         hud.text("${me.health.toInt()} HP", bx + bw + 6f * d, y + 1f * d, 11f, if (me.health < 30f) 0xFFFF8A80.toInt() else 0xCCFFFFFF.toInt(), shadow = false)
         hud.bar(bx, y + 11f * d, bw, 6f * d, MathX.clamp01(me.armor / 100f), 0xFF90CAF9.toInt())
         hud.text("Vest ${me.armor}", bx + bw + 6f * d, y + 11f * d, 10.5f, 0xFFB3D9FF.toInt(), shadow = false)
+        // Vehicle card: the health of the ride under you (Warfare).
+        if (me.vehicle >= 0) {
+            val v = sim.vehicles.getOrNull(me.vehicle)
+            if (v != null && !v.dead) {
+                hud.bar(bx, y + 19f * d, bw, 6f * d, MathX.clamp01(v.health / v.maxHealth), if (v.isTank) 0xFFFFB74D.toInt() else 0xFF8BC34A.toInt())
+                val kindName = when { v.isTank -> "Tank"; v.isTurret -> "Turret"; else -> "Jeep" }
+                hud.text("$kindName ${v.health.toInt()} HP", bx + bw + 6f * d, y + 19f * d, 10.5f, 0xCCFFFFFF.toInt(), shadow = false)
+            }
+        }
         // Level chip: progression always visible, not only at the end.
         val ly = y + pr + 4f * d
         hud.panel(x, ly, 92f * d, 22f * d, 0x80101418.toInt(), 8f)

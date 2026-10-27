@@ -10,6 +10,7 @@ import com.oea.engine.physics.Layers
 import com.oea.engine.physics.RayHit
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -33,13 +34,15 @@ internal enum class Weapon(
     SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f, price = 1600),
     REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f, price = 1000),
     MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f, price = 1300),
-    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500);
+    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500),
+    ROCKET("Rocket launcher", "◎", 140f, 1f, 24f, 1, 3.4f, 0.06f, 0.03f, 250f, 1, false, 4, 1.05f, 0.04f, 0.74f, price = 2200),
+    MISSILE("Guided missile", "☆", 120f, 1f, 18f, 1, 4.2f, 0.05f, 0.03f, 320f, 1, false, 4, 1.15f, 0.05f, 0.88f, price = 2600);
 
     val interval get() = 60f / rpm
 
     companion object {
-        val AMMO_NAMES = arrayOf("Light ammo", "Rifle ammo", "Shells", "Heavy ammo")
-        val AMMO_PACK = intArrayOf(40, 40, 12, 10)
+        val AMMO_NAMES = arrayOf("Light ammo", "Rifle ammo", "Shells", "Heavy ammo", "Special ammo")
+        val AMMO_PACK = intArrayOf(40, 40, 12, 10, 6)
         val guns = entries.filter { it != PAN }
 
         /** Which guns the loot tables draw from for a loadout option. */
@@ -68,6 +71,8 @@ internal enum class LootKind { WEAPON, AMMO, MEDKIT, ARMOR, HELMET, GRENADE }
 private const val GRENADE_FRAG = 0
 private const val GRENADE_SMOKE = 1
 private const val GRENADE_STUN = 2
+/** Rocket (3) and guided missile (3 as well) explosions — bigger blasts. */
+private const val GRENADE_ROCKET = 3
 /** Clash Squad shop prices. */
 internal const val SHOP_MEDKIT = 300
 internal const val SHOP_FRAG = 400
@@ -75,6 +80,9 @@ internal const val SHOP_SMOKE = 500
 internal const val SHOP_STUN = 450
 internal const val SHOP_VEST = 600
 internal const val SHOP_HELMET = 500
+/** Weapon upgrade costs: base per level, up to UP_MAX levels per weapon. */
+internal const val UP_BASE = 250
+internal const val UP_MAX = 3
 
 internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Float, var y: Float, var z: Float) {
     var taken = false
@@ -101,12 +109,38 @@ internal class Grenade(
     var vx: Float, var vy: Float, var vz: Float,
     val type: Int,
     fuse: Float = 2.4f,
+    /** Rocket (unguided) or guided missile: fly straight/home instead of arcing. */
+    val rocket: Boolean = false,
+    val missile: Boolean = false,
+    /** Missile lock target (player id) — re-locks to the nearest enemy while alive. */
+    var homing: Int = -1,
+    /** Thrower's team — the missile won't lock teammates. */
+    val team: Int = 0,
+    /** Seconds of flight left before the warhead self-destructs. */
+    var life: Float = 12f,
 ) {
     var fuse = fuse
     var bounces = 0
     var dead = false
     /** Blinks faster as the fuse burns down — the last half-second screams. */
     val fuseLeft: Float get() = fuse
+}
+
+/** A driveable combat vehicle: 0 jeep (fast transport), 1 tank (cannon), 2 turret (missiles). */
+internal class Vehicle(
+    val id: Int, var x: Float, var y: Float, var z: Float, var yaw: Float,
+    val kind: Int, val radius: Float, val maxHealth: Float, val speed: Float,
+    var health: Float = maxHealth,
+    /** Player id at the wheel (-1 = empty). */
+    var driver: Int = -1,
+    /** Current speed (for contact damage). */
+    var speedNow: Float = 0f,
+    var dead: Boolean = false,
+    /** Warfare vehicles respawn at their spawn point after a short wait. */
+    var respawnAt: Float = 0f,
+) {
+    val isTank get() = kind == 1
+    val isTurret get() = kind == 2
 }
 
 /** Input for one simulation tick (from touch controls, a client's packet or a bot). */
@@ -129,6 +163,10 @@ internal class PlayerInput {
     var smoke = false
     /** Stun throwable (second flags byte, bit 0). */
     var stun = false
+    /** Vehicle mount/dismount (second flags byte, bit 8). */
+    var mount = false
+    /** One-shot buy: upgrade the weapon in this slot (-1 = none). */
+    var buyUpSlot = -1
     /** One-shot: reload every weapon in the pack (second flags byte, bit 1). */
     var reloadAll = false
     /** How long the frag fuse was cooked before the throw (0 = none). */
@@ -174,7 +212,7 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     val slots = arrayOf(Weapon.PAN, Weapon.PAN)
     val mags = IntArray(2)
     var active = 0
-    val ammo = IntArray(4)
+    val ammo = IntArray(5)
     var medkits = 0
     /** Frag grenades (value 0) and smoke grenades (value 1) in the pack. */
     var grenades = 0
@@ -206,6 +244,10 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     var respawnAt = 0f
     /** Gun Game ladder index into [GUN_LADDER]. */
     var gunLevel = 0
+    /** Vehicle this player is riding (vehicle id, or -1). */
+    var vehicle = -1
+    /** Per-weapon upgrade levels bought with cash (0-3). */
+    var upLevels = IntArray(Weapon.entries.size)
     var deaths = 0
     /** View kick from recoil not yet applied by the controlling client (radians, upwards). */
     var recoil = 0f
@@ -309,6 +351,8 @@ internal class ArenaSim(
     val players = LinkedHashMap<Int, ArenaPlayer>()
     val loot = ArrayList<Loot>()
     val grenades = ArrayList<Grenade>()
+    /** Driveable vehicles (Warfare). */
+    val vehicles = ArrayList<Vehicle>()
     /** Smoke clouds: [x, y, z, ttl-seconds] — the cloud hides anyone inside it. */
     val smokes = ArrayList<FloatArray>(4)
     val zone = Zone(seed, ArenaMap.SIZE * 0.5f, fastZone)
@@ -383,14 +427,24 @@ internal class ArenaSim(
         if (warfare) {
             // Three objectives: prefer real towns; fall back to a triangle around the center.
             val towns = map.towns
-            if (towns.size >= 3) {
-                points += CapturePoint(towns[0][0], towns[0][1])
-                points += CapturePoint(towns[towns.size / 2][0], towns[towns.size / 2][1])
-                points += CapturePoint(towns.last()[0], towns.last()[1])
-            } else {
+            val pool: List<FloatArray> = if (towns.size >= 3) towns
+            else {
                 val c = ArenaMap.SIZE * 0.5f; val o = ArenaMap.SIZE * 0.3f
-                points += CapturePoint(c - o, c - o); points += CapturePoint(c + o, c - o); points += CapturePoint(c, c + o)
+                listOf(floatArrayOf(c - o, c - o), floatArrayOf(c + o, c - o), floatArrayOf(c, c + o))
             }
+            points += CapturePoint(pool[0][0], pool[0][1])
+            points += CapturePoint(pool[1][0], pool[1][1])
+            points += CapturePoint(pool[2][0], pool[2][1])
+            // Warfare motor pool (Delta Force style): jeeps for fast transit, a
+            // tank for breakthroughs, a mobile turret for lock-on missile support.
+            for (k in 0..1) {
+                val t = pool[k]
+                vehicles += Vehicle(vehicles.size, t[0], map.heightAt(t[0], t[1]), t[1], 0f, kind = 0, radius = 2.2f, maxHealth = 180f, speed = 17f)
+            }
+            val tt = pool[2]
+            vehicles += Vehicle(vehicles.size, tt[0], map.heightAt(tt[0], tt[1]), tt[1], 0f, kind = 1, radius = 2.6f, maxHealth = 420f, speed = 9f)
+            val tc = ArenaMap.SIZE * 0.5f
+            vehicles += Vehicle(vehicles.size, tc, map.heightAt(tc, tc), tc, 0f, kind = 2, radius = 2.0f, maxHealth = 240f, speed = 3f)
         }
     }
 
@@ -507,6 +561,7 @@ internal class ArenaSim(
         p.smokes = 1
         p.armor = 1
         p.helmet = 1
+        applyUpgrades(p) // keep upgraded mags after the round restarts
     }
 
     /** Start (or restart) a round: everyone respawns at their team's area, kit applied. */
@@ -567,6 +622,9 @@ internal class ArenaSim(
         if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 3
         if (p.cash > 500) { p.medkits++; p.cash -= SHOP_MEDKIT }
         if (p.cash > 700) { p.grenades++; p.cash -= SHOP_FRAG }
+        if (inp.buyUpSlot >= 0) {
+            Weapon.entries.getOrNull(inp.buyUpSlot)?.let { if (upgrade(p, it)) inp.buyUpSlot = -1 }
+        }
         if (p.cash > 900) { p.smokes++; p.cash -= SHOP_SMOKE }
         p.armor = min(3, p.armor + 1)
         p.helmet = min(3, p.helmet + 1)
@@ -630,8 +688,57 @@ internal class ArenaSim(
         if (zone.enabled && zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
         if (zone.enabled) for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, true)
         // Grenades: arc on gravity, bounce once off the terrain, then go off on the fuse.
+        // Rockets and guided missiles fly straight (or steer) instead of arcing.
         for (g in grenades) {
             if (g.dead) continue
+            if (g.rocket || g.missile) {
+                g.life -= dt
+                if (g.missile) {
+                    // Homing: steer toward the locked player — or re-lock the nearest
+                    // enemy in front. This is the guided missile's whole trick.
+                    var t = g.homing >= 0 ? players[g.homing] : null
+                    if (t == null || !t.alive) {
+                        var best = -1; var bestD = 75f * 75f
+                        for (o in players.values) {
+                            if (!o.alive || o.skydiving) continue
+                            if (teams && o.team == g.team) continue
+                            val ox = o.pos.x - g.x; val oz = o.pos.z - g.z
+                            if (ox * ox + oz * oz > bestD) continue
+                            // Only lock forward along the flight direction.
+                            val fwd = g.vx; val right = g.vz
+                            if (ox * fwd + oz * right < 0f) continue
+                            val d2 = ox * ox + oz * oz
+                            if (d2 < bestD) { bestD = d2; best = o.id }
+                        }
+                        g.homing = best
+                    }
+                    t?.let {
+                        val tx = it.pos.x - g.x; val ty = it.pos.y + 1.0f - g.y; val tz = it.pos.z - g.z
+                        val l = sqrt(tx * tx + ty * ty + tz * tz) + 1e-4f
+                        val turn = 4.5f * dt
+                        g.vx += (tx / l - g.vx) * turn; g.vy += (ty / l - g.vy) * turn; g.vz += (tz / l - g.vz) * turn
+                        val nl = sqrt(g.vx * g.vx + g.vy * g.vy + g.vz * g.vz) + 1e-4f
+                        g.vx = g.vx / nl * 45f; g.vy = g.vy / nl * 45f; g.vz = g.vz / nl * 45f
+                    }
+                    g.vy -= 8f * dt // slight settle, still mostly flying
+                }
+                g.x += g.vx * dt; g.y += g.vy * dt; g.z += g.vz * dt
+                var blast = false
+                if (g.y < map.heightAt(g.x, g.z)) blast = true
+                if (g.life <= 0f) blast = true
+                if (!blast) for (o in players.values) {
+                    if (!o.alive) continue
+                    val dx = o.pos.x - g.x; val dz = o.pos.z - g.z; val dy = o.pos.y + 1f - g.y
+                    if (dx * dx + dz * dz + dy * dy < 1.4f * 1.4f) { blast = true; break }
+                }
+                if (!blast) for (v in vehicles) {
+                    if (v.dead) continue
+                    val dx = v.x - g.x; val dz = v.z - g.z; val dy = v.y + 1.2f - g.y
+                    if (dx * dx + dz * dz + dy * dy < 2.6f * 2.6f) { blast = true; break }
+                }
+                if (blast) explode(g)
+                continue
+            }
             g.vy -= 21f * dt
             g.x += g.vx * dt; g.y += g.vy * dt; g.z += g.vz * dt
             val gy = map.heightAt(g.x, g.z)
@@ -645,6 +752,37 @@ internal class ArenaSim(
             if (g.fuse <= 0f) explode(g)
         }
         grenades.removeAll { it.dead }
+        // Vehicles: drive, carry the driver, ram enemies, respawn in warfare.
+        for (v in vehicles) {
+            if (v.dead) {
+                if (warfare && v.respawnAt > 0f && time >= v.respawnAt) {
+                    v.dead = false; v.health = v.maxHealth; v.driver = -1; v.speedNow = 0f
+                }
+                continue
+            }
+            val d = v.driver >= 0 ? players[v.driver] : null
+            if (d == null) { v.speedNow = 0f; continue }
+            v.yaw += d.input.moveX * 2.4f * dt
+            val throttle = d.input.moveY.coerceIn(-1f, 1f)
+            v.speedNow = v.speed * throttle
+            v.x += sin(v.yaw) * v.speedNow * dt
+            v.z += cos(v.yaw) * v.speedNow * dt
+            v.x = v.x.coerceIn(0f, ArenaMap.SIZE); v.z = v.z.coerceIn(0f, ArenaMap.SIZE)
+            v.y = map.heightAt(v.x, v.z)
+            d.pos.x = v.x; d.pos.z = v.z; d.pos.y = v.y; d.yaw = v.yaw
+            // Ramming: fast vehicles hurt players they clip.
+            if (abs(v.speedNow) > 4f) {
+                for (o in players.values) {
+                    if (!o.alive || o === d || o.skydiving) continue
+                    if (teams && o.team == d.team) continue
+                    val dx = o.pos.x - v.x; val dz = o.pos.z - v.z
+                    if (dx * dx + dz * dz < v.radius * v.radius) {
+                        val spd = abs(v.speedNow) / v.speed
+                        damage(o, d, 45f * spd, Weapon.PAN, false, cause = -3)
+                    }
+                }
+            }
+        }
         // Smoke clouds linger for a while — they hide whoever stands in them.
         for (s in smokes) s[3] -= dt
         smokes.removeAll { it[3] <= 0f }
@@ -790,6 +928,15 @@ internal class ArenaSim(
             }
             return
         }
+        // Vehicles: mount when close, dismount on press; tanks and turrets fire their own weapons.
+        if (inp.mount) {
+            inp.mount = false
+            if (p.vehicle >= 0) unmount(p) else tryMount(p)
+        }
+        if (p.vehicle >= 0) {
+            vehicleFire(p, inp, dt)
+            return
+        }
         if (!move(p, inp, dt)) return
         val len = sqrt(inp.moveX * inp.moveX + inp.moveY * inp.moveY)
         // Weapons.
@@ -809,12 +956,13 @@ internal class ArenaSim(
         if (p.reloadLeft > 0f) {
             p.reloadLeft -= dt
             if (p.reloadLeft <= 0f && w.ammo >= 0) {
-                val need = w.mag - p.mags[p.active]
+                val emag = ceil(w.mag * (1f + 0.1f * p.upLevels[w.ordinal])).toInt()
+                val need = emag - p.mags[p.active]
                 val take = min(need, p.ammo[w.ammo])
                 p.mags[p.active] += take; p.ammo[w.ammo] -= take
             }
-        } else if (w.ammo >= 0 && (inp.reload || p.mags[p.active] == 0 && inp.fire) && p.mags[p.active] < w.mag && p.ammo[w.ammo] > 0) {
-            p.reloadLeft = w.reload
+        } else if (w.ammo >= 0 && (inp.reload || p.mags[p.active] == 0 && inp.fire) && p.mags[p.active] < ceil(w.mag * (1f + 0.1f * p.upLevels[w.ordinal])) && p.ammo[w.ammo] > 0) {
+            p.reloadLeft = w.reload * (1f - 0.08f * p.upLevels[w.ordinal]) // upgrades reload faster
         }
         val moving = len > 0.2f
         // Prone is the steadiest stance; a stun opens the spread right up.
@@ -840,6 +988,47 @@ internal class ArenaSim(
         if (inp.reloadAll) { reloadAll(p); inp.reloadAll = false }
     }
 
+    /** Climb into the nearest empty vehicle. */
+    private fun tryMount(p: ArenaPlayer) {
+        var best: Vehicle? = null; var bestD = 4f * 4f
+        for (v in vehicles) {
+            if (v.dead || v.driver >= 0) continue
+            val dx = v.x - p.pos.x; val dz = v.z - p.pos.z
+            val d2 = dx * dx + dz * dz
+            if (d2 < bestD) { bestD = d2; best = v }
+        }
+        best?.let {
+            it.driver = p.id; p.vehicle = it.id
+            p.pos.x = it.x; p.pos.z = it.z; p.pos.y = it.y; p.yaw = it.yaw
+        }
+    }
+
+    /** Step out of a vehicle, keeping its position. */
+    private fun unmount(p: ArenaPlayer) {
+        val v = vehicles.getOrNull(p.vehicle) ?: run { p.vehicle = -1; return }
+        if (v.driver == p.id) { v.driver = -1; v.speedNow = 0f }
+        p.vehicle = -1
+        p.pos.x = v.x; p.pos.z = v.z; p.pos.y = v.y; p.yaw = v.yaw
+    }
+
+    /** Vehicle weapons: the tank's 105 mm splash cannon and the turret's lock-on missiles. */
+    private fun vehicleFire(p: ArenaPlayer, inp: PlayerInput, dt: Float) {
+        val v = vehicles.getOrNull(p.vehicle) ?: run { p.vehicle = -1; return }
+        if (v.dead) { p.vehicle = -1; return }
+        if (p.cooldown > 0f) p.cooldown -= dt
+        if (inp.fire && p.cooldown <= 0f) {
+            val cp = cos(p.pitch)
+            val dx = sin(p.yaw) * cp; val dy = sin(p.pitch); val dz = cos(p.yaw) * cp
+            if (v.isTank) {
+                p.cooldown = 1.6f
+                grenades += Grenade(v.x, v.y + 2.4f, v.z, dx * 65f, dy * 65f, dz * 65f, GRENADE_FRAG, rocket = true, team = p.team)
+            } else if (v.isTurret) {
+                p.cooldown = 2.0f
+                grenades += Grenade(v.x, v.y + 2.0f, v.z, dx * 40f, dy * 40f, dz * 40f, GRENADE_FRAG, missile = true, homing = -1, team = p.team)
+            }
+        }
+    }
+
     /** Reload-all: top up every weapon in the pack from the reserves, instantly. */
     fun reloadAll(p: ArenaPlayer) {
         for (slot in 0..1) {
@@ -854,6 +1043,8 @@ internal class ArenaSim(
 
     private fun fire(p: ArenaPlayer) {
         val w = p.weapon
+        // Launchers fire a warhead instead of a bullet.
+        if (w == Weapon.ROCKET || w == Weapon.MISSILE) { launch(p, w == Weapon.ROCKET); return }
         p.cooldown = w.interval
         p.shots++
         p.lastShotTime = time
@@ -862,6 +1053,7 @@ internal class ArenaSim(
         val cp = cos(p.pitch)
         val bx = sin(p.yaw) * cp; val by = sin(p.pitch); val bz = cos(p.yaw) * cp
         val shotTime = (time * 1000f).toLong()
+        val upMul = 1f + 0.1f * p.upLevels[w.ordinal] // weapon upgrade damage bonus
         for (k in 0 until w.pellets) {
             var dx = bx + rng.gaussian() * p.spread * 0.5f
             var dy = by + rng.gaussian() * p.spread * 0.5f
@@ -870,24 +1062,44 @@ internal class ArenaSim(
             var dist = w.range
             var hitWorld = false
             if (map.physics.raycast(ex, ey, ez, dx, dy, dz, w.range, hit, Layers.WORLD or Layers.PROPS)) { dist = hit.distance; hitWorld = true }
+            // Vehicles sit on the ray and swallow the shot before players are tested.
+            var hitVehicle: Vehicle? = null
+            for (v in vehicles) {
+                if (v.dead) continue
+                if (teams && v.driver >= 0) {
+                    val drv = players[v.driver]
+                    if (drv != null && drv.team == p.team) continue
+                }
+                val dxv = v.x - ex; val dyv = (v.y + 1.0f) - ey; val dzv = v.z - ez
+                val t = dxv * dx + dyv * dy + dzv * dz
+                if (t < 0f || t > w.range) continue
+                val px = ex + dx * t; val py = ey + dy * t; val pz = ez + dz * t
+                val dd = sqrt((px - v.x) * (px - v.x) + (py - (v.y + 1f)) * (py - (v.y + 1f)) + (pz - v.z) * (pz - v.z))
+                if (dd < v.radius + 0.3f && t < dist) { dist = t; hitVehicle = v }
+            }
             var victim: ArenaPlayer? = null
             var head = false
-            for (o in players.values) {
-                if (o === p || !o.alive || o.skydiving) continue
-                if (teams && o.team == p.team) continue // friendly fire is off
-                // Lag compensation: test where the shooter saw the target.
-                val rewindMs = p.bot?.let { 0L } ?: compensation(p)
-                if (!o.history.sample(shotTime - rewindMs, rewind)) rewind.set(o.pos)
-                val oy = if (o.crouching) 1.05f else 1.6f
-                val th = Intersect.raySphere(ex, ey, ez, dx, dy, dz, rewind.x, rewind.y + oy + 0.02f, rewind.z, 0.24f)
-                val tb = Intersect.rayCapsule(ex, ey, ez, dx, dy, dz, rewind.x, rewind.y + 0.3f, rewind.z, rewind.x, rewind.y + oy - 0.3f, rewind.z, 0.36f)
-                val t = when { th >= 0f && (tb < 0f || th <= tb) -> th; else -> tb }
-                if (t in 0f..dist && !inSmoke(ex, ey, ez, dx, dy, dz, t)) { dist = t; victim = o; head = t == th }
+            if (hitVehicle == null) {
+                for (o in players.values) {
+                    if (o === p || !o.alive || o.skydiving) continue
+                    if (teams && o.team == p.team) continue // friendly fire is off
+                    // Lag compensation: test where the shooter saw the target.
+                    val rewindMs = p.bot?.let { 0L } ?: compensation(p)
+                    if (!o.history.sample(shotTime - rewindMs, rewind)) rewind.set(o.pos)
+                    val oy = if (o.crouching) 1.05f else 1.6f
+                    val th = Intersect.raySphere(ex, ey, ez, dx, dy, dz, rewind.x, rewind.y + oy + 0.02f, rewind.z, 0.24f)
+                    val tb = Intersect.rayCapsule(ex, ey, ez, dx, dy, dz, rewind.x, rewind.y + 0.3f, rewind.z, rewind.x, rewind.y + oy - 0.3f, rewind.z, 0.36f)
+                    val t = when { th >= 0f && (tb < 0f || th <= tb) -> th; else -> tb }
+                    if (t in 0f..dist && !inSmoke(ex, ey, ez, dx, dy, dz, t)) { dist = t; victim = o; head = t == th }
+                }
             }
             val hx = ex + dx * dist; val hy = ey + dy * dist; val hz = ez + dz * dist
-            if (victim != null) {
+            if (hitVehicle != null) {
+                damageVehicle(hitVehicle, w.damage * upMul * (1f - 0.35f * (hitVehicle.maxHealth - hitVehicle.health) / hitVehicle.maxHealth), p)
+                events?.onShot(p, hx, hy, hz, false)
+            } else if (victim != null) {
                 val falloff = if (dist > w.range * 0.5f) MathX.lerp(1f, 0.6f, (dist - w.range * 0.5f) / (w.range * 0.5f)) else 1f
-                val dmg = w.damage * falloff * (if (head) w.headshot else 1f)
+                val dmg = w.damage * upMul * falloff * (if (head) w.headshot else 1f)
                 damage(victim, p, dmg, w, head)
                 events?.onShot(p, hx, hy, hz, true)
             } else if (k == 0 || w.pellets > 1 && k % 3 == 0) {
@@ -1065,17 +1277,97 @@ internal class ArenaSim(
             events?.onGrenade(g.x, g.y, g.z, GRENADE_SMOKE)
             return
         }
-        val r = 4.6f
+        val big = g.rocket || g.missile
+        val r = if (big) (if (g.rocket) 4.5f else 3.5f) else 4.6f
+        val dmg = if (big) (if (g.rocket) 140f else 120f) else 80f
         for (p in players.values) {
             if (!p.alive) continue
             val dx = p.pos.x - g.x; val dz = p.pos.z - g.z; val dy = p.pos.y + 1.0f - g.y
             val d = sqrt(dx * dx + dy * dy + dz * dz)
             if (d < r) {
                 val falloff = 1f - d / r
-                damage(p, null, 80f * falloff * falloff, Weapon.PAN, false, true, cause = -2)
+                damage(p, null, dmg * falloff * falloff, Weapon.PAN, false, true, cause = -2)
             }
         }
-        events?.onGrenade(g.x, g.y, g.z, GRENADE_FRAG)
+        for (v in vehicles) {
+            if (v.dead) continue
+            val dx = v.x - g.x; val dz = v.z - g.z; val dy = v.y + 1.2f - g.y
+            val d = sqrt(dx * dx + dy * dy + dz * dz)
+            if (d < r) {
+                val falloff = 1f - d / r
+                damageVehicle(v, dmg * falloff * falloff, null)
+            }
+        }
+        events?.onGrenade(g.x, g.y, g.z, if (big) GRENADE_ROCKET else GRENADE_FRAG)
+    }
+
+    /** Rocket launchers and guided missiles: straight-flying warheads, no arc. */
+    private fun launch(p: ArenaPlayer, rocket: Boolean) {
+        if (p.mags[p.active] <= 0) return
+        p.mags[p.active]--
+        p.cooldown = if (rocket) Weapon.ROCKET.interval else Weapon.MISSILE.interval
+        p.shots++
+        p.lastShotTime = time
+        val cp = cos(p.pitch)
+        val dx = sin(p.yaw) * cp; val dy = sin(p.pitch); val dz = cos(p.yaw) * cp
+        val speed = if (rocket) 55f else 45f
+        val g = Grenade(p.pos.x, p.pos.y + p.eyeHeight, p.pos.z, dx * speed, dy * speed, dz * speed,
+            GRENADE_FRAG, rocket = rocket, missile = !rocket, homing = -1, life = 10f, team = p.team)
+        grenades += g
+    }
+
+    /** Destroy a vehicle: the crew dies with it, and the wreck takes everything nearby with it. */
+    fun damageVehicle(v: Vehicle, amount: Float, from: ArenaPlayer?) {
+        if (v.dead) return
+        v.health -= amount
+        if (v.health > 0f) return
+        v.dead = true
+        if (v.driver >= 0) {
+            val d = players[v.driver]
+            if (d != null && d.alive) damage(d, from, 100f, Weapon.PAN, false)
+        }
+        v.driver = -1
+        val r = 5f
+        for (o in players.values) {
+            if (!o.alive) continue
+            val dx = o.pos.x - v.x; val dz = o.pos.z - v.z; val dy = o.pos.y + 1f - (v.y + 1.2f)
+            val d = sqrt(dx * dx + dz * dz + dy * dy)
+            if (d < r) damage(o, from, 90f * (1f - d / r) * (1f - d / r), Weapon.PAN, false, cause = -2)
+        }
+        for (o in vehicles) {
+            if (o === v || o.dead) continue
+            val dx = o.x - v.x; val dz = o.z - v.z
+            val d = sqrt(dx * dx + dz * dz)
+            if (d < r) o.health -= 90f * (1f - d / r) * (1f - d / r)
+        }
+        events?.onGrenade(v.x, v.y + 1.2f, v.z, GRENADE_ROCKET)
+        if (warfare) v.respawnAt = time + 12f
+        else vehicles.remove(v)
+    }
+
+    /** Weapon upgrade cost for the player's next level (Clash Squad cash). */
+    fun upgradeCost(p: ArenaPlayer, w: Weapon): Int = UP_BASE * (1 + p.upLevels[w.ordinal])
+
+    /** Spend cash to level a weapon up (max UP_MAX levels). */
+    fun upgrade(p: ArenaPlayer, w: Weapon): Boolean {
+        val lv = p.upLevels[w.ordinal]
+        if (lv >= UP_MAX) return false
+        val cost = upgradeCost(p, w)
+        if (p.cash < cost) return false
+        p.cash -= cost
+        p.upLevels[w.ordinal] = lv + 1
+        applyUpgrades(p)
+        return true
+    }
+
+    /** Re-apply upgrade multipliers (mag size) to the equipped loadout. */
+    private fun applyUpgrades(p: ArenaPlayer) {
+        for (slot in 0..1) {
+            val w = p.slots[slot]
+            if (w == Weapon.PAN) continue
+            val lv = p.upLevels[w.ordinal]
+            p.mags[slot] = ceil(w.mag * (1f + 0.1f * lv)).toInt()
+        }
     }
 
     fun lineOfSight(a: ArenaPlayer, b: ArenaPlayer): Boolean =

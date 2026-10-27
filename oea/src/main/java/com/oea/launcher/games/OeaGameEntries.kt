@@ -64,7 +64,7 @@ class OeaSendOffActivity : OeaStandaloneGameActivity() {
     )
 
     override val keyLegend: List<String> = listOf(
-        "Mouse look · Shift ADS · Space jump · C crouch · Z prone · R reload · G frag · H smoke · I stun · E pick · 1/2 weapons · Esc pause",
+        "Mouse look · Shift ADS · Space jump · C crouch · Z prone · R reload · G frag · H smoke · I stun · E mount/exit vehicle · 1/2 weapons · Esc pause",
     )
 
     override fun onMatchStarted(gameId: String) {
