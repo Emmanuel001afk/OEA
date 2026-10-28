@@ -384,7 +384,7 @@ class Renderer3D internal constructor(private val graphics: Graphics) {
         // Skinned characters: non-batched draws after the batched opaque runs.
         if (skinnedCount > 0) {
             if (skin.bind()) {
-                setPassUniforms(skin)
+                setPassUniforms(cam, skin)
                 GLES30.glEnable(GLES30.GL_DEPTH_TEST)
                 GLES30.glDepthFunc(GLES30.GL_LEQUAL)
                 GLES30.glEnable(GLES30.GL_CULL_FACE)
