@@ -2316,7 +2316,7 @@ class OeaArena : OeaGame() {
         val d = hud.density
         val list = if (isAuthority) {
             sim.players.values.filter { it.team == me.team && it.id != me.id && it.alive }
-                .map { Triple(it.id, it.name, it.health) }
+                .map { Triple(it.id, it.name, it.health.toFloat()) }
         } else {
             actors.values.filter { it.team == me.team && it.id != localId && it.alive }
                 .map { Triple(it.id, it.name, it.health) }
