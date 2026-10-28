@@ -54,16 +54,6 @@ class CharRig(
     private val tmp = Mat4()
     private val tmp2 = Mat4()
 
-    init {
-        if (spec == null) {
-            human = HumanBody(null, feminine, hairStyle)
-            // Legacy rigs still get the SSS skin term on the skinned path: the
-            // default body should read as flesh, not plastic.
-            mSkin = Material(color = skin.color, texture = skin.texture, specular = skin.specular,
-                shininess = skin.shininess, rim = skin.rim, subsurface = skin.color)
-        }
-    }
-
     /**
      * Mutable per-character animation state; the game updates a handful of
      * fields per frame — nothing else persists.
@@ -115,6 +105,17 @@ class CharRig(
     private var baseSkinShine = 32f; private var baseTopShine = 32f; private var baseBottomShine = 32f
     private var baseOuterShine = 36f; private var baseShoesShine = 40f; private var baseHeadShine = 32f; private var baseBackShine = 32f
     private var weatherApplied = -1f
+
+    // Legacy rigs (no spec) get a default body; the default skin carries the
+    // SSS term on the skinned path so it reads as flesh, not plastic. Spec rigs
+    // rebuild their materials in ensureForm instead.
+    init {
+        if (spec == null) {
+            human = HumanBody(null, feminine, hairStyle)
+            mSkin = Material(color = skin.color, texture = skin.texture, specular = skin.specular,
+                shininess = skin.shininess, rim = skin.rim, subsurface = skin.color)
+        }
+    }
 
     /** Rebuilds private materials when the spec changes — the instant-apply path. */
     private fun ensureForm() {

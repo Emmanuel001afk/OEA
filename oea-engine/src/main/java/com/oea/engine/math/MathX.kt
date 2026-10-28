@@ -189,4 +189,6 @@ object Colors {
     const val WHITE = -0x1
     const val BLACK = -0x1000000
     const val TRANSPARENT = 0
+    /** Dark brown (rgb 96, 62, 42) — the default hair/skin fallback. */
+    const val DK_BROWN = -0x9FC1D6
 }
