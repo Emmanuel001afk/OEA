@@ -1625,6 +1625,7 @@ class OeaArena : OeaGame() {
         }
         items += MenuItem("deploy", "Deploy to round ${sim.round}")
         ctx.ui.menu("Send Off · Lone Wolf", "Choose your weapon (rounds ${sim.round}, ${sim.round + 1})", items) { id ->
+            if (id == null) return@menu
             when (id) {
                 "deploy" -> { shopOpen = false; pendingDeploy = true }
                 else -> { pendingBuySlot = id.removePrefix("pick").toInt(); openWolfPick() }
