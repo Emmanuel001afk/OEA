@@ -118,14 +118,20 @@ object OeaArtwork {
         "pine_night" to look(Color.rgb(8, 14, 10), Color.rgb(20, 40, 32), Color.rgb(120, 200, 160), Color.rgb(70, 150, 110)),
         "storm_night" to look(Color.rgb(10, 12, 18), Color.rgb(32, 40, 64), Color.rgb(140, 170, 220), Color.rgb(80, 110, 180)),
         "bloom_night" to look(Color.rgb(16, 8, 20), Color.rgb(64, 24, 64), Color.rgb(220, 140, 200), Color.rgb(180, 80, 160)),
-        "abyss_night" to look(Color.rgb(2, 6, 12), Color.rgb(6, 20, 40), Color.rgb(60, 160, 240), Color.rgb(30, 100, 180))
+        "abyss_night" to look(Color.rgb(2, 6, 12), Color.rgb(6, 20, 40), Color.rgb(60, 160, 240), Color.rgb(30, 100, 180)),
+        // ---- Send Off battlefield art (game-themed wallpapers)
+        "barrage_dusk" to look(Color.rgb(26, 14, 8), Color.rgb(118, 52, 20), Color.rgb(255, 190, 110), Color.rgb(240, 130, 60)),
+        "tank_ridge" to look(Color.rgb(10, 12, 24), Color.rgb(36, 38, 62), Color.rgb(190, 170, 255), Color.rgb(140, 120, 220)),
+        "squad_dawn" to look(Color.rgb(28, 30, 40), Color.rgb(96, 92, 84), Color.rgb(255, 210, 150), Color.rgb(220, 170, 100))
 )
 
     /** Every generated picture OEA can draw for a theme and wallpapers. */
     val ids: List<String> = listOf(
         "aurora_night", "glass_deep", "ridge_night", "forest_mist", "dune_dusk",
         "crimson_night", "teal_night", "amber_night", "violet_night", "ocean_night",
-        "sand_light", "pine_night", "storm_night", "bloom_night", "abyss_night"
+        "sand_light", "pine_night", "storm_night", "bloom_night", "abyss_night",
+        // Send Off battlefield art (game-themed wallpapers)
+        "barrage_dusk", "tank_ridge", "squad_dawn"
     )
 
     /** Wallpaper home set IDs from artwork */
@@ -138,7 +144,9 @@ object OeaArtwork {
         "neon_pulse", "arctic_aurora", "volcanic_glow", "cyber_grid",
         "lush_jungle", "starlight_desert", "coral_reef", "monsoon_cloud",
         "golden_hour", "frosted_lake", "obsidian_mirror", "prism_shard",
-        "tundra_dawn", "magma_flow", "zen_garden", "nebula_core"
+        "tundra_dawn", "magma_flow", "zen_garden", "nebula_core",
+        // ---- Send Off battlefield art (game-themed wallpapers)
+        "barrage_dusk", "tank_ridge", "squad_dawn"
     )
 
     /** Wallpaper lock set IDs */
@@ -166,6 +174,10 @@ object OeaArtwork {
         "storm_night" -> "Storm night"
         "bloom_night" -> "Bloom night"
         "abyss_night" -> "Abyss night"
+        // ---- Send Off battlefield art (game-themed wallpapers)
+        "barrage_dusk" -> "Barrage dusk"
+        "tank_ridge" -> "Tank ridge"
+        "squad_dawn" -> "Squad dawn"
         "canyon_ember" -> "Canyon ember"
         "glass_dusk" -> "Glass dusk"
         "orchid_bloom" -> "Orchid bloom"
@@ -256,6 +268,7 @@ object OeaArtwork {
             "strata_sand", "lock_noir", "slate_lines", "desert_mirage", "paper_light", "sand_light", "lock_sand", "lock_slate", "lock_noir" -> strata(canvas, paint, spec, w, h, random)
             "mist_valley", "lock_frost", "forest_mist", "frosted_pine", "pine_night", "lock_forest", "lock_frost" -> mist(canvas, paint, spec, w, h, random)
             "orbit_dawn", "lock_midnight", "ridge_night", "dune_dusk", "amber_haze", "amber_night", "crimson_night", "violet_night", "storm_night", "lock_amber", "lock_midnight" -> orbit(canvas, paint, spec, w, h, random)
+            "barrage_dusk", "tank_ridge", "squad_dawn" -> battlefield(canvas, paint, spec, w, h, random)
             else -> strata(canvas, paint, spec, w, h, random)
         }
         // Lock-screen art gets a vignette and a clear middle band, so the clock,
@@ -473,6 +486,82 @@ object OeaArtwork {
         paint.style = Paint.Style.FILL
         paint.color = OeaWallpaperRenderer.alpha(OeaWallpaperRenderer.blend(spec.accent, Color.WHITE, 0.5f), 0x88)
         canvas.drawCircle(cx, cy, w * 0.035f, paint)
+    }
+
+    /**
+     * Send Off battlefield art: a shell arcing over smoking ridges with soldier
+     * silhouettes — the game-themed wallpaper set.
+     */
+    private fun battlefield(canvas: Canvas, paint: Paint, spec: Look, w: Float, h: Float, random: Random) {
+        // Distant shell bursts along the horizon.
+        for (i in 0 until 4) {
+            val bx = w * random.nextFloat()
+            val by = h * (0.44f + random.nextFloat() * 0.08f)
+            glow(canvas, paint, bx, by, max(w, h) * (0.08f + random.nextFloat() * 0.08f), spec.accent, 0x5A)
+        }
+        // Smoke plumes rising behind the ridge line.
+        for (i in 0 until 5) {
+            val x = w * (0.1f + random.nextFloat() * 0.8f)
+            val baseY = h * (0.5f + random.nextFloat() * 0.08f)
+            for (j in 0 until 4) {
+                paint.color = OeaWallpaperRenderer.alpha(
+                    OeaWallpaperRenderer.blend(spec.bottom, spec.glow, 0.15f + j * 0.05f),
+                    if (spec.dark) 0x1E else 0x24
+                )
+                canvas.drawCircle(x + sin(j * 1.3f) * w * 0.02f, baseY - j * w * 0.05f, w * (0.06f + random.nextFloat() * 0.05f), paint)
+            }
+        }
+        // Rolling ridge silhouettes, darker towards the viewer.
+        for (layer in 0 until 3) {
+            val y = h * (0.52f + layer * 0.07f)
+            val path = Path().apply {
+                moveTo(-w * 0.05f, y)
+                var x = -w * 0.05f
+                while (x < w * 1.05f) {
+                    x += w / 7f
+                    lineTo(x, y + sin((x / w) * 4f + layer * 2.1f) * h * 0.04f)
+                }
+                lineTo(w * 1.05f, h)
+                lineTo(-w * 0.05f, h)
+                close()
+            }
+            paint.color = OeaWallpaperRenderer.alpha(
+                OeaWallpaperRenderer.blend(Color.rgb(4, 4, 8), spec.glow, 0.1f + layer * 0.06f),
+                0xC0 - layer * 0x30
+            )
+            canvas.drawPath(path, paint)
+        }
+        // A shell arcing across the sky, warhead glowing mid-flight.
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = max(1.5f, w * 0.006f)
+        paint.color = OeaWallpaperRenderer.alpha(spec.glow, 0x80)
+        val ax0 = w * (0.15f + random.nextFloat() * 0.2f)
+        val ax1 = w * (0.6f + random.nextFloat() * 0.2f)
+        val arcTop = h * (0.18f + random.nextFloat() * 0.1f)
+        val arc = Path().apply {
+            moveTo(ax0, h * 0.62f)
+            quadTo(w * 0.5f, arcTop, ax1, h * 0.5f)
+        }
+        canvas.drawPath(arc, paint)
+        paint.style = Paint.Style.FILL
+        glow(canvas, paint, w * 0.5f, arcTop + h * 0.05f, max(w, h) * 0.05f, spec.accent, 0xC8)
+        // Foreground soldier silhouettes.
+        for (i in 0 until 3) {
+            val x = w * (0.12f + i * 0.28f + random.nextFloat() * 0.04f)
+            val s = h * (0.34f + random.nextFloat() * 0.06f)
+            paint.color = Color.rgb(4, 4, 8)
+            canvas.drawOval(x, h - s * 0.74f, x + s * 0.22f, h - s * 0.04f, paint)
+            canvas.drawCircle(x + s * 0.11f, h - s * 0.85f, s * 0.09f, paint)
+            val shoulders = Path().apply {
+                moveTo(x, h - s * 0.46f)
+                quadTo(x + s * 0.11f, h - s * 0.54f, x + s * 0.22f, h - s * 0.46f)
+                lineTo(x + s * 0.22f, h)
+                lineTo(x, h)
+                close()
+            }
+            canvas.drawPath(shoulders, paint)
+        }
+        grain(canvas, paint, w, h, spec, random, if (spec.dark) 0x14 else 0x18)
     }
 
     /** A light grain so flat areas read as a picture rather than a fill. */

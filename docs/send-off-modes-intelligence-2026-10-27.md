@@ -141,3 +141,20 @@ like a vote — the new flow is one screen each:
   code-in-a-lobby-text hack.
 - The friend is handed back to the lobby the moment the connection lands, and
   the host's Connect validates the reply before accepting.
+
+## 10. Game-themed theme art & wallpapers (2026-10-28)
+The launcher ships a procedural wallpaper library and theme artwork (no image
+data in the APK); three Send Off battlefield looks are now part of both:
+- **Artwork** (`OeaArtwork`, new `battlefield()` recipe): `barrage_dusk`
+  (mortar shell arcing over a burning ridge line), `tank_ridge` (tank
+  silhouette on a dusk ridge, shell streaking past) and `squad_dawn` (squad
+  advancing through fog at first light) — added to the theme `ids`, labels
+  and the wallpaper home set.
+- **Wallpaper library** (`OeaWallpaper`): three new home entries
+  `BARRAGE_DUSK`, `TANK_RIDGE`, `SQUAD_DAWN` with blurbs and accents,
+  rendered through the artwork above.
+- **Reference art** (`docs/images/`, neutral, no text/names):
+  `send-off-wallpaper-artillery-1.png` (mortar shell at golden hour),
+  `send-off-wallpaper-artillery-2.png` (tank cannon at dusk),
+  `send-off-wallpaper-soldiers-1.png` (squad in fog at first light),
+  all 768×1376 to match the existing wallpaper set.
