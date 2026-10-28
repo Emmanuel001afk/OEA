@@ -2319,7 +2319,7 @@ class OeaArena : OeaGame() {
                 .map { Triple(it.id, it.name, it.health.toFloat()) }
         } else {
             actors.values.filter { it.team == me.team && it.id != localId && it.alive }
-                .map { Triple(it.id, it.name, it.health) }
+                .map { Triple(it.id, it.name, it.health.toFloat()) }
         }
         if (list.isEmpty()) return
         val bw = 120f * d; val bh = 14f * d
