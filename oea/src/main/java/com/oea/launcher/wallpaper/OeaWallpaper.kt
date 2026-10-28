@@ -366,6 +366,22 @@ enum class OeaWallpaper(
         "lock_prism", "Prism lock",
         "Prism shard lock with rainbow.",
         Color.rgb(180, 140, 255), light = false, forLock = true
+    ),
+    // ---- Send Off battlefield wallpapers (game-themed, artwork in OeaArtwork)
+    BARRAGE_DUSK(
+        "barrage_dusk", "Barrage dusk",
+        "A mortar shell arcing over a burning ridge line at dusk.",
+        Color.rgb(240, 130, 60), light = false
+    ),
+    TANK_RIDGE(
+        "tank_ridge", "Tank ridge",
+        "A tank silhouette on a dusk ridge with a shell streaking past.",
+        Color.rgb(140, 120, 220), light = false
+    ),
+    SQUAD_DAWN(
+        "squad_dawn", "Squad dawn",
+        "A squad advancing through fog at first light.",
+        Color.rgb(220, 170, 100), light = false
 );
 
     companion object {
