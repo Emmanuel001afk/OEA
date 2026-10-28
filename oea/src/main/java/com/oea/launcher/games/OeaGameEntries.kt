@@ -44,6 +44,29 @@ class OeaEndlessDaysActivity : OeaStandaloneGameActivity() {
 class OeaSendOffActivity : OeaStandaloneGameActivity() {
     override val standaloneGameId: String = "arena"
 
+    /** Every finger and key the match answers to, on one screen. */
+    override val controlLegend: List<Pair<String, String>> = listOf(
+        "✋" to "Drag the left stick to move — it floats, so it never runs out",
+        "🖐" to "Drag anywhere on the right side of the screen to look around",
+        "🔥" to "Hold FIRE to shoot; drag it while held to fine-aim",
+        "⊕" to "ADS: aim down the sights — zoomed in, steadier, slower",
+        "↑" to "Jump",
+        "▼" to "Crouch: smaller, steadier, harder to spot",
+        "⏱" to "Hold crouch for a half-second to go PRONE — flat, slow, steadiest aim (also Z)",
+        "R" to "Reload the active weapon",
+        "+" to "Use a medkit to heal",
+        "💣" to "Tap FRAG for a normal throw; hold it to COOK the fuse and throw early (also G)",
+        "✳" to "Throw a smoke grenade to hide (also H)",
+        "⚡" to "Throw a stun grenade to slow everyone it flashes (also I)",
+        "◎" to "Pick up loot when the PICK button appears",
+        "1 / 2" to "Switch weapon slot (also Y on gamepad)",
+        "☰" to "Pause → Pack to see your kit and reload all weapons",
+    )
+
+    override val keyLegend: List<String> = listOf(
+        "Mouse look · Shift ADS · Space jump · C crouch · Z prone · R reload · G frag · H smoke · I stun · E mount/exit vehicle · 1/2 weapons · Esc pause",
+    )
+
     override fun onMatchStarted(gameId: String) {
         runCatching { com.oea.launcher.gameboost.OeaGameBoost.onOeaGameOpened(applicationContext, gameId) }
     }

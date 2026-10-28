@@ -272,12 +272,21 @@ class CharacterController(var radius: Float = 0.4f, var height: Float = 1.8f, va
         velocity.y += gravity * dt
         hitWall = false
         // Horizontal, in sub-steps so fast movement never tunnels through thin walls.
+        // Axis-separated: each axis resolves against obstacles on its own, so a
+        // blocked axis still lets the player slide along the wall — smooth
+        // movement against buildings instead of push-out jitter.
         val dist = sqrt(vx * vx + vz * vz) * dt
         val steps = max(1, (dist / (radius * 0.5f)).toInt() + 1)
         val sx = vx * dt / steps; val sz = vz * dt / steps
         for (i in 0 until steps) {
-            position.x += sx; position.z += sz
-            resolveWalls(world)
+            if (sx != 0f) {
+                position.x += sx
+                resolveHorizontal(world, 0, if (sx > 0f) 1f else -1f)
+            }
+            if (sz != 0f) {
+                position.z += sz
+                resolveHorizontal(world, 1, if (sz > 0f) 1f else -1f)
+            }
         }
         // Vertical.
         position.y += velocity.y * dt
@@ -305,7 +314,12 @@ class CharacterController(var radius: Float = 0.4f, var height: Float = 1.8f, va
         }
     }
 
-    private fun resolveWalls(world: PhysicsWorld) {
+    /**
+     * Resolve the player's circle against obstacles after moving one axis.
+     * Only the moved axis is corrected — the other axis keeps its position, so
+     * the player slides along walls instead of jittering against them.
+     */
+    private fun resolveHorizontal(world: PhysicsWorld, axis: Int, dir: Float) {
         repeat(3) {
             var moved = false
             box.set(position.x - radius, position.y + stepHeight, position.z - radius, position.x + radius, position.y + height, position.z + radius)
@@ -314,27 +328,28 @@ class CharacterController(var radius: Float = 0.4f, var height: Float = 1.8f, va
                     is Collider.Box -> {
                         if (c.bounds.maxY <= position.y + stepHeight || c.bounds.minY >= position.y + height) return@query
                         val b = c.bounds
-                        val cx = MathX.clamp(position.x, b.minX, b.maxX)
-                        val cz = MathX.clamp(position.z, b.minZ, b.maxZ)
-                        var dx = position.x - cx; var dz = position.z - cz
-                        val d2 = dx * dx + dz * dz
-                        if (d2 > radius * radius) return@query
-                        if (d2 < 1e-8f) {
-                            // Centre inside the box: push out along the shallowest axis.
-                            val left = position.x - b.minX; val right = b.maxX - position.x
-                            val back = position.z - b.minZ; val front = b.maxZ - position.z
-                            val m = minOf(minOf(left, right), minOf(back, front))
-                            when (m) {
-                                left -> position.x = b.minX - radius
-                                right -> position.x = b.maxX + radius
-                                back -> position.z = b.minZ - radius
-                                else -> position.z = b.maxZ + radius
+                        if (axis == 0) {
+                            if (position.z + radius <= b.minZ || position.z - radius >= b.maxZ) return@query
+                            if (dir > 0f) {
+                                if (position.x + radius <= b.minX) return@query
+                                if (position.x - radius >= b.maxX) return@query
+                                position.x = b.minX - radius
+                            } else {
+                                if (position.x - radius >= b.maxX) return@query
+                                if (position.x + radius <= b.minX) return@query
+                                position.x = b.maxX + radius
                             }
                         } else {
-                            val d = sqrt(d2)
-                            dx /= d; dz /= d
-                            position.x = cx + dx * radius
-                            position.z = cz + dz * radius
+                            if (position.x + radius <= b.minX || position.x - radius >= b.maxX) return@query
+                            if (dir > 0f) {
+                                if (position.z + radius <= b.minZ) return@query
+                                if (position.z - radius >= b.maxZ) return@query
+                                position.z = b.minZ - radius
+                            } else {
+                                if (position.z - radius >= b.maxZ) return@query
+                                if (position.z + radius <= b.minZ) return@query
+                                position.z = b.maxZ + radius
+                            }
                         }
                         moved = true
                         hitWall = true

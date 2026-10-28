@@ -45,6 +45,48 @@ void main() {
 }
 """
 
+    // ------------------------------------------------------------------ skinned character
+    // Same fragment interface as STD_VERT so the lit pipeline is shared.
+    // Vertices carry 4 bone indices + weights; the skeleton's uniform palette
+    // supplies the matrices. GLSL ES 3.00 allows dynamic indexing here.
+
+    val SKIN_VERT = HEADER + """
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec3 a_normal;
+layout(location = 2) in vec2 a_uv;
+layout(location = 3) in vec4 a_color;
+layout(location = 4) in vec4 a_boneIds;
+layout(location = 5) in vec4 a_boneWeights;
+uniform mat4 u_viewProj;
+uniform mat4 u_lightViewProj;
+uniform mat4 u_model;
+uniform mat4 u_bones[19];
+uniform vec4 u_uvTransform;
+out vec3 v_worldPos;
+out vec3 v_normal;
+out vec2 v_uv;
+out vec4 v_color;
+out vec4 v_lightPos;
+void main() {
+    mat4 skin = u_bones[int(a_boneIds.x)] * a_boneWeights.x
+        + u_bones[int(a_boneIds.y)] * a_boneWeights.y
+        + u_bones[int(a_boneIds.z)] * a_boneWeights.z
+        + u_bones[int(a_boneIds.w)] * a_boneWeights.w;
+    vec4 skinned = skin * vec4(a_pos, 1.0);
+    vec3 sn = mat3(skin) * a_normal;
+    sn = sn / max(sqrt(dot(sn, sn)), 1e-8);
+    vec4 world = u_model * skinned;
+    v_worldPos = world.xyz;
+    mat3 m3 = mat3(u_model);
+    vec3 s2 = vec3(dot(m3[0], m3[0]), dot(m3[1], m3[1]), dot(m3[2], m3[2]));
+    v_normal = m3 * (sn / max(s2, vec3(1e-8)));
+    v_uv = a_uv * u_uvTransform.xy + u_uvTransform.zw;
+    v_color = a_color;
+    v_lightPos = u_lightViewProj * world;
+    gl_Position = u_viewProj * world;
+}
+"""
+
     val STD_FRAG = HEADER + """
 precision highp sampler2DShadow;
 in vec3 v_worldPos;
@@ -65,6 +107,8 @@ uniform vec3 u_skyAmbient;
 uniform vec3 u_groundAmbient;
 uniform vec4 u_fog;         // rgb, density
 uniform vec4 u_shadowParams; // enabled, texel, bias, strength
+// Subsurface scattering: rgb = skin tint (linear), w = strength (0 = off).
+uniform vec4 u_subsurface;
 uniform float u_exposure;
 // Dynamic point lights (fire, sparks, magic, muzzle flashes): the light that
 // VFX actually throws onto skin, cloth and terrain.
@@ -130,6 +174,13 @@ void main() {
         vec3 h2 = normalize(ln + v);
         float spec2 = pow(max(dot(n, h2), 0.0), u_params.y) * u_params.x;
         color += u_pointColor[i].rgb * on * att * (base.rgb * ndl2 + vec3(spec2) * 0.7 + base.rgb * 0.08);
+    }
+    // Subsurface scattering: light that leaks through thin skin — the cheek,
+    // ear and nose glow warm when the sun is behind. One term kills the
+    // "plastic statue" look on faces and bare skin.
+    if (u_subsurface.w > 0.01) {
+        float sss = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 3.0);
+        color += u_subsurface.rgb * sss * u_subsurface.w;
     }
     if (u_flags.z > 0.5 && u_fog.a > 0.0) {
         float d = length(u_camPos - v_worldPos) * u_fog.a;

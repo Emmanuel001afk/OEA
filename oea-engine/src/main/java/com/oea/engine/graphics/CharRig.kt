@@ -1,6 +1,7 @@
 package com.oea.engine.graphics
 
 import com.oea.engine.math.MathX
+import com.oea.engine.math.Mat4
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -41,7 +42,27 @@ class CharRig(
     val backpack: Material? = null,
     /** Full character definition; when set, overrides the style params above. */
     val spec: CharSpec? = null,
+    /** Armor vest material (game-owned; defaults to the outer layer). */
+    val vest: Material? = null,
 ) {
+
+    // ---- skinned pipeline: a real skeleton driving procedurally generated
+    // body parts. Legacy rigs (no spec) get a default body; spec rigs rebuild
+    // on revision change in [ensureForm].
+    val skeleton = Skeleton()
+    var human: HumanBody? = null
+    private val tmp = Mat4()
+    private val tmp2 = Mat4()
+
+    init {
+        if (spec == null) {
+            human = HumanBody(null, feminine, hairStyle)
+            // Legacy rigs still get the SSS skin term on the skinned path: the
+            // default body should read as flesh, not plastic.
+            mSkin = Material(color = skin.color, texture = skin.texture, specular = skin.specular,
+                shininess = skin.shininess, rim = skin.rim, subsurface = skin.color)
+        }
+    }
 
     /**
      * Mutable per-character animation state; the game updates a handful of
@@ -63,6 +84,8 @@ class CharRig(
         var headYaw = 0f
         /** Extra parts: joint spheres, belly blend, shoulder pads, hair cap. */
         var detail = true
+        /** 0..1 (1 = just pressed): the arms drop to the weapon — the reload pose. */
+        var reload = 0f
     }
 
     // ---------------------------------------------------------------- spec plumbing
@@ -100,7 +123,7 @@ class CharRig(
         formRev = sp.revision
         val f = sp.form()
         form = f
-        mSkin = Material(color = f.skinColor, texture = CharTextures.forKey(f.skinTexture), specular = 0.18f, rim = 0.12f)
+        mSkin = Material(color = f.skinColor, texture = CharTextures.forKey(f.skinTexture), specular = 0.18f, rim = 0.12f, subsurface = f.skinColor)
         mHair = Material(color = f.hairColor, texture = CharTextures.forKey("hair"), specular = 0.42f, shininess = 48f, rim = 0.18f)
         mTop = Material(color = f.topColor, texture = CharTextures.forKey(f.topTexture), specular = 0.22f, rim = 0.14f)
         mBottom = Material(color = f.bottomColor, texture = CharTextures.forKey(f.bottomTexture), specular = 0.18f, rim = 0.1f)
@@ -120,6 +143,8 @@ class CharRig(
         baseSkinShine = mSkin.shininess; baseTopShine = mTop.shininess; baseBottomShine = mBottom.shininess
         baseOuterShine = mOuter.shininess; baseShoesShine = mShoes.shininess; baseHeadShine = mHead.shininess; baseBackShine = mBack.shininess
         weatherApplied = -1f
+        // Rebuild the skinned body whenever the spec changes (studio sliders).
+        human = HumanBody(sp, f.feminine || feminine, f.hairStyle)
     }
 
     // ---------------------------------------------------------------- draw
@@ -141,18 +166,7 @@ class CharRig(
         // materials absorb it, the shared legacy ones only tint.
         val wet = fx?.wetness ?: 0f
         val dust = fx?.dust ?: 0f
-        if (spec != null && form != null && abs(wet + dust - weatherApplied) > 0.03f) {
-            weatherApplied = wet + dust
-            val gloss = 1f + wet * 1.6f
-            val dustCol = 0xFFC9B9A0.toInt()
-            mSkin.color = mixTint(baseSkin, dustCol, dust * 0.12f); mSkin.specular = (baseSkinSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mSkin.shininess = (baseSkinShine * gloss).coerceAtMost(160f)
-            mTop.color = mixTint(baseTop, dustCol, dust * 0.38f); mTop.specular = (baseTopSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mTop.shininess = (baseTopShine * gloss).coerceAtMost(160f)
-            mBottom.color = mixTint(baseBottom, dustCol, dust * 0.32f); mBottom.specular = (baseBottomSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mBottom.shininess = (baseBottomShine * gloss).coerceAtMost(160f)
-            mOuter.color = mixTint(baseOuter, dustCol, dust * 0.42f); mOuter.specular = (baseOuterSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mOuter.shininess = (baseOuterShine * gloss).coerceAtMost(160f)
-            mShoes.color = mixTint(baseShoes, dustCol, dust * 0.3f); mShoes.specular = (baseShoesSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mShoes.shininess = (baseShoesShine * gloss).coerceAtMost(160f)
-            mHead.color = mixTint(baseHead, dustCol, dust * 0.35f); mHead.specular = (baseHeadSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mHead.shininess = (baseHeadShine * gloss).coerceAtMost(160f)
-            mBack.color = mixTint(baseBack, dustCol, dust * 0.45f); mBack.specular = (baseBackSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mBack.shininess = (baseBackShine * gloss).coerceAtMost(160f)
-        }
+        applyWeather(fx)
         val wetTint = wetTintFor(wet)
 
         fun wx(lx: Float, lz: Float) = x + lx * ca + lz * sa
@@ -161,9 +175,9 @@ class CharRig(
         // Root position: hips sit lower when crouching, the run cycle adds a
         // double bounce, leaning banks the whole body sideways.
         val crouchK = if (p.crouch) 0.24f else 0f
-        val bob = if (p.airborne || p.crouch) 0f else sp * 0.055f * abs(cos(p.phase))
+        val bob = if (p.airborne || p.crouch) 0f else sp * 0.035f * abs(cos(p.phase))
         val hipY = y + (0.92f - crouchK) * s + bob * s
-        val roll = p.lean * 0.35f + (if (p.airborne) 0f else sp * 0.07f * sin(p.phase))
+        val roll = p.lean * 0.35f + (if (p.airborne) 0f else sp * 0.04f * sin(p.phase))
         val pitch = 0.10f * sp + (if (p.airborne) 0.18f else 0f) + (if (p.crouch) 0.30f else 0f)
         val leanX = roll * 0.30f * s
 
@@ -514,6 +528,106 @@ class CharRig(
                 sph(r, acM, wx(shX, cuZ), cuY, wz(shX, cuZ), 0.078f * s)
             }
         }
+    }
+
+    // ---------------------------------------------------------------- skinned pipeline
+
+    /** Weather tint for the skinned path (shared with the legacy primitive draw). */
+    private fun applyWeather(fx: CharFx?) {
+        val wet = fx?.wetness ?: 0f
+        val dust = fx?.dust ?: 0f
+        if (spec != null && form != null && abs(wet + dust - weatherApplied) > 0.03f) {
+            weatherApplied = wet + dust
+            val gloss = 1f + wet * 1.6f
+            val dustCol = 0xFFC9B9A0.toInt()
+            mSkin.color = mixTint(baseSkin, dustCol, dust * 0.12f); mSkin.specular = (baseSkinSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mSkin.shininess = (baseSkinShine * gloss).coerceAtMost(160f)
+            mTop.color = mixTint(baseTop, dustCol, dust * 0.38f); mTop.specular = (baseTopSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mTop.shininess = (baseTopShine * gloss).coerceAtMost(160f)
+            mBottom.color = mixTint(baseBottom, dustCol, dust * 0.32f); mBottom.specular = (baseBottomSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mBottom.shininess = (baseBottomShine * gloss).coerceAtMost(160f)
+            mOuter.color = mixTint(baseOuter, dustCol, dust * 0.42f); mOuter.specular = (baseOuterSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mOuter.shininess = (baseOuterShine * gloss).coerceAtMost(160f)
+            mShoes.color = mixTint(baseShoes, dustCol, dust * 0.3f); mShoes.specular = (baseShoesSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mShoes.shininess = (baseShoesShine * gloss).coerceAtMost(160f)
+            mHead.color = mixTint(baseHead, dustCol, dust * 0.35f); mHead.specular = (baseHeadSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mHead.shininess = (baseHeadShine * gloss).coerceAtMost(160f)
+            mBack.color = mixTint(baseBack, dustCol, dust * 0.45f); mBack.specular = (baseBackSpec * (1f + wet * 1.2f)).coerceAtMost(1f); mBack.shininess = (baseBackShine * gloss).coerceAtMost(160f)
+        }
+    }
+
+    /**
+     * Draws the character with the skinned pipeline: one skeleton drives the
+     * whole body — every joint bends, the mesh is skinned in the shader.
+     *
+     * [vest]/[helmet]/[pack] gate the armor/headwear/pack meshes; the game
+     * decides from kit state. [vestMat] overrides the armor material (the
+     * game owns it), falling back to the outer layer.
+     */
+    fun drawSkinned(
+        r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, p: Pose, scale: Float = 1f, fx: CharFx? = null,
+        vest: Boolean = false, helmet: Boolean = false, pack: Boolean = false, vestMat: Material? = null,
+        lod: Int = 0,
+    ) {
+        val h = human ?: return
+        if (spec != null) ensureForm()
+        applyWeather(fx)
+        // Pose → skeleton. The pelvis rides the crouch/bob offset in local units;
+        // the draw scale stretches it with the body.
+        val crouchK = if (p.crouch) 0.22f else 0f
+        val bob = if (p.airborne || p.crouch) 0f else p.speed * 0.035f * abs(cos(p.phase))
+        skeleton.update(p.phase, p.speed, p.airborne, p.crouch, p.lean, p.aimHold, p.aimPitch, p.headYaw, bob - crouchK, p.reload)
+        tmp.setPosYaw(x, y, z, yaw, scale)
+        val bones = skeleton.matrices
+        r.drawSkinned(h.body, mSkin, bones, tmp)
+        r.drawSkinned(h.shirt, mTop, bones, tmp)
+        if (lod < 2 && spec != null && form?.outer != "none") r.drawSkinned(h.outer, mOuter, bones, windTmp(x, y, z, yaw, scale, fx))
+        r.drawSkinned(h.pants, mBottom, bones, tmp)
+        if (lod < 2 && (spec != null || hair != null)) r.drawSkinned(h.hair, mHair, bones, windTmp(x, y, z, yaw, scale, fx))
+        r.drawSkinned(h.shoes, mShoes, bones, tmp)
+        if (lod < 1 && vest) r.drawSkinned(h.vest, vestMat ?: mOuter, bones, tmp)
+        if (lod < 1 && helmet) r.drawSkinned(h.headwear, mHead, bones, tmp)
+        if (lod < 1 && pack) r.drawSkinned(h.pack, mBack, bones, tmp)
+        // Eyes: own skinned mesh on the HEAD bone; the blink squashes it in Y.
+        // The mesh is centered on the eye line (y = 0), so it draws at head height.
+        // The small extra yaw/pitch makes the eyes glance toward the aim.
+        if (lod < 1 && h.face.vertexCount > 0) {
+            tmp2.setTRS(x, y + 1.632f * scale, z, yaw + p.headYaw * 0.08f, p.aimPitch * 0.12f, 0f, scale, scale * blinkK, scale)
+            r.drawSkinned(h.face, mEye, bones, tmp2)
+        }
+        // Brows: own mesh, flattened in Y with aiming/running tension (furrow).
+        if (lod < 1 && h.brows.vertexCount > 0) {
+            val tension = (0.25f + abs(p.aimPitch) * 0.5f + p.speed * 0.35f + if (p.crouch) 0.15f else 0f).coerceAtMost(1f)
+            tmp2.setTRS(x, y + 1.632f * scale, z, yaw, 0f, 0f, scale, scale * (1f - 0.5f * tension), scale)
+            r.drawSkinned(h.brows, mHair, bones, tmp2)
+        }
+    }
+
+    /** Hair and coat shells sway with the wind: a hair-trigger rotation about the
+     * character's feet — small angles, so the head barely moves. */
+    private fun windTmp(x: Float, y: Float, z: Float, yaw: Float, scale: Float, fx: CharFx?): Mat4 {
+        if (fx != null && (fx.windX != 0f || fx.windZ != 0f)) {
+            tmp2.setTRS(x, y, z, yaw + fx.windX * 0.01f, -fx.windZ * 0.015f, 0f, scale, scale, scale)
+        } else tmp2.setPosYaw(x, y, z, yaw, scale)
+        return tmp2
+    }
+
+    // ---------------------------------------------------------------- face: blink
+
+    private val rnd = java.util.Random()
+    private var blinkNext = 0f
+    private var blinkUntil = 0f
+    /** 1 = eyes open, ~0.08 = blinking. Drives the face mesh's Y scale. */
+    var blinkK = 1f
+
+    /**
+     * Advances the blink schedule from absolute game time (seconds). Blinks
+     * every 2–6 s, each blink is a 0.14 s smooth close/open. Call once per
+     * frame per rig; the draw reads [blinkK].
+     */
+    fun faceUpdate(t: Float) {
+        if (t >= blinkNext) {
+            blinkUntil = t + 0.05f
+            blinkNext = t + 2.0f + rnd.nextFloat() * 4.0f
+        }
+        blinkK = if (t < blinkUntil + 0.14f) {
+            val k = (t - blinkUntil) / 0.14f  // 0..1 across the blink
+            1f - 0.92f * (1f - abs(k * 2f - 1f))  // smooth close and open
+        } else 1f
     }
 
     // ---------------------------------------------------------------- primitive helpers

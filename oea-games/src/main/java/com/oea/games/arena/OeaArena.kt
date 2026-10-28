@@ -48,6 +48,7 @@ import com.oea.engine.physics.RayHit
 import com.oea.engine.ui.ButtonStyle
 import com.oea.engine.ui.Hud
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -76,6 +77,8 @@ class OeaArena : OeaGame() {
         var walk = 0f
         var lastX = 0f; var lastZ = 0f
         var speed01 = 0f
+        /** Reload progress 0..1 from the snapshot (drives the reload pose). */
+        var reloadN = 0f
         /** Weather/wind state for this soldier (wet, dusty, hair in the wind). */
         val fx = CharFx()
         val alive get() = flags and 1 != 0
@@ -111,22 +114,112 @@ class OeaArena : OeaGame() {
     private var fogTimer = 0f
 
     // Controls
-    private val joystick = VirtualJoystick(floatArrayOf(0f, 0.32f, 0.42f, 1f), 60f, homeX = 0.14f, homeY = 0.74f)
+    private val joystick = VirtualJoystick(floatArrayOf(0f, 0.32f, 0.42f, 1f), 60f, homeX = 0.13f, homeY = 0.58f)
     private val look = LookPad(floatArrayOf(0.42f, 0.12f, 1f, 1f))
     private val fire = VirtualButton(0.86f, 0.7f, radiusDp = 44f, label = "FIRE", color = 0xFFFF5A3C.toInt())
     private val fire2 = VirtualButton(0.1f, 0.36f, radiusDp = 30f, label = "◎", color = 0xFFFF5A3C.toInt())
     private val adsBtn = VirtualButton(0.75f, 0.52f, radiusDp = 27f, label = "⊕")
     private val jumpBtn = VirtualButton(0.93f, 0.46f, radiusDp = 27f, label = "↑")
-    private val crouchBtn = VirtualButton(0.95f, 0.88f, radiusDp = 24f, label = "▼")
-    private val reloadBtn = VirtualButton(0.74f, 0.88f, radiusDp = 24f, label = "R")
-    private val healBtn = VirtualButton(0.6f, 0.9f, radiusDp = 23f, label = "+")
+    private val crouchBtn = VirtualButton(0.95f, 0.78f, radiusDp = 24f, label = "▼")
+    private val reloadBtn = VirtualButton(0.74f, 0.78f, radiusDp = 24f, label = "R")
+    private val healBtn = VirtualButton(0.55f, 0.8f, radiusDp = 23f, label = "+")
     private val pickupBtn = VirtualButton(0.6f, 0.62f, radiusDp = 30f, label = "PICK", color = 0xFF57C8FF.toInt())
+    /** Throwable pack: frag, smoke and stun grenades, each with its own count. */
+    private val stunBtn = VirtualButton(0.22f, 0.92f, radiusDp = 28f, label = "STUN", color = 0xFF42A5F5.toInt())
+    private val fragBtn = VirtualButton(0.3f, 0.92f, radiusDp = 28f, label = "FRAG", color = 0xFFFF7043.toInt())
+    private val smokeBtn = VirtualButton(0.38f, 0.92f, radiusDp = 28f, label = "SMK", color = 0xFF9E9E9E.toInt())
+    /** Mount / dismount a vehicle (Warfare). */
+    private val mountBtn = VirtualButton(0.12f, 0.92f, radiusDp = 28f, label = "MOUNT", color = 0xFF66BB6A.toInt())
+    /** Sprint: hold to run — the walk/run split players keep asking for. */
+    private val sprintBtn = VirtualButton(0.93f, 0.88f, radiusDp = 28f, label = "SPRINT", color = 0xFFFFB300.toInt())
+    /** Prone: hold to lie flat — alongside the long-crouch toggle. */
+    private val proneBtn = VirtualButton(0.83f, 0.9f, radiusDp = 28f, label = "PRONE", color = 0xFF7E57C2.toInt())
+    /** Controls screen: DONE commits & plays, RESET restores the factory layout,
+     *  ADS toggles tap vs hold aim. Drawn at the top of the screen. */
+    private val ctrlDone = VirtualButton(0.74f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "DONE", color = 0xFF66BB6A.toInt())
+    private val ctrlReset = VirtualButton(0.58f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "RESET", color = 0xFFFF7043.toInt())
+    private val ctrlAds = VirtualButton(0.42f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "ADS · TAP", color = 0xFFFFB300.toInt())
+    /** Every control button, in one place — the layout screen saves them all. */
+    private val controlButtons: List<Pair<VirtualButton, String>> get() = listOf(
+        fire to "fire", fire2 to "fire2", adsBtn to "ads", jumpBtn to "jump", crouchBtn to "crouch",
+        reloadBtn to "reload", healBtn to "heal", pickupBtn to "pickup", stunBtn to "stun",
+        fragBtn to "frag", smokeBtn to "smoke", mountBtn to "mount", sprintBtn to "sprint", proneBtn to "prone",
+    )
+    /** ADS sensitivity mode: true = hold the button, false = tap-toggle. */
+    private var adsHoldMode = false
+    /** The controls screen: drag buttons to taste, DONE to play. */
+    private var controlsOpen = false
+
+    /** Default button anchors — the factory layout for RESET in the controls screen. */
+    private val btnDefaults: Map<String, FloatArray> = mapOf(
+        "fire" to floatArrayOf(0.86f, 0.7f), "fire2" to floatArrayOf(0.1f, 0.36f),
+        "ads" to floatArrayOf(0.75f, 0.52f), "jump" to floatArrayOf(0.93f, 0.46f),
+        "crouch" to floatArrayOf(0.95f, 0.78f), "reload" to floatArrayOf(0.74f, 0.78f),
+        "heal" to floatArrayOf(0.55f, 0.8f), "pickup" to floatArrayOf(0.6f, 0.62f),
+        "stun" to floatArrayOf(0.22f, 0.92f), "frag" to floatArrayOf(0.3f, 0.92f),
+        "smoke" to floatArrayOf(0.38f, 0.92f), "mount" to floatArrayOf(0.12f, 0.92f),
+        "sprint" to floatArrayOf(0.93f, 0.88f), "prone" to floatArrayOf(0.83f, 0.9f),
+    )
+    private val btnDefaultRadius: Map<String, Float> = mapOf(
+        "fire" to 44f, "fire2" to 30f, "ads" to 27f, "jump" to 27f, "crouch" to 24f,
+        "reload" to 24f, "heal" to 23f, "pickup" to 30f, "stun" to 28f, "frag" to 28f,
+        "smoke" to 28f, "mount" to 28f, "sprint" to 28f, "prone" to 28f,
+    )
+
+    private fun saveButtonLayout() {
+        for ((b, key) in controlButtons) {
+            ctx.storage.putFloat("btn_$key_x", b.anchorX)
+            ctx.storage.putFloat("btn_$key_y", b.anchorY)
+            ctx.storage.putFloat("btn_$key_r", b.radiusDp)
+        }
+        ctx.storage.putInt("ads_hold", if (adsHoldMode) 1 else 0)
+    }
+
+    private fun resetButtonLayout() {
+        for ((b, key) in controlButtons) {
+            val d = btnDefaults[key]
+            if (d != null) {
+                b.anchorX = d[0]; b.anchorY = d[1]
+            }
+            b.radiusDp = btnDefaultRadius[key] ?: 28f
+        }
+        saveButtonLayout()
+    }
     private var lookYaw = 0f
     private var lookPitch = 0f
     private var adsOn = false
     private var crouchOn = false
     private var jumpLatch = false
     private var reloadLatch = false
+    private var mountLatch = false
+    /** One-shot grenade throw: 0 frag, 1 smoke, 2 stun, -1 idle. */
+    private var grenadeLatch = -1
+    /** How long the frag button has been held — past 0.3 s it cooks the fuse. */
+    private var cookTimer = 0f
+    private var cookAmount = 0f
+    private var wasFragHeld = false
+    /** Prone: long-press crouch for 0.5 s. */
+    private var proneOn = false
+    private var crouchHold = 0f
+    /** Camera shake from nearby explosions. */
+    private var shake = 0f
+    /** Set by the pause menu's reload-all; rides the next command packet. */
+    private var pendingReloadAll = false
+    /** Round-mode flow state (dialogs stack one at a time). */
+    private var roundDialogOpen = false
+    private var shopOpen = false
+    /** Pending Clash Squad purchases — applied through the command stream. */
+    private var pendingBuySlot = -1
+    private var pendingBuyUpSlot = -1
+    private var pendingBuyMedkits = 0
+    private var pendingBuyFrags = 0
+    private var pendingBuySmokes = 0
+    private var pendingBuyStuns = 0
+    private var pendingBuyVest = 0
+    private var pendingBuyHelmet = 0
+    private var pendingDeploy = false
+    /** Set when the client leaves the round-over screen — the host opens the shop. */
+    private var pendingAdvancePrep = false
     private var slotLatch = -1
     private var pickupLatch = -1
     private val inputNow = PlayerInput()
@@ -163,6 +256,7 @@ class OeaArena : OeaGame() {
     private val hit = RayHit()
     private val m = Mat4()
     private val tmp = Vec3()
+    private val tmp2 = Vec3()
     private val tracers = ArrayList<FloatArray>()
     private val sparks = ParticleSystem(1200, Textures.softCircle(64, 0.2f), additive = true, velocityAligned = true)
     private val puffs = ParticleSystem(500, Textures.softCircle(64, 0f), additive = false)
@@ -172,10 +266,95 @@ class OeaArena : OeaGame() {
     private var hitMarkerKill = false
     private var damageFrom = 0f
     private var damageAngle = 0f
+    /** Sight kick from recoil: rises on fire, recovers smoothly (radians). */
+    private var recoilPitch = 0f
+    /** Brief dip of the camera when the weapon slot changes. */
+    private var switchDip = 0f
+    /** 0..1 blend between hip and ADS camera/field of view. */
+    private var adsBlend = 0f
+    /** Smoothed camera position/target so the world glides instead of snapping. */
+    private val camPosSm = Vec3()
+    private val camTgtSm = Vec3()
+    private var camInit = false
+    /** The player's own warm light in the permanent-night modes. */
+    private val flashLight = com.oea.engine.graphics.PointLight()
     /** Presentation of the respawn wait (the simulation owns the real timer). */
     private var respawnCountdown = -1f
     private val tracerMat = Material(color = 0xFFFFE6A0.toInt(), emissive = 0xFFFFD27A.toInt(), emissiveStrength = 3f, unlit = true, additive = true, transparent = true, depthWrite = false, castShadows = false, fog = false)
-    private val zoneMat = Material(color = 0x553FA9FF, emissive = 0xFF3FA9FF.toInt(), emissiveStrength = 0.6f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    private val zoneMat = Material(color = 0x663FA9FF, emissive = 0xFF3FA9FF.toInt(), emissiveStrength = 0.85f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    /** The glowing ground line where the zone boundary meets the terrain. */
+    private val zoneRingMat = Material(color = 0x999FEBFF, emissive = 0xFFBFF2FF.toInt(), emissiveStrength = 1.1f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    /** Faint ring showing where the zone is shrinking to. */
+    private val zoneTargetMat = Material(color = 0x333FA9FF, emissive = 0xFF3FA9FF.toInt(), emissiveStrength = 0.35f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    /** Sick-green aura on the undead in Haunted. */
+    private val undeadAura = Material(color = 0x224AFF66.toInt(), emissive = 0xFF5AFF7A.toInt(), emissiveStrength = 0.5f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    /** Tall open curtain for the zone wall — no caps, so it reads as a boundary, not a solid pillar. */
+    private val zoneCurtain: Mesh by lazy { MeshBuilder().cylinder(0f, 0f, 0f, 1f, 1f, 48, caps = false).build() }
+    /** Glowing ground ring; the tube scales with the zone radius, which keeps the line visible at every phase. */
+    private val zoneRing: Mesh by lazy { MeshBuilder().torus(0f, 0f, 0f, 1f, 0.045f, 64, 8).build() }
+    /** Warfare objectives: a flat ring on the ground and a beam that stands up as the bar fills. */
+    private val captureRing: Mesh by lazy { MeshBuilder().torus(0f, 0f, 0f, 1f, 0.05f, 48, 6).build() }
+    private val captureBeam: Mesh by lazy { MeshBuilder().cylinder(0f, 0f, 0f, 1f, 1f, 16, caps = false).build() }
+    private val jeepMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.55f, 0f, 4.4f, 0.6f, 2.0f)
+        mb.box(0f, 1.0f, -0.35f, 2.1f, 0.55f, 1.5f)
+        for (wx in floatArrayOf(-1.4f, 1.4f)) for (wz in floatArrayOf(1.0f, -1.0f)) {
+            mb.withTransform(Mat4().setTRS(wx, 0.28f, wz, yaw = MathX.HALF_PI)) { mb.cylinder(0f, 0f, 0f, 0.42f, 0.35f, 12) }
+        }
+        mb.build()
+    }
+    private val tankMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.7f, 0f, 5.0f, 0.7f, 3.2f)
+        mb.box(0f, 0.2f, 1.5f, 5.0f, 0.4f, 0.45f)
+        mb.box(0f, 0.2f, -1.5f, 5.0f, 0.4f, 0.45f)
+        mb.box(0f, 1.2f, 0f, 3.0f, 0.45f, 2.2f)
+        mb.withTransform(Mat4().setTRS(0f, 1.2f, 2.3f, pitch = MathX.HALF_PI)) { mb.cylinder(0f, 0f, 0f, 0.11f, 3.6f, 10) }
+        mb.withTransform(Mat4().setTRS(0f, 1.6f, 0f)) { mb.box(0f, 0f, 0f, 0.26f, 0.16f, 0.4f) }
+        mb.build()
+    }
+    private val turretMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.9f, 0f, 3.6f, 0.8f, 3.6f)
+        mb.box(0f, 1.6f, 0f, 1.8f, 0.6f, 1.8f)
+        mb.withTransform(Mat4().setTRS(0f, 1.55f, 1.5f, pitch = MathX.HALF_PI)) { mb.cylinder(0f, 0f, 0f, 0.12f, 2.4f, 10) }
+        mb.withTransform(Mat4().setTRS(0f, 1.9f, 0f)) { mb.box(0f, 0f, 0f, 0.3f, 0.18f, 0.4f) }
+        mb.build()
+    }
+    private val heloMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0.6f, 0f, 4.4f, 1.0f, 1.7f)          // fuselage
+        mb.box(0f, 0.5f, -2.3f, 1.0f, 0.5f, 0.5f)        // tail boom
+        mb.box(0f, 0.85f, -2.3f, 1.7f, 0.14f, 0.24f)     // tail fin
+        mb.box(0f, 1.05f, -0.6f, 0.8f, 0.1f, 0.5f)       // tail rotor hub
+        mb.box(0f, 0.22f, 0.85f, 4.4f, 0.14f, 0.24f)     // skids
+        for (wx in floatArrayOf(-0.85f, 0.85f)) {
+            mb.withTransform(Mat4().setTRS(wx, 0.6f, 0.85f)) { mb.cylinder(0f, 0f, 0f, 0.07f, 0.45f, 6) }
+        }
+        mb.build()
+    }
+    /** Spinning main rotor — drawn separately so it can spin about Y. */
+    private val heloRotorMesh: Mesh by lazy {
+        val mb = MeshBuilder()
+        mb.box(0f, 0f, 0f, 6.0f, 0.09f, 0.3f)
+        mb.box(0f, 0f, 0f, 0.3f, 0.09f, 6.0f)
+        mb.build()
+    }
+    private val vehicleMat: Material by lazy { Material(color = 0xFF8D6E4F.toInt(), specular = 0.5f) }
+    private val vehicleMatTank: Material by lazy { Material(color = 0xFF5D4A3A.toInt(), specular = 0.5f) }
+    private val pointMatFree = Material(color = 0xFF8A9BB5.toInt(), emissive = 0xFF8A9BB5.toInt(), emissiveStrength = 0.7f, unlit = true, transparent = true, additive = true, depthWrite = false, fog = false)
+    private val pointMatBlue = Material(color = 0x5542A5F5.toInt(), emissive = 0xFF42A5F5.toInt(), emissiveStrength = 1.1f, unlit = true, transparent = true, additive = true, depthWrite = false, fog = false)
+    private val pointMatOrange = Material(color = 0x55FF7043.toInt(), emissive = 0xFFFF7043.toInt(), emissiveStrength = 1.1f, unlit = true, transparent = true, additive = true, depthWrite = false, fog = false)
+    private val grenadeMatFrag = Material(color = 0xFF3E4A2C.toInt(), specular = 0.35f, shininess = 30f)
+    private val grenadeMatSmoke = Material(color = 0xFF616161.toInt(), specular = 0.25f)
+    /** The blinking warning light near the end of the fuse. */
+    private val grenadeBlinkMat = Material(color = 0x66FF3B3B.toInt(), emissive = 0xFFFF3B3B.toInt(), emissiveStrength = 1.6f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    private val rocketMat = Material(color = 0xFFE0E0E0.toInt(), emissive = 0xFFFF7043.toInt(), emissiveStrength = 1.2f, specular = 0.6f)
+    private val rocketTrailMat = Material(color = 0x88FFFFFF.toInt(), emissive = 0xFFFFFFFF.toInt(), emissiveStrength = 0.8f, unlit = true, transparent = true, additive = true, depthWrite = false, castShadows = false, fog = false)
+    /** A smoke grenade's lasting cloud: a soft grey volume standing over where the air went thick. */
+    private val smokeCloudMat = Material(color = 0x99909090.toInt(), unlit = true, transparent = true, doubleSided = true, depthWrite = false, castShadows = false)
+    private fun grenadeMat(type: Int) = if (type == 0) grenadeMatFrag else grenadeMatSmoke
     private val skin = Material(color = 0xFFE0B48C.toInt(), specular = 0.2f)
     private val pants = Material(color = 0xFF2E3440.toInt(), specular = 0.15f)
     private val vestMat = Material(color = 0xFF4E5D3A.toInt(), specular = 0.2f)
@@ -255,7 +434,7 @@ class OeaArena : OeaGame() {
             // Day turns to night while wave after wave lands on the island.
             "last_day" -> { env.copyFrom(envDay); sim.zone.enabled = false }
             // Competitive daylight: crisper air, quicker reads.
-            "tdm", "gun" -> { env.copyFrom(envDay); env.fogDensity = 0.0034f }
+            "tdm", "gun", "cs", "wolf", "warfare", "warfare_koth", "warfare_ad" -> { env.copyFrom(envDay); env.fogDensity = 0.0034f }
             else -> env.copyFrom(envDay)
         }
         if (rules == "last_day" || rules == "haunted" || rules == "lights_out") {
@@ -284,12 +463,18 @@ class OeaArena : OeaGame() {
                 // team match with two humans already has both sides covered.
                 "tdm" -> (2 - humanCount).coerceAtLeast(0)
                 "gun" -> if (humanCount == 1) 1 else 0
+                // Clash Squad is a 4v4 squad; Lone Wolf a 1v1 duel; Warfare a 6v6.
+                "cs" -> (8 - humanCount).coerceAtLeast(0)
+                "wolf" -> (2 - humanCount).coerceAtLeast(0)
+                "warfare", "warfare_koth", "warfare_ad" -> (12 - humanCount).coerceAtLeast(0)
                 else -> 0
             }
             repeat(max(configuredBots, minimumBots)) { i -> sim.addPlayer(sim.allocBotId(), BOT_NAMES[i % BOT_NAMES.size], EngineColors[(i + 2) % EngineColors.size], true) }
             repeat(pendingExtraBots) { i -> sim.addPlayer(sim.allocBotId(), BOT_NAMES[(i + 3) % BOT_NAMES.size], EngineColors[(i + 5) % EngineColors.size], true) }
             pendingExtraBots = 0
             sim.events = simEvents
+            // Round modes open in the shop/pick phase — deploy starts round 1.
+            if (sim.roundMode) sim.roundPhase = 2
             sim.compensation = { p -> if (p.id == localId) 0L else (net?.rttTo(p.id)?.toLong() ?: 0L) / 2 + 110L }
             local = sim.players[localId]
             if (net != null) broadcastRoster()
@@ -324,6 +509,13 @@ class OeaArena : OeaGame() {
         invertY = ctx.settings.invertLookY
         turnLimit = ctx.settings.turnSpeedLimit * MathX.DEG_TO_RAD
         look.maxDeltaPx = 420f // only absurd pointer-resync jumps are discarded
+        // Controls: the saved button layout and the ADS tap/hold mode.
+        for ((b, key) in controlButtons) {
+            b.anchorX = ctx.storage.getFloat("btn_$key_x", b.anchorX)
+            b.anchorY = ctx.storage.getFloat("btn_$key_y", b.anchorY)
+            b.radiusDp = ctx.storage.getFloat("btn_$key_r", b.radiusDp)
+        }
+        adsHoldMode = ctx.storage.getInt("ads_hold", 0) == 1
         xpTotal = ctx.storage.getInt("xp")
         levelBefore = levelFor(xpTotal)
         levelNow = levelBefore
@@ -377,6 +569,46 @@ class OeaArena : OeaGame() {
             net?.broadcast(EV_OVER) { it.u8(winner?.id ?: 255) }
             endMatch(winner?.id ?: -1, winner?.name)
         }
+        override fun onGrenade(x: Float, y: Float, z: Float, type: Int) {
+            ctx.audio.play(sHit, 0.9f, pitch = 0.6f)
+            when (type) {
+                0 -> {
+                    vfx.sparksAt(x, y, z, 40, dirY = 0.9f, hot = 0xFFFFC27A.toInt())
+                    vfx.light(x, y + 0.4f, z, 0xFFFFD9A0.toInt(), 3.2f, 9f)
+                    vfx.smokeColumn(x, y + 0.4f, z, 1.2f)
+                    val me = local
+                    if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 12f) shake = 0.5f else shake = max(shake, 0.12f)
+                }
+                1 -> vfx.smokeColumn(x, y + 0.4f, z, 2.6f)
+                3 -> {
+                    // Rocket / missile warhead: a bigger blast with fire and a ground scorch.
+                    vfx.sparksAt(x, y, z, 70, dirY = 1.4f, hot = 0xFFFF8A3D.toInt())
+                    vfx.light(x, y + 0.6f, z, 0xFFFF9D3C.toInt(), 5f, 14f)
+                    vfx.smokeColumn(x, y + 0.4f, z, 3.0f)
+                    ctx.audio.play(sHit, 0.6f, pitch = 0.35f)
+                    val me = local
+                    if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 18f) shake = 0.7f else shake = max(shake, 0.2f)
+                }
+                else -> {
+                    // Stun: a white flash and a crackle — no damage, but the legs go heavy.
+                    vfx.sparksAt(x, y, z, 24, dirY = 1.2f, hot = 0xFFFFFFFF.toInt())
+                    vfx.light(x, y + 0.3f, z, 0xFFFFFFFF.toInt(), 2.5f, 5f)
+                    val me = local
+                    if (me?.alive == true && MathX.length(me.pos.x - x, me.pos.z - z) < 6f) shake = max(shake, 0.25f)
+                }
+            }
+        }
+        override fun onRoundOver(winTeam: Int, round: Int) {
+            ctx.audio.play(sWin, 0.7f)
+            net?.broadcast(EV_ROUND_OVER) { it.u8(winTeam).u8(round) }
+        }
+        override fun onRoundStart(round: Int) {
+            net?.broadcast(EV_ROUND_START) { it.u8(round) }
+        }
+        override fun onPointCaptured(x: Float, z: Float, team: Int) {
+            vfx.sparksAt(x, map.heightAt(x, z) + 1.2f, z, 24, dirY = 1.2f, hot = 0xFFFFFFFF.toInt())
+            ctx.audio.play(sPick, 0.8f)
+        }
     }
 
     private fun broadcastRoster() {
@@ -393,7 +625,9 @@ class OeaArena : OeaGame() {
         val me = local ?: return
         buildInput(inputNow)
         if (isAuthority) {
-            sim.players[localId]?.input?.let { if (me.alive) it.copyFrom(inputNow) }
+            // The sim gates on alive itself; copying during prep lets the dead
+            // round-maker still shop and deploy.
+            sim.players[localId]?.input?.copyFrom(inputNow)
             // Remote clients' queued commands.
             for ((id, q) in hostQueues) {
                 val p = sim.players[id] ?: continue
@@ -423,15 +657,19 @@ class OeaArena : OeaGame() {
             sim.step(dt)
             snapTimer -= dt
             if (net != null && snapTimer <= 0f) { snapTimer = 1f / 20f; sendSnapshot() }
-        } else if (me.alive && !matchOver) {
-            prev.getOrPut(localId) { FloatArray(3) }.let { it[0] = me.pos.x; it[1] = me.pos.y; it[2] = me.pos.z }
+        } else if ((me.alive || sim.roundPhase != 0) && !matchOver) {
+            // Predict only while alive; during prep/round-over the commands
+            // (buys, deploy, advance) still need to reach the host.
             inputNow.seq = ++seq and 0xFFFF
-            sim.move(me, inputNow, dt)
-            history.push(inputNow.seq, floatArrayOf(me.pos.x, me.pos.y, me.pos.z, inputNow.moveX, inputNow.moveY, inputNow.yaw, inputNow.pitch,
-                if (inputNow.crouch) 1f else 0f, if (inputNow.jump) 1f else 0f, if (inputNow.ads) 1f else 0f))
+            if (me.alive) {
+                prev.getOrPut(localId) { FloatArray(3) }.let { it[0] = me.pos.x; it[1] = me.pos.y; it[2] = me.pos.z }
+                sim.move(me, inputNow, dt)
+                history.push(inputNow.seq, floatArrayOf(me.pos.x, me.pos.y, me.pos.z, inputNow.moveX, inputNow.moveY, inputNow.yaw, inputNow.pitch,
+                    if (inputNow.crouch) 1f else 0f, if (inputNow.jump) 1f else 0f, if (inputNow.ads) 1f else 0f, if (inputNow.sprint) 1f else 0f))
+            }
             sendCommand(inputNow)
         }
-        jumpLatch = false; reloadLatch = false; slotLatch = -1; pickupLatch = -1
+        jumpLatch = false; reloadLatch = false; mountLatch = false; slotLatch = -1; pickupLatch = -1; grenadeLatch = -1; cookAmount = 0f
     }
 
     private val aim = FloatArray(2)
@@ -442,7 +680,7 @@ class OeaArena : OeaGame() {
      * despite the over-the-shoulder camera offset.
      */
     private fun aimAngles(me: ArenaPlayer, out: FloatArray) {
-        out[0] = lookYaw; out[1] = lookPitch
+        out[0] = lookYaw; out[1] = lookPitch + recoilPitch
         if (me.skydiving) return
         val cp = cos(lookPitch)
         val fx = sin(lookYaw) * cp; val fy = sin(lookPitch); val fz = cos(lookYaw) * cp
@@ -464,6 +702,19 @@ class OeaArena : OeaGame() {
             inp.moveX = 0f; inp.moveY = 0f
             inp.fire = false; inp.ads = false; inp.jump = false; inp.crouch = false
             inp.reload = false; inp.slot = -1; inp.heal = false; inp.pickup = -1
+            inp.grenade = false; inp.smoke = false; inp.stun = false; inp.cook = 0f; inp.prone = false; inp.reloadAll = false
+            if (me != null) aimAngles(me, aim) else { aim[0] = lookYaw; aim[1] = lookPitch }
+            inp.yaw = aim[0]
+            inp.pitch = aim[1]
+            return
+        }
+        // Controls screen: the soldier stands still while the layout is being set.
+        if (controlsOpen) {
+            inp.moveX = 0f; inp.moveY = 0f
+            inp.fire = false; inp.ads = false; inp.jump = false; inp.crouch = false
+            inp.reload = false; inp.slot = -1; inp.heal = false; inp.pickup = -1
+            inp.grenade = false; inp.smoke = false; inp.stun = false; inp.cook = 0f
+            inp.prone = false; inp.reloadAll = false; inp.sprint = false; inp.mount = false
             if (me != null) aimAngles(me, aim) else { aim[0] = lookYaw; aim[1] = lookPitch }
             inp.yaw = aim[0]
             inp.pitch = aim[1]
@@ -475,21 +726,42 @@ class OeaArena : OeaGame() {
         inp.yaw = aim[0]
         inp.pitch = aim[1]
         inp.fire = fire.pressed || fire2.pressed
-        inp.ads = adsOn
+        inp.ads = adsOn || (adsHoldMode && adsBtn.pressed)
         inp.jump = jumpLatch
         inp.crouch = crouchOn
         inp.reload = reloadLatch
+        inp.mount = mountLatch
+        mountLatch = false
         inp.slot = slotLatch
         inp.heal = healBtn.pressed
         inp.pickup = pickupLatch
+        inp.grenade = grenadeLatch == 0
+        inp.smoke = grenadeLatch == 1
+        inp.stun = grenadeLatch == 2
+        inp.cook = cookAmount
+        inp.prone = proneOn || proneBtn.pressed
+        inp.sprint = sprintBtn.pressed
+        inp.reloadAll = pendingReloadAll
+        pendingReloadAll = false
+        inp.buySlot = pendingBuySlot; inp.buyMedkits = pendingBuyMedkits; inp.buyFrags = pendingBuyFrags
+        inp.buySmokes = pendingBuySmokes; inp.buyStuns = pendingBuyStuns; inp.buyVest = pendingBuyVest; inp.buyHelmet = pendingBuyHelmet
+        inp.buyUpSlot = pendingBuyUpSlot
+        inp.deployRound = pendingDeploy
+        inp.advancePrep = pendingAdvancePrep
+        pendingBuySlot = -1; pendingBuyMedkits = 0; pendingBuyFrags = 0; pendingBuySmokes = 0; pendingBuyStuns = 0; pendingBuyVest = 0; pendingBuyHelmet = 0
+        pendingBuyUpSlot = -1
+        pendingDeploy = false
+        pendingAdvancePrep = false
     }
 
     private fun sendCommand(inp: PlayerInput) {
         val s = net ?: return
         val w = ByteWriter(24)
         w.u16(inp.seq).q8(inp.moveX, -1f, 1f).q8(inp.moveY, -1f, 1f).angle(inp.yaw).q16(inp.pitch, -1.3f, 1.3f)
-            .u8((if (inp.fire) 1 else 0) or (if (inp.ads) 2 else 0) or (if (inp.jump) 4 else 0) or (if (inp.crouch) 8 else 0) or (if (inp.reload) 16 else 0) or (if (inp.heal) 32 else 0))
+            .u8((if (inp.fire) 1 else 0) or (if (inp.ads) 2 else 0) or (if (inp.jump) 4 else 0) or (if (inp.crouch) 8 else 0) or (if (inp.reload) 16 else 0) or (if (inp.heal) 32 else 0) or (if (inp.grenade) 64 else 0) or (if (inp.smoke) 128 else 0))
+            .u8((if (inp.stun) 1 else 0) or (if (inp.reloadAll) 2 else 0) or (if (inp.prone) 4 else 0) or (if (inp.mount) 8 else 0) or (if (inp.advancePrep) 16 else 0) or (if (inp.sprint) 32 else 0))
             .u8(if (inp.slot in 0..1) inp.slot else 255).varint(inp.pickup + 1)
+            .u8(if (inp.buySlot >= 0) inp.buySlot else 255).u8(inp.buyMedkits).u8(inp.buyFrags).u8(inp.buySmokes).u8(inp.buyStuns).u8(inp.buyVest).u8(inp.buyHelmet).u8(if (inp.buyUpSlot >= 0) inp.buyUpSlot else 255).u8(if (inp.deployRound) 1 else 0)
         sentCmds.addLast(w.toByteArray())
         while (sentCmds.size > 3) sentCmds.removeFirst()
         // Each packet repeats the last commands, so a lost packet costs nothing.
@@ -507,16 +779,27 @@ class OeaArena : OeaGame() {
             w.u8(sim.players.size)
             for (p in sim.players.values) {
                 val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or
-                    (if (p.parachute) 16 else 0) or (if (p.healProgress > 0f) 32 else 0)
+                    (if (p.parachute) 16 else 0) or (if (p.healProgress > 0f) 32 else 0) or (if (p.prone) 64 else 0)
                 w.u8(p.id).u8(flags).f32(p.pos.x).f32(p.pos.y).f32(p.pos.z).angle(p.yaw).q16(p.pitch, -1.3f, 1.3f)
                     .u8(p.health.toInt().coerceIn(0, 255)).u8(p.armor).u8(p.helmet)
                     .u8(p.slots[0].ordinal).u8(p.slots[1].ordinal).u8(p.active).u8(p.mags[0]).u8(p.mags[1])
                 p.ammo.forEach { w.u16(it.coerceIn(0, 65535)) }
-                w.u8(p.medkits).u8(p.shots and 0xFF).u8(p.kills).u16(p.lastAck and 0xFFFF)
+                w.u8(p.medkits).u8(p.grenades).u8(p.smokes).u8(p.stuns).u16(p.cash).u8(p.shots and 0xFF).u8(p.kills).u16(p.lastAck and 0xFFFF)
                     .q8(p.healProgress, 0f, 1f).q8(p.reloadLeft, 0f, 4f)
-                w.u8(p.team).u8(p.gunLevel)
+                w.u8(p.team).u8(p.gunLevel).u8(if (p.vehicle >= 0) p.vehicle else 255)
+                for (k in 0 until 11) w.u8(p.upLevels[k])
             }
             w.u8(sim.teamScore[0].coerceIn(0, 255)).u8(sim.teamScore[1].coerceIn(0, 255))
+            // Warfare scores (captures / King of the Hill points) — synced so
+            // clients show the live score, not a local zero.
+            w.u8(sim.captures[0].coerceIn(0, 255)).u8(sim.captures[1].coerceIn(0, 255))
+            w.u16(sim.kothScore[0].coerceIn(0f, 65535f).toInt()).u16(sim.kothScore[1].coerceIn(0f, 65535f).toInt())
+            w.f32(sim.adTimer).u16(sim.adTickets.coerceIn(0, 65535))
+            w.u8(sim.vehicles.size)
+            for (v in sim.vehicles) {
+                w.u8(v.id).u8(if (v.dead) 1 else 0).f32(v.x).f32(v.y).f32(v.z).angle(v.yaw).f32(v.health)
+                    .u8(if (v.driver >= 0) v.driver else 255).u8(v.kind)
+            }
         }
     }
 
@@ -536,8 +819,15 @@ class OeaArena : OeaGame() {
                         inp.seq = r.u16(); inp.moveX = r.q8(-1f, 1f); inp.moveY = r.q8(-1f, 1f); inp.yaw = r.angle(); inp.pitch = r.q16(-1.3f, 1.3f)
                         val b = r.u8()
                         inp.fire = b and 1 != 0; inp.ads = b and 2 != 0; inp.jump = b and 4 != 0; inp.crouch = b and 8 != 0; inp.reload = b and 16 != 0; inp.heal = b and 32 != 0
+                        inp.grenade = b and 64 != 0; inp.smoke = b and 128 != 0
+                        val b2 = r.u8()
+                        inp.stun = b2 and 1 != 0; inp.reloadAll = b2 and 2 != 0; inp.prone = b2 and 4 != 0; inp.mount = b2 and 8 != 0; inp.advancePrep = b2 and 16 != 0; inp.sprint = b2 and 32 != 0
                         inp.slot = r.u8().let { if (it == 255) -1 else it }
                         inp.pickup = r.varint() - 1
+                        inp.buySlot = r.u8().let { if (it == 255) -1 else it }
+                        inp.buyMedkits = r.u8(); inp.buyFrags = r.u8(); inp.buySmokes = r.u8(); inp.buyStuns = r.u8(); inp.buyVest = r.u8(); inp.buyHelmet = r.u8()
+                        inp.buyUpSlot = r.u8().let { if (it == 255) -1 else it }
+                        inp.deployRound = r.u8() != 0
                         val newest = q.lastOrNull()?.seq ?: last
                         if (InputHistory.seqDiff(inp.seq, newest) > 0) q.addLast(inp)
                     }
@@ -565,6 +855,11 @@ class OeaArena : OeaGame() {
                     sim.loot += Loot(id, kind, value, r.f32(), r.f32(), r.f32())
                 }
                 EV_OVER -> if (!isAuthority) { val w = r.u8(); endMatch(if (w == 255) -1 else w, actors[w]?.name) }
+                EV_ROUND_OVER -> if (!isAuthority) {
+                    val t = r.u8(); val rn = r.u8()
+                    sim.roundsWon[t]++; sim.round = rn; sim.roundPhase = 1
+                }
+                EV_ROUND_START -> if (!isAuthority) sim.roundPhase = 0
                 NetSession.MSG_PLAYER_LEFT -> if (isAuthority) sim.players[msg.from]?.let { if (it.alive) sim.damage(it, null, 999f, Weapon.PAN, false, zoneDamage = true) }
                 NetSession.MSG_PLAYER_JOINED -> if (isAuthority) broadcastRoster()
                 NetSession.MSG_MATCH_ENDED -> ctx.ui.exit(GameResult("Match ended"))
@@ -585,10 +880,12 @@ class OeaArena : OeaGame() {
             val x = r.f32(); val y = r.f32(); val z = r.f32(); val yaw = r.angle(); val pitch = r.q16(-1.3f, 1.3f)
             val health = r.u8(); val armor = r.u8(); val helmet = r.u8()
             val s0 = r.u8(); val s1 = r.u8(); val active = r.u8(); val m0 = r.u8(); val m1 = r.u8()
-            val ammo = IntArray(4) { r.u16() }
-            val meds = r.u8(); val shots = r.u8(); val kills = r.u8(); val ack = r.u16()
+            val ammo = IntArray(5) { r.u16() }
+            val meds = r.u8(); val grens = r.u8(); val smokes = r.u8(); val stuns = r.u8(); val cash = r.u16(); val shots = r.u8(); val kills = r.u8(); val ack = r.u16()
             val heal = r.q8(0f, 1f); val reload = r.q8(0f, 4f)
             val team = r.u8(); val gunLevel = r.u8()
+            val veh = r.u8().let { if (it == 255) -1 else it }
+            val ups = IntArray(11) { r.u8() }
             val a = actors.getOrPut(id) { Actor(id, "Player $id", EngineColors[id % EngineColors.size]) }
             if (id != localId && a.shots != shots && a.alive) onRemoteShots(a, (shots - a.shots) and 0xFF)
             if (id == localId && a.shots != shots) local?.let { me ->
@@ -599,24 +896,39 @@ class OeaArena : OeaGame() {
                 addTracer(x, y + (if (flags and 2 != 0) 1.05f else 1.6f) - 0.15f, z, lookYaw, camPos.x + sin(lookYaw) * 60f, camPos.y + sin(lookPitch) * 60f, camPos.z + cos(lookYaw) * 60f)
             }
             a.flags = flags; a.health = health; a.armor = armor; a.helmet = helmet; a.weapon = (if (active == 0) s0 else s1); a.shots = shots; a.kills = kills
+            a.reloadN = reload
             a.team = team; a.gunLevel = gunLevel
             a.buffer.push(now, floatArrayOf(x, y, z, yaw, pitch))
             if (id == localId) {
-                local?.let { it.team = team; it.gunLevel = gunLevel }
-                reconcile(x, y, z, flags, health, armor, helmet, s0, s1, active, m0, m1, ammo, meds, kills, ack, heal, reload)
+                local?.let { it.team = team; it.gunLevel = gunLevel; it.vehicle = veh; for (k in 0 until 11) it.upLevels[k] = ups[k] }
+                reconcile(x, y, z, flags, health, armor, helmet, s0, s1, active, m0, m1, ammo, meds, kills, ack, heal, reload, grens, smokes, stuns, cash)
             }
         }
         sim.teamScore[0] = r.u8(); sim.teamScore[1] = r.u8()
+        sim.captures[0] = r.u8(); sim.captures[1] = r.u8()
+        sim.kothScore[0] = r.u16().toFloat(); sim.kothScore[1] = r.u16().toFloat()
+        sim.adTimer = r.f32(); sim.adTickets = r.u16()
+        val nv = r.u8()
+        sim.vehicles.clear()
+        repeat(nv) {
+            val id = r.u8(); val dead = r.u8() != 0
+            val x = r.f32(); val y = r.f32(); val z = r.f32(); val yaw = r.angle()
+            val health = r.f32(); val driver = r.u8().let { if (it == 255) -1 else it }; val kind = r.u8()
+            val v = sim.vehicles.getOrPut(id) { com.oea.games.arena.Vehicle(id, x, y, z, yaw, kind, 2.4f, 300f, 12f) }
+            v.x = x; v.y = y; v.z = z; v.yaw = yaw; v.health = health; v.driver = driver; v.dead = dead
+        }
         @Suppress("UNUSED_VARIABLE") val unused = time
     }
 
     /** Client: accept the authority's view of our player and replay unacknowledged inputs. */
     private fun reconcile(x: Float, y: Float, z: Float, flags: Int, health: Int, armor: Int, helmet: Int, s0: Int, s1: Int, active: Int,
-                          m0: Int, m1: Int, ammo: IntArray, meds: Int, kills: Int, ack: Int, heal: Float, reload: Float) {
+                          m0: Int, m1: Int, ammo: IntArray, meds: Int, kills: Int, ack: Int, heal: Float, reload: Float, grens: Int, smokes: Int, stuns: Int, cash: Int) {
         val me = local ?: return
         me.health = health.toFloat(); me.armor = armor; me.helmet = helmet
         me.slots[0] = Weapon.entries[s0]; me.slots[1] = Weapon.entries[s1]; me.active = active; me.mags[0] = m0; me.mags[1] = m1
         ammo.copyInto(me.ammo); me.medkits = meds; me.kills = kills; me.healProgress = heal; me.reloadLeft = reload
+        me.grenades = grens; me.smokes = smokes; me.stuns = stuns; me.cash = cash
+        me.prone = flags and 64 != 0
         val wasAlive = me.alive
         me.alive = flags and 1 != 0
         me.skydiving = flags and 8 != 0
@@ -636,6 +948,7 @@ class OeaArena : OeaGame() {
                 history.forEachPending { _, st ->
                     replay.moveX = st[3]; replay.moveY = st[4]; replay.yaw = st[5]; replay.pitch = st[6]
                     replay.crouch = st[7] > 0.5f; replay.jump = st[8] > 0.5f; replay.ads = st[9] > 0.5f
+                    replay.sprint = st[10] > 0.5f
                     sim.move(me, replay, 1f / fixedStepHz)
                 }
             }
@@ -697,6 +1010,8 @@ class OeaArena : OeaGame() {
     private fun onHitFeedback(shooter: Int, victim: Int, damage: Float, head: Boolean, vx: Float, vy: Float, vz: Float, sx: Float, sz: Float) {
         // Sparks and dust where the round lands — they bounce off the ground.
         vfx.sparksAt(vx, vy, vz, if (head) 10 else 6, dirY = 0.8f, hot = if (head) 0xFFFFD54F.toInt() else 0xFFFFC27A.toInt())
+        // Blood on body hits: a red spray that lingers a beat in the air.
+        vfx.sparksAt(vx, vy, vz, if (head) 14 else 8, dirY = 0.7f, hot = if (head) 0xFFFF4029.toInt() else 0xFFB3261E.toInt())
         if (map.heightAt(vx, vz) > vy - 0.4f) vfx.dustPuff(vx, map.heightAt(vx, vz), vz, 0.5f)
         if (shooter == localId) {
             hitMarker = 0.25f
@@ -711,7 +1026,11 @@ class OeaArena : OeaGame() {
         }
     }
 
-    private fun nameOfId(id: Int): String = sim.players[id]?.name ?: actors[id]?.name ?: if (id < 0) "the zone" else "Player $id"
+    private fun nameOfId(id: Int): String = sim.players[id]?.name ?: actors[id]?.name ?: when (id) {
+        -2 -> "a grenade"
+        -1 -> "the zone"
+        else -> "Player $id"
+    }
 
     private fun onKillFeed(killer: Int, victim: Int, weapon: Weapon, head: Boolean) {
         val text = if (killer < 0) "${nameOfId(victim)} was caught by the zone" else "${nameOfId(killer)} ${weapon.glyph}${if (head) " ◎" else ""} ${nameOfId(victim)}"
@@ -755,9 +1074,20 @@ class OeaArena : OeaGame() {
         val headline = when {
             winnerId == localId && rules == "tdm" -> "Victory! Your team took it"
             winnerId == localId && rules == "gun" -> "Victory! Ladder complete"
+            winnerId == localId && rules == "cs" -> "Victory! The series is yours"
+            winnerId == localId && rules == "wolf" -> "Victory! The duel is yours"
+            winnerId == localId && rules == "warfare" -> "Victory! Every sector secured"
+            winnerId == localId && rules == "warfare_koth" -> "Victory! The hill is yours"
+            winnerId == localId && rules == "warfare_ad" -> "Victory! The tickets are drained"
+            winnerId == localId && rules == "br_res" -> "Victory! Last one standing"
             winnerId == localId -> "Victory! Last one standing"
             rules == "tdm" -> (if (sim.teamScore[0] > sim.teamScore[1]) "Blue" else "Orange") + " team wins"
             rules == "gun" -> "${name ?: "Someone"} finished the ladder"
+            rules == "cs" -> (if (sim.roundsWon[0] > sim.roundsWon[1]) "Blue" else "Orange") + " squad takes the series"
+            rules == "wolf" -> (if (sim.roundsWon[0] > sim.roundsWon[1]) "Blue" else "Orange") + " duelist takes the duel"
+            rules == "warfare" -> (if (sim.captures[0] > sim.captures[1]) "Blue" else "Orange") + " holds the field"
+            rules == "warfare_koth" -> (if (sim.kothScore[0] > sim.kothScore[1]) "Blue" else "Orange") + " holds the hill"
+            rules == "warfare_ad" -> (if (sim.adTickets <= 0) "Blue" else "Orange") + " takes the objective"
             sim.survival -> "The waves won · you reached wave $waveNumber"
             else -> "${name ?: "Nobody"} won the match"
         }
@@ -772,8 +1102,20 @@ class OeaArena : OeaGame() {
         val me = local
         val alive = me?.alive == true && !matchOver
         val sl = g.safeInsets[0].toFloat(); val sr = g.safeInsets[2].toFloat()
+        // Round modes: phase 1 = round over (result, then shop), phase 2 = shop/pick prep.
+        if (sim.roundMode && !studio.open) {
+            if (!roundDialogOpen && !shopOpen) {
+                if (sim.roundPhase == 1) {
+                    roundDialogOpen = true
+                    openRoundOverDialog()
+                } else if (sim.roundPhase == 2) {
+                    shopOpen = true
+                    openShopOrPick()
+                }
+            }
+        }
         // Controls: buttons first (they claim fingers), then the stick and the look area.
-        val near = me?.let { sim.nearestLoot(it, LootKind.WEAPON) }
+        val near = me?.let { sim.nearestLoot(it, LootKind.WEAPON) ?: sim.nearestLoot(it, LootKind.GRENADE) }
         pickupBtn.visible = alive && near != null && !(me?.skydiving ?: true)
         pickupBtn.label = near?.let { Weapon.entries[it.value].glyph } ?: "PICK"
         healBtn.visible = alive && (me?.medkits ?: 0) > 0
@@ -781,11 +1123,38 @@ class OeaArena : OeaGame() {
         // In the Character Studio the game controls stand down completely so
         // every tap lands on the studio overlay instead of the fire button.
         val controlsPaused = studio.open
-        for (b in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn)) {
-            b.enabled = alive
-            b.paused = controlsPaused
+        for ((b, _) in controlButtons) {
+            b.enabled = alive || controlsOpen // the layout screen stays draggable while dead
+            b.paused = controlsPaused && !controlsOpen
             b.update(ctx.input, w, h, d, sl, sr)
         }
+        // Controls screen: screen buttons update first (justPressed), then the
+        // drag handling reads the game buttons' per-frame drag delta (px).
+        for (b in listOf(ctrlDone, ctrlReset, ctrlAds)) {
+            b.paused = !controlsOpen
+            b.visible = controlsOpen
+            b.update(ctx.input, w, h, d, sl, sr)
+        }
+        if (controlsOpen) {
+            for ((b, _) in controlButtons) {
+                if (b.dragDx != 0f || b.dragDy != 0f) {
+                    b.anchorX = (b.anchorX + b.dragDx / w).coerceIn(0.04f, 0.96f)
+                    b.anchorY = (b.anchorY + b.dragDy / h).coerceIn(0.04f, 0.96f)
+                    saveButtonLayout()
+                }
+            }
+            if (ctrlDone.justPressed) controlsOpen = false
+            if (ctrlReset.justPressed) resetButtonLayout()
+            if (ctrlAds.justPressed) {
+                adsHoldMode = !adsHoldMode
+                ctrlAds.label = if (adsHoldMode) "ADS · HOLD" else "ADS · TAP"
+                saveButtonLayout()
+            }
+        }
+        // Throwable pack: the buttons carry their own counts.
+        stunBtn.label = if ((me?.stuns ?: 0) > 0) "STUN ${me!!.stuns}" else "—"
+        fragBtn.label = if ((me?.grenades ?: 0) > 0) "FRAG ${me!!.grenades}" else "—"
+        smokeBtn.label = if ((me?.smokes ?: 0) > 0) "SMK ${me!!.smokes}" else "—"
         joystick.paused = controlsPaused
         look.paused = controlsPaused
         joystick.update(ctx.input, w, h, d)
@@ -826,18 +1195,66 @@ class OeaArena : OeaGame() {
                 lookPitch = MathX.clamp(lookPitch - gpPitch, -1.2f, 1.1f)
             }
         }
-        if (adsBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) adsOn = !adsOn
-        if (crouchBtn.justPressed || gp.justPressed(KeyEvent.KEYCODE_BUTTON_B)) crouchOn = !crouchOn
-        if (jumpBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SPACE) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_A)) { jumpLatch = true; crouchOn = false }
-        if (reloadBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_R) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_X)) reloadLatch = true
-        if (pickupBtn.justPressed && near != null) pickupLatch = near.id
-        if (gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) slotLatch = 1 - (me?.active ?: 0)
+        // All gameplay button state stands down while the controls screen is open —
+        // taps there move buttons, not the soldier.
+        if (!controlsOpen) {
+            if (adsBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) adsOn = !adsOn
+            if (crouchBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_C) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_B)) crouchOn = !crouchOn
+            if (jumpBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SPACE) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_A)) { jumpLatch = true; crouchOn = false }
+            if (reloadBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_R) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_X)) reloadLatch = true
+            if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_G) && me?.alive == true && !me.skydiving) grenadeLatch = 0
+            if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_H) && me?.alive == true && !me.skydiving) grenadeLatch = 1
+            if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_I) && me?.alive == true && !me.skydiving) grenadeLatch = 2
+            if (pickupBtn.justPressed && near != null) pickupLatch = near.id
+            if (mountBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_E) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) mountLatch = true
+        // Frag: a tap throws on the normal fuse; holding cooks the fuse and the
+        // throw fires on release with whatever is left — the pull-pin mechanic.
+        if (fragBtn.pressed) {
+            if (!wasFragHeld) cookTimer = 0f
+            cookTimer += dt
+            if (cookTimer > 0.3f) fragBtn.highlight = true
+        } else {
+            fragBtn.highlight = false
+            if (wasFragHeld && me?.alive == true && !me.skydiving) {
+                grenadeLatch = 0
+                cookAmount = if (cookTimer >= 0.3f) cookTimer else 0f
+            }
+            cookTimer = 0f
+        }
+        wasFragHeld = fragBtn.pressed
+        if (smokeBtn.justPressed && me?.alive == true && !me.skydiving) grenadeLatch = 1
+        if (stunBtn.justPressed && me?.alive == true && !me.skydiving) grenadeLatch = 2
+        // Prone: hold crouch for half a second to lie flat; tap to crouch back.
+        if (crouchBtn.justPressed) {
+            if (proneOn) { proneOn = false; crouchOn = true } else crouchOn = !crouchOn
+            crouchHold = 0f
+        }
+        if (crouchBtn.pressed) {
+            crouchHold += dt
+            if (crouchHold >= 0.5f && !proneOn) { proneOn = true; crouchOn = false }
+        } else crouchHold = 0f
+        if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_Z) && me?.alive == true) {
+            proneOn = !proneOn
+            if (proneOn) crouchOn = false
+        }
+        } // !controlsOpen
+        if (gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) { slotLatch = 1 - (me?.active ?: 0); if (slotLatch >= 0) switchDip = 0.25f }
         if (me?.weapon == Weapon.PAN) adsOn = false
         if (me != null && me.alive && me.recoil != 0f) {
-            // Recoil from the simulation (host) or from our own shots (client) kicks the camera.
-            lookPitch = MathX.clamp(lookPitch + me.recoil, -1.2f, 1.1f)
+            // Recoil (host simulation or client snapshot) kicks the sight up;
+            // the kick decays smoothly so the crosshair recovers like a real gun.
+            recoilPitch += me.recoil
             me.recoil = 0f
         }
+        if (recoilPitch != 0f) {
+            recoilPitch *= MathX.damp(1f, 0f, 8f, dt)
+            if (kotlin.math.abs(recoilPitch) < 0.002f) recoilPitch = 0f
+        }
+        if (switchDip != 0f) {
+            switchDip *= MathX.damp(1f, 0f, 10f, dt)
+            if (switchDip < 0.002f) switchDip = 0f
+        }
+        if (shake > 0f) shake *= MathX.damp(1f, 0f, 5f, dt)
         // Visual effects.
         sparks.update(dt); puffs.update(dt)
         // Physics VFX: the air everyone breathes (weather, smoke, wind) and the
@@ -927,18 +1344,37 @@ class OeaArena : OeaGame() {
         val yaw: Float; val pitch: Float
         if (me != null && me.alive) { yaw = lookYaw; pitch = lookPitch }
         else { yaw = lookYaw; pitch = MathX.clamp(lookPitch, -0.6f, 0.6f) }
+        // Recoil rise, the reload dip and the switch jolt reshape the sight
+        // picture without touching the input — the crosshair stays glued to shots.
+        val kick = recoilPitch + switchDip + if (me?.reloadLeft > 0f) 0.1f else 0f
+        val sightPitch = pitch + kick
         val skydive = me?.skydiving == true && me.alive
         val ads = adsOn && me?.alive == true && !skydive
         val zoom = if (ads) me?.weapon?.zoom ?: 1f else 1f
-        val eyeY = py + (if (me?.crouching == true) 1.15f else 1.7f)
+        val eyeY = py + when {
+            me?.prone == true -> 0.8f
+            me?.crouching == true -> 1.15f
+            else -> 1.7f
+        }
         val fx = sin(yaw); val fz = cos(yaw)
         val rx = -fz; val rz = fx
-        val back = if (skydive) 7f else if (ads && zoom > 2f) 0.05f else if (ads) 1.6f else 3.0f
-        val side = if (ads && zoom > 2f) 0f else 0.62f
-        val cp = cos(pitch)
-        val lx = fx * cp; val ly = sin(pitch); val lz = fz * cp
-        var cx = px + rx * side - lx * back
-        var cy = eyeY + 0.3f - ly * back
+        // ADS blends the whole camera: field of view, offset and stance.
+        val backHip = 3.0f
+        val backAds = if (zoom > 2f) 0.05f else 1.6f
+        val back = if (skydive) 7f else MathX.lerp(backHip, backAds, adsBlend)
+        val sideAds = if (zoom > 2f) 0f else 0.62f
+        val side = MathX.lerp(0.62f, sideAds, adsBlend)
+        val cp = cos(sightPitch)
+        val lx = fx * cp; val ly = sin(sightPitch); val lz = fz * cp
+        // Weapon bob: still hands when standing, a live body when moving —
+        // but the sights settle when the weapon is aimed.
+        val mov = joystick.magnitude
+        val t = ctx.time.elapsed.toFloat()
+        val bobScale = (1f - adsBlend * 0.8f) * (1f - (me?.spread ?: 0f) * 0.5f)
+        val bobY = sin(t * 9f) * 0.05f * mov * bobScale
+        val bobX = cos(t * 4.5f) * 0.035f * mov * bobScale
+        var cx = px + rx * side - lx * back + bobX
+        var cy = eyeY + 0.3f - ly * back + bobY
         var cz = pz + rz * side - lz * back
         // Keep the camera out of walls.
         val ox = px; val oy = eyeY; val oz = pz
@@ -949,10 +1385,29 @@ class OeaArena : OeaGame() {
             cx = ox + ddx * k; cy = oy + ddy * k; cz = oz + ddz * k
         }
         cy = max(cy, map.heightAt(cx, cz) + 0.3f)
-        camPos.set(cx, cy, cz)
+        // Smooth the follow so the world glides instead of snapping.
+        if (!camInit) {
+            camPosSm.set(cx, cy, cz)
+            camTgtSm.set(cx + lx * 10f, cy + ly * 10f, cz + lz * 10f)
+            camInit = true
+        } else {
+            val kPos = MathX.damp(0f, 1f, 15f, dt)
+            camPosSm.x = MathX.lerp(camPosSm.x, cx, kPos); camPosSm.y = MathX.lerp(camPosSm.y, cy, kPos); camPosSm.z = MathX.lerp(camPosSm.z, cz, kPos)
+            camTgtSm.x = MathX.lerp(camTgtSm.x, cx + lx * 10f, kPos); camTgtSm.y = MathX.lerp(camTgtSm.y, cy + ly * 10f, kPos); camTgtSm.z = MathX.lerp(camTgtSm.z, cz + lz * 10f, kPos)
+        }
+        camPos.set(camPosSm.x, camPosSm.y, camPosSm.z)
+        // Explosions near the player kick the view — the world wobbles, then settles.
+        if (shake > 0f) {
+            val s = shake * 0.14f
+            camPos.x += (kotlin.random.Random.nextFloat() - 0.5f) * 2f * s
+            camPos.y += (kotlin.random.Random.nextFloat() - 0.5f) * 2f * s
+        }
         camera.position.set(camPos)
-        camera.target.set(cx + lx * 10f, cy + ly * 10f, cz + lz * 10f)
-        camera.fovY = (70f / zoom) * MathX.DEG_TO_RAD
+        camera.target.set(camTgtSm.x, camTgtSm.y, camTgtSm.z)
+        // ADS blends the field of view so the zoom glides in instead of popping.
+        val wantAds = if (ads) 1f else 0f
+        adsBlend = MathX.damp(adsBlend, wantAds, 14f, dt)
+        camera.fovY = (70f / (1f + (zoom - 1f) * adsBlend)) * MathX.DEG_TO_RAD
         camera.near = 0.1f
         camera.far = 420f * ctx.graphics.quality.detailDistance.coerceAtLeast(0.7f)
         @Suppress("UNUSED_VARIABLE") val unused = alpha + dt
@@ -1015,6 +1470,8 @@ class OeaArena : OeaGame() {
             MenuItem("turn", turnLabel),
             MenuItem("invert", "Invert look · " + if (invertY) "On" else "Off"),
             MenuItem("studio", "Character studio"),
+            MenuItem("pack", "Pack · weapons & throwables"),
+            MenuItem("controls", "Controls · layout & buttons"),
             MenuItem("info", "Match & controls"),
             MenuItem("exit", if (net != null) "Leave match" else "Quit match", destructive = true),
         )
@@ -1046,6 +1503,11 @@ class OeaArena : OeaGame() {
                     openPauseMenu()
                 }
                 "studio" -> studio.open = true
+                "pack" -> openPackMenu()
+                "controls" -> {
+                    ctrlAds.label = if (adsHoldMode) "ADS · HOLD" else "ADS · TAP"
+                    controlsOpen = true
+                }
                 "info" -> ctx.ui.menu("Match & controls", modeBlurb(), listOf(MenuItem("back", "Back"))) { openPauseMenu() }
                 "exit" -> {
                     ctx.storage.putInt("xp", xpTotal)
@@ -1055,10 +1517,143 @@ class OeaArena : OeaGame() {
         }
     }
 
+    /** The pack: the kit as it stands — weapons, ammo, consumables and throwables —
+     *  with a reload-all for the next push. Mirrors the Free Fire bag / PUBG inventory. */
+    private fun openPackMenu() {
+        val me = local ?: return
+        val items = ArrayList<MenuItem>()
+        for (slot in 0..1) {
+            val w = me.slots[slot]
+            val reserve = if (w.ammo >= 0) me.ammo[w.ammo] else 0
+            items += MenuItem("w$slot", (if (slot == me.active) "★ " else "") + w.name + " · mag ${me.mags[slot]} · reserve $reserve")
+        }
+        items += MenuItem("meds", "Medkits · ${me.medkits}")
+        items += MenuItem("frags", "Frag grenades · ${me.grenades}")
+        items += MenuItem("smokes", "Smoke grenades · ${me.smokes}")
+        items += MenuItem("stuns", "Stun grenades · ${me.stuns}")
+        items += MenuItem("reloadall", "Reload all weapons")
+        items += MenuItem("back", "Back")
+        ctx.ui.menu("Send Off · Pack", "Your kit, as it stands", items) { id ->
+            when (id) {
+                "reloadall" -> pendingReloadAll = true
+                "back" -> openPauseMenu()
+                else -> openPackMenu() // refresh — counts change as the match runs
+            }
+        }
+    }
+
+    /** Round over: the result, then the shop (CS) or the next pick (wolf). */
+    private fun openRoundOverDialog() {
+        val team = if (sim.roundsWon[0] > sim.roundsWon[1]) 0 else 1
+        val teamName = if (team == 0) "Blue" else "Orange"
+        ctx.ui.menu(
+            "Round ${sim.round - 1} over",
+            "$teamName takes the round · ${sim.roundsWon[0]}–${sim.roundsWon[1]}",
+            listOf(MenuItem("next", "To the shop"), MenuItem("quit", "Quit", destructive = true)),
+        ) { id ->
+            roundDialogOpen = false
+            when (id) {
+                "next" -> {
+                    sim.roundPhase = 2
+                    pendingAdvancePrep = true
+                }
+                "quit" -> {
+                    ctx.storage.putInt("xp", xpTotal)
+                    ctx.ui.exit(GameResult("Left Send Off", local?.kills?.toLong() ?: 0))
+                }
+            }
+        }
+    }
+
+    /** CS: the buy shop. Wolf: the weapon pick (rounds 1, 3, 5) or a ready screen. */
+    private fun openShopOrPick() {
+        if (rules == "wolf") {
+            if (sim.round % 2 == 1) openWolfPick() else openWolfReady()
+        } else openShop()
+    }
+
+    /** The Clash Squad shop: buy weapons and consumables with the round's cash. */
+    private fun openShop() {
+        val me = local ?: return
+        val items = ArrayList<MenuItem>()
+        for (w in Weapon.entries) {
+            if (w == Weapon.PAN) continue
+            items += MenuItem("buy${w.ordinal}", "${w.label} · $${w.price}${if (w.price <= me.cash) "" else " · can't afford"}")
+        }
+        items += MenuItem("medkit", "Medkit · $SHOP_MEDKIT")
+        items += MenuItem("frag", "Frag grenade · $SHOP_FRAG")
+        items += MenuItem("smoke", "Smoke grenade · $SHOP_SMOKE")
+        items += MenuItem("stun", "Stun grenade · $SHOP_STUN")
+        items += MenuItem("vest", "Vest upgrade · $SHOP_VEST (lv ${me.armor}/3)")
+        items += MenuItem("helmet", "Helmet upgrade · $SHOP_HELMET (lv ${me.helmet}/3)")
+        // Weapon upgrades: spend cash to make the gun hit harder, hold more, reload faster.
+        for (slot in 0..1) {
+            val w = me.slots[slot]
+            if (w == Weapon.PAN) continue
+            val lv = me.upLevels[w.ordinal]
+            items += if (lv >= UP_MAX) MenuItem("up$slot", "${w.label} · fully upgraded (lv $lv/$UP_MAX)")
+            else MenuItem("up$slot", "Upgrade ${w.label} · lv ${lv}→${lv + 1}/$UP_MAX · $${sim.upgradeCost(me, w)}")
+        }
+        items += MenuItem("deploy", "Deploy to round ${sim.round}")
+        ctx.ui.menu("Send Off · Shop", "Cash $${me.cash} · round ${sim.round}", items) { id ->
+            when (id) {
+                "deploy" -> { shopOpen = false; pendingDeploy = true }
+                else -> {
+                    when {
+                        id.startsWith("buy") -> pendingBuySlot = id.removePrefix("buy").toInt()
+                        id.startsWith("up") -> pendingBuyUpSlot = id.removePrefix("up").toInt()
+                        "medkit" -> pendingBuyMedkits = 1
+                        "frag" -> pendingBuyFrags = 1
+                        "smoke" -> pendingBuySmokes = 1
+                        "stun" -> pendingBuyStuns = 1
+                        "vest" -> pendingBuyVest = 1
+                        "helmet" -> pendingBuyHelmet = 1
+                    }
+                    openShop() // refresh — the cash and kit change
+                }
+            }
+        }
+    }
+
+    /** Lone Wolf weapon pick: the duelist chooses the gun for the next two rounds. */
+    private fun openWolfPick() {
+        val items = ArrayList<MenuItem>()
+        for (w in Weapon.entries) {
+            if (w == Weapon.PAN) continue
+            items += MenuItem("pick${w.ordinal}", "${w.label} · ${w.glyph}")
+        }
+        items += MenuItem("deploy", "Deploy to round ${sim.round}")
+        ctx.ui.menu("Send Off · Lone Wolf", "Choose your weapon (rounds ${sim.round}, ${sim.round + 1})", items) { id ->
+            when (id) {
+                "deploy" -> { shopOpen = false; pendingDeploy = true }
+                else -> { pendingBuySlot = id.removePrefix("pick").toInt(); openWolfPick() }
+            }
+        }
+    }
+
+    /** Lone Wolf, even rounds: nothing to pick — just deploy. */
+    private fun openWolfReady() {
+        ctx.ui.menu(
+            "Send Off · Lone Wolf",
+            "Round ${sim.round} — same guns, ready to duel",
+            listOf(MenuItem("deploy", "Deploy to round ${sim.round}")),
+        ) { id ->
+            when (id) {
+                "deploy" -> { shopOpen = false; pendingDeploy = true }
+            }
+        }
+    }
+
     /** One plain-language briefing per rules set — what this mode IS and how to play it. */
     private fun modeBlurb(): String = when (rules) {
         "tdm" -> "Team Deathmatch — first team to 40 eliminations wins. You respawn 4 s after death with 3 s of spawn protection. Friendly fire is off. Move: left stick · look: right thumb · fire, ADS, jump, crouch, reload: the round buttons."
         "gun" -> "Gun Game — every kill advances you to the next gun (pistol → SMG → rifle → shotgun → revolver → marksman → sniper → LMG → pan). Death drops you one stage. A kill with the final pan wins the match. No loot, fast respawns."
+        "cs" -> "Clash Squad — two squads of four, best of seven. Between rounds, spend your cash in the shop on weapons, medkits, grenades and armor. A round ends when a squad is wiped. Deploy from the shop to start each round."
+        "wolf" -> "Lone Wolf — 1v1 duels, best of five. Every two rounds you pick the weapon both duelists use. No looting, no zone: just you, the island and one opponent."
+        "warfare" -> "Warfare — two squads of six fight over three capture points. Stand on an objective to fill its bar; the first squad to five captures takes the field. You respawn with your kit."
+        "warfare_koth" -> "King of the Hill — two squads of six, one hill. Stand on it to score for your team; the first squad to 200 takes the hill. You respawn with your kit."
+        "warfare_ad" -> "Attack & Defend — team Orange defends with 300 tickets, team Blue assaults. Every sector Blue captures drains 50 tickets; if the clock runs out, Orange holds. Both sides respawn with their kit."
+        "br_res" -> "Resurgence Royale — the zone closes like Battle Royale, but death is not the end: you come back on a town 20 s later with your loadout. The last one standing still wins."
         "last_day" -> "Last Day Survival — no zone. Day turns to night while waves keep landing on the island. Survive as long as you can; every wave is worth XP."
         "lights_out" -> "Lights Out — permanent night with tight fog. Your muzzle flash is the light."
         "haunted" -> "Haunted — sick green fog and endless undead waves. Shoot what moves."
@@ -1110,6 +1705,7 @@ class OeaArena : OeaGame() {
                 LootKind.MEDKIT -> r.draw(Mesh.unitCube, mat, l.x, l.y + 0.15f + bob, l.z, t + l.id, 0f, 0f, 0.4f, 0.28f, 0.28f)
                 LootKind.ARMOR -> r.draw(Mesh.unitCube, mat, l.x, l.y + 0.3f + bob, l.z, t + l.id, 0f, 0f, 0.5f, 0.55f, 0.22f)
                 LootKind.HELMET -> r.draw(Mesh.unitSphere, mat, l.x, l.y + 0.25f + bob, l.z, t + l.id, 0f, 0f, 0.42f, 0.3f, 0.42f)
+                LootKind.GRENADE -> r.draw(Mesh.unitSphere, if (l.value == 0) grenadeMatFrag else grenadeMatSmoke, l.x, l.y + 0.18f + bob, l.z, t + l.id, 0f, 0f, 0.16f, 0.2f, 0.16f)
             }
             r.blobShadow(l.x, l.y - 0.28f, l.z, 0.35f, 0.3f)
         }
@@ -1122,7 +1718,7 @@ class OeaArena : OeaGame() {
                 val x = if (pr != null) MathX.lerp(pr[0], p.pos.x, alpha) else p.pos.x
                 val y = if (pr != null) MathX.lerp(pr[1], p.pos.y, alpha) else p.pos.y
                 val z = if (pr != null) MathX.lerp(pr[2], p.pos.z, alpha) else p.pos.z
-                val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or (if (p.parachute) 16 else 0)
+                val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or (if (p.parachute) 16 else 0) or (if (p.prone) 64 else 0)
                 drawSoldier(r, x, y, z, if (p.id == localId) lookYaw else p.yaw, p.pitch, p.color, flags, p.weapon, p.armor, p.helmet, p.ctrl.position.dstXZ(tmp.set(pr?.get(0) ?: x, 0f, pr?.get(2) ?: z)) * 0f + walkPhase(p), walkSpeeds[p.id] ?: 0f, team = p.team, id = p.id,
                     fx = if (p.id == localId) myFx else actorFx.getOrPut(p.id) { CharFx() })
             }
@@ -1130,7 +1726,7 @@ class OeaArena : OeaGame() {
             val me = local
             if (me != null && !(me.alive && adsOn && me.weapon.zoom > 2f)) {
                 val (x, y, z) = viewTarget().takeIf { me.alive } ?: Triple(me.pos.x, me.pos.y, me.pos.z)
-                val flags = (if (me.alive) 1 else 0) or (if (crouchOn) 2 else 0) or (if (adsOn) 4 else 0) or (if (me.skydiving) 8 else 0) or (if (me.parachute) 16 else 0)
+                val flags = (if (me.alive) 1 else 0) or (if (crouchOn) 2 else 0) or (if (adsOn) 4 else 0) or (if (me.skydiving) 8 else 0) or (if (me.parachute) 16 else 0) or (if (proneOn) 64 else 0)
                 drawSoldier(r, x, y, z, lookYaw, lookPitch, me.color, flags, me.weapon, me.armor, me.helmet, walkPhase(me), walkSpeeds[me.id] ?: 0f, team = me.team, id = me.id, fx = myFx)
             }
             for (a in actors.values) {
@@ -1139,10 +1735,66 @@ class OeaArena : OeaGame() {
                 drawSoldier(r, v[0], v[1], v[2], v[3], v[4], a.color, a.flags, Weapon.entries.getOrElse(a.weapon) { Weapon.PAN }, a.armor, a.helmet, a.walk, a.speed01, team = a.team, id = a.id, fx = a.fx)
             }
         }
-        // Zone wall (absent in survival rules — there is no shrinking zone to show).
+        // Thrown grenades: a small spinning egg, with a blinking warning light
+        // as the fuse burns down — the last half-second is obvious.
+        val tg = ctx.time.elapsed.toFloat()
+        for (g in sim.grenades) {
+            if (g.rocket || g.missile) {
+                // Warheads: a glowing missile with a smoke trail behind it.
+                r.draw(Mesh.unitSphere, rocketMat, g.x, g.y, g.z, tg * 10f, 0f, 0f, 0.26f, 0.26f, 0.26f)
+                val nl = sqrt(g.vx * g.vx + g.vz * g.vz) + 1e-4f
+                r.draw(Mesh.unitCube, rocketTrailMat, g.x - g.vx / nl * 0.8f, g.y, g.z - g.vz / nl * 0.8f, 0f, 0f, 0f, 0.8f, 0.24f, 0.8f)
+            } else {
+                r.draw(Mesh.unitSphere, grenadeMat(g.type), g.x, g.y, g.z, tg * 7f, 0f, 0f, 0.17f, 0.22f, 0.17f)
+                if (g.fuse < 0.7f && sin(tg * 18f) > 0f) r.draw(Mesh.unitSphere, grenadeBlinkMat, g.x, g.y + 0.12f, g.z, 0f, 0f, 0f, 0.34f, 0.34f, 0.34f)
+            }
+        }
+        // Smoke clouds linger and mark where the air is thick — whoever stands
+        // inside one is hidden from sight and from fire.
+        for (s in sim.smokes) r.draw(Mesh.unitSphere, smokeCloudMat, s[0], s[1] + 1.4f, s[2], 0f, 0f, 0f, 4f, 3.2f, 4f)
+        // Vehicles (Warfare motor pool).
+        for (v in sim.vehicles) {
+            if (v.dead) continue
+            val mesh = when (v.kind) { 1 -> tankMesh; 2 -> turretMesh; 3 -> heloMesh; else -> jeepMesh }
+            r.draw(mesh, if (v.kind == 1) vehicleMatTank else vehicleMat, v.x, v.y, v.z, v.yaw, 1f)
+            if (v.kind == 3) {
+                // The rotor spins about Y; the whole craft yaws with the driver.
+                r.draw(heloRotorMesh, vehicleMat, v.x, v.y + 2.2f, v.z, v.yaw + ctx.time.elapsed.toFloat() * 30f, 1f)
+            }
+            // A helo's shadow belongs on the ground below it, fading with height.
+            if (v.kind == 3) {
+                val alt = (v.y - map.physics.groundHeight(v.x, v.z, v.y)).coerceAtLeast(0f)
+                val k = (1f - min(1f, alt / 30f)) * 0.5f + 0.15f
+                r.blobShadow(v.x, map.physics.groundHeight(v.x, v.z, v.y), v.z, v.radius * 0.9f * k, 0.35f * k)
+            } else r.blobShadow(v.x, v.y - 0.1f, v.z, v.radius * 0.9f, 0.35f)
+        }
+        // Warfare objectives: a ring on the ground plus a beam that stands up as
+        // the capture bar fills — the sector is visible from across the map.
+        if (sim.warfare) {
+            for (pt in sim.points) {
+                val gy = map.heightAt(pt.x, pt.z)
+                val mat = when (pt.owner) { 0 -> pointMatBlue; 1 -> pointMatOrange; else -> pointMatFree }
+                r.draw(captureRing, mat, pt.x, gy + 0.05f, pt.z, 0f, MathX.HALF_PI, 0f, pt.r, 1f, pt.r)
+                r.draw(captureBeam, mat, pt.x, gy + 0.5f + pt.progress * 2.5f, pt.z, 0f, 0f, 0f, 0.9f, 1f + pt.progress * 5f, 0.9f)
+            }
+        }
+        // Permanent night: the player's own warm light travels with them —
+        // the muzzle flash is not the only thing that pushes the dark back.
+        if ((rules == "lights_out" || rules == "haunted") && local?.alive == true) {
+            val me = local!!
+            val fx0 = sin(lookYaw); val fz0 = cos(lookYaw)
+            flashLight.set(me.pos.x + fx0 * 0.8f, me.pos.y + 1.5f, me.pos.z + fz0 * 0.8f, 0xFFFFC08A.toInt(), 2.4f, 10f)
+            env.pointLights.add(flashLight)
+        }
+        // Zone boundary (absent in survival rules — there is no shrinking zone to show):
+        // a tall glowing curtain on the zone edge plus a bright ground ring, exactly
+        // like the boundary line players read on the horizon.
         if (sim.zone.enabled) {
             val z = sim.zone
-            r.draw(Mesh.unitCylinder, zoneMat, z.cx, -20f, z.cz, 0f, 0f, 0f, z.radius * 2f, 140f, z.radius * 2f)
+            val g = map.physics.groundHeight(z.cx, z.cz, 0f)
+            r.draw(zoneCurtain, zoneMat, z.cx, g, z.cz, 0f, 0f, 0f, z.radius, 120f, z.radius)
+            r.draw(zoneRing, zoneRingMat, z.cx, g + 0.06f, z.cz, 0f, 0f, 0f, z.radius, 1f, z.radius)
+            if (z.shrinking) r.draw(zoneRing, zoneTargetMat, z.toX, g + 0.05f, z.toZ, 0f, 0f, 0f, z.toR, 1f, z.toR)
         }
         for (tr in tracers) r.drawLine(tr[0], tr[1], tr[2], tr[3], tr[4], tr[5], 0.025f, tracerMat, Colors.withAlpha(Colors.WHITE, 1f - tr[6] / 0.09f))
         r.particles(puffs)
@@ -1157,14 +1809,17 @@ class OeaArena : OeaGame() {
         walkSpeeds[p.id] = MathX.clamp01(moved * 28f)
         st[0] = p.pos.x; st[1] = p.pos.z
         st[2] += moved * 2.2f
-        if (p.id == localId && moved > 0.04f && p.ctrl.grounded && (st[2] % MathX.PI_F) < moved * 2.2f) ctx.audio.play(sStep, 0.35f)
+        if (p.id == localId && moved > 0.04f && p.ctrl.grounded && (st[2] % MathX.PI_F) < moved * 2.2f) {
+            ctx.audio.play(sStep, 0.35f)
+            vfx.dustPuff(p.pos.x, map.heightAt(p.pos.x, p.pos.z) + 0.05f, p.pos.z, 0.25f)
+        }
         return st[2]
     }
 
     private fun lootMaterial(kind: LootKind) = lootGlow.getOrPut(kind) {
         val c = when (kind) {
             LootKind.WEAPON -> 0xFFB0BEC5.toInt(); LootKind.AMMO -> 0xFFFFC107.toInt(); LootKind.MEDKIT -> 0xFFEF5350.toInt()
-            LootKind.ARMOR -> 0xFF42A5F5.toInt(); LootKind.HELMET -> 0xFF7E57C2.toInt()
+            LootKind.ARMOR -> 0xFF42A5F5.toInt(); LootKind.HELMET -> 0xFF7E57C2.toInt(); LootKind.GRENADE -> 0xFFFF7043.toInt()
         }
         Material(color = c, emissive = c, emissiveStrength = 0.6f, specular = 0.6f)
     }
@@ -1188,6 +1843,21 @@ class OeaArena : OeaGame() {
             Weapon.LMG -> { mb.box(0f, 0f, 0.15f, 0.09f, 0.13f, 0.62f); mb.withTransform(Mat4().setTRS(0f, 0.01f, 0.52f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.028f, 0.32f, 8) }
                 mb.box(0f, -0.14f, 0.1f, 0.08f, 0.12f, 0.16f); mb.box(0f, -0.08f, -0.08f, 0.1f, 0.1f, 0.22f)
                 mb.box(0f, -0.05f, -0.26f, 0.07f, 0.14f, 0.2f); mb.box(0f, 0.12f, 0.02f, 0.05f, 0.05f, 0.2f) }
+            Weapon.ROCKET -> { mb.box(0f, 0f, 0.12f, 0.13f, 0.17f, 0.95f)
+                mb.withTransform(Mat4().setTRS(0f, 0.03f, 0.6f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.06f, 0.32f, 12) }
+                mb.box(0f, -0.14f, 0.22f, 0.09f, 0.15f, 0.11f); mb.box(0f, -0.06f, -0.38f, 0.09f, 0.16f, 0.2f) }
+            Weapon.MISSILE -> { mb.box(0f, 0f, 0.07f, 0.12f, 0.16f, 0.8f)
+                mb.withTransform(Mat4().setTRS(0f, 0.03f, 0.5f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.05f, 0.26f, 12) }
+                mb.withTransform(Mat4().setTRS(0f, 0.07f, 0.24f, pitch = MathX.HALF_PI)) { cone(0f, 0f, 0f, 0.05f, 0.14f, 12) }
+                mb.box(0f, -0.13f, 0.17f, 0.08f, 0.14f, 0.1f); mb.box(0f, -0.05f, -0.32f, 0.09f, 0.15f, 0.19f) }
+            Weapon.MORTAR -> { mb.box(0f, -0.16f, 0f, 0.34f, 0.1f, 0.34f)
+                mb.withTransform(Mat4().setTRS(0f, -0.06f, 0.22f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.09f, 0.62f, 14) }
+                mb.withTransform(Mat4().setTRS(0f, 0.02f, 0.55f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.1f, 0.06f, 14) }
+                mb.box(0f, -0.24f, 0.18f, 0.3f, 0.07f, 0.3f) }
+            Weapon.HOWITZER -> { mb.box(0f, -0.14f, 0f, 0.3f, 0.1f, 0.3f)
+                mb.withTransform(Mat4().setTRS(0f, -0.05f, 0.24f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.09f, 0.78f, 14) }
+                mb.withTransform(Mat4().setTRS(0f, 0.02f, 0.62f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.11f, 0.09f, 14) }
+                mb.box(0f, -0.21f, 0.2f, 0.28f, 0.08f, 0.28f); mb.box(0f, -0.17f, -0.22f, 0.14f, 0.16f, 0.22f) }
         }
         mb.build()
     }
@@ -1220,6 +1890,7 @@ class OeaArena : OeaGame() {
                 hairStyle = if (feminine) (1 + id % 2) else 0,
                 feminine = feminine,
                 backpack = if (id % 2 == 0) packMat else null,
+                vest = vestMat,
             )
         }
     }
@@ -1228,12 +1899,23 @@ class OeaArena : OeaGame() {
     private fun drawSoldier(r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, pitch: Float, color: Int, flags: Int, weapon: Weapon, armor: Int, helmet: Int, walk: Float, speed01: Float = 0f, team: Int = 0, id: Int = 0, fx: CharFx? = null) {
         val alive = flags and 1 != 0
         val crouch = flags and 2 != 0
+        val prone = flags and 64 != 0
         val sky = flags and 8 != 0
         val chute = flags and 16 != 0
         // Teams wear their colours; free-for-all keeps the player's own.
         val kit = if (sim.teams && team in TEAM_COLORS.indices) TEAM_COLORS[team] else color
         val body = shirt(kit)
         val vscale = 0.95f + (id % 5) * 0.025f
+        // Face: the blink schedule rides on absolute time. LOD cuts the armor,
+        // pack and headwear draws for far soldiers — draw calls, not pixels.
+        val rig0 = rigFor(kit, id)
+        rig0.faceUpdate(ctx.time.elapsed.toFloat())
+        val ddx0 = x - camera.position.x; val ddz0 = z - camera.position.z
+        val d2 = ddx0 * ddx0 + ddz0 * ddz0
+        // LOD distances ride the quality tier's detail-distance multiplier:
+        // weak devices cull armor/pack detail closer in.
+        val k = ctx.graphics.quality.detailDistance
+        val lod = if (d2 > (45f * k) * (45f * k)) 2 else if (d2 > (20f * k) * (20f * k)) 1 else 0
         if (!alive) {
             r.draw(Mesh.unitCube, body, x, y + 0.15f, z, yaw, MathX.HALF_PI, 0f, 0.5f, 0.6f, 0.28f)
             r.draw(Mesh.unitCube, pants, x, y + 0.12f, z - cos(yaw) * 0.0f, yaw, MathX.HALF_PI, 0f, 0.42f, 1.4f, 0.2f)
@@ -1246,9 +1928,19 @@ class OeaArena : OeaGame() {
             rigPose.crouch = false
             rigPose.airborne = true
             rigPose.aimHold = false
+            rigPose.aimPitch = 0f
             rigPose.lean = 0f
+            rigPose.headYaw = 0f
             rigPose.detail = true
-            rigFor(kit, id).draw(r, x, y, z, yaw, rigPose, vscale, fx)
+            rigPose.reload = 0f
+            val skyRig = rigFor(kit, id)
+            skyRig.drawSkinned(
+                r, x, y, z, yaw, rigPose, vscale, fx,
+                vest = armor > 0,
+                helmet = helmet > 0 || sim.teams || (skyRig.spec != null && skyRig.spec.outfit.headwear.partId != "none"),
+                pack = skyRig.pack != null || (skyRig.spec != null && skyRig.spec.outfit.back.partId != "none"),
+                lod = lod,
+            )
             return
         }
         if (chute) {
@@ -1260,25 +1952,42 @@ class OeaArena : OeaGame() {
         // arms raised onto the weapon, run cycle when moving.
         rigPose.phase = walk * 1.15f
         rigPose.speed = if (chute) 0f else speed01
-        rigPose.crouch = crouch
+        // Prone folds into the crouch pose — the rig has no flat-ly pose, so the
+        // body sits lower and smaller: reads as lying down at a glance.
+        rigPose.crouch = crouch || prone
         rigPose.airborne = chute
         rigPose.aimHold = !chute
         rigPose.aimPitch = MathX.clamp(pitch, -0.9f, 0.9f)
         rigPose.lean = 0f
+        rigPose.headYaw = 0f
         rigPose.detail = true
-        rigFor(kit, id).draw(r, x, y, z, yaw, rigPose, vscale, fx)
-        val hip = y + (if (crouch) 0.55f else 0.9f) * vscale
+        // Reload pose: the snapshot carries the sim's reload progress for every
+        // player (local via reconcile, remotes via the actor), so everyone
+        // lowers the weapon when reloading.
+        rigPose.reload = (if (id == localId) (local?.reloadLeft ?: 0f) * 0.25f else actors[id]?.reloadN ?: 0f).coerceIn(0f, 1f)
+        val rig = rigFor(kit, id)
+        val bodyY = y - if (prone) 0.2f else 0f
+        // Skinned body + armor/headwear/pack meshes, one skeleton for all.
+        rig.drawSkinned(
+            r, x, bodyY, z, yaw, rigPose, vscale * (if (prone) 0.92f else 1f), fx,
+            vest = armor > 0,
+            helmet = helmet > 0 || sim.teams || (rig.spec != null && rig.spec.outfit.headwear.partId != "none"),
+            pack = rig.pack != null || (rig.spec != null && rig.spec.outfit.back.partId != "none"),
+            lod = lod,
+        )
+        val hip = bodyY + (if (prone) 0.42f else if (crouch) 0.55f else 0.9f) * vscale
         val torsoY = hip + 0.36f * vscale
-        // Gear on top of the rig: plate carrier, helmet, weapon in the hands.
-        if (armor > 0) r.draw(Mesh.unitCube, vestMat, x, torsoY + 0.02f, z, yaw, 0f, 0f, 0.54f, 0.46f, 0.33f)
-        val headY = torsoY + 0.50f * vscale
-        if (helmet > 0 || sim.teams) r.draw(Mesh.unitSphere, helmetMat, x, headY + 0.05f, z, yaw, 0f, 0f, 0.30f, 0.24f, 0.30f)
+        // Haunted: the undead carry a sick-green glow so they read through the fog.
+        if (rules == "haunted" && id != localId && alive) {
+            r.draw(Mesh.unitSphere, undeadAura, x, torsoY + 0.05f, z, 0f, 0f, 0f, 1.15f, 1.3f, 1.15f)
+        }
         // The weapon itself, held level with the aim just off the chest.
         val forwardX = sin(yaw); val forwardZ = cos(yaw)
         val rightX = -forwardZ; val rightZ = forwardX
         val gunPitch = MathX.clamp(pitch, -0.9f, 0.9f)
         val sx = x + rightX * 0.22f + forwardX * 0.25f; val sz = z + rightZ * 0.22f + forwardZ * 0.25f
-        m.setTRS(sx, torsoY + 0.18f, sz, yaw, gunPitch, 0f)
+        // Reload: the weapon dips to waist height with the arms.
+        m.setTRS(sx, torsoY + 0.18f - rigPose.reload * 0.28f * vscale, sz, yaw, gunPitch, 0f)
         m.translate(0f, 0f, 0.18f)
         val gm = m.copy()
         r.draw(gunMesh(weapon), gunMat, gm.translate(-0.05f, 0.02f, 0.12f))
@@ -1314,6 +2023,7 @@ class OeaArena : OeaGame() {
         drawMinimap(hud, me)
         drawKillFeed(hud)
         drawStatus(hud, me)
+        drawTeammates(hud, me)
         for (n in damageNumbers) {
             tmp.set(n[0], n[1], n[2])
             if (camera.worldToScreen(tmp, w, h, tmp)) {
@@ -1364,12 +2074,22 @@ class OeaArena : OeaGame() {
 
     private fun drawScope(hud: Hud) {
         val w = hud.width; val h = hud.height
+        val d = hud.density
         val r = min(w, h) * 0.46f
         val cx = w / 2f; val cy = h / 2f
         val b = hud.batch
         b.rect(0f, 0f, cx - r, h, 0xFF000000.toInt()); b.rect(cx + r, 0f, w - cx - r, h, 0xFF000000.toInt())
         b.ring(cx, cy, r + 40f, 80f, 0xFF000000.toInt())
         b.line(cx - r, cy, cx + r, cy, 1.5f, 0xCC000000.toInt()); b.line(cx, cy - r, cx, cy + r, 1.5f, 0xCC000000.toInt())
+        // Reticle: centre dot, stadia marks and mildots for ranging.
+        b.circle(cx, cy, 2f * d, Colors.WHITE)
+        for (i in 1..4) {
+            val off = i * r / 4f
+            b.line(cx - 6f * d, cy - off, cx + 6f * d, cy - off, 1f, 0xAAFFFFFF.toInt())
+            b.line(cx - 6f * d, cy + off, cx + 6f * d, cy + off, 1f, 0xAAFFFFFF.toInt())
+            b.line(cx - off, cy - 6f * d, cx - off, cy + 6f * d, 1f, 0xAAFFFFFF.toInt())
+            b.line(cx + off, cy - 6f * d, cx + off, cy + 6f * d, 1f, 0xAAFFFFFF.toInt())
+        }
     }
 
     private fun drawControls(hud: Hud, me: ArenaPlayer) {
@@ -1378,13 +2098,19 @@ class OeaArena : OeaGame() {
         adsBtn.highlight = adsOn; crouchBtn.highlight = crouchOn
         reloadBtn.progress = if (me.reloadLeft > 0f) 1f - me.reloadLeft / me.weapon.reload.coerceAtLeast(0.1f) else -1f
         healBtn.label = "+${me.medkits}"
-        for (btn in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn)) btn.draw(b, hud.fontBold, hud.density)
-        // Weapon slots (tap to switch).
+        for ((b, _) in controlButtons) b.draw(b, hud.fontBold, hud.density)
+        if (controlsOpen) {
+            for (b in listOf(ctrlDone, ctrlReset, ctrlAds)) b.draw(b, hud.fontBold, hud.density)
+            hud.text("CONTROLS · drag any button to move it", hud.width / 2f, hud.safeTop + hud.dp(48f), 16f, 0xFFFFFFFF.toInt(), align = Align.CENTER, bold = true)
+            hud.text("RESET restores the factory layout · ADS sets tap or hold aim", hud.width / 2f, hud.safeTop + hud.dp(74f), 13f, 0xBFFFFFFFu.toInt(), align = Align.CENTER)
+        }
+        // Weapon slots (tap to switch), bottom-right.
         val d = hud.density
         val sw = 112f * d; val sh = 46f * d
         val sy = hud.height - hud.safeBottom - sh - 12f * d
+        val sx0 = hud.width - hud.safeRight - sw - 12f * d
         for (i in 0..1) {
-            val sx = hud.width / 2f - sw - 6f * d + i * (sw + 12f * d)
+            val sx = sx0 - i * (sw + 12f * d)
             val active = me.active == i
             val wpn = me.slots[i]
             hud.panel(sx, sy, sw, sh, if (active) 0xE62A3646.toInt() else 0x99141820.toInt(), 12f)
@@ -1392,80 +2118,130 @@ class OeaArena : OeaGame() {
             hud.text(wpn.label, sx + 10f * d, sy + 6f * d, 12f, Colors.WHITE, bold = true, shadow = false)
             val ammoText = if (wpn == Weapon.PAN) "melee" else "${me.mags[i]} / ${me.ammo[wpn.ammo]}"
             hud.text(ammoText, sx + 10f * d, sy + 24f * d, 13f, if (wpn != Weapon.PAN && me.mags[i] == 0) 0xFFFF6B6B.toInt() else 0xCCFFFFFF.toInt(), shadow = false)
-            if (hud.hotspot("slot$i", sx, sy, sw, sh)) slotLatch = i
+            if (hud.hotspot("slot$i", sx, sy, sw, sh)) { slotLatch = i; switchDip = 0.25f }
         }
-        // Health and armour.
-        val bw = 240f * d
-        val bx = hud.width / 2f - bw / 2f
-        val by = sy - 22f * d
-        hud.bar(bx, by, bw, 9f * d, me.health / 100f, if (me.health < 30f) 0xFFFF5252.toInt() else 0xFFF1F3F5.toInt())
-        if (me.armor > 0) hud.text("Vest ${me.armor}", bx - 8f * d, by - 4f * d, 11f, 0xFF90CAF9.toInt(), Align.RIGHT)
-        if (me.helmet > 0) hud.text("Helmet ${me.helmet}", bx + bw + 8f * d, by - 4f * d, 11f, 0xFFB39DDB.toInt())
     }
 
     private fun drawTopBar(hud: Hud, me: ArenaPlayer) {
         val d = hud.density
+        val w = hud.width; val h = hud.height
         val alive = if (isAuthority) sim.aliveCount else actors.values.count { it.alive }
         val x = hud.safeLeft + 14f * d
         val y = hud.safeTop + 10f * d
-        // Mode card: the scoreboard this mode actually runs on.
-        when {
-            sim.teams -> {
-                hud.panel(x, y, 190f * d, 46f * d, 0x99101418.toInt(), 12f)
-                hud.text("TEAM DEATHMATCH", x + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
-                hud.text("${sim.teamScore[0]}", x + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
-                hud.text("${sim.teamScore[1]}", x + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
-                hud.text("first to 40", x + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
-            }
-            sim.gunGame -> {
-                hud.panel(x, y, 190f * d, 46f * d, 0x99101418.toInt(), 12f)
-                hud.text("GUN GAME", x + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
-                val stage = me.gunLevel.coerceIn(0, GUN_LADDER.size - 1)
-                hud.text("Stage ${stage + 1} / ${GUN_LADDER.size}", x + 12f * d, y + 22f * d, 15f, 0xFFFFD27A.toInt(), bold = true, shadow = false)
-                hud.text(GUN_LADDER[stage].label, x + 112f * d, y + 25f * d, 11f, 0xCCFFFFFF.toInt(), shadow = false)
-            }
-            sim.survival -> {
-                hud.panel(x, y, 170f * d, 46f * d, 0x99101418.toInt(), 12f)
-                hud.text(if (rules == "haunted") "HAUNTED" else if (rules == "lights_out") "LIGHTS OUT" else "LAST DAY SURVIVAL",
-                    x + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
-                hud.text("Wave $waveNumber", x + 12f * d, y + 22f * d, 16f, 0xFF7ED957.toInt(), bold = true, shadow = false)
-                hud.text("$alive alive", x + 96f * d, y + 25f * d, 11f, 0xCCFFFFFF.toInt(), shadow = false)
-            }
-            else -> {
-                hud.panel(x, y, 150f * d, 40f * d, 0x99101418.toInt(), 12f)
-                hud.text("$alive alive", x + 12f * d, y + 10f * d, 15f, Colors.WHITE, bold = true, shadow = false)
-                hud.text("${me.kills} ◎", x + 138f * d, y + 10f * d, 15f, 0xFFFFD27A.toInt(), Align.RIGHT, bold = true, shadow = false)
+        // Player card: portrait, health and armour (top-left).
+        val pr = 30f * d
+        hud.batch.circle(x + pr / 2f, y + pr / 2f, pr / 2f, 0xE6101418.toInt())
+        hud.batch.circle(x + pr / 2f, y + pr / 2f, pr / 2f - 1.5f * d, me.color)
+        hud.text(me.name.firstOrNull()?.uppercaseChar()?.toString() ?: "P", x + pr / 2f, y + pr / 2f, 13f, Colors.WHITE, Align.CENTER, bold = true)
+        val bx = x + pr + 10f * d
+        val bw = 132f * d
+        hud.bar(bx, y + 1f * d, bw, 8f * d, MathX.clamp01(me.health / 100f), if (me.health < 30f) 0xFFFF5252.toInt() else 0xFFF1F3F5.toInt())
+        hud.text("${me.health.toInt()} HP", bx + bw + 6f * d, y + 1f * d, 11f, if (me.health < 30f) 0xFFFF8A80.toInt() else 0xCCFFFFFF.toInt(), shadow = false)
+        hud.bar(bx, y + 11f * d, bw, 6f * d, MathX.clamp01(me.armor / 100f), 0xFF90CAF9.toInt())
+        hud.text("Vest ${me.armor}", bx + bw + 6f * d, y + 11f * d, 10.5f, 0xFFB3D9FF.toInt(), shadow = false)
+        // Vehicle card: the health of the ride under you (Warfare).
+        if (me.vehicle >= 0) {
+            val v = sim.vehicles.getOrNull(me.vehicle)
+            if (v != null && !v.dead) {
+                hud.bar(bx, y + 19f * d, bw, 6f * d, MathX.clamp01(v.health / v.maxHealth), if (v.isTank) 0xFFFFB74D.toInt() else 0xFF8BC34A.toInt())
+                val kindName = when { v.isTank -> "Tank"; v.isTurret -> "Turret"; v.isHelo -> "Helo"; else -> "Jeep" }
+                hud.text("$kindName ${v.health.toInt()} HP", bx + bw + 6f * d, y + 19f * d, 10.5f, 0xCCFFFFFF.toInt(), shadow = false)
             }
         }
         // Level chip: progression always visible, not only at the end.
-        val ly = y + if (sim.teams || sim.gunGame || sim.survival) 52f * d else 44f * d
+        val ly = y + pr + 4f * d
         hud.panel(x, ly, 92f * d, 22f * d, 0x80101418.toInt(), 8f)
         hud.text("Lvl $levelNow", x + 10f * d, ly + 4f * d, 11.5f, 0xFFFFD54F.toInt(), bold = true, shadow = false)
         val prevXp = xpForLevel(levelNow)
         val nextXp = xpForLevel(levelNow + 1).coerceAtLeast(prevXp + 1)
         hud.bar(x + 48f * d, ly + 8f * d, 36f * d, 5f * d, MathX.clamp01((xpTotal - prevXp) / (nextXp - prevXp).toFloat()), 0xFFFFD54F.toInt())
         if (sim.teams || sim.gunGame) hud.text("${me.kills} ◎", x + 110f * d, ly + 4f * d, 11.5f, 0xFFFFD27A.toInt(), shadow = false)
-        // Zone clock (battle royale only — the other modes have no zone).
+        // Mode card (top-right): the scoreboard this mode actually runs on.
+        val mw = 190f * d; val mx = w - hud.safeRight - mw - 14f * d
+        when {
+            sim.roundMode -> {
+                hud.panel(mx, y, mw, 46f * d, 0x99101418.toInt(), 12f)
+                hud.text(if (rules == "wolf") "LONE WOLF" else "CLASH SQUAD", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                hud.text("${sim.roundsWon[0]}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                hud.text("${sim.roundsWon[1]}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                hud.text("round ${sim.round}", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+            }
+            sim.warfare -> {
+                hud.panel(mx, y, mw, 46f * d, 0x99101418.toInt(), 12f)
+                if (sim.koth) {
+                    hud.text("KING OF THE HILL", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.kothScore[0].toInt()}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.kothScore[1].toInt()}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                    hud.text("first to 200", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+                } else if (sim.ad) {
+                    hud.text("ATTACK & DEFEND", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.adTickets}", mx + 12f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                    hud.text("${(sim.adTimer).toInt()}s", mx + 58f * d, y + 22f * d, 15f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                    hud.text("drain 300", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+                } else {
+                    hud.text("WARFARE", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.captures[0]}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                    hud.text("${sim.captures[1]}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                    hud.text("first to 5", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+                }
+            }
+            sim.teams -> {
+                hud.panel(mx, y, mw, 46f * d, 0x99101418.toInt(), 12f)
+                hud.text("TEAM DEATHMATCH", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                hud.text("${sim.teamScore[0]}", mx + 12f * d, y + 22f * d, 17f, 0xFF64B5F6.toInt(), bold = true, shadow = false)
+                hud.text("${sim.teamScore[1]}", mx + 58f * d, y + 22f * d, 17f, 0xFFFFB74D.toInt(), bold = true, shadow = false)
+                hud.text("first to 40", mx + 104f * d, y + 27f * d, 10.5f, 0x88FFFFFF.toInt(), shadow = false)
+            }
+            sim.gunGame -> {
+                hud.panel(mx, y, mw, 46f * d, 0x99101418.toInt(), 12f)
+                hud.text("GUN GAME", mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                val stage = me.gunLevel.coerceIn(0, GUN_LADDER.size - 1)
+                hud.text("Stage ${stage + 1} / ${GUN_LADDER.size}", mx + 12f * d, y + 22f * d, 15f, 0xFFFFD27A.toInt(), bold = true, shadow = false)
+                hud.text(GUN_LADDER[stage].label, mx + 112f * d, y + 25f * d, 11f, 0xCCFFFFFF.toInt(), shadow = false)
+            }
+            sim.survival -> {
+                hud.panel(mx, y, mw, 46f * d, 0x99101418.toInt(), 12f)
+                hud.text(if (rules == "haunted") "HAUNTED" else if (rules == "lights_out") "LIGHTS OUT" else "LAST DAY SURVIVAL",
+                    mx + 12f * d, y + 8f * d, 10.5f, 0xAAFFFFFF.toInt(), bold = true, shadow = false)
+                hud.text("Wave $waveNumber", mx + 12f * d, y + 22f * d, 16f, 0xFF7ED957.toInt(), bold = true, shadow = false)
+                hud.text("$alive alive", mx + 108f * d, y + 25f * d, 11f, 0xCCFFFFFF.toInt(), shadow = false)
+            }
+            else -> {
+                hud.panel(mx, y, 150f * d, 40f * d, 0x99101418.toInt(), 12f)
+                hud.text("$alive alive", mx + 12f * d, y + 10f * d, 15f, Colors.WHITE, bold = true, shadow = false)
+                hud.text("${me.kills} ◎", mx + 138f * d, y + 10f * d, 15f, 0xFFFFD27A.toInt(), Align.RIGHT, bold = true, shadow = false)
+            }
+        }
+        // Zone chevron + clock (top-center): the arrow points at the safe zone.
         val z = sim.zone
         if (z.enabled) {
             val t = max(0f, z.timer).toInt()
-            hud.text(if (z.shrinking) "Zone closing · ${t}s" else "Zone shrinks in ${t / 60}:${String.format(java.util.Locale.US, "%02d", t % 60)}",
-                x + 4f * d, ly + 28f * d, 13f, if (z.shrinking) 0xFF64B5F6.toInt() else 0xDDFFFFFF.toInt())
-            if (me.alive && z.outside(me.pos.x, me.pos.z) && !me.skydiving) hud.text("Outside the zone!", hud.width / 2f, y + 60f * d, 18f, 0xFF64B5F6.toInt(), Align.CENTER, bold = true)
+            val cx = w / 2f; val cy = y + 2f * d
+            tmp.set(z.cx, 8f, z.cz)
+            camera.worldToScreen(tmp, w, h, tmp2)
+            val ang = atan2(tmp2.y - cy, tmp2.x - cx)
+            val s = 13f * d
+            val dx = cos(ang); val dy = sin(ang)
+            hud.batch.polygon(floatArrayOf(cx + dx * s, cy + dy * s, cx - dx * s - dy * s * 0.55f, cy - dy * s + dx * s * 0.55f, cx - dx * s + dy * s * 0.55f, cy - dy * s - dx * s * 0.55f),
+                if (z.shrinking) 0xFF64B5F6.toInt() else 0xDDFFFFFF.toInt())
+            hud.text("ZONE", cx, cy - 9f * d, 10f, 0xAAFFFFFF.toInt(), Align.CENTER, bold = true, shadow = false)
+            hud.text(if (z.shrinking) "Closing · ${t}s" else "Shrinks in ${t / 60}:${String.format(java.util.Locale.US, "%02d", t % 60)}",
+                cx, cy + 17f * d, 13f, if (z.shrinking) 0xFF64B5F6.toInt() else 0xDDFFFFFF.toInt(), Align.CENTER)
+            if (me.alive && z.outside(me.pos.x, me.pos.z) && !me.skydiving) hud.text("Outside the zone!", cx, cy + 38f * d, 16f, 0xFF64B5F6.toInt(), Align.CENTER, bold = true)
         }
         if (me.healProgress > 0f) {
-            hud.text("Healing…", hud.width / 2f, hud.height * 0.6f, 15f, Colors.WHITE, Align.CENTER, bold = true)
-            hud.bar(hud.width / 2f - 70f * d, hud.height * 0.6f + 24f * d, 140f * d, 6f * d, me.healProgress, 0xFF66BB6A.toInt())
+            hud.text("Healing…", w / 2f, h * 0.6f, 15f, Colors.WHITE, Align.CENTER, bold = true)
+            hud.bar(w / 2f - 70f * d, h * 0.6f + 24f * d, 140f * d, 6f * d, me.healProgress, 0xFF66BB6A.toInt())
         }
-        if (me.reloadLeft > 0f) hud.text("Reloading", hud.width / 2f, hud.height * 0.56f, 14f, 0xDDFFFFFF.toInt(), Align.CENTER)
-        if (net == null && hud.iconButton("menu", "☰", hud.width - hud.safeRight - 150f * d, y + 20f * d, 18f)) onBack()
+        if (me.reloadLeft > 0f) hud.text("Reloading", w / 2f, h * 0.56f, 14f, 0xDDFFFFFF.toInt(), Align.CENTER)
+        if (net == null && hud.iconButton("menu", "☰", w - hud.safeRight - 150f * d, y + 20f * d, 18f)) onBack()
     }
 
     private fun drawMinimap(hud: Hud, me: ArenaPlayer) {
         val d = hud.density
         val size = 118f * d
-        val x = hud.width - hud.safeRight - size - 12f * d
-        val y = hud.safeTop + 10f * d
+        val x = hud.safeLeft + 12f * d
+        val y = hud.height - hud.safeBottom - size - 12f * d
         val b = hud.batch
         b.roundRect(x - 3f * d, y - 3f * d, size + 6f * d, size + 6f * d, 14f * d, 0xAA0E1116.toInt())
         val scale = size / (ArenaMap.SIZE * 0.95f)
@@ -1478,6 +2254,13 @@ class OeaArena : OeaGame() {
         if (z.enabled) {
             b.ring(mx(z.cx), my(z.cz), z.radius * scale, 1.6f * d, Colors.WHITE)
             b.ring(mx(z.toX), my(z.toZ), z.toR * scale, 1.2f * d, 0xFF64B5F6.toInt())
+        }
+        // Warfare: the three objectives, team-colored once captured.
+        if (sim.warfare) {
+            for (pt in sim.points) {
+                val dot = when (pt.owner) { 0 -> 0xFF64B5F6.toInt(); 1 -> 0xFFFFB74D.toInt(); else -> 0xFFFFFFFF.toInt() }
+                b.ring(mx(pt.x), my(pt.z), 4.5f * pt.r * scale, 2f * d, dot)
+            }
         }
         // Teammates as dots; enemies never show on the minimap.
         if (sim.teams) {
@@ -1509,8 +2292,10 @@ class OeaArena : OeaGame() {
             if (now - at > 6000) continue
             val a = 1f - MathX.clamp01((now - at - 5000) / 1000f)
             val tw = hud.measure(text, 12f) + 16f * d
-            hud.panel(x - tw, y, tw, 22f * d, Colors.withAlpha(0xFF101418.toInt(), 0.65f * a), 8f)
-            hud.text(text, x - 8f * d, y + 4f * d, 12f, Colors.withAlpha(Colors.WHITE, a), Align.RIGHT, shadow = false)
+            // Slide in from the right, then settle.
+            val ox = (1f - MathX.clamp01((now - at) / 260f)) * 26f * d
+            hud.panel(x - tw + ox, y, tw, 22f * d, Colors.withAlpha(0xFF101418.toInt(), 0.65f * a), 8f)
+            hud.text(text, x - 8f * d + ox, y + 4f * d, 12f, Colors.withAlpha(Colors.WHITE, a), Align.RIGHT, shadow = false)
             y += 26f * d
         }
     }
@@ -1520,7 +2305,29 @@ class OeaArena : OeaGame() {
         val d = hud.density
         val ground = map.physics.groundHeight(me.pos.x, me.pos.z, me.pos.y)
         hud.text(if (me.parachute) "Parachute open · ${(me.pos.y - ground).toInt()} m" else "Free fall · ${(me.pos.y - ground).toInt()} m",
-            hud.width / 2f, hud.safeTop + 14f * d, 16f, Colors.WHITE, Align.CENTER, bold = true)
+            hud.width / 2f, hud.safeTop + 58f * d, 16f, Colors.WHITE, Align.CENTER, bold = true)
+    }
+
+    /** Teammates' health bars along the bottom edge. */
+    private fun drawTeammates(hud: Hud, me: ArenaPlayer) {
+        if (!sim.teams) return
+        val d = hud.density
+        val list = if (isAuthority) sim.players.values.filter { it.team == me.team && it.id != me.id && it.alive }
+            else actors.values.filter { it.team == me.team && it.id != localId && it.alive }
+        if (list.isEmpty()) return
+        val bw = 120f * d; val bh = 14f * d
+        val gap = 8f * d
+        val total = list.size * (bw + gap) - gap
+        var x = hud.width / 2f - total / 2f
+        val y = hud.height - hud.safeBottom - bh - 6f * d
+        for (t in list) {
+            hud.panel(x, y, bw, bh, 0x80101418.toInt(), 6f)
+            val name = if (isAuthority) t.name else nameOfId(t.id)
+            hud.text(name.take(8), x + 8f * d, y + 3f * d, 10f, 0xCCFFFFFF.toInt(), bold = true, shadow = false)
+            hud.bar(x + 8f * d, y + 8f * d, bw - 16f * d, 4f * d, MathX.clamp01(t.health / 100f),
+                if (t.health < 30f) 0xFFFF5252.toInt() else 0xFF64B5F6.toInt())
+            x += bw + gap
+        }
     }
 
     private fun drawEndPanel(hud: Hud, me: ArenaPlayer) {
@@ -1580,13 +2387,15 @@ class OeaArena : OeaGame() {
         private const val EV_LOOT_SPAWN = 43
         private const val EV_OVER = 44
         private const val EV_ROSTER = 45
+        private const val EV_ROUND_OVER = 46
+        private const val EV_ROUND_START = 47
         private val BOT_NAMES = listOf("Raven", "Kodo", "Viper", "Nova", "Blaze", "Echo", "Titan", "Shade", "Rook", "Jinx", "Atlas", "Mira", "Onyx", "Zed", "Kira")
         private val EngineColors = com.oea.engine.EngineSettings.PLAYER_COLORS
 
         val descriptor = GameDescriptor(
             id = ID,
             title = "Send Off",
-            tagline = "Battle royale · team deathmatch · gun game",
+            tagline = "Battle royale · clash squad · lone wolf · warfare · gun game",
             description = "A competitive shooter with real modes, not labels. Battle Royale: skydive, loot pistols, SMGs, rifles, shotguns, revolvers, marksman rifles, LMGs and snipers, stay inside the shrinking zone, be last standing. " +
                 "Team Deathmatch: two teams, respawns, spawn protection, first to 40 eliminations. Gun Game: every kill advances your gun — a kill with the final pan wins. " +
                 "Survival: Last Day (day turns to night while waves land), Lights Out (permanent night) and Haunted (green fog, endless undead). " +
@@ -1605,7 +2414,13 @@ class OeaArena : OeaGame() {
             options = listOf(
                 GameOption("rules", "Game mode", listOf(
                     Choice("br", "Battle Royale", "Zone, loot, last one standing"),
+                    Choice("br_res", "Resurgence Royale", "Zone royale · you come back"),
                     Choice("tdm", "Team Deathmatch", "Two teams · respawns · first to 40"),
+                    Choice("cs", "Clash Squad", "4v4 · buy shop · first to 4 rounds"),
+                    Choice("wolf", "Lone Wolf", "1v1 duel · pick guns · best of 5"),
+                    Choice("warfare", "Warfare", "6v6 · capture points · first to 5"),
+                    Choice("warfare_koth", "King of the Hill", "6v6 · hold the hill · first to 200"),
+                    Choice("warfare_ad", "Attack & Defend", "6v6 · drain the tickets · 10 min"),
                     Choice("gun", "Gun Game", "One kill = next gun · pan finish"),
                     Choice("last_day", "Last Day Survival", "Day turns to night · endless waves"),
                     Choice("lights_out", "Lights Out", "Permanent night · tight fog"),
