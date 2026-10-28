@@ -4,8 +4,7 @@ import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import com.oea.engine.graphics.Gpu.genBuffer
 import com.oea.engine.graphics.Gpu.genVertexArray
-import com.oea.engine.graphics.Gpu.glError
-import com.oea.engine.math.MathX
+import com.oea.engine.math.Colors
 import com.oea.engine.math.Vec3
 import kotlin.math.sqrt
 
@@ -68,11 +67,15 @@ class SkeletalMesh(val vertices: FloatArray, val indices: IntArray) {
             vbo = genBuffer()
             GLES30.glBindVertexArray(vao)
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
-            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, vertices.size * 4, GLES30.GL_DYNAMIC_DRAW)
+            val fb = Gpu.floatBuffer(vertices.size).put(vertices)
+            fb.position(0)
+            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, vertices.size * 4, fb, GLES30.GL_DYNAMIC_DRAW)
             if (indices.isNotEmpty()) {
                 ibo = genBuffer()
                 GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, ibo)
-                GLES30.glBufferData(GLES30.GL_ELEMENT_ARRAY_BUFFER, indices.size * 4, GLES30.GL_STATIC_DRAW)
+                val ib = Gpu.intBuffer(indices.size).put(indices)
+                ib.position(0)
+                GLES30.glBufferData(GLES30.GL_ELEMENT_ARRAY_BUFFER, indices.size * 4, ib, GLES30.GL_STATIC_DRAW)
             }
             attr(0, 3, 0)
             attr(1, 3, 12)
@@ -86,10 +89,14 @@ class SkeletalMesh(val vertices: FloatArray, val indices: IntArray) {
         }
         if (dirty) {
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
-            GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER, 0, vertices.size * 4, vertices)
+            val fb = Gpu.floatBuffer(vertices.size).put(vertices)
+            fb.position(0)
+            GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER, 0, vertices.size * 4, fb)
             if (indices.isNotEmpty()) {
                 GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, ibo)
-                GLES30.glBufferSubData(GLES30.GL_ELEMENT_ARRAY_BUFFER, 0, indices.size * 4, indices)
+                val ib = Gpu.intBuffer(indices.size).put(indices)
+                ib.position(0)
+                GLES30.glBufferSubData(GLES30.GL_ELEMENT_ARRAY_BUFFER, 0, indices.size * 4, ib)
             }
             dirty = false
         }
@@ -137,7 +144,7 @@ class SkeletalMesh(val vertices: FloatArray, val indices: IntArray) {
         ): Int {
             if (verts >= capacity) grow()
             val o = verts * SkeletalMesh.STRIDE
-            MathX.toLinear(color, linear)
+            Colors.toLinear(color, linear)
             buf[o] = x; buf[o + 1] = y; buf[o + 2] = z
             buf[o + 3] = nx; buf[o + 4] = ny; buf[o + 5] = nz
             buf[o + 6] = u; buf[o + 7] = v

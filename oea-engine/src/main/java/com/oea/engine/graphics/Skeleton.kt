@@ -126,7 +126,7 @@ class Skeleton {
             val arm = if (side < 0) 10 else 6
             val fore = if (side < 0) 11 else 7
             val hand = if (side < 0) 12 else 8
-            val ua: Float; val el: Float
+            var ua: Float; var el: Float
             if (aimHold) {
                 ua = MathX.HALF_PI + aimPitch
                 el = 0.18f
