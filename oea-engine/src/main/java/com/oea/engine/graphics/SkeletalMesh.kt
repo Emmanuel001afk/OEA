@@ -114,9 +114,9 @@ class SkeletalMesh(val vertices: FloatArray, val indices: IntArray) {
     }
 
     internal fun dispose() {
-        if (vao != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vao)); vao = 0 }
-        if (vbo != 0) { GLES30.glDeleteBuffers(1, intArrayOf(vbo)); vbo = 0 }
-        if (ibo != 0) { GLES30.glDeleteBuffers(1, intArrayOf(ibo)); ibo = 0 }
+        if (vao != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vao), 0); vao = 0 }
+        if (vbo != 0) { GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0); vbo = 0 }
+        if (ibo != 0) { GLES30.glDeleteBuffers(1, intArrayOf(ibo), 0); ibo = 0 }
     }
 
     /** Accumulates vertices/indices and bakes them into a [SkeletalMesh]. */
