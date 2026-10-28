@@ -378,11 +378,11 @@ internal class ArenaSim(
     val teamScore = IntArray(2)
     /** Warfare: capture events per team (first to [WARFARE_WIN] takes the match). */
     val captures = IntArray(2)
-    private const val WARFARE_WIN = 5
+    private val WARFARE_WIN = 5
     /** King of the Hill: score accumulated while holding the single hill. */
     val kothScore = FloatArray(2)
-    private const val KOTH_WIN = 200
-    private const val KOTH_RATE = 1.2f
+    private val KOTH_WIN = 200
+    private val KOTH_RATE = 1.2f
     val teams = rules == "tdm" || rules == "cs" || rules == "warfare" || rules == "wolf" || rules == "warfare_koth" || rules == "warfare_ad"
     val gunGame = rules == "gun"
     /** Respawn after death — except the round-based duels, which respawn at round start. */
@@ -400,7 +400,7 @@ internal class ArenaSim(
     var adTickets = 300
     /** Attack time limit: defenders win when it runs out. */
     var adTimer = 600f
-    private const val AD_DRAIN = 50
+    private val AD_DRAIN = 50
     /** CoD-style royale: the zone closes, but you come back. */
     val resurgence = rules == "br_res"
     var round = 1
@@ -655,9 +655,6 @@ internal class ArenaSim(
         if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 3
         if (p.cash > 500) { p.medkits++; p.cash -= SHOP_MEDKIT }
         if (p.cash > 700) { p.grenades++; p.cash -= SHOP_FRAG }
-        if (inp.buyUpSlot >= 0) {
-            Weapon.entries.getOrNull(inp.buyUpSlot)?.let { if (upgrade(p, it)) inp.buyUpSlot = -1 }
-        }
         if (p.cash > 900) { p.smokes++; p.cash -= SHOP_SMOKE }
         p.armor = min(3, p.armor + 1)
         p.helmet = min(3, p.helmet + 1)
@@ -741,7 +738,7 @@ internal class ArenaSim(
                 if (g.missile) {
                     // Homing: steer toward the locked player — or re-lock the nearest
                     // enemy in front. This is the guided missile's whole trick.
-                    var t = g.homing >= 0 ? players[g.homing] : null
+                    var t = if (g.homing >= 0) players[g.homing] else null
                     if (t == null || !t.alive) {
                         var best = -1; var bestD = 75f * 75f
                         for (o in players.values) {
@@ -812,7 +809,7 @@ internal class ArenaSim(
                 }
                 continue
             }
-            val d = v.driver >= 0 ? players[v.driver] : null
+            val d = if (v.driver >= 0) players[v.driver] else null
             if (d == null) { v.speedNow = 0f; continue }
             v.yaw += d.input.moveX * 2.4f * dt
             val throttle = d.input.moveY.coerceIn(-1f, 1f)
@@ -1283,6 +1280,7 @@ internal class ArenaSim(
             val wanted = when (l.kind) {
                 LootKind.AMMO -> true
                 LootKind.MEDKIT -> p.medkits < 5
+                LootKind.GRENADE -> p.grenades < 5
                 LootKind.ARMOR -> l.value > p.armor
                 LootKind.HELMET -> l.value > p.helmet
                 LootKind.WEAPON -> p.slots.any { it == Weapon.PAN } && p.slots.none { it.ordinal == l.value }
@@ -1723,6 +1721,7 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
                 LootKind.ARMOR -> l.value > p.armor
                 LootKind.HELMET -> l.value > p.helmet
                 LootKind.MEDKIT -> p.medkits < 3
+                LootKind.GRENADE -> p.grenades < 5
             }
             if (!useful) continue
             val dx = l.x - p.pos.x; val dz = l.z - p.pos.z
