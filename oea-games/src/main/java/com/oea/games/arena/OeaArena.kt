@@ -1595,7 +1595,8 @@ class OeaArena : OeaGame() {
             else MenuItem("up$slot", "Upgrade ${w.label} · lv ${lv}→${lv + 1}/$UP_MAX · $${sim.upgradeCost(me, w)}")
         }
         items += MenuItem("deploy", "Deploy to round ${sim.round}")
-        ctx.ui.menu("Send Off · Shop", "Cash $${me.cash} · round ${sim.round}", items) { id ->
+        ctx.ui.menu("Send Off · Shop", "Cash ${me.cash} · round ${sim.round}", items) { id ->
+            if (id == null) return@menu
             when (id) {
                 "deploy" -> { shopOpen = false; pendingDeploy = true }
                 else -> {
