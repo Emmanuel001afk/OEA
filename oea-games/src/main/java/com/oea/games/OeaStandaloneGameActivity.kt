@@ -1,8 +1,13 @@
 package com.oea.games
 
+import android.Manifest
 import android.app.Activity
 import android.app.Dialog
+import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
@@ -11,6 +16,7 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -27,6 +33,8 @@ import com.oea.engine.core.PlayMode
 import com.oea.engine.net.lan.LanBrowser
 import com.oea.engine.net.lan.LanGame
 import com.oea.engine.net.lan.LanJoinCode
+import com.oea.engine.net.qr.QrCodes
+import com.oea.engine.net.qr.QrScannerView
 import com.oea.engine.net.session.NetPlayer
 import com.oea.engine.net.session.NetSession
 import com.oea.engine.net.session.OnlineInvite
@@ -83,8 +91,11 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     private var lobbyDialog: Dialog? = null
     private var lobbyStatus: TextView? = null
     private var inviteDialog: Dialog? = null
+    private var replyDialog: Dialog? = null
     private var lobbyMode = PlayMode.LAN
     private var pendingStart = false
+    /** A scan that waits for the camera permission to be granted. */
+    private var pendingCamera: (() -> Unit)? = null
 
     private fun toolkit(): GameKit = kit ?: GameKit(this, palette).also { kit = it }
 
@@ -491,17 +502,97 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         val dialog = k.sheet("Invite a friend online", "Send your code, then paste the reply you get back.") { panel, d ->
             panel.addView(status)
             panel.addView(codeView)
+            // The invite as a QR: the friend can scan it instead of typing the code.
+            invite.code?.let { code ->
+                panel.addView(qrView(code), LinearLayout.LayoutParams(k.dp(190), k.dp(190)).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL; topMargin = k.dp(6); bottomMargin = k.dp(6)
+                })
+            }
             panel.addView(reply, LinearLayout.LayoutParams(-1, -2).apply { topMargin = k.dp(6) })
             panel.addView(
                 k.buttonRow(
-                    k.quietButton("Share") { invite.code?.let { share(it, "OEA invite code") } },
-                    k.primaryButton("Connect") { invite.acceptReply(reply.text.toString())?.let { toast(it) } }
+                    k.quietButton("Paste") { clipboardText()?.let { reply.setText(it) } ?: toast("The clipboard is empty.") },
+                    k.quietButton("Scan QR") { scanQr("Scan your friend's reply QR") { reply.setText(it) } },
+                    k.primaryButton("Connect") {
+                        val err = invite.acceptReply(reply.text.toString())
+                        if (err != null) toast(err)
+                    }
                 )
             )
             panel.addView(k.quietButton("Close") { d.dismiss() }, LinearLayout.LayoutParams(-1, -2))
         }
         dialog.setOnDismissListener { invite.onChange = null }
         inviteDialog = dialog
+    }
+
+    /** A white rounded card holding a QR of [text]. */
+    private fun qrView(text: String): View {
+        val k = toolkit()
+        val bmp = runCatching { QrCodes.encode(text, 640) }.getOrNull()
+        return FrameLayout(this).apply {
+            background = k.rounded(Color.WHITE, 22)
+            setPadding(k.dp(10), k.dp(10), k.dp(10), k.dp(10))
+            bmp?.let {
+                addView(ImageView(this@OeaStandaloneGameActivity).apply {
+                    setImageBitmap(it)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = "QR code"
+                }, FrameLayout.LayoutParams(-1, -1))
+            }
+        }
+    }
+
+    private fun clipboardText(): String? = runCatching {
+        getSystemService(ClipboardManager::class.java).takeIf { it.hasPrimaryClip() }
+            ?.getPrimaryClip()?.getItemAt(0)?.coerceToText(this)?.toString()
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    /** Full-screen QR scanner: camera, torch and a picture fallback. */
+    private fun scanQr(title: String, onResult: (String) -> Unit) {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            pendingCamera = { scanQr(title, onResult) }
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_CAMERA)
+            return
+        }
+        val k = toolkit()
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val root = FrameLayout(this)
+        val scanner = QrScannerView(this)
+        scanner.accept = { it.contains("OEA", ignoreCase = true) }
+        root.addView(scanner, FrameLayout.LayoutParams(-1, -1))
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(k.dp(16), k.dp(36), k.dp(16), k.dp(12))
+        }
+        top.addView(k.text(title, 18f, Color.WHITE, GameType.medium).apply { setPadding(k.dp(14), 0, 0, 0) })
+        root.addView(top, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        val bottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(k.dp(20), k.dp(12), k.dp(20), k.dp(40)) }
+        bottom.addView(k.quietButton("Torch") { scanner.setTorch(!scanner.torch) }, LinearLayout.LayoutParams(0, k.dp(48), 1f).apply { rightMargin = k.dp(10) })
+        bottom.addView(k.quietButton("From picture") {
+            dialog.dismiss()
+            pickImage { t -> if (t != null) onResult(t) else toast("No OEA code found in that picture.") }
+        }, LinearLayout.LayoutParams(0, k.dp(48), 1f))
+        root.addView(bottom, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        scanner.onResult = { text -> dialog.dismiss(); scanner.stop(); onResult(text) }
+        scanner.onError = { msg -> toast(msg) }
+        dialog.setContentView(root)
+        dialog.show()
+        scanner.start()
+        dialog.setOnDismissListener { scanner.stop() }
+    }
+
+    private fun pickImage(onText: (String?) -> Unit) {
+        pendingPick = { bmp ->
+            val text = bmp?.let { QrCodes.decode(it) }
+            onText(text)
+        }
+        val intent = Intent(Intent.ACTION_PICK).apply {
+            type = "image/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/jpeg", "image/png", "image/webp"))
+        }
+        runCatching { startActivityForResult(intent, REQ_PICK) }
+            .onFailure { toast("This phone can't pick images."); pendingPick = null }
     }
 
     private fun showNearbyBrowser() {
@@ -623,25 +714,12 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             return
         }
         val s = NetSession.joinOnline(this, d, trimmed) { code, err ->
-            if (err != null) {
-                toast(err)
-                main.post {
+            main.post {
+                if (err != null) {
+                    toast(err)
                     if (lobbyStatus == null) showLobby(joined = true, extra = err) else refreshLobby(err)
-                    // The reply code only exists once the connection attempt has
-                    // been answered, so it is appended to the lobby text.
-                    lobbyStatus?.let { status ->
-                        if (code != null && !status.text.contains(code)) {
-                            status.text = status.text.toString() + "\n\nSend this reply code to the host:\n$code"
-                        }
-                    }
-                }
-            } else if (code != null) {
-                main.post {
-                    lobbyStatus?.let { status ->
-                        if (!status.text.contains(code)) {
-                            status.text = status.text.toString() + "\n\nSend this reply code to the host:\n$code"
-                        }
-                    }
+                } else if (code != null) {
+                    showReplySheet(s, code)
                 }
             }
         }
@@ -650,6 +728,65 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             showLobby(joined = true, extra = "Preparing your reply…")
             s.setReady(true)
         }
+    }
+
+    /** The friend's side of the invite: one screen with the reply code to send
+     *  back — QR, copy and share — and a live line telling them what's happening. */
+    private fun showReplySheet(s: NetSession, replyCode: String) {
+        lobbyDialog?.dismiss(); lobbyDialog = null
+        lobbyStatus = null
+        val k = toolkit()
+        val status = k.text("", 13.5f, palette.textSecondary, GameType.medium)
+        val codeView = k.text("", 15f, palette.text, GameType.medium).apply {
+            setTextIsSelectable(true)
+            setPadding(0, k.dp(10), 0, k.dp(10))
+            setLineSpacing(k.dpf(2f), 1f)
+        }
+        fun refresh() {
+            status.text = s.status.ifBlank { s.phase.label }
+            if (codeView.text.isEmpty()) codeView.text = "Reply code (send this back):\n\n$replyCode"
+        }
+        val listener = object : SessionListener {
+            override fun onSessionUpdate(session: NetSession) {
+                main.post {
+                    refresh()
+                    // Connected (or failed): hand the friend back to the lobby.
+                    if (session.phase != SessionPhase.CONNECTING) {
+                        replyDialog?.dismiss(); replyDialog = null
+                        if (session.phase == SessionPhase.LOBBY) showLobby(joined = true, extra = null)
+                    }
+                }
+            }
+        }
+        s.addListener(listener)
+        refresh()
+        val dialog = k.sheet("You're invited", "Send this reply to the host — they enter it and you're in.") { panel, d ->
+            panel.addView(status)
+            panel.addView(qrView(replyCode), LinearLayout.LayoutParams(k.dp(190), k.dp(190)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL; topMargin = k.dp(6); bottomMargin = k.dp(6)
+            })
+            panel.addView(codeView)
+            panel.addView(
+                k.buttonRow(
+                    k.quietButton("Copy") {
+                        runCatching {
+                            getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                                android.content.ClipData.newPlainText("OEA reply code", replyCode)
+                            )
+                        }.onSuccess { toast("Reply code copied.") }
+                    },
+                    k.primaryButton("Share") { share(replyCode, "OEA reply code") }
+                )
+            )
+            panel.addView(k.quietButton("Cancel") {
+                s.removeListener(listener)
+                d.dismiss()
+                s.close("Cancelled")
+                if (!directLaunch) showHome()
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+        dialog.setOnDismissListener { s.removeListener(listener) }
+        replyDialog = dialog
     }
 
     // ================================================================ about
@@ -748,6 +885,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             main.post {
                 lobbyDialog?.dismiss(); lobbyDialog = null
                 inviteDialog?.dismiss(); inviteDialog = null
+                replyDialog?.dismiss(); replyDialog = null
                 pendingStart = true
                 // The host's authoritative match settings travel in the start
                 // packet; using our local defaults here would desynchronise
@@ -760,9 +898,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             main.post {
                 // If the user already left the lobby themselves, do nothing —
                 // only an unexpected close (kick, host left) needs a message.
-                val hadDialog = lobbyDialog != null || inviteDialog != null
+                val hadDialog = lobbyDialog != null || inviteDialog != null || replyDialog != null
                 lobbyDialog?.dismiss(); lobbyDialog = null
                 inviteDialog?.dismiss(); inviteDialog = null
+                replyDialog?.dismiss(); replyDialog = null
                 if (hadDialog && host == null && !isFinishing && !pendingStart) {
                     toast(reason)
                     if (!directLaunch) showHome()
@@ -915,6 +1054,29 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     override fun onGenericMotionEvent(event: MotionEvent): Boolean =
         host?.dispatchGenericMotionEvent(event) == true || super.onGenericMotionEvent(event)
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_CAMERA) {
+            val cb = pendingCamera
+            pendingCamera = null
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) cb?.invoke()
+            else toast("Camera permission is needed to scan codes. You can paste codes instead.")
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_PICK || resultCode != Activity.RESULT_OK || data == null) return
+        val uri = data.data ?: return
+        val bmp = runCatching { contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } }.getOrNull()
+        // The scan sheet owns the result — hand it back through the pending callback.
+        pendingPick?.invoke(bmp)
+        pendingPick = null
+    }
+
+    /** The scan sheet's picture fallback waits here for the picker's result. */
+    private var pendingPick: ((Bitmap?) -> Unit)? = null
+
     // ---------------------------------------------------------------- HostUi
 
     override fun toast(message: String) = runCatching {
@@ -1012,5 +1174,8 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         const val EXTRA_GAME_PLAYERS = "com.oea.games.extra.GAME_PLAYERS"
         /** Set to true to skip the front menu even without other extras. */
         const val EXTRA_AUTO_START = "com.oea.games.extra.AUTO_START"
+
+        private const val REQ_CAMERA = 4201
+        private const val REQ_PICK = 4202
     }
 }

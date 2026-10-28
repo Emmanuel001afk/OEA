@@ -36,7 +36,10 @@ internal enum class Weapon(
     MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f, price = 1300),
     LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500),
     ROCKET("Rocket launcher", "◎", 140f, 1f, 24f, 1, 3.4f, 0.06f, 0.03f, 250f, 1, false, 4, 1.05f, 0.04f, 0.74f, price = 2200),
-    MISSILE("Guided missile", "☆", 120f, 1f, 18f, 1, 4.2f, 0.05f, 0.03f, 320f, 1, false, 4, 1.15f, 0.05f, 0.88f, price = 2600);
+    MISSILE("Guided missile", "☆", 120f, 1f, 18f, 1, 4.2f, 0.05f, 0.03f, 320f, 1, false, 4, 1.15f, 0.05f, 0.88f, price = 2600),
+    /** Artillery: lobbed shells on a long fuse — area fire, not a gun. */
+    MORTAR("Mortar", "‡", 90f, 1f, 14f, 1, 3.6f, 0.09f, 0.01f, 190f, 1, false, 3, 3.4f, 0.05f, 0.62f, price = 2400),
+    HOWITZER("Howitzer", "✶", 130f, 1f, 9f, 1, 4.6f, 0.08f, 0.008f, 240f, 1, false, 4, 4.0f, 0.07f, 0.55f, price = 3000);
 
     val interval get() = 60f / rpm
 
@@ -73,6 +76,7 @@ private const val GRENADE_SMOKE = 1
 private const val GRENADE_STUN = 2
 /** Rocket (3) and guided missile (3 as well) explosions — bigger blasts. */
 private const val GRENADE_ROCKET = 3
+private const val GRENADE_ARTY = 4
 /** Clash Squad shop prices. */
 internal const val SHOP_MEDKIT = 300
 internal const val SHOP_FRAG = 400
@@ -112,6 +116,10 @@ internal class Grenade(
     /** Rocket (unguided) or guided missile: fly straight/home instead of arcing. */
     val rocket: Boolean = false,
     val missile: Boolean = false,
+    /** Artillery shell: arcs high, sticks into the ground and fuses there. */
+    val sticky: Boolean = false,
+    /** Howitzer shell: the heavy 155 mm — bigger blast than the mortar's. */
+    val heavy: Boolean = false,
     /** Missile lock target (player id) — re-locks to the nearest enemy while alive. */
     var homing: Int = -1,
     /** Thrower's team — the missile won't lock teammates. */
@@ -780,11 +788,16 @@ internal class ArenaSim(
             g.x += g.vx * dt; g.y += g.vy * dt; g.z += g.vz * dt
             val gy = map.heightAt(g.x, g.z)
             if (g.y < gy) {
-                g.y = gy; g.vy = -g.vy * 0.35f; g.vx *= 0.55f; g.vz *= 0.55f
-                g.bounces++
-                if (g.bounces >= 1) g.fuse = min(g.fuse, 0.6f)
+                if (g.sticky) {
+                    // Artillery: sticks where it lands and fuses out — no bounce.
+                    g.y = gy; g.vx = 0f; g.vy = 0f; g.vz = 0f
+                } else {
+                    g.y = gy; g.vy = -g.vy * 0.35f; g.vx *= 0.55f; g.vz *= 0.55f
+                    g.bounces++
+                    if (g.bounces >= 1) g.fuse = min(g.fuse, 0.6f)
+                }
             }
-            g.vx *= (1f - 1.2f * dt); g.vz *= (1f - 1.2f * dt)
+            if (!g.sticky) { g.vx *= (1f - 1.2f * dt); g.vz *= (1f - 1.2f * dt) }
             g.fuse -= dt
             if (g.fuse <= 0f) explode(g)
         }
@@ -1128,6 +1141,8 @@ internal class ArenaSim(
         val w = p.weapon
         // Launchers fire a warhead instead of a bullet.
         if (w == Weapon.ROCKET || w == Weapon.MISSILE) { launch(p, w == Weapon.ROCKET); return }
+        // Artillery: lobbed shells on a long fuse — area fire at positions, not people.
+        if (w == Weapon.MORTAR || w == Weapon.HOWITZER) { artillery(p, w == Weapon.HOWITZER); return }
         p.cooldown = w.interval
         p.shots++
         p.lastShotTime = time
@@ -1361,8 +1376,17 @@ internal class ArenaSim(
             return
         }
         val big = g.rocket || g.missile
-        val r = if (big) (if (g.rocket) 4.5f else 3.5f) else 4.6f
-        val dmg = if (big) (if (g.rocket) 140f else 120f) else 80f
+        val arty = g.type == GRENADE_ARTY
+        val r = when {
+            arty -> if (g.heavy) 7.5f else 6.0f // howitzer / mortar shells
+            big -> if (g.rocket) 5.5f else 3.5f
+            else -> 4.6f
+        }
+        val dmg = when {
+            arty -> if (g.heavy) 165f else 115f
+            big -> if (g.rocket) 165f else 120f
+            else -> 80f
+        }
         for (p in players.values) {
             if (!p.alive) continue
             val dx = p.pos.x - g.x; val dz = p.pos.z - g.z; val dy = p.pos.y + 1.0f - g.y
@@ -1397,6 +1421,26 @@ internal class ArenaSim(
         val g = Grenade(p.pos.x, p.pos.y + p.eyeHeight, p.pos.z, dx * speed, dy * speed, dz * speed,
             GRENADE_FRAG, rocket = rocket, missile = !rocket, homing = -1, life = 10f, team = p.team)
         grenades += g
+    }
+
+    /** Artillery: lobbed shells on a long fuse. The aim direction sets the
+     *  horizontal line of fire; the shell arcs high and sticks where it lands,
+     *  then fuses out — area fire against groups, cover and vehicles. */
+    private fun artillery(p: ArenaPlayer, heavy: Boolean) {
+        if (p.mags[p.active] <= 0) return
+        p.mags[p.active]--
+        p.cooldown = if (heavy) Weapon.HOWITZER.interval else Weapon.MORTAR.interval
+        p.shots++
+        p.lastShotTime = time
+        val cp = cos(p.pitch)
+        val dx = sin(p.yaw) * cp; val dz = cos(p.yaw) * cp
+        val speed = if (heavy) 34f else 30f
+        val up = if (heavy) 22f else 20f
+        val fuse = if (heavy) 3.4f else 2.8f
+        val g = Grenade(p.pos.x, p.pos.y + p.eyeHeight + 0.2f, p.pos.z, dx * speed, up, dz * speed,
+            GRENADE_ARTY, fuse = fuse, sticky = true, heavy = heavy, life = 10f, team = p.team)
+        grenades += g
+        events?.onShot(p, p.pos.x, p.pos.y + p.eyeHeight, p.pos.z, false)
     }
 
     /** Destroy a vehicle: the crew dies with it, and the wreck takes everything nearby with it. */
@@ -1507,6 +1551,7 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
     fun think(sim: ArenaSim, dt: Float) {
         val inp = p.input
         inp.jump = false; inp.reload = false; inp.slot = -1; inp.pickup = -1
+        inp.grenade = false; inp.smoke = false; inp.stun = false; inp.mount = false; inp.prone = false
         if (p.skydiving) {
             if (!hasGoal) pickGoal(sim)
             steerTo(goalX, goalZ, inp, 1f)
@@ -1529,6 +1574,13 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
         if (best != p.active && p.slots[best] != Weapon.PAN) inp.slot = best
         if (p.health < 55f && p.medkits > 0 && t == null) { inp.heal = true; inp.moveX = 0f; inp.moveY = 0f; inp.fire = false; return }
         inp.heal = false
+        // A nearby empty vehicle is worth boarding — mounted weapons and speed.
+        if (p.vehicle < 0 && p.slots.all { it == Weapon.PAN }) {
+            for (v in sim.vehicles) {
+                if (v.dead || v.driver >= 0) continue
+                if (MathX.length(v.x - p.pos.x, v.z - p.pos.z) < 3.2f) { inp.mount = true; break }
+            }
+        }
         if (t != null && t.alive && hasGun) {
             fight(sim, t, inp, dt)
             return
@@ -1587,14 +1639,25 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
         inp.ads = dist > 18f && w != Weapon.SHOTGUN
         val aligned = abs(MathX.angleDelta(p.yaw, wantYaw)) < 0.12f
         burst -= dt
-        if (reaction <= 0f && aligned && dist < w.range * 0.9f) {
+        if (reaction <= 0f && aligned && dist < fireRange(w)) {
             if (w.auto) {
                 if (burst <= -0.35f) burst = rng.range(0.25f, 0.7f)
                 inp.fire = burst > 0f
             } else inp.fire = rng.chance(0.5f)
         } else inp.fire = false
-        // Movement: strafe, keep a good distance for the weapon.
+        // Grenades: a target behind cover earns a frag; a bad trade earns a smoke screen.
+        val los = sim.lineOfSight(p, t)
+        if (!los && dist < 34f && p.grenades > 0 && rng.chance(0.02f + 0.03f * skill)) inp.grenade = true
+        if (p.health < 40f && dist > 30f && p.smokes > 0 && rng.chance(0.01f + 0.02f * skill)) inp.smoke = true
+        // Movement: strafe, keep a good distance for the weapon — and take cover
+        // when the shooter is already firing at us.
         strafeTimer -= dt
+        val underFire = sim.time - p.lastDamageTime < 2f && p.lastDamageFrom >= 0
+        if (underFire && dist < 40f) {
+            coverStrafe(inp, dt, dist)
+            if (dist > 24f && rng.chance(0.02f)) inp.jump = true
+            return
+        }
         if (strafeTimer <= 0f) { strafe = if (rng.chance(0.5f)) 1f else -1f; strafeTimer = rng.range(0.6f, 1.8f); inp.crouch = rng.chance(0.25f * skill) }
         val ideal = when (w) {
             Weapon.SHOTGUN -> 6f
@@ -1603,12 +1666,51 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
             Weapon.MARKSMAN -> 35f
             Weapon.REVOLVER -> 14f
             Weapon.LMG -> 25f
+            Weapon.ROCKET -> 25f
+            Weapon.MISSILE -> 30f
+            Weapon.MORTAR -> 50f
+            Weapon.HOWITZER -> 55f
             else -> 20f
         }
         inp.moveX = strafe * 0.8f
         inp.moveY = if (dist > ideal * 1.3f) 0.8f else if (dist < ideal * 0.6f) -0.6f else 0f
         if (p.mags[p.active] == 0) inp.reload = true
         if (rng.chance(0.004f + 0.01f * skill)) inp.jump = true
+    }
+
+    /** Effective engagement range per weapon — artillery shells fly far shorter
+     *  than their sight line, so the bot doesn't waste shells at 150 m. */
+    private fun fireRange(w: Weapon): Float = when (w) {
+        Weapon.MORTAR -> 70f
+        Weapon.HOWITZER -> 80f
+        Weapon.ROCKET -> 60f
+        Weapon.MISSILE -> 70f
+        Weapon.SHOTGUN -> 22f
+        Weapon.SMG -> 38f
+        Weapon.PISTOL -> 40f
+        Weapon.RIFLE -> 90f
+        Weapon.LMG -> 80f
+        Weapon.SNIPER -> 240f
+        Weapon.MARKSMAN -> 150f
+        Weapon.REVOLVER -> 70f
+        else -> w.range * 0.9f
+    }
+
+    /** Under fire: strafe sideways off the shooter's line — the classic escape
+     *  from a kill zone — and drop to a lower profile at close range. */
+    private fun coverStrafe(inp: PlayerInput, dt: Float, dist: Float) {
+        strafeTimer -= dt
+        if (strafeTimer <= 0f) {
+            strafe = if (rng.chance(0.5f)) 1f else -1f
+            strafeTimer = rng.range(0.4f, 1.2f)
+        }
+        val t = target
+        val dir = atan2(p.pos.x - (t?.pos?.x ?: p.pos.x), p.pos.z - (t?.pos?.z ?: p.pos.z))
+        val side = dir + MathX.HALF_PI * strafe
+        inp.moveX = 0f
+        inp.moveY = 0.85f
+        inp.yaw = MathX.lerpAngle(p.yaw, side, 0.25f)
+        inp.crouch = dist < 20f || rng.chance(0.3f)
     }
 
     private fun nearestUseful(sim: ArenaSim): Loot? {

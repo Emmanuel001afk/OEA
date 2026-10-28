@@ -69,11 +69,18 @@ Force's 105 mm gun-launched missile and ATGMs):
 
 | Weapon | How it works |
 |---|---|
-| **Rocket launcher** | Fires an unguided rocket at 55 m/s; explodes on contact with a 4.5 m splash (140 dmg falloff). Anti-vehicle tool — bullets glance off tanks, rockets wreck them. |
+| **Rocket launcher** | Fires an unguided rocket at 55 m/s; explodes on contact with a 5.5 m splash (165 dmg falloff). Anti-vehicle tool — bullets glance off tanks, rockets wreck them. |
 | **Guided missile** | The "tap to fire, it homes" missile: launch toward an enemy and it steers (up to 45 m/s) onto the nearest living target in front, re-locking if the target dies. 3.5 m splash (120 dmg). |
+| **Mortar** ‡ | Artillery: lobs a shell on a high arc (30 m/s, 20 m/s up), sticks where it lands and fuses out 2.8 s later. 6 m blast, 115 dmg. Area fire against groups, cover and vehicles — the aim sets the line, the shell lands ~60 m out. |
+| **Howitzer** ✶ | Heavy artillery: the 155 mm — a bigger, slower shell (34 m/s, 22 m/s up), 3.4 s fuse, 7.5 m blast, 165 dmg. 240 m sight line, 55 m engagement. |
 
-Both use special ammo (6 per pack), single-shot mags, and appear in the Clash
-Squad shop for $2,200 / $2,600.
+Both launchers use special ammo (6 per pack), single-shot mags, and appear in
+the Clash Squad shop for $2,200 / $2,600. The mortar and howitzer use heavy
+and special ammo respectively ($2,400 / $3,000).
+
+The tank's 105 mm cannon and the turret's missiles were rebalanced with the
+artillery: the cannon now blasts 5.5 m / 165 dmg — a real artillery piece, not
+a rattling pea-shooter.
 
 ## 6. Upgrades & enhancements
 
@@ -109,3 +116,28 @@ vehicle state for LAN play.
   side picker is the natural next step if players want to choose assault/defend).
 - Blood Strike's separate ranked ladders — ranking systems are out of scope.
 - Extraction (Hazard Operations) — a different game shape, not a mode variant.
+
+## 9. Bots & online play (2026-10-28)
+
+### Bots that know what to do
+- **Grenades**: a target behind cover earns a frag (within 34 m, 2–5% per
+  reaction); a bad trade — low health, enemy far — earns a smoke screen.
+- **Cover**: when shot at (last 2 s), the bot strafe-steps sideways off the
+  shooter's line and drops to a lower profile instead of walking in the open.
+- **Vehicles**: a bot with no gun boards the nearest free vehicle (3.2 m).
+- **Artillery**: mortar/howitzer engagement ranges (70/80 m) stop the bot
+  wasting shells at the sight line's 240 m.
+- **Aim**: reaction, burst control, strafe cadence and per-weapon ideal
+  distances unchanged and re-tuned for the new launchers.
+
+### The invitation process, fixed
+The old flow made the invitee host their own session and exchange reply codes
+like a vote — the new flow is one screen each:
+- **Host**: the invite sheet shows the code **and a QR**, with Paste and Scan
+  buttons for the friend's reply (camera scanner with torch, or a picture).
+- **Friend**: entering the host's code opens a single "You're invited" screen
+  with the reply code as **QR + text**, Copy and Share — one tap to send back.
+  Live status ("Waiting for the host…" → connected) replaces the old
+  code-in-a-lobby-text hack.
+- The friend is handed back to the lobby the moment the connection lands, and
+  the host's Connect validates the reply before accepting.

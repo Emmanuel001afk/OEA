@@ -1366,11 +1366,13 @@ class OeaArena : OeaGame() {
         val side = MathX.lerp(0.62f, sideAds, adsBlend)
         val cp = cos(sightPitch)
         val lx = fx * cp; val ly = sin(sightPitch); val lz = fz * cp
-        // Weapon bob: still hands when standing, a live body when moving.
+        // Weapon bob: still hands when standing, a live body when moving —
+        // but the sights settle when the weapon is aimed.
         val mov = joystick.magnitude
         val t = ctx.time.elapsed.toFloat()
-        val bobY = sin(t * 9f) * 0.05f * mov
-        val bobX = cos(t * 4.5f) * 0.035f * mov
+        val bobScale = (1f - adsBlend * 0.8f) * (1f - (me?.spread ?: 0f) * 0.5f)
+        val bobY = sin(t * 9f) * 0.05f * mov * bobScale
+        val bobX = cos(t * 4.5f) * 0.035f * mov * bobScale
         var cx = px + rx * side - lx * back + bobX
         var cy = eyeY + 0.3f - ly * back + bobY
         var cz = pz + rz * side - lz * back
@@ -1848,6 +1850,14 @@ class OeaArena : OeaGame() {
                 mb.withTransform(Mat4().setTRS(0f, 0.03f, 0.5f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.05f, 0.26f, 12) }
                 mb.withTransform(Mat4().setTRS(0f, 0.07f, 0.24f, pitch = MathX.HALF_PI)) { cone(0f, 0f, 0f, 0.05f, 0.14f, 12) }
                 mb.box(0f, -0.13f, 0.17f, 0.08f, 0.14f, 0.1f); mb.box(0f, -0.05f, -0.32f, 0.09f, 0.15f, 0.19f) }
+            Weapon.MORTAR -> { mb.box(0f, -0.16f, 0f, 0.34f, 0.1f, 0.34f)
+                mb.withTransform(Mat4().setTRS(0f, -0.06f, 0.22f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.09f, 0.62f, 14) }
+                mb.withTransform(Mat4().setTRS(0f, 0.02f, 0.55f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.1f, 0.06f, 14) }
+                mb.box(0f, -0.24f, 0.18f, 0.3f, 0.07f, 0.3f) }
+            Weapon.HOWITZER -> { mb.box(0f, -0.14f, 0f, 0.3f, 0.1f, 0.3f)
+                mb.withTransform(Mat4().setTRS(0f, -0.05f, 0.24f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.09f, 0.78f, 14) }
+                mb.withTransform(Mat4().setTRS(0f, 0.02f, 0.62f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.11f, 0.09f, 14) }
+                mb.box(0f, -0.21f, 0.2f, 0.28f, 0.08f, 0.28f); mb.box(0f, -0.17f, -0.22f, 0.14f, 0.16f, 0.22f) }
         }
         mb.build()
     }
