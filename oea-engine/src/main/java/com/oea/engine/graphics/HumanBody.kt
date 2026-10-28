@@ -47,9 +47,9 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         const val THIGH_R = 16; const val SHIN_R = 17; const val FOOT_R = 18
 
         const val WHITE = Colors.WHITE
-        const val EYE = 0xFF1E1610
-        const val MOUTH = 0xFF8A4A3A
-        const val SCAR = 0xFF5A2A20
+        const val EYE = 0xFF1E1610.toInt()
+        const val MOUTH = 0xFF8A4A3A.toInt()
+        const val SCAR = 0xFF5A2A20.toInt()
     }
 
     init {
@@ -96,7 +96,7 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         brows = buildBrows(eyeSp, browR)
         shirt = buildShirt(topPart, chestK, shoulderK, waistK, hipK)
         pants = buildPants(bottomPart, hipK, limbT)
-        hair = buildHair(hairStyle, hairColor, faceW, faceL, browR, eyeSp, jawW, form?.facialHair ?: 0f)
+        hair = buildHair(hairStyle, hairColor, faceW, faceL, browR, eyeSp, jawW, (form?.facialHair ?: 0).toFloat())
         shoes = buildShoes(limbT)
         outer = buildOuter(outerPart, chestK, shoulderK, waistK, hipK)
         headwear = buildHeadwear(headwearId)
@@ -321,7 +321,7 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         }
         // warpaint streaks
         if ((form?.warpaint ?: 0f) > 0.05f) {
-            val wc = form?.paintColor ?: 0xFFB04030
+            val wc = form?.paintColor ?: 0xFFB04030.toInt()
             partialSphere(g, 0.088f, 1.585f, 0.092f, 0.013f, 0.05f, 0.008f, 6, 4, HEAD, wc)
             partialSphere(g, -0.088f, 1.585f, 0.092f, 0.013f, 0.05f, 0.008f, 6, 4, HEAD, wc)
         }
