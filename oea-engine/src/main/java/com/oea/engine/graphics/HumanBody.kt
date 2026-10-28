@@ -47,9 +47,9 @@ class HumanBody(spec: CharSpec?, feminine: Boolean, hairStyle: Int) {
         const val THIGH_R = 16; const val SHIN_R = 17; const val FOOT_R = 18
 
         const val WHITE = Colors.WHITE
-        const val EYE = 0xFF1E1610.toInt()
-        const val MOUTH = 0xFF8A4A3A.toInt()
-        const val SCAR = 0xFF5A2A20.toInt()
+        private val EYE = 0xFF1E1610.toInt()
+        private val MOUTH = 0xFF8A4A3A.toInt()
+        private val SCAR = 0xFF5A2A20.toInt()
     }
 
     init {
