@@ -168,9 +168,9 @@ class OeaArena : OeaGame() {
 
     private fun saveButtonLayout() {
         for ((b, key) in controlButtons) {
-            ctx.storage.putFloat("btn_$key_x", b.anchorX)
-            ctx.storage.putFloat("btn_$key_y", b.anchorY)
-            ctx.storage.putFloat("btn_$key_r", b.radiusDp)
+            ctx.storage.putFloat("btn_${key}_x", b.anchorX)
+            ctx.storage.putFloat("btn_${key}_y", b.anchorY)
+            ctx.storage.putFloat("btn_${key}_r", b.radiusDp)
         }
         ctx.storage.putInt("ads_hold", if (adsHoldMode) 1 else 0)
     }
@@ -283,7 +283,7 @@ class OeaArena : OeaGame() {
     private val tracerMat = Material(color = 0xFFFFE6A0.toInt(), emissive = 0xFFFFD27A.toInt(), emissiveStrength = 3f, unlit = true, additive = true, transparent = true, depthWrite = false, castShadows = false, fog = false)
     private val zoneMat = Material(color = 0x663FA9FF, emissive = 0xFF3FA9FF.toInt(), emissiveStrength = 0.85f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
     /** The glowing ground line where the zone boundary meets the terrain. */
-    private val zoneRingMat = Material(color = 0x999FEBFF, emissive = 0xFFBFF2FF.toInt(), emissiveStrength = 1.1f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
+    private val zoneRingMat = Material(color = 0x999FEBFF.toInt(), emissive = 0xFFBFF2FF.toInt(), emissiveStrength = 1.1f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
     /** Faint ring showing where the zone is shrinking to. */
     private val zoneTargetMat = Material(color = 0x333FA9FF, emissive = 0xFF3FA9FF.toInt(), emissiveStrength = 0.35f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
     /** Sick-green aura on the undead in Haunted. */
@@ -511,9 +511,9 @@ class OeaArena : OeaGame() {
         look.maxDeltaPx = 420f // only absurd pointer-resync jumps are discarded
         // Controls: the saved button layout and the ADS tap/hold mode.
         for ((b, key) in controlButtons) {
-            b.anchorX = ctx.storage.getFloat("btn_$key_x", b.anchorX)
-            b.anchorY = ctx.storage.getFloat("btn_$key_y", b.anchorY)
-            b.radiusDp = ctx.storage.getFloat("btn_$key_r", b.radiusDp)
+            b.anchorX = ctx.storage.getFloat("btn_${key}_x", b.anchorX)
+            b.anchorY = ctx.storage.getFloat("btn_${key}_y", b.anchorY)
+            b.radiusDp = ctx.storage.getFloat("btn_${key}_r", b.radiusDp)
         }
         adsHoldMode = ctx.storage.getInt("ads_hold", 0) == 1
         xpTotal = ctx.storage.getInt("xp")
@@ -914,7 +914,7 @@ class OeaArena : OeaGame() {
             val id = r.u8(); val dead = r.u8() != 0
             val x = r.f32(); val y = r.f32(); val z = r.f32(); val yaw = r.angle()
             val health = r.f32(); val driver = r.u8().let { if (it == 255) -1 else it }; val kind = r.u8()
-            val v = sim.vehicles.getOrPut(id) { com.oea.games.arena.Vehicle(id, x, y, z, yaw, kind, 2.4f, 300f, 12f) }
+            val v = sim.vehicles.firstOrNull { it.id == id } ?: com.oea.games.arena.Vehicle(id, x, y, z, yaw, kind, 2.4f, 300f, 12f).also { sim.vehicles.add(it) }
             v.x = x; v.y = y; v.z = z; v.yaw = yaw; v.health = health; v.driver = driver; v.dead = dead
         }
         @Suppress("UNUSED_VARIABLE") val unused = time
@@ -1346,7 +1346,7 @@ class OeaArena : OeaGame() {
         else { yaw = lookYaw; pitch = MathX.clamp(lookPitch, -0.6f, 0.6f) }
         // Recoil rise, the reload dip and the switch jolt reshape the sight
         // picture without touching the input — the crosshair stays glued to shots.
-        val kick = recoilPitch + switchDip + if (me?.reloadLeft > 0f) 0.1f else 0f
+        val kick = recoilPitch + switchDip + if ((me?.reloadLeft ?: 0f) > 0f) 0.1f else 0f
         val sightPitch = pitch + kick
         val skydive = me?.skydiving == true && me.alive
         val ads = adsOn && me?.alive == true && !skydive
@@ -1595,19 +1595,20 @@ class OeaArena : OeaGame() {
             else MenuItem("up$slot", "Upgrade ${w.label} · lv ${lv}→${lv + 1}/$UP_MAX · $${sim.upgradeCost(me, w)}")
         }
         items += MenuItem("deploy", "Deploy to round ${sim.round}")
-        ctx.ui.menu("Send Off · Shop", "Cash $${me.cash} · round ${sim.round}", items) { id ->
+        ctx.ui.menu("Send Off · Shop", "Cash ${me.cash} · round ${sim.round}", items) { id ->
+            if (id == null) return@menu
             when (id) {
                 "deploy" -> { shopOpen = false; pendingDeploy = true }
                 else -> {
                     when {
                         id.startsWith("buy") -> pendingBuySlot = id.removePrefix("buy").toInt()
                         id.startsWith("up") -> pendingBuyUpSlot = id.removePrefix("up").toInt()
-                        "medkit" -> pendingBuyMedkits = 1
-                        "frag" -> pendingBuyFrags = 1
-                        "smoke" -> pendingBuySmokes = 1
-                        "stun" -> pendingBuyStuns = 1
-                        "vest" -> pendingBuyVest = 1
-                        "helmet" -> pendingBuyHelmet = 1
+                        id == "medkit" -> pendingBuyMedkits = 1
+                        id == "frag" -> pendingBuyFrags = 1
+                        id == "smoke" -> pendingBuySmokes = 1
+                        id == "stun" -> pendingBuyStuns = 1
+                        id == "vest" -> pendingBuyVest = 1
+                        id == "helmet" -> pendingBuyHelmet = 1
                     }
                     openShop() // refresh — the cash and kit change
                 }
@@ -1624,6 +1625,7 @@ class OeaArena : OeaGame() {
         }
         items += MenuItem("deploy", "Deploy to round ${sim.round}")
         ctx.ui.menu("Send Off · Lone Wolf", "Choose your weapon (rounds ${sim.round}, ${sim.round + 1})", items) { id ->
+            if (id == null) return@menu
             when (id) {
                 "deploy" -> { shopOpen = false; pendingDeploy = true }
                 else -> { pendingBuySlot = id.removePrefix("pick").toInt(); openWolfPick() }
@@ -1937,8 +1939,8 @@ class OeaArena : OeaGame() {
             skyRig.drawSkinned(
                 r, x, y, z, yaw, rigPose, vscale, fx,
                 vest = armor > 0,
-                helmet = helmet > 0 || sim.teams || (skyRig.spec != null && skyRig.spec.outfit.headwear.partId != "none"),
-                pack = skyRig.pack != null || (skyRig.spec != null && skyRig.spec.outfit.back.partId != "none"),
+                helmet = helmet > 0 || sim.teams || (skyRig.spec?.outfit?.headwear?.partId?.let { it != "none" } == true),
+                pack = skyRig.spec?.outfit?.back?.partId?.let { it != "none" } == true,
                 lod = lod,
             )
             return
@@ -1971,8 +1973,8 @@ class OeaArena : OeaGame() {
         rig.drawSkinned(
             r, x, bodyY, z, yaw, rigPose, vscale * (if (prone) 0.92f else 1f), fx,
             vest = armor > 0,
-            helmet = helmet > 0 || sim.teams || (rig.spec != null && rig.spec.outfit.headwear.partId != "none"),
-            pack = rig.pack != null || (rig.spec != null && rig.spec.outfit.back.partId != "none"),
+            helmet = helmet > 0 || sim.teams || (rig.spec?.outfit?.headwear?.partId?.let { it != "none" } == true),
+            pack = rig.spec?.outfit?.back?.partId?.let { it != "none" } == true,
             lod = lod,
         )
         val hip = bodyY + (if (prone) 0.42f else if (crouch) 0.55f else 0.9f) * vscale
@@ -2098,9 +2100,9 @@ class OeaArena : OeaGame() {
         adsBtn.highlight = adsOn; crouchBtn.highlight = crouchOn
         reloadBtn.progress = if (me.reloadLeft > 0f) 1f - me.reloadLeft / me.weapon.reload.coerceAtLeast(0.1f) else -1f
         healBtn.label = "+${me.medkits}"
-        for ((b, _) in controlButtons) b.draw(b, hud.fontBold, hud.density)
+        for ((button, _) in controlButtons) button.draw(b, hud.fontBold, hud.density)
         if (controlsOpen) {
-            for (b in listOf(ctrlDone, ctrlReset, ctrlAds)) b.draw(b, hud.fontBold, hud.density)
+            for (button in listOf(ctrlDone, ctrlReset, ctrlAds)) button.draw(b, hud.fontBold, hud.density)
             hud.text("CONTROLS · drag any button to move it", hud.width / 2f, hud.safeTop + hud.dp(48f), 16f, 0xFFFFFFFF.toInt(), align = Align.CENTER, bold = true)
             hud.text("RESET restores the factory layout · ADS sets tap or hold aim", hud.width / 2f, hud.safeTop + hud.dp(74f), 13f, 0xBFFFFFFFu.toInt(), align = Align.CENTER)
         }
@@ -2312,8 +2314,13 @@ class OeaArena : OeaGame() {
     private fun drawTeammates(hud: Hud, me: ArenaPlayer) {
         if (!sim.teams) return
         val d = hud.density
-        val list = if (isAuthority) sim.players.values.filter { it.team == me.team && it.id != me.id && it.alive }
-            else actors.values.filter { it.team == me.team && it.id != localId && it.alive }
+        val list = if (isAuthority) {
+            sim.players.values.filter { it.team == me.team && it.id != me.id && it.alive }
+                .map { Triple(it.id, it.name, it.health.toFloat()) }
+        } else {
+            actors.values.filter { it.team == me.team && it.id != localId && it.alive }
+                .map { Triple(it.id, it.name, it.health.toFloat()) }
+        }
         if (list.isEmpty()) return
         val bw = 120f * d; val bh = 14f * d
         val gap = 8f * d
@@ -2322,10 +2329,10 @@ class OeaArena : OeaGame() {
         val y = hud.height - hud.safeBottom - bh - 6f * d
         for (t in list) {
             hud.panel(x, y, bw, bh, 0x80101418.toInt(), 6f)
-            val name = if (isAuthority) t.name else nameOfId(t.id)
+            val name = if (isAuthority) t.second else nameOfId(t.first)
             hud.text(name.take(8), x + 8f * d, y + 3f * d, 10f, 0xCCFFFFFF.toInt(), bold = true, shadow = false)
-            hud.bar(x + 8f * d, y + 8f * d, bw - 16f * d, 4f * d, MathX.clamp01(t.health / 100f),
-                if (t.health < 30f) 0xFFFF5252.toInt() else 0xFF64B5F6.toInt())
+            hud.bar(x + 8f * d, y + 8f * d, bw - 16f * d, 4f * d, MathX.clamp01(t.third / 100f),
+                if (t.third < 30f) 0xFFFF5252.toInt() else 0xFF64B5F6.toInt())
             x += bw + gap
         }
     }

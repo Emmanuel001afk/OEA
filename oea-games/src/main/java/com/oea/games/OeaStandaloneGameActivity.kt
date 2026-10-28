@@ -6,6 +6,7 @@ import android.app.Dialog
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Build
@@ -16,7 +17,7 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
-import android.view.FrameLayout
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -719,7 +720,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
                     toast(err)
                     if (lobbyStatus == null) showLobby(joined = true, extra = err) else refreshLobby(err)
                 } else if (code != null) {
-                    showReplySheet(s, code)
+                    NetSession.current?.let { showReplySheet(it, code) }
                 }
             }
         }

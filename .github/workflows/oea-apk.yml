@@ -9,8 +9,10 @@ permissions:
 # Serialize release publication: rapid pushes must not concurrently delete/upload
 # the same OEA-latest.apk asset, which can produce uploads.github.com 404s.
 concurrency:
-  group: oea-apk-release
-  cancel-in-progress: false
+  # Keep main/release publication serialized, but cancel obsolete runs of the same PR
+  # so a stale compiler job cannot block validation of the newest fix commit.
+  group: oea-apk-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
   push:
