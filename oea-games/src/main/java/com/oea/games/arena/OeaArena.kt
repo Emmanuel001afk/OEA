@@ -130,6 +130,61 @@ class OeaArena : OeaGame() {
     private val smokeBtn = VirtualButton(0.38f, 0.92f, radiusDp = 28f, label = "SMK", color = 0xFF9E9E9E.toInt())
     /** Mount / dismount a vehicle (Warfare). */
     private val mountBtn = VirtualButton(0.12f, 0.92f, radiusDp = 28f, label = "MOUNT", color = 0xFF66BB6A.toInt())
+    /** Sprint: hold to run — the walk/run split players keep asking for. */
+    private val sprintBtn = VirtualButton(0.93f, 0.88f, radiusDp = 28f, label = "SPRINT", color = 0xFFFFB300.toInt())
+    /** Prone: hold to lie flat — alongside the long-crouch toggle. */
+    private val proneBtn = VirtualButton(0.83f, 0.9f, radiusDp = 28f, label = "PRONE", color = 0xFF7E57C2.toInt())
+    /** Controls screen: DONE commits & plays, RESET restores the factory layout,
+     *  ADS toggles tap vs hold aim. Drawn at the top of the screen. */
+    private val ctrlDone = VirtualButton(0.74f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "DONE", color = 0xFF66BB6A.toInt())
+    private val ctrlReset = VirtualButton(0.58f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "RESET", color = 0xFFFF7043.toInt())
+    private val ctrlAds = VirtualButton(0.42f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "ADS · TAP", color = 0xFFFFB300.toInt())
+    /** Every control button, in one place — the layout screen saves them all. */
+    private val controlButtons: List<Pair<VirtualButton, String>> get() = listOf(
+        fire to "fire", fire2 to "fire2", adsBtn to "ads", jumpBtn to "jump", crouchBtn to "crouch",
+        reloadBtn to "reload", healBtn to "heal", pickupBtn to "pickup", stunBtn to "stun",
+        fragBtn to "frag", smokeBtn to "smoke", mountBtn to "mount", sprintBtn to "sprint", proneBtn to "prone",
+    )
+    /** ADS sensitivity mode: true = hold the button, false = tap-toggle. */
+    private var adsHoldMode = false
+    /** The controls screen: drag buttons to taste, DONE to play. */
+    private var controlsOpen = false
+
+    /** Default button anchors — the factory layout for RESET in the controls screen. */
+    private val btnDefaults: Map<String, FloatArray> = mapOf(
+        "fire" to floatArrayOf(0.86f, 0.7f), "fire2" to floatArrayOf(0.1f, 0.36f),
+        "ads" to floatArrayOf(0.75f, 0.52f), "jump" to floatArrayOf(0.93f, 0.46f),
+        "crouch" to floatArrayOf(0.95f, 0.78f), "reload" to floatArrayOf(0.74f, 0.78f),
+        "heal" to floatArrayOf(0.55f, 0.8f), "pickup" to floatArrayOf(0.6f, 0.62f),
+        "stun" to floatArrayOf(0.22f, 0.92f), "frag" to floatArrayOf(0.3f, 0.92f),
+        "smoke" to floatArrayOf(0.38f, 0.92f), "mount" to floatArrayOf(0.12f, 0.92f),
+        "sprint" to floatArrayOf(0.93f, 0.88f), "prone" to floatArrayOf(0.83f, 0.9f),
+    )
+    private val btnDefaultRadius: Map<String, Float> = mapOf(
+        "fire" to 44f, "fire2" to 30f, "ads" to 27f, "jump" to 27f, "crouch" to 24f,
+        "reload" to 24f, "heal" to 23f, "pickup" to 30f, "stun" to 28f, "frag" to 28f,
+        "smoke" to 28f, "mount" to 28f, "sprint" to 28f, "prone" to 28f,
+    )
+
+    private fun saveButtonLayout() {
+        for ((b, key) in controlButtons) {
+            ctx.storage.putFloat("btn_$key_x", b.anchorX)
+            ctx.storage.putFloat("btn_$key_y", b.anchorY)
+            ctx.storage.putFloat("btn_$key_r", b.radiusDp)
+        }
+        ctx.storage.putInt("ads_hold", if (adsHoldMode) 1 else 0)
+    }
+
+    private fun resetButtonLayout() {
+        for ((b, key) in controlButtons) {
+            val d = btnDefaults[key]
+            if (d != null) {
+                b.anchorX = d[0]; b.anchorY = d[1]
+            }
+            b.radiusDp = btnDefaultRadius[key] ?: 28f
+        }
+        saveButtonLayout()
+    }
     private var lookYaw = 0f
     private var lookPitch = 0f
     private var adsOn = false
@@ -454,6 +509,13 @@ class OeaArena : OeaGame() {
         invertY = ctx.settings.invertLookY
         turnLimit = ctx.settings.turnSpeedLimit * MathX.DEG_TO_RAD
         look.maxDeltaPx = 420f // only absurd pointer-resync jumps are discarded
+        // Controls: the saved button layout and the ADS tap/hold mode.
+        for ((b, key) in controlButtons) {
+            b.anchorX = ctx.storage.getFloat("btn_$key_x", b.anchorX)
+            b.anchorY = ctx.storage.getFloat("btn_$key_y", b.anchorY)
+            b.radiusDp = ctx.storage.getFloat("btn_$key_r", b.radiusDp)
+        }
+        adsHoldMode = ctx.storage.getInt("ads_hold", 0) == 1
         xpTotal = ctx.storage.getInt("xp")
         levelBefore = levelFor(xpTotal)
         levelNow = levelBefore
@@ -603,7 +665,7 @@ class OeaArena : OeaGame() {
                 prev.getOrPut(localId) { FloatArray(3) }.let { it[0] = me.pos.x; it[1] = me.pos.y; it[2] = me.pos.z }
                 sim.move(me, inputNow, dt)
                 history.push(inputNow.seq, floatArrayOf(me.pos.x, me.pos.y, me.pos.z, inputNow.moveX, inputNow.moveY, inputNow.yaw, inputNow.pitch,
-                    if (inputNow.crouch) 1f else 0f, if (inputNow.jump) 1f else 0f, if (inputNow.ads) 1f else 0f))
+                    if (inputNow.crouch) 1f else 0f, if (inputNow.jump) 1f else 0f, if (inputNow.ads) 1f else 0f, if (inputNow.sprint) 1f else 0f))
             }
             sendCommand(inputNow)
         }
@@ -646,13 +708,25 @@ class OeaArena : OeaGame() {
             inp.pitch = aim[1]
             return
         }
+        // Controls screen: the soldier stands still while the layout is being set.
+        if (controlsOpen) {
+            inp.moveX = 0f; inp.moveY = 0f
+            inp.fire = false; inp.ads = false; inp.jump = false; inp.crouch = false
+            inp.reload = false; inp.slot = -1; inp.heal = false; inp.pickup = -1
+            inp.grenade = false; inp.smoke = false; inp.stun = false; inp.cook = 0f
+            inp.prone = false; inp.reloadAll = false; inp.sprint = false; inp.mount = false
+            if (me != null) aimAngles(me, aim) else { aim[0] = lookYaw; aim[1] = lookPitch }
+            inp.yaw = aim[0]
+            inp.pitch = aim[1]
+            return
+        }
         inp.moveX = joystick.value.x
         inp.moveY = joystick.value.y
         if (me != null) aimAngles(me, aim) else { aim[0] = lookYaw; aim[1] = lookPitch }
         inp.yaw = aim[0]
         inp.pitch = aim[1]
         inp.fire = fire.pressed || fire2.pressed
-        inp.ads = adsOn
+        inp.ads = adsOn || (adsHoldMode && adsBtn.pressed)
         inp.jump = jumpLatch
         inp.crouch = crouchOn
         inp.reload = reloadLatch
@@ -665,7 +739,8 @@ class OeaArena : OeaGame() {
         inp.smoke = grenadeLatch == 1
         inp.stun = grenadeLatch == 2
         inp.cook = cookAmount
-        inp.prone = proneOn
+        inp.prone = proneOn || proneBtn.pressed
+        inp.sprint = sprintBtn.pressed
         inp.reloadAll = pendingReloadAll
         pendingReloadAll = false
         inp.buySlot = pendingBuySlot; inp.buyMedkits = pendingBuyMedkits; inp.buyFrags = pendingBuyFrags
@@ -684,7 +759,7 @@ class OeaArena : OeaGame() {
         val w = ByteWriter(24)
         w.u16(inp.seq).q8(inp.moveX, -1f, 1f).q8(inp.moveY, -1f, 1f).angle(inp.yaw).q16(inp.pitch, -1.3f, 1.3f)
             .u8((if (inp.fire) 1 else 0) or (if (inp.ads) 2 else 0) or (if (inp.jump) 4 else 0) or (if (inp.crouch) 8 else 0) or (if (inp.reload) 16 else 0) or (if (inp.heal) 32 else 0) or (if (inp.grenade) 64 else 0) or (if (inp.smoke) 128 else 0))
-            .u8((if (inp.stun) 1 else 0) or (if (inp.reloadAll) 2 else 0) or (if (inp.prone) 4 else 0) or (if (inp.mount) 8 else 0) or (if (inp.advancePrep) 16 else 0))
+            .u8((if (inp.stun) 1 else 0) or (if (inp.reloadAll) 2 else 0) or (if (inp.prone) 4 else 0) or (if (inp.mount) 8 else 0) or (if (inp.advancePrep) 16 else 0) or (if (inp.sprint) 32 else 0))
             .u8(if (inp.slot in 0..1) inp.slot else 255).varint(inp.pickup + 1)
             .u8(if (inp.buySlot >= 0) inp.buySlot else 255).u8(inp.buyMedkits).u8(inp.buyFrags).u8(inp.buySmokes).u8(inp.buyStuns).u8(inp.buyVest).u8(inp.buyHelmet).u8(if (inp.buyUpSlot >= 0) inp.buyUpSlot else 255).u8(if (inp.deployRound) 1 else 0)
         sentCmds.addLast(w.toByteArray())
@@ -746,7 +821,7 @@ class OeaArena : OeaGame() {
                         inp.fire = b and 1 != 0; inp.ads = b and 2 != 0; inp.jump = b and 4 != 0; inp.crouch = b and 8 != 0; inp.reload = b and 16 != 0; inp.heal = b and 32 != 0
                         inp.grenade = b and 64 != 0; inp.smoke = b and 128 != 0
                         val b2 = r.u8()
-                        inp.stun = b2 and 1 != 0; inp.reloadAll = b2 and 2 != 0; inp.prone = b2 and 4 != 0; inp.mount = b2 and 8 != 0; inp.advancePrep = b2 and 16 != 0
+                        inp.stun = b2 and 1 != 0; inp.reloadAll = b2 and 2 != 0; inp.prone = b2 and 4 != 0; inp.mount = b2 and 8 != 0; inp.advancePrep = b2 and 16 != 0; inp.sprint = b2 and 32 != 0
                         inp.slot = r.u8().let { if (it == 255) -1 else it }
                         inp.pickup = r.varint() - 1
                         inp.buySlot = r.u8().let { if (it == 255) -1 else it }
@@ -873,6 +948,7 @@ class OeaArena : OeaGame() {
                 history.forEachPending { _, st ->
                     replay.moveX = st[3]; replay.moveY = st[4]; replay.yaw = st[5]; replay.pitch = st[6]
                     replay.crouch = st[7] > 0.5f; replay.jump = st[8] > 0.5f; replay.ads = st[9] > 0.5f
+                    replay.sprint = st[10] > 0.5f
                     sim.move(me, replay, 1f / fixedStepHz)
                 }
             }
@@ -1047,10 +1123,33 @@ class OeaArena : OeaGame() {
         // In the Character Studio the game controls stand down completely so
         // every tap lands on the studio overlay instead of the fire button.
         val controlsPaused = studio.open
-        for (b in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, stunBtn, fragBtn, smokeBtn)) {
-            b.enabled = alive
-            b.paused = controlsPaused
+        for ((b, _) in controlButtons) {
+            b.enabled = alive || controlsOpen // the layout screen stays draggable while dead
+            b.paused = controlsPaused && !controlsOpen
             b.update(ctx.input, w, h, d, sl, sr)
+        }
+        // Controls screen: screen buttons update first (justPressed), then the
+        // drag handling reads the game buttons' per-frame drag delta (px).
+        for (b in listOf(ctrlDone, ctrlReset, ctrlAds)) {
+            b.paused = !controlsOpen
+            b.visible = controlsOpen
+            b.update(ctx.input, w, h, d, sl, sr)
+        }
+        if (controlsOpen) {
+            for ((b, _) in controlButtons) {
+                if (b.dragDx != 0f || b.dragDy != 0f) {
+                    b.anchorX = (b.anchorX + b.dragDx / w).coerceIn(0.04f, 0.96f)
+                    b.anchorY = (b.anchorY + b.dragDy / h).coerceIn(0.04f, 0.96f)
+                    saveButtonLayout()
+                }
+            }
+            if (ctrlDone.justPressed) controlsOpen = false
+            if (ctrlReset.justPressed) resetButtonLayout()
+            if (ctrlAds.justPressed) {
+                adsHoldMode = !adsHoldMode
+                ctrlAds.label = if (adsHoldMode) "ADS · HOLD" else "ADS · TAP"
+                saveButtonLayout()
+            }
         }
         // Throwable pack: the buttons carry their own counts.
         stunBtn.label = if ((me?.stuns ?: 0) > 0) "STUN ${me!!.stuns}" else "—"
@@ -1096,15 +1195,18 @@ class OeaArena : OeaGame() {
                 lookPitch = MathX.clamp(lookPitch - gpPitch, -1.2f, 1.1f)
             }
         }
-        if (adsBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) adsOn = !adsOn
-        if (crouchBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_C) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_B)) crouchOn = !crouchOn
-        if (jumpBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SPACE) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_A)) { jumpLatch = true; crouchOn = false }
-        if (reloadBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_R) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_X)) reloadLatch = true
-        if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_G) && me?.alive == true && !me.skydiving) grenadeLatch = 0
-        if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_H) && me?.alive == true && !me.skydiving) grenadeLatch = 1
-        if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_I) && me?.alive == true && !me.skydiving) grenadeLatch = 2
-        if (pickupBtn.justPressed && near != null) pickupLatch = near.id
-        if (mountBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_E) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) mountLatch = true
+        // All gameplay button state stands down while the controls screen is open —
+        // taps there move buttons, not the soldier.
+        if (!controlsOpen) {
+            if (adsBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) adsOn = !adsOn
+            if (crouchBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_C) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_B)) crouchOn = !crouchOn
+            if (jumpBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SPACE) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_A)) { jumpLatch = true; crouchOn = false }
+            if (reloadBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_R) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_X)) reloadLatch = true
+            if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_G) && me?.alive == true && !me.skydiving) grenadeLatch = 0
+            if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_H) && me?.alive == true && !me.skydiving) grenadeLatch = 1
+            if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_I) && me?.alive == true && !me.skydiving) grenadeLatch = 2
+            if (pickupBtn.justPressed && near != null) pickupLatch = near.id
+            if (mountBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_E) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) mountLatch = true
         // Frag: a tap throws on the normal fuse; holding cooks the fuse and the
         // throw fires on release with whatever is left — the pull-pin mechanic.
         if (fragBtn.pressed) {
@@ -1135,6 +1237,7 @@ class OeaArena : OeaGame() {
             proneOn = !proneOn
             if (proneOn) crouchOn = false
         }
+        } // !controlsOpen
         if (gp.justPressed(KeyEvent.KEYCODE_BUTTON_Y)) { slotLatch = 1 - (me?.active ?: 0); if (slotLatch >= 0) switchDip = 0.25f }
         if (me?.weapon == Weapon.PAN) adsOn = false
         if (me != null && me.alive && me.recoil != 0f) {
@@ -1366,6 +1469,7 @@ class OeaArena : OeaGame() {
             MenuItem("invert", "Invert look · " + if (invertY) "On" else "Off"),
             MenuItem("studio", "Character studio"),
             MenuItem("pack", "Pack · weapons & throwables"),
+            MenuItem("controls", "Controls · layout & buttons"),
             MenuItem("info", "Match & controls"),
             MenuItem("exit", if (net != null) "Leave match" else "Quit match", destructive = true),
         )
@@ -1398,6 +1502,10 @@ class OeaArena : OeaGame() {
                 }
                 "studio" -> studio.open = true
                 "pack" -> openPackMenu()
+                "controls" -> {
+                    ctrlAds.label = if (adsHoldMode) "ADS · HOLD" else "ADS · TAP"
+                    controlsOpen = true
+                }
                 "info" -> ctx.ui.menu("Match & controls", modeBlurb(), listOf(MenuItem("back", "Back"))) { openPauseMenu() }
                 "exit" -> {
                     ctx.storage.putInt("xp", xpTotal)
@@ -1980,7 +2088,12 @@ class OeaArena : OeaGame() {
         adsBtn.highlight = adsOn; crouchBtn.highlight = crouchOn
         reloadBtn.progress = if (me.reloadLeft > 0f) 1f - me.reloadLeft / me.weapon.reload.coerceAtLeast(0.1f) else -1f
         healBtn.label = "+${me.medkits}"
-        for (btn in listOf(fire, fire2, adsBtn, jumpBtn, crouchBtn, reloadBtn, healBtn, pickupBtn, stunBtn, fragBtn, smokeBtn, mountBtn)) btn.draw(b, hud.fontBold, hud.density)
+        for ((b, _) in controlButtons) b.draw(b, hud.fontBold, hud.density)
+        if (controlsOpen) {
+            for (b in listOf(ctrlDone, ctrlReset, ctrlAds)) b.draw(b, hud.fontBold, hud.density)
+            hud.text("CONTROLS · drag any button to move it", hud.width / 2f, hud.safeTop + hud.dp(48f), 16f, 0xFFFFFFFF.toInt(), align = Align.CENTER, bold = true)
+            hud.text("RESET restores the factory layout · ADS sets tap or hold aim", hud.width / 2f, hud.safeTop + hud.dp(74f), 13f, 0xBFFFFFFFu.toInt(), align = Align.CENTER)
+        }
         // Weapon slots (tap to switch), bottom-right.
         val d = hud.density
         val sw = 112f * d; val sh = 46f * d

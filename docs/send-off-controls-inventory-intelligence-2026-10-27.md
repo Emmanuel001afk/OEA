@@ -55,3 +55,39 @@ Send Off's controls and inventory.
 - Attachments (per-weapon stat pipeline — larger).
 - Perks / character skills (CoD/Free Fire loadout systems).
 - Ping system (needs squad net-sync surface).
+
+## 4. Controls overhaul (2026-10-28)
+
+The controls were fixed in layout and thin in actions. This pass makes them
+player-resettable and completes the movement set.
+
+### Layout, reset to one's liking
+- **Controls screen** (pause menu → "Controls · layout & buttons"): every button
+  is draggable — a held button moves with the finger (its own per-frame drag
+  delta), clamped to the screen. **DONE** returns to play, **RESET** restores the
+  factory layout, **ADS** switches tap vs hold aim.
+- The layout is **persisted** (per-button anchors + radius, ADS mode) — it
+  survives matches and reinstalls of the profile.
+- The screen runs with the match underneath, so it's safe to open any time.
+
+### More controls
+| Control | What it does |
+|---|---|
+| **SPRINT** (new button, hold) | Runs — the dedicated run input; works with the stick too |
+| **PRONE** (new button, hold) | Lies flat — alongside the long-crouch toggle and Z |
+| **ADS · TAP / HOLD** | Aim mode: tap-toggle (default) or hold-to-aim, player's choice |
+| MOUNT | Fixed: the button was drawn but never updated — touch was dead (E / gamepad Y still worked) |
+
+### Run and walk, not hop
+- Walk/run split widened and made explicit: walk 4.8 m/s, run 8.4 m/s (was
+  5.4 vs 7.0 with a stick-threshold gate). A jog now reads as a jog.
+- Gait rebalanced (CharRig): the vertical bob 0.055 → 0.035 and the lateral
+  sway 0.07 → 0.04 — the body stays planted; the legs carry the run.
+- Sprint never fires while aiming, crouching or prone; the stick's
+  full-deflection run keeps its no-fire rule.
+
+### Other areas
+The same "set it to your liking" philosophy now reaches the aim controls
+(sensitivity, ADS sensitivity, turn limit, invert — all persisted) and the
+controls screen itself is part of the pause menu alongside the pack and
+studio.

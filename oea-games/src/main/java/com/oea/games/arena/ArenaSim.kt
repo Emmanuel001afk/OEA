@@ -174,6 +174,8 @@ internal class PlayerInput {
     var cook = 0f
     /** Prone state (long-press crouch). */
     var prone = false
+    /** Sprint: hold to run (second flags byte, bit 5). */
+    var sprint = false
 
     /** One-shot: deploy the next round (the host starts it). */
     var deployRound = false
@@ -191,7 +193,7 @@ internal class PlayerInput {
     fun copyFrom(o: PlayerInput) {
         seq = o.seq; moveX = o.moveX; moveY = o.moveY; yaw = o.yaw; pitch = o.pitch; fire = o.fire; ads = o.ads
         jump = o.jump; crouch = o.crouch; reload = o.reload; slot = o.slot; heal = o.heal; pickup = o.pickup
-        grenade = o.grenade; smoke = o.smoke; stun = o.stun; cook = o.cook; prone = o.prone; reloadAll = o.reloadAll
+        grenade = o.grenade; smoke = o.smoke; stun = o.stun; cook = o.cook; prone = o.prone; reloadAll = o.reloadAll; sprint = o.sprint
         deployRound = o.deployRound; advancePrep = o.advancePrep
         buySlot = o.buySlot; buyMedkits = o.buyMedkits; buyFrags = o.buyFrags; buySmokes = o.buySmokes
         buyStuns = o.buyStuns; buyVest = o.buyVest; buyHelmet = o.buyHelmet
@@ -961,18 +963,23 @@ internal class ArenaSim(
         p.crouching = inp.crouch && !inp.prone
         p.prone = inp.prone
         p.aiming = inp.ads && p.weapon != Weapon.PAN
-        val sprint = my > 0.92f && !p.aiming && !p.crouching && !p.prone && !inp.fire
+        // Sprint: full stick deflection (not while firing) or the SPRINT button —
+        // held, never while aiming, crouched or prone.
+        val sprint = (my > 0.92f && !inp.fire) || inp.sprint
         // Heavier guns slow you down whether hip-firing, sprinting or aiming;
         // the held weapon is part of the movement balance, not only an ADS penalty.
         val weight = p.weapon.moveSpeed
         // A stun grenade's flash crawls the legs; prone is the slowest, steadiest stance.
+        // Walk and run are a wide, readable split (4.8 vs 8.4 m/s) — a jog reads as
+        // a jog, not a slightly-faster walk.
+        val sprinting = sprint && !p.aiming && !p.crouching && !p.prone
         val speed = when {
-            p.stunTimer > 0f -> (if (p.crouching) 2.6f else 5.4f) * weight * 0.45f
+            p.stunTimer > 0f -> (if (p.crouching) 2.6f else 4.8f) * weight * 0.45f
             p.prone -> 1.8f * weight
             p.crouching -> 2.6f * weight
             p.aiming -> 3.4f * weight
-            sprint -> 7.0f * weight
-            else -> 5.4f * weight
+            sprinting -> 8.4f * weight
+            else -> 4.8f * weight
         }
         p.ctrl.height = when {
             p.prone -> 0.65f

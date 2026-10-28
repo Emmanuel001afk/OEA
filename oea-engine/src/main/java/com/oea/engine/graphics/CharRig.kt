@@ -175,9 +175,9 @@ class CharRig(
         // Root position: hips sit lower when crouching, the run cycle adds a
         // double bounce, leaning banks the whole body sideways.
         val crouchK = if (p.crouch) 0.24f else 0f
-        val bob = if (p.airborne || p.crouch) 0f else sp * 0.055f * abs(cos(p.phase))
+        val bob = if (p.airborne || p.crouch) 0f else sp * 0.035f * abs(cos(p.phase))
         val hipY = y + (0.92f - crouchK) * s + bob * s
-        val roll = p.lean * 0.35f + (if (p.airborne) 0f else sp * 0.07f * sin(p.phase))
+        val roll = p.lean * 0.35f + (if (p.airborne) 0f else sp * 0.04f * sin(p.phase))
         val pitch = 0.10f * sp + (if (p.airborne) 0.18f else 0f) + (if (p.crouch) 0.30f else 0f)
         val leanX = roll * 0.30f * s
 
@@ -569,7 +569,7 @@ class CharRig(
         // Pose → skeleton. The pelvis rides the crouch/bob offset in local units;
         // the draw scale stretches it with the body.
         val crouchK = if (p.crouch) 0.22f else 0f
-        val bob = if (p.airborne || p.crouch) 0f else p.speed * 0.055f * abs(cos(p.phase))
+        val bob = if (p.airborne || p.crouch) 0f else p.speed * 0.035f * abs(cos(p.phase))
         skeleton.update(p.phase, p.speed, p.airborne, p.crouch, p.lean, p.aimHold, p.aimPitch, p.headYaw, bob - crouchK, p.reload)
         tmp.setPosYaw(x, y, z, yaw, scale)
         val bones = skeleton.matrices
