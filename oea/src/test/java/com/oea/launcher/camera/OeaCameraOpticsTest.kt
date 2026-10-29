@@ -76,7 +76,9 @@ class OeaCameraOpticsTest {
 
     @Test fun aspectSizeRespectsThePixelBudget() {
         val sizes = listOf(1920 to 1080, 3840 to 2160, 1280 to 720)
-        assertEquals(1280 to 720, OeaCameraOptics.bestAspectSize(sizes, 16f / 9f, maxPixels = 1920L * 1080L))
+        // The budget is inclusive: a 1080p buffer exactly fits, 4K does not.
+        assertEquals(1920 to 1080, OeaCameraOptics.bestAspectSize(sizes, 16f / 9f, maxPixels = 1920L * 1080L))
+        assertEquals(1280 to 720, OeaCameraOptics.bestAspectSize(sizes, 16f / 9f, maxPixels = 1920L * 1080L - 1))
         // "Full" means "the biggest the budget allows", not "no picture".
         assertEquals(1920 to 1080, OeaCameraOptics.bestAspectSize(sizes, 0f, maxPixels = 1920L * 1080L))
         assertNull(OeaCameraOptics.bestAspectSize(emptyList(), 4f / 3f))
