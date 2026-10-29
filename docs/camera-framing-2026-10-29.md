@@ -25,3 +25,7 @@ Additional fixes before PR:
 - PR workflow now runs the camera optics JVM suite before the APK build.
 
 Remaining verification limits: no local Android SDK/JDK or physical camera; static inspection is not a guarantee of zero issues. The five studio tools are implemented composition aids, not proven globally unprecedented inventions. Portrait remains conservative face-guided softening, not full human masking. Video uses hardware-supported recording sizes and is not post-cropped like still photos. Verify vendor HAL orientation/preview behavior and video framing on devices before release.
+
+## CI compatibility repairs
+
+The first actual unit-test compilation exposed pre-existing test drift: fault-policy tests still named the old `screenIsGame` argument, and two Java crypto tests referenced the removed OEA `AdbKeys`/`Spake2` implementations. Updated the argument name and removed those orphaned tests: production now delegates ADB identity/pairing to kadb, and neither old class exists in the source tree. The current `OeaWirelessPairingTest` remains in the full suite; no existing production class was restored or test task skipped. The CI camera guard now checks the single TextureView snapshot rather than requiring the obsolete double transform. Camera test failures also feed the existing log artifact/comment mechanism.
