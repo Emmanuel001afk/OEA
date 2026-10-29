@@ -72,6 +72,13 @@ object OeaCameraOptics {
     fun displayAspect(aspect: Float, rotationDegrees: Int): Float =
         if (aspect > 0f && (rotationDegrees == 90 || rotationDegrees == 270)) 1f / aspect else aspect
 
+    /** Output shape follows the window, not the sensor mounting or EXIF encoding. */
+    fun frameAspect(aspect: Float, portrait: Boolean): Float {
+        if (aspect <= 0f) return aspect
+        val wide = maxOf(aspect, 1f / aspect)
+        return if (portrait) 1f / wide else wide
+    }
+
     private fun normalize(degrees: Int): Int = ((degrees % 360) + 360) % 360
 
     /**
@@ -134,7 +141,7 @@ object OeaCameraOptics {
     fun cropRect(width: Int, height: Int, aspect: Float): IntArray {
         if (aspect <= 0f || width <= 0 || height <= 0) return intArrayOf(0, 0, width, height)
         val current = aspectOf(width, height)
-        if (kotlin.math.abs(current - aspect) < 0.01f) return intArrayOf(0, 0, width, height)
+        if (kotlin.math.abs(width - height * aspect) < 1f) return intArrayOf(0, 0, width, height)
         return if (current > aspect) {
             val croppedWidth = (height * aspect).toInt().coerceIn(1, width)
             val left = (width - croppedWidth) / 2

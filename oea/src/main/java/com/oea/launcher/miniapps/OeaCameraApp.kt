@@ -115,7 +115,7 @@ import java.util.concurrent.Executors
  *   instead of a black rectangle, and the torch is owned by [OeaTorch] like
  *   every other torch in OEA.
  *
- * Modes: Photo, Video, Portrait (focus-band blur), Night (shadow lift), Pro,
+ * Modes: Photo, Video, Portrait (face-guided softening), Night (shadow lift), Pro,
  * QR, Document, Time-lapse. Flash Auto/On/Off/Torch, timer 0–10 s, a real burst,
  * grid, aspect, filters, pinch and slider zoom, a captured-photo sheet with
  * Share / Edit in EMAGE / Night pass / face blur / background softening, and a
@@ -162,7 +162,6 @@ object OeaCameraApp {
         Thread(task, "OeaCameraDevelop").apply { isDaemon = true }
     }
 
-    private var focusBandY = 0.5f
 
     // ------------------------------------------------------------------ settings
 
@@ -226,7 +225,7 @@ object OeaCameraApp {
     enum class CaptureMode(val label: String, val desc: String) {
         PHOTO("Photo", "Standard capture · the contrast push is in settings"),
         VIDEO("Video", "Record with stabilization and mic control"),
-        PORTRAIT("Portrait", "Softens everything outside the band you focused on"),
+        PORTRAIT("Portrait", "Gentle face-guided softening · not depth segmentation"),
         NIGHT("Night", "Lifts shadows and calms colour noise in the dark"),
         PRO("Pro", "ISO, exposure, white balance, focus — as far as this lens obeys"),
         QR("QR", "Scan a QR code with OEA's own camera, or from a picture"),
@@ -482,12 +481,39 @@ object OeaCameraApp {
             // TextureView's opaque black fill hiding the intended preview.
             isOpaque = false
         }
-        root.addView(textureView, FrameLayout.LayoutParams(-1, -1))
+        root.addView(textureView, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        fun layoutViewfinder() {
+            if (root.width <= 0 || root.height <= 0) return
+            val ratio = OeaCameraOptics.frameAspect(aspect.ratio, root.height >= root.width)
+            val rect = OeaCameraOptics.cropRect(root.width, root.height, ratio)
+            val params = textureView.layoutParams as FrameLayout.LayoutParams
+            val width = rect[2] - rect[0]
+            val height = rect[3] - rect[1]
+            if (params.width != width || params.height != height) {
+                params.width = width
+                params.height = height
+                textureView.layoutParams = params
+            }
+        }
+        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutViewfinder() }
+
+        val studioOverlay = com.oea.launcher.camera.OeaFrameStudio(host)
+        var refreshStudio: () -> Unit = {}
         val gridOverlay = GridOverlayView(host, grid)
         // The preview is the sensor's full frame; the crop guide shows what the
         // chosen aspect will actually keep, so 1:1 is never a surprise.
-        gridOverlay.setAspect(aspect.ratio)
+        gridOverlay.setAspect(OeaCameraOptics.frameAspect(aspect.ratio, host.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE))
         root.addView(gridOverlay, FrameLayout.LayoutParams(-1, -1))
+        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            gridOverlay.setAspect(OeaCameraOptics.frameAspect(aspect.ratio, root.height >= root.width))
+        }
+        root.addView(studioOverlay, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        textureView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val params = studioOverlay.layoutParams as FrameLayout.LayoutParams
+            params.width = textureView.width
+            params.height = textureView.height
+            studioOverlay.layoutParams = params
+        }
         val filterOverlay = View(host).apply { alpha = 0f }
         root.addView(filterOverlay, FrameLayout.LayoutParams(-1, -1))
         val focusView = View(host).apply {
@@ -574,7 +600,7 @@ object OeaCameraApp {
                     statusView.visibility = View.VISIBLE
                 }
             },
-            onReady = { onViewfinderOpen(host) }
+            onReady = { onViewfinderOpen(host); refreshStudio() }
         )
 
         retryAction = { cameraHelper.retry() }
@@ -636,20 +662,15 @@ object OeaCameraApp {
                 MotionEvent.ACTION_DOWN -> pinching = false
                 MotionEvent.ACTION_POINTER_DOWN -> pinching = true
                 MotionEvent.ACTION_UP -> if (!pinching) {
-                    focusView.x = event.x - dp(36)
-                    focusView.y = event.y - dp(36)
+                    focusView.x = textureView.x + event.x - dp(36)
+                    focusView.y = textureView.y + event.y - dp(36)
                     focusView.visibility = View.VISIBLE
                     focusView.alpha = 1f
                     focusView.animate().alpha(0f).setStartDelay(800).setDuration(300)
                         .withEndAction { focusView.visibility = View.GONE }.start()
                     cameraHelper.focusAt(event.x, event.y, textureView.width, textureView.height)
-                    // The portrait pass blurs hardest away from this line, so the
-                    // band you focused on is the band the picture keeps sharp.
-                    if (textureView.height > 0) {
-                        focusBandY = (event.y / textureView.height).coerceIn(0.12f, 0.88f)
-                    }
                     if (captureMode == CaptureMode.PORTRAIT) {
-                        toast(host, "Portrait keeps the ${(focusBandY * 100).toInt()}% line sharp")
+                        toast(host, "Focus set · portrait softening is face-guided, not depth segmentation")
                     }
                 }
                 else -> Unit
@@ -705,6 +726,8 @@ object OeaCameraApp {
             aspect = AspectMode.values()[(aspect.ordinal + 1) % AspectMode.values().size]
             p.edit().putString(KEY_ASPECT, aspect.name).apply()
             cameraHelper.setAspect(aspect)
+            layoutViewfinder()
+            gridOverlay.setAspect(OeaCameraOptics.frameAspect(aspect.ratio, textureView.height >= textureView.width))
             refreshChips()
         }
         flashChip.setOnClickListener {
@@ -760,10 +783,11 @@ object OeaCameraApp {
                         aspect = chosen
                         p.edit().putString(KEY_ASPECT, chosen.name).apply()
                         cameraHelper.setAspect(chosen)
-                        gridOverlay.setAspect(chosen.ratio)
+                        layoutViewfinder()
+                        gridOverlay.setAspect(OeaCameraOptics.frameAspect(chosen.ratio, host.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE))
                         refreshChips()
                     },
-                    onVisualChange = { refreshLevelUi() }
+                    onVisualChange = { refreshLevelUi(); refreshStudio() }
                 )
             },
             LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(6) }
@@ -959,7 +983,8 @@ object OeaCameraApp {
             modeChips += mode to chip
             modeRow.addView(chip, LinearLayout.LayoutParams(-2, dp(34)).apply { rightMargin = dp(6) })
         }
-        bottom.addView(kit.hscroll(modeRow), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+        val modeRail = kit.hscroll(modeRow)
+        bottom.addView(modeRail, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
         proBox.visibility = if (captureMode == CaptureMode.PRO) View.VISIBLE else View.GONE
 
         // Shutter row: the gallery thumb on one side, the camera switch on the other.
@@ -1074,6 +1099,13 @@ object OeaCameraApp {
         shutterRow.addView(View(host), LinearLayout.LayoutParams(0, 1, 1f))
         shutterRow.addView(switchBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
         bottom.addView(shutterRow, LinearLayout.LayoutParams(-1, -2))
+        refreshStudio = {
+            chips.visibility = if (p.getBoolean("hide_quick", false)) View.GONE else View.VISIBLE
+            zoomRow.visibility = if (p.getBoolean("hide_zoom", false)) View.GONE else View.VISIBLE
+            modeRail.visibility = if (p.getBoolean("hide_modes", false)) View.GONE else View.VISIBLE
+            studioOverlay.configure(p, if (p.getBoolean("studio_echo", false)) cameraHelper.snapshot() else null)
+        }
+        refreshStudio()
 
         // ---- capture
         val mainHandler = Handler(Looper.getMainLooper())
@@ -1109,7 +1141,9 @@ object OeaCameraApp {
             val smoothFaces = privacyBlur(host)
             val hdr = p.getBoolean(KEY_HDR, false)
             val withLocation = p.getBoolean(KEY_LOCATION, false)
-            val cropAspect = aspect.ratio
+            val cropAspect = if (aspect == AspectMode.FULL && textureView.width > 0 && textureView.height > 0)
+                textureView.width.toFloat() / textureView.height else OeaCameraOptics.frameAspect(
+                    aspect.ratio, root.height >= root.width)
             CAPTURE.execute {
                 val saved = saveFrame(
                     host = host,
@@ -1612,10 +1646,16 @@ object OeaCameraApp {
         // therefore runs on *upright* pixels. Before this, a portrait photo's
         // Portrait pass blurred a horizontal band across a picture that a viewer
         // then rotated, so the band was 90° away from the tap.
-        val rotation = if (jpeg != null) OeaCameraOptics.rotationForOrientationTag(orientationTag) else 0
-        val mirrorPixels = jpeg != null && (mirror || OeaCameraOptics.orientationTagMirrors(orientationTag))
+        // HALs may rotate pixels or write EXIF. Trust the delivered JPEG, never
+        // apply a guessed rotation a second time.
+        val deliveredTag = jpeg?.let { bytes -> runCatching {
+            ExifInterface(java.io.ByteArrayInputStream(bytes)).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        }.getOrDefault(orientationTag) } ?: 1
+        val rotation = OeaCameraOptics.rotationForOrientationTag(deliveredTag)
+        val mirrorPixels = jpeg != null && (mirror xor OeaCameraOptics.orientationTagMirrors(deliveredTag))
         val needsTurn = rotation != 0 || mirrorPixels
-        val uprightAspect = OeaCameraOptics.displayAspect(aspect, rotation)
+        val uprightAspect = aspect
         // The Camera2 reader already chooses the requested aspect when the device
         // offers it. Do not decode/re-encode a full-resolution JPEG just because an
         // aspect ratio is selected: that used to downsample otherwise untouched
@@ -1625,7 +1665,8 @@ object OeaCameraApp {
             runCatching {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-                OeaCameraOptics.matchesAspect(bounds.outWidth, bounds.outHeight, uprightAspect)
+                OeaCameraOptics.matchesAspect(bounds.outWidth, bounds.outHeight, uprightAspect,
+                    tolerance = 1f / (bounds.outHeight.coerceAtLeast(1) * uprightAspect))
             }.getOrDefault(false)
         } else {
             false
@@ -1640,7 +1681,7 @@ object OeaCameraApp {
                 file.delete()
                 return null
             }
-            writeExif(host, file, orientationTag, withLocation)
+            writeExif(host, file, deliveredTag, withLocation)
             publish(host, file)
             return file
         }
@@ -1655,10 +1696,10 @@ object OeaCameraApp {
             mode = mode,
             filter = filter,
             privacy = privacy,
-            aspect = if (decoded != null) uprightAspect else aspect,
+            aspect = uprightAspect,
             hdr = hdr,
             // Turned pixels are already upright, and the preview snapshot is too.
-            orientationTag = if (decoded == null || needsTurn) 1 else orientationTag,
+            orientationTag = 1,
             withLocation = withLocation
         )
         if (turned !== decoded && turned !== upright) turned.recycle()
@@ -1693,7 +1734,7 @@ object OeaCameraApp {
     ): File? {
         var working = source
         if (OeaCameraEffects.needed(mode, privacy)) {
-            val processed = runCatching { OeaCameraEffects.process(working, mode, privacy, focusBandY) }.getOrDefault(working)
+            val processed = runCatching { OeaCameraEffects.process(working, mode, privacy) }.getOrDefault(working)
             if (processed !== working && working !== source) working.recycle()
             working = processed
         }
@@ -2097,6 +2138,23 @@ object OeaCameraApp {
                 { frames -> if (frames == 1) "1 frame" else "$frames frames" }
             ) { setBurstCount(host, it) }
 
+            kit.sectionTitle(panel, "Screen & Frame Studio")
+            listOf(
+                Triple("hide_quick", "Hide quick chips", "Keep settings accessible; remove the quick-control strip"),
+                Triple("hide_zoom", "Hide zoom rail", "Pinch to zoom still works"),
+                Triple("hide_modes", "Hide mode rail", "Stay in the current capture mode"),
+                Triple("studio_echo", "Frame Echo", "Freeze a faint reference when enabled or settings change; match your next composition"),
+                Triple("studio_dual", "Two-Destination Frame", "See square and portrait delivery guides together"),
+                Triple("studio_caption", "Caption Nest", "Reserve a lower caption zone without burning text into the photo"),
+                Triple("studio_edge", "Edge Breathing Room", "Inset guides remind you to keep hands and heads away from the crop"),
+                Triple("studio_orbit", "Subject Orbit", "Head and shoulder placement guide for consistent portrait series")
+            ).forEach { (key, title, description) ->
+                kit.switchRow(group, R.drawable.oic_photo_camera, title, description, p.getBoolean(key, false)) {
+                    p.edit().putBoolean(key, it).apply()
+                    onVisualChange()
+                }
+            }
+
             kit.sectionTitle(panel, "Aspect")
             val aspectRow = LinearLayout(host).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -2109,7 +2167,7 @@ object OeaCameraApp {
             panel.addView(kit.hscroll(aspectRow))
             kit.note(
                 panel,
-                "The aspect chip sets the preview buffer and crops the saved file from the sensor's own frame — it is a crop, never a stretch. Camera2 all the way down: the still is the camera's JPEG, the torch is OEA's, tap-to-focus uses the focus regions this lens declares, and Pro's ISO/EV/white-balance/focus only reach what this hardware exposes (OEA hides what it refuses). Filters are OEA's own ColorMatrix. Night, Portrait and Document rewrite the pixels themselves: there is no depth sensor in this app, so nothing pretends to measure distance. Face blur is Android's FaceDetector over a small copy of the frame."
+                "The aspect chip sets the preview buffer and crops the saved file from the sensor's own frame — it is a crop, never a stretch. Camera2 all the way down: the still is the camera's JPEG, the torch is OEA's, tap-to-focus uses the focus regions this lens declares, and Pro's ISO/EV/white-balance/focus only reach what this hardware exposes (OEA hides what it refuses). Filters are OEA's own ColorMatrix. Night, Portrait and Document rewrite the pixels themselves: Portrait uses conservative face-derived head/torso envelopes, not person segmentation or measured depth. No detected face means no portrait blur. Face blur is Android's FaceDetector over a small copy of the frame."
             )
         }
     }
@@ -2254,7 +2312,6 @@ object OeaCameraApp {
         private var cameraId: String? = null
         private var opening = false
         private var running = false
-        private var previewMatrix: Matrix? = null
 
         private class PendingCapture(val queuedAt: Long, val callback: (ByteArray?) -> Unit)
 
@@ -2430,9 +2487,9 @@ object OeaCameraApp {
 
         /** The preview as it looks on screen, for the fallback path. */
         fun snapshot(): Bitmap? {
-            val raw = runCatching { textureView.bitmap }.getOrNull() ?: return null
-            val matrix = previewMatrix ?: return raw
-            return runCatching { Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true) }.getOrDefault(raw)
+            // getBitmap copies the displayed TextureView, including setTransform.
+            // Applying that matrix again rotates/crops the fallback and Frame Echo twice.
+            return runCatching { textureView.bitmap }.getOrNull()
         }
 
         // ------------------------------------------------------------- opening
@@ -2681,12 +2738,14 @@ object OeaCameraApp {
             val matrix = Matrix()
             // Buffer centre to the view centre, rotate, scale to cover, mirror a
             // front camera — in that order, which is the order `post` composes.
+            // TextureView first stretches the buffer to its own bounds. Undo that
+            // implicit stretch before mapping buffer coordinates to the window.
+            matrix.postScale(bufferWidth / viewWidth, bufferHeight / viewHeight)
             matrix.postTranslate(-bufferWidth / 2f, -bufferHeight / 2f)
             matrix.postRotate(rotation.toFloat())
             matrix.postScale(scale, scale)
             matrix.postTranslate(viewWidth / 2f, viewHeight / 2f)
             if (front) matrix.postScale(-1f, 1f, viewWidth / 2f, viewHeight / 2f)
-            previewMatrix = matrix
             runCatching { textureView.setTransform(matrix) }
             // The focus square and the portrait band are placed in view space, so
             // they stay correct; the still is cropped from the buffer itself.
@@ -2720,7 +2779,8 @@ object OeaCameraApp {
             )
             applyFocusDefaults(builder)
             set(builder, CaptureRequest.FLASH_MODE, if (flashMode == FlashMode.TORCH) CameraMetadata.FLASH_MODE_TORCH else CameraMetadata.FLASH_MODE_OFF)
-            set(builder, CaptureRequest.JPEG_ORIENTATION, jpegOrientation())
+            set(builder, CaptureRequest.JPEG_ORIENTATION,
+                OeaCameraOptics.rotationDegrees(sensorOrientation, deviceRotationDegrees(), front))
             set(builder, CaptureRequest.JPEG_QUALITY, 94.toByte())
             applyZoom(builder)
             synchronized(captures) { captures.addLast(PendingCapture(SystemClock.elapsedRealtime(), callback)) }

@@ -41,6 +41,15 @@ jobs:
         # entry Game Boost does not recognise. Runs before the build so the
         # failure is readable.
         run: python3 tools/check-kotlin.py
+      - name: Camera geometry regression tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.camera.OeaCameraOpticsTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
       - name: Use the stable OEA signing key (optional)
         # Without this, every runner creates a new random debug key, so each
         # APK has a different signature and cannot update the previous one
@@ -209,10 +218,11 @@ jobs:
           grep -Fq 'TEMPLATE_STILL_CAPTURE' "$CAMERA"
           grep -Fq 'ImageFormat.JPEG' "$CAMERA"
           grep -Fq 'JPEG_ORIENTATION' "$CAMERA"
-          # The preview snapshot is only a fallback, and it is the transformed one;
-          # the old preview-screenshot saver is gone.
+          # TextureView snapshots already include setTransform. Reapplying the
+          # matrix would rotate/crop fallback photos twice.
           ! grep -Fq 'fun saveBitmap(' "$CAMERA"
-          grep -Fq 'val matrix = previewMatrix ?: return raw' "$CAMERA"
+          grep -Fq 'return runCatching { textureView.bitmap }.getOrNull()' "$CAMERA"
+          ! grep -Fq 'val matrix = previewMatrix ?: return raw' "$CAMERA"
           # The preview is transformed, so it is upright and cropped, not stretched.
           grep -Fq 'textureView.setTransform' "$CAMERA"
           grep -Fq 'fun rotationDegrees(' "$OPTICS"

@@ -122,20 +122,20 @@ class OeaFaultPolicyTest {
     @Test
     fun `threads are classified by the work they do, not by their number`() {
         val main = Thread.currentThread()
-        assertEquals(ThreadKind.MAIN_HOME, OeaFaultPolicy.classify(main, main, screenIsGame = false))
-        assertEquals(ThreadKind.MAIN_SCREEN, OeaFaultPolicy.classify(main, main, screenIsGame = true))
+        assertEquals(ThreadKind.MAIN_HOME, OeaFaultPolicy.classify(main, main, screenIsRecoverableOeaScreen = false))
+        assertEquals(ThreadKind.MAIN_SCREEN, OeaFaultPolicy.classify(main, main, screenIsRecoverableOeaScreen = true))
 
         val gl = Thread({ }, "GLThread 42")
-        assertEquals(ThreadKind.RENDER, OeaFaultPolicy.classify(gl, main, screenIsGame = true))
+        assertEquals(ThreadKind.RENDER, OeaFaultPolicy.classify(gl, main, screenIsRecoverableOeaScreen = true))
 
         val socket = Thread({ }, "oea-lan-r12")
-        assertEquals(ThreadKind.WORKER, OeaFaultPolicy.classify(socket, main, screenIsGame = false))
+        assertEquals(ThreadKind.WORKER, OeaFaultPolicy.classify(socket, main, screenIsRecoverableOeaScreen = false))
 
         val binder = Thread({ }, "Binder:1234_2")
-        assertEquals(ThreadKind.BINDER, OeaFaultPolicy.classify(binder, main, screenIsGame = false))
+        assertEquals(ThreadKind.BINDER, OeaFaultPolicy.classify(binder, main, screenIsRecoverableOeaScreen = false))
 
         val stranger = Thread({ }, "SomeProviderThread")
-        assertEquals(ThreadKind.UNKNOWN, OeaFaultPolicy.classify(stranger, main, screenIsGame = false))
+        assertEquals(ThreadKind.UNKNOWN, OeaFaultPolicy.classify(stranger, main, screenIsRecoverableOeaScreen = false))
     }
 
     @Test

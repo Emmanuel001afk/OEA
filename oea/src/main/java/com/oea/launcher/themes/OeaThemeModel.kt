@@ -101,6 +101,20 @@ object OeaThemeCatalog {
     val GRAPHITE_HOME = drawn("obsidian_mirror", "Graphite waves")
     val GRAPHITE_LOCK = drawn("lock_noir", "Graphite orbits")
 
+    // Real quote artwork, bundled as density-independent WebP.
+    val BORROWED_LIGHT = OeaImageRef.Bundled("quote_borrowed_light", R.drawable.oea_quote_borrowed_light, "Borrowed Light")
+    val QUIET_GROWTH = OeaImageRef.Bundled("quote_quiet_growth", R.drawable.oea_quote_quiet_growth, "Quiet Growth")
+    val TIDE_RELEASE = OeaImageRef.Bundled("quote_tide_and_release", R.drawable.oea_quote_tide_and_release, "Tide & Release")
+
+    val QUOTE_AFTER_THE_STORM = OeaImageRef.Bundled("quote_after_the_storm", R.drawable.oea_quote_after_the_storm, "After the Storm")
+    val QUOTE_ROOTS_AND_WINGS = OeaImageRef.Bundled("quote_roots_and_wings", R.drawable.oea_quote_roots_and_wings, "Roots & Wings")
+    val QUOTE_UNFINISHED_STORY = OeaImageRef.Bundled("quote_unfinished_story", R.drawable.oea_quote_unfinished_story, "Unfinished Story")
+    val QUOTE_SLOW_BECOMING = OeaImageRef.Bundled("quote_slow_becoming", R.drawable.oea_quote_slow_becoming, "Slow Becoming")
+    val QUOTE_PRECIOUS_ORDINARY = OeaImageRef.Bundled("quote_precious_ordinary", R.drawable.oea_quote_precious_ordinary, "Precious Ordinary")
+    val QUOTE_CHOOSE_PEACE = OeaImageRef.Bundled("quote_choose_peace", R.drawable.oea_quote_choose_peace, "Choose Peace")
+    val QUOTE_LIGHT_YOU_CARRY = OeaImageRef.Bundled("quote_light_you_carry", R.drawable.oea_quote_light_you_carry, "The Light You Carry")
+    val QUOTE_OPEN_HORIZON = OeaImageRef.Bundled("quote_open_horizon", R.drawable.oea_quote_open_horizon, "Open Horizon")
+
     // ------------------------------------------------------------- drawn artwork
     // OEA draws these itself (OeaArtwork): a lock-screen picture made for each of
     // the five themes that would otherwise repeat their Home picture on the lock
@@ -163,6 +177,8 @@ object OeaThemeCatalog {
 
     /** Every bundled picture, offered in the wallpaper library too. */
     val bundledImages: List<OeaImageRef.Bundled> = listOf(
+        BORROWED_LIGHT, QUIET_GROWTH, TIDE_RELEASE,
+        QUOTE_AFTER_THE_STORM, QUOTE_ROOTS_AND_WINGS, QUOTE_UNFINISHED_STORY, QUOTE_SLOW_BECOMING, QUOTE_PRECIOUS_ORDINARY, QUOTE_CHOOSE_PEACE, QUOTE_LIGHT_YOU_CARRY, QUOTE_OPEN_HORIZON,
         AURORA, LIQUID_GLASS, MOUNTAIN, FOREST, DESERT,
         NEON_HOME, NEON_LOCK, OCEAN_HOME, OCEAN_LOCK, SAKURA_HOME, SAKURA_LOCK,
         NEBULA_HOME, NEBULA_LOCK, GRAPHITE_HOME, GRAPHITE_LOCK
@@ -177,6 +193,61 @@ object OeaThemeCatalog {
      * Proper previews with larger distinct collections, fixed transparent/white look.
      */
     val builtIns: List<OeaThemeSpec> = listOf(
+        OeaThemeSpec(
+            "quote_after_the_storm", "After the Storm", "You have survived days you thought would break you. Keep going.", QUOTE_AFTER_THE_STORM, QUOTE_AFTER_THE_STORM,
+            accentDark = Color.rgb(241, 204, 147), accentLight = Color.rgb(127, 83, 34), surfaceTint = Color.rgb(31, 42, 48),
+            mode = "dark", glassStyle = "classic", iconShape = "rounded", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_roots_and_wings", "Roots & Wings", "Remember your roots. Do not forget you can still grow.", QUOTE_ROOTS_AND_WINGS, QUOTE_ROOTS_AND_WINGS,
+            accentDark = Color.rgb(224, 205, 143), accentLight = Color.rgb(111, 93, 34), surfaceTint = Color.rgb(35, 47, 32),
+            mode = "dark", glassStyle = "classic", iconShape = "circle", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_unfinished_story", "Unfinished Story", "A hard chapter is not the end of your story.", QUOTE_UNFINISHED_STORY, QUOTE_UNFINISHED_STORY,
+            accentDark = Color.rgb(195, 181, 248), accentLight = Color.rgb(92, 68, 151), surfaceTint = Color.rgb(32, 29, 65),
+            mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_slow_becoming", "Slow Becoming", "You are not late. You are still becoming.", QUOTE_SLOW_BECOMING, QUOTE_SLOW_BECOMING,
+            accentDark = Color.rgb(231, 189, 190), accentLight = Color.rgb(139, 76, 93), surfaceTint = Color.rgb(31, 54, 58),
+            mode = "dark", glassStyle = "liquid", iconShape = "rounded", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_precious_ordinary", "Precious Ordinary", "One day, the ordinary moments will be the ones you miss most.", QUOTE_PRECIOUS_ORDINARY, QUOTE_PRECIOUS_ORDINARY,
+            accentDark = Color.rgb(239, 187, 123), accentLight = Color.rgb(137, 80, 31), surfaceTint = Color.rgb(59, 37, 25),
+            mode = "dark", glassStyle = "classic", iconShape = "rounded", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_choose_peace", "Choose Peace", "Not every battle deserves your soul. Choose peace.", QUOTE_CHOOSE_PEACE, QUOTE_CHOOSE_PEACE,
+            accentDark = Color.rgb(159, 218, 185), accentLight = Color.rgb(37, 103, 80), surfaceTint = Color.rgb(20, 52, 43),
+            mode = "dark", glassStyle = "liquid", iconShape = "circle", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_light_you_carry", "The Light You Carry", "When the road grows dark, be gentle with the light you carry.", QUOTE_LIGHT_YOU_CARRY, QUOTE_LIGHT_YOU_CARRY,
+            accentDark = Color.rgb(238, 200, 136), accentLight = Color.rgb(132, 87, 34), surfaceTint = Color.rgb(25, 35, 61),
+            mode = "dark", glassStyle = "classic", iconShape = "squircle", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_open_horizon", "Open Horizon", "You can honour where you have been without staying there.", QUOTE_OPEN_HORIZON, QUOTE_OPEN_HORIZON,
+            accentDark = Color.rgb(156, 216, 231), accentLight = Color.rgb(34, 111, 139), surfaceTint = Color.rgb(22, 44, 65),
+            mode = "dark", glassStyle = "liquid", iconShape = "rounded", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_borrowed_light", "Borrowed Light", "Time is borrowed. Love is what we leave behind.", BORROWED_LIGHT, BORROWED_LIGHT,
+            accentDark = Color.rgb(244, 201, 130), accentLight = Color.rgb(137, 85, 29), surfaceTint = Color.rgb(57, 39, 28),
+            mode = "dark", glassStyle = "classic", iconShape = "rounded", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_quiet_growth", "Quiet Growth", "Some growth is too quiet for the world to hear. Keep growing.", QUIET_GROWTH, QUIET_GROWTH,
+            accentDark = Color.rgb(167, 221, 166), accentLight = Color.rgb(40, 109, 68), surfaceTint = Color.rgb(22, 51, 39),
+            mode = "dark", glassStyle = "liquid", iconShape = "circle", dockStyle = "glass", pageEffect = "fade"
+        ),
+        OeaThemeSpec(
+            "quote_tide_release", "Tide & Release", "Let go of what has ended. Make room for what can begin.", TIDE_RELEASE, TIDE_RELEASE,
+            accentDark = Color.rgb(161, 214, 229), accentLight = Color.rgb(39, 100, 134), surfaceTint = Color.rgb(24, 37, 59),
+            mode = "dark", glassStyle = "liquid", iconShape = "squircle", dockStyle = "glass", pageEffect = "fade"
+        ),
         OeaThemeSpec(
             "aurora", "Aurora", "Northern lights over a still lake", AURORA, AURORA_LOCK,
             accentDark = Color.rgb(95, 227, 192), accentLight = Color.rgb(0, 121, 107), surfaceTint = Color.rgb(24, 70, 82),

@@ -20,9 +20,8 @@ import kotlin.math.roundToInt
  *
  * OEA has no native code and no machine-learning model, so it does not pretend
  * otherwise: "Night" is a real shadow-lifting tone curve with a light denoise in
- * the dark areas only, and "Portrait" is a distance-weighted blur that softens
- * everything away from the band you focused on — the same trick a tilt-shift lens
- * pulls, and it is honest about not knowing depth. "Blur faces" runs Android's own
+ * the dark areas only, and "Portrait" gently softens outside detected face-derived head/torso envelopes.
+ * It is an approximation, not a depth or person segmentation model. "Blur faces" runs Android's own
  * [FaceDetector] over the picture and smudges what it finds, which is what you
  * want before sending a photo of a street to anyone.
  *
@@ -54,8 +53,7 @@ internal object OeaCameraEffects {
     fun process(
         source: Bitmap,
         mode: OeaCameraApp.CaptureMode,
-        blurFaces: Boolean,
-        focusY: Float = 0.5f
+        blurFaces: Boolean
     ): Bitmap {
         if (!needed(mode, blurFaces)) return source
         val longest = maxOf(source.width, source.height).coerceAtLeast(1)
@@ -73,7 +71,7 @@ internal object OeaCameraEffects {
         if (mutable !== work && work !== source) work.recycle()
         when (mode) {
             OeaCameraApp.CaptureMode.NIGHT -> night(mutable)
-            OeaCameraApp.CaptureMode.PORTRAIT -> portrait(mutable, focusY)
+            OeaCameraApp.CaptureMode.PORTRAIT -> portrait(mutable)
             OeaCameraApp.CaptureMode.DOC -> document(mutable)
             else -> Unit
         }
@@ -160,83 +158,56 @@ internal object OeaCameraEffects {
 
     private fun mix(from: Int, to: Int, amount: Float): Int = (from + (to - from) * amount).toInt().coerceIn(0, 255)
 
-    /**
-     * Everything outside the middle band of the frame is blurred harder, which is
-     * what a shallow depth of field looks like. The band follows the focus tap:
-     * [focusY] is where in the frame you told the camera to look, as a fraction of
-     * the height. There is no depth sensor in this, and OEA says so — it is the
-     * tilt-shift trick, not a measurement of distance.
+    /** Gentle face-guided approximation, not a person/depth segmentation mask.
+     * Keeps detected head/torso envelopes sharp; leaves undetected scenes alone.
      */
-    private fun portrait(bitmap: Bitmap, focusY: Float = 0.5f) {
-        val width = bitmap.width
-        val height = bitmap.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    private fun portrait(bitmap: Bitmap) {
+        // A face-derived head/torso envelope is intentionally conservative. It
+        // cannot segment hair or limbs; if detection fails, keep the original.
+        val probeWidth = minOf(640, bitmap.width).let { it - it % 2 }.coerceAtLeast(2)
+        val scale = probeWidth.toFloat() / bitmap.width
+        val probeHeight = (bitmap.height * scale).toInt().coerceAtLeast(2)
+        val probe = Bitmap.createBitmap(probeWidth, probeHeight, Bitmap.Config.RGB_565)
+        Canvas(probe).drawBitmap(bitmap, null, android.graphics.Rect(0, 0, probeWidth, probeHeight), null)
+        val faces = arrayOfNulls<FaceDetector.Face>(MAX_FACES)
+        val count = try {
+            FaceDetector(probeWidth, probeHeight, MAX_FACES).findFaces(probe, faces)
+        } finally { probe.recycle() }
+        val envelopes = (0 until count).mapNotNull { index ->
+            faces[index]?.takeIf { it.confidence() >= 0.4f }?.let { face ->
+                val center = PointF()
+                face.getMidPoint(center)
+                floatArrayOf(center.x / scale, center.y / scale, face.eyesDistance() / scale)
+            }
+        }
+        if (envelopes.isEmpty()) return
+        val blurred = boxBlur(bitmap, 10)
+        val pixels = IntArray(bitmap.width * bitmap.height)
         val soft = IntArray(pixels.size)
-        // Two passes of a widening box blur give a smooth falloff without a
-        // separate blur radius per row.
-        val bandTop = (height * (focusY - 0.18f)).toInt().coerceAtLeast(0)
-        val bandBottom = (height * (focusY + 0.18f)).toInt().coerceAtMost(height - 1)
-        for (y in 0 until height) {
-            val distance = when {
-                y in bandTop..bandBottom -> 0
-                y < bandTop -> bandTop - y
-                else -> y - bandBottom
-            }.toFloat()
-            val radius = (distance / height * 6f).toInt().coerceIn(0, 6)
-            if (radius == 0) {
-                for (x in 0 until width) soft[y * width + x] = pixels[y * width + x]
-                continue
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        blurred.getPixels(soft, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        blurred.recycle()
+        for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
+            var keep = 0f
+            for (face in envelopes) {
+                val eyes = face[2].coerceAtLeast(4f)
+                // Protect the head AND torso, rather than a horizontal sharp band.
+                val head = kotlin.math.hypot((x-face[0])/(eyes*2.2f), (y-face[1])/(eyes*3f))
+                val torso = kotlin.math.hypot((x-face[0])/(eyes*3.8f), (y-face[1]-eyes*6f)/(eyes*6f))
+                val distance = minOf(head, torso)
+                val t = ((distance - 0.85f) / 0.45f).coerceIn(0f, 1f)
+                keep = maxOf(keep, 1f - t*t*(3f-2f*t))
             }
-            for (x in 0 until width) {
-                var r = 0
-                var g = 0
-                var b = 0
-                var n = 0
-                var dy = -radius
-                while (dy <= radius) {
-                    var dx = -radius
-                    while (dx <= radius) {
-                        val sx = (x + dx).coerceIn(0, width - 1)
-                        val sy = (y + dy).coerceIn(0, height - 1)
-                        val c = pixels[sy * width + sx]
-                        r += (c shr 16) and 0xFF
-                        g += (c shr 8) and 0xFF
-                        b += c and 0xFF
-                        n++
-                        dx++
-                    }
-                    dy++
-                }
-                soft[y * width + x] = Color.rgb(r / n, g / n, b / n)
-            }
-        }
-        for (i in pixels.indices) {
-            val y = i / width
-            val inBand = y in bandTop..bandBottom
+            val i = y * bitmap.width + x
+            val amount = (1f-keep)*0.65f
             val original = pixels[i]
-            if (inBand) {
-                // Keep the subject crisp but push its colour slightly forward.
-                val r = (original shr 16) and 0xFF
-                val g = (original shr 8) and 0xFF
-                val b = original and 0xFF
-                val luma = (r * 299 + g * 587 + b * 114) / 1000
-                pixels[i] = Color.rgb(
-                    mix(r, luma, -0.10f).coerceIn(0, 255),
-                    mix(g, luma, -0.06f).coerceIn(0, 255),
-                    mix(b, luma, -0.04f).coerceIn(0, 255)
-                )
-            } else {
-                val blurred = soft[i]
-                pixels[i] = Color.rgb(
-                    mix((original shr 16) and 0xFF, (blurred shr 16) and 0xFF, 0.82f),
-                    mix((original shr 8) and 0xFF, (blurred shr 8) and 0xFF, 0.82f),
-                    mix(original and 0xFF, blurred and 0xFF, 0.82f)
-                )
-            }
+            val blurredPixel = soft[i]
+            pixels[i] = Color.rgb(
+                mix((original shr 16) and 255, (blurredPixel shr 16) and 255, amount),
+                mix((original shr 8) and 255, (blurredPixel shr 8) and 255, amount),
+                mix(original and 255, blurredPixel and 255, amount))
         }
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-        vignette(bitmap)
+        bitmap.setPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
     }
 
     /**
@@ -318,7 +289,7 @@ internal object OeaCameraEffects {
      */
     private fun blurFaces(bitmap: Bitmap) {
         val scale = minOf(1f, 640f / bitmap.width.toFloat())
-        val probeWidth = (bitmap.width * scale).toInt().coerceAtLeast(16)
+        val probeWidth = (bitmap.width * scale).toInt().let { it - it % 2 }.coerceAtLeast(16)
         val probeHeight = (bitmap.height * scale).toInt().coerceAtLeast(16)
         val probe = Bitmap.createBitmap(probeWidth, probeHeight, Bitmap.Config.RGB_565)
         Canvas(probe).drawBitmap(bitmap, Matrix().apply { postScale(scale, scale) }, null)

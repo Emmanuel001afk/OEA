@@ -224,9 +224,11 @@ class OeaThemesActivity : Activity() {
             }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6); bottomMargin = dp(4) })
         }
 
-        kit.sectionTitle(box, "Built-in themes")
-        kit.note(box, "Every theme has its own Home picture and its own lock-screen picture — five of the lock screens are drawn by OEA itself — and no theme uses a wallpaper from the library below.")
-        addThemeGrid(box, OeaThemeCatalog.builtIns, applied?.id, withCreate = false)
+        kit.sectionTitle(box, "Life in Words · quote themes")
+        kit.note(box, "New life-quote themes pair illustrated artwork with matching colours, icons and dock styling. Their pictures are also available in the wallpaper library; Home and lock screen share each quote artwork. Other themes offer coordinated pairs.")
+        addThemeGrid(box, OeaThemeCatalog.builtIns.filter { it.id.startsWith("quote_") }, applied?.id, withCreate = false)
+        kit.sectionTitle(box, "More built-in themes")
+        addThemeGrid(box, OeaThemeCatalog.builtIns.filterNot { it.id.startsWith("quote_") }, applied?.id, withCreate = false)
 
         kit.sectionTitle(box, "My themes")
         val mine = store.customThemes()
