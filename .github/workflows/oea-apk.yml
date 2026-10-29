@@ -41,6 +41,8 @@ jobs:
         # entry Game Boost does not recognise. Runs before the build so the
         # failure is readable.
         run: python3 tools/check-kotlin.py
+      - name: Camera geometry regression tests
+        run: ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.camera.OeaCameraOpticsTest' --stacktrace
       - name: Use the stable OEA signing key (optional)
         # Without this, every runner creates a new random debug key, so each
         # APK has a different signature and cannot update the previous one

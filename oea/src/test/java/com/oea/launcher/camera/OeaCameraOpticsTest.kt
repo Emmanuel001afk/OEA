@@ -15,6 +15,14 @@ import org.junit.Test
  * the Pro focus slider pushed the lens to infinity when the user asked for close.
  */
 class OeaCameraOpticsTest {
+    @Test fun outputShapeDoesNotDependOnSensorMounting() {
+        assertEquals(3f / 4f, OeaCameraOptics.frameAspect(4f / 3f, true), 0.0001f)
+        assertEquals(9f / 16f, OeaCameraOptics.frameAspect(16f / 9f, true), 0.0001f)
+        assertEquals(4f / 3f, OeaCameraOptics.frameAspect(4f / 3f, false), 0.0001f)
+        assertEquals(1f, OeaCameraOptics.frameAspect(1f, true), 0.0001f)
+        assertEquals(0f, OeaCameraOptics.frameAspect(0f, true), 0.0001f)
+    }
+
 
     @Test fun rearCameraIsTurnedAgainstTheDisplay() {
         // A typical phone: sensor mounted at 90°, portrait window.
@@ -105,6 +113,22 @@ class OeaCameraOpticsTest {
         // Already the right shape: untouched.
         val same = OeaCameraOptics.cropRect(4000, 3000, 4f / 3f)
         assertArrayEquals(intArrayOf(0, 0, 4000, 3000), same)
+    }
+
+    @Test fun nearSquareStillGetsAnAccurateCrop() {
+        val rect = OeaCameraOptics.cropRect(4000, 3980, 1f)
+        assertEquals(3980, rect[2] - rect[0])
+        assertEquals(3980, rect[3] - rect[1])
+    }
+
+    @Test fun portraitCropsHaveRequestedShapeAndStayCentered() {
+        for (aspect in listOf(4f / 3f, 16f / 9f, 1f)) {
+            val wanted = OeaCameraOptics.frameAspect(aspect, true)
+            val rect = OeaCameraOptics.cropRect(3024, 4032, wanted)
+            assertEquals(wanted, (rect[2] - rect[0]).toFloat() / (rect[3] - rect[1]), 0.001f)
+            assertTrue(kotlin.math.abs(rect[0] - (3024 - rect[2])) <= 1)
+            assertTrue(kotlin.math.abs(rect[1] - (4032 - rect[3])) <= 1)
+        }
     }
 
     @Test fun cropNeverExceedsTheFrame() {
