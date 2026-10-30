@@ -73,6 +73,16 @@ class OeaFloatingWindowService : AccessibilityService() {
     private var windowRoot: FrameLayout? = null
     private var windowParams: WindowManager.LayoutParams? = null
 
+    /**
+     * The small round ball shown while the workspace is COLLAPSED (the
+     * down-symbol / double-tap). Collapsing must not make the workspace
+     * look like it vanished: it shrinks into this draggable ball, in the
+     * same visual language as Game Boost's floating control, and one tap
+     * brings the full window back. Null while the ball is not on screen.
+     */
+    private var ballRoot: FrameLayout? = null
+    private var ballParams: WindowManager.LayoutParams? = null
+
     /** Title bar (the drag area) and the resize handle. */
     private var titleBar: View? = null
     private var resizeHandle: View? = null
@@ -132,14 +142,14 @@ class OeaFloatingWindowService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
-        hideWindow(animate = false)
+        hideAll()
         OeaLiveWindowManager.detach()
         instance = null
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
-        hideWindow(animate = false)
+        hideAll()
         OeaLiveWindowManager.detach()
         instance = null
         super.onDestroy()
@@ -356,7 +366,7 @@ class OeaFloatingWindowService : AccessibilityService() {
         // single shared instance would move both views at once.
         val collapseBtn = iconButton(
             R.drawable.oic_expand_more,
-            "Collapse the floating window"
+            "Collapse into a small floating ball; tap the ball to reopen"
         ) { collapse() }
         titleLayout.addView(collapseBtn, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.END or Gravity.CENTER_VERTICAL).apply {
             marginEnd = dp(42)
@@ -383,6 +393,10 @@ class OeaFloatingWindowService : AccessibilityService() {
      * (experimental), tapping instead starts an OEA live window: the real
      * app on a private virtual display, presented and controlled through
      * this overlay while the phone screen keeps the user's current app.
+     *
+     * The list contains OEA's OWN launchable apps first (mini-apps, tools,
+     * games — everything the phone's app drawer can also open, except the
+     * OEA home screen itself), then the other installed apps.
      */
     private fun buildWorkspaceContent(content: FrameLayout) {
         val body = LinearLayout(this).apply {
@@ -400,7 +414,7 @@ class OeaFloatingWindowService : AccessibilityService() {
             text = if (OeaLiveWindows.enabled(this@OeaFloatingWindowService)) {
                 "Live windows are on: tap an app to open it here for real, on a private display. Your current app stays on the phone screen. Long-press an app for the old freeform request."
             } else {
-                "Tap an app to request Android freeform. This panel is a floating launcher, not an embedded app window. Android/OEM may ignore the request and open the app full-screen; tap the arrow above to hide this panel and check. Reboot after enabling freeform in Developer options."
+                "Tap an app to request Android freeform. This panel is a floating launcher, not an embedded app window. Android/OEM may ignore the request and open the app full-screen; tap the arrow above to shrink this panel into a small floating ball (tap the ball to reopen it) and check. Reboot after enabling freeform in Developer options."
             }
             setTextColor(0xFFD6E2F3.toInt())
             textSize = 11f
@@ -410,14 +424,103 @@ class OeaFloatingWindowService : AccessibilityService() {
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val launchIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
-        val apps = runCatching {
+        val resolved = runCatching {
             @Suppress("DEPRECATION")
             packageManager.queryIntentActivities(launchIntent, 0)
-                .filter { it.activityInfo.packageName != packageName }
-                .distinctBy { it.activityInfo.packageName }
-                .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
         }.getOrDefault(emptyList())
-        if (apps.isEmpty()) {
+        // Home-screen components are not launchable "apps" here: starting the
+        // home screen from inside the workspace would be wrong (and OEA's own
+        // home activity would otherwise appear at the top of the OEA list).
+        val homeComponents = runCatching {
+            @Suppress("DEPRECATION")
+            packageManager.queryIntentActivities(
+                android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME), 0
+            )
+        }.getOrDefault(emptyList()).mapNotNull { r ->
+            r.activityInfo?.let { android.content.ComponentName(it.packageName, it.name) }
+        }.toHashSet()
+        val isHome = { info: android.content.pm.ResolveInfo ->
+            homeComponents.contains(
+                android.content.ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+            )
+        }
+        // OEA's own apps: every launchable component of ours except the home
+        // screen. Deduplicated per component (not per package) so each OEA
+        // mini-app gets its own row.
+        val mine = resolved
+            .filter { it.activityInfo.packageName == packageName && !isHome(it) }
+            .distinctBy { it.activityInfo.name }
+            .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
+        val others = resolved
+            .filter { it.activityInfo.packageName != packageName }
+            .distinctBy { it.activityInfo.packageName }
+            .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
+
+        fun sectionLabel(title: String) {
+            list.addView(TextView(this).apply {
+                text = title
+                setTextColor(0xFF7AE7C7.toInt())
+                textSize = 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(dp(4), dp(8), dp(4), dp(4))
+            })
+        }
+
+        fun addAppRow(info: android.content.pm.ResolveInfo) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isClickable = true
+                isFocusable = true
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0x182F80ED)
+                    cornerRadius = dp(10).toFloat()
+                }
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+                contentDescription = "Request ${info.loadLabel(packageManager)} in an Android freeform window"
+            }
+            val icon = ImageView(this).apply {
+                setImageDrawable(info.loadIcon(packageManager))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }
+            row.addView(icon, LinearLayout.LayoutParams(dp(34), dp(34)))
+            row.addView(TextView(this).apply {
+                text = info.loadLabel(packageManager).toString()
+                setTextColor(0xFFF1F8FF.toInt())
+                textSize = 13f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(dp(10), 0, 0, 0)
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            row.setOnClickListener {
+                val label = info.loadLabel(packageManager).toString()
+                if (OeaLiveWindows.enabled(this)) {
+                    val message = OeaLiveWindowManager.start(
+                        this, info.activityInfo.packageName, label
+                    )
+                    android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                    val result = OeaMultitaskLauncher.launchFloating(
+                        this,
+                        OeaAppInfo(info.activityInfo.packageName, info.activityInfo.name, label)
+                    )
+                    android.widget.Toast.makeText(this, result.message, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+            // Escape hatch: long-press always keeps the old freeform path.
+            row.setOnLongClickListener {
+                val label = info.loadLabel(packageManager).toString()
+                val result = OeaMultitaskLauncher.launchFloating(
+                    this,
+                    OeaAppInfo(info.activityInfo.packageName, info.activityInfo.name, label)
+                )
+                android.widget.Toast.makeText(this, result.message, android.widget.Toast.LENGTH_LONG).show()
+                true
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(5) })
+        }
+
+        if (mine.isEmpty() && others.isEmpty()) {
             list.addView(TextView(this).apply {
                 text = "No launchable apps were found. Check Android app visibility and try again."
                 setTextColor(0xFFD6E2F3.toInt())
@@ -425,59 +528,13 @@ class OeaFloatingWindowService : AccessibilityService() {
                 setPadding(dp(8), dp(12), dp(8), dp(12))
             })
         } else {
-            val liveMode = OeaLiveWindows.enabled(this)
-            apps.forEach { info ->
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    isClickable = true
-                    isFocusable = true
-                    background = android.graphics.drawable.GradientDrawable().apply {
-                        setColor(0x182F80ED)
-                        cornerRadius = dp(10).toFloat()
-                    }
-                    setPadding(dp(8), dp(6), dp(8), dp(6))
-                    contentDescription = "Request ${info.loadLabel(packageManager)} in an Android freeform window"
-                }
-                val icon = ImageView(this).apply {
-                    setImageDrawable(info.loadIcon(packageManager))
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                }
-                row.addView(icon, LinearLayout.LayoutParams(dp(34), dp(34)))
-                row.addView(TextView(this).apply {
-                    text = info.loadLabel(packageManager).toString()
-                    setTextColor(0xFFF1F8FF.toInt())
-                    textSize = 13f
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                    setPadding(dp(10), 0, 0, 0)
-                }, LinearLayout.LayoutParams(0, -2, 1f))
-                row.setOnClickListener {
-                    val label = info.loadLabel(packageManager).toString()
-                    if (liveMode) {
-                        val message = OeaLiveWindowManager.start(
-                            this, info.activityInfo.packageName, label
-                        )
-                        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
-                    } else {
-                        val result = OeaMultitaskLauncher.launchFloating(
-                            this,
-                            OeaAppInfo(info.activityInfo.packageName, info.activityInfo.name, label)
-                        )
-                        android.widget.Toast.makeText(this, result.message, android.widget.Toast.LENGTH_LONG).show()
-                    }
-                }
-                // Escape hatch: long-press always keeps the old freeform path.
-                row.setOnLongClickListener {
-                    val label = info.loadLabel(packageManager).toString()
-                    val result = OeaMultitaskLauncher.launchFloating(
-                        this,
-                        OeaAppInfo(info.activityInfo.packageName, info.activityInfo.name, label)
-                    )
-                    android.widget.Toast.makeText(this, result.message, android.widget.Toast.LENGTH_LONG).show()
-                    true
-                }
-                list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(5) })
+            if (mine.isNotEmpty()) {
+                sectionLabel("OEA APPS")
+                mine.forEach { addAppRow(it) }
+            }
+            if (others.isNotEmpty()) {
+                sectionLabel("APPS ON THIS PHONE")
+                others.forEach { addAppRow(it) }
             }
         }
         val scroll = ScrollView(this).apply { isFillViewport = true; addView(body) }
@@ -862,11 +919,40 @@ class OeaFloatingWindowService : AccessibilityService() {
 
     // ------------------------------------------------------------------ public API
 
-    /** Collapse (hide) the floating window; the service stays alive. */
-    fun collapse() = hideWindow(animate = true)
+    /**
+     * Collapse the floating workspace into a small round floating ball
+     * (Game Boost's floating-control pattern): draggable, snapping to the
+     * nearest screen edge, restored by a single tap. The service stays
+     * alive and live app windows keep running.
+     */
+    fun collapse() {
+        // Remember exactly where the window was, so expand() returns to it
+        // even if the user only dragged (never flung) before collapsing.
+        windowParams?.let { lp ->
+            pendingX = lp.x
+            pendingY = lp.y
+            OeaFloatingWindows.savePosition(this, lp.x, lp.y)
+        }
+        hideWindow(animate = true)
+        showBall()
+    }
 
-    /** Expand (show) the floating window. */
-    fun expand() = showWindow(animate = true)
+    /** Expand (show) the floating window again, removing the ball. */
+    fun expand() {
+        removeBall(animate = false)
+        showWindow(animate = true)
+    }
+
+    /**
+     * Removes EVERYTHING this service draws: the window and the collapsed
+     * ball. Used when the feature is switched off (Android's unbind, or the
+     * OEA settings switch) — off means nothing above other apps, not even
+     * a ball.
+     */
+    fun hideAll() {
+        hideWindow(animate = false)
+        removeBall(animate = false)
+    }
 
     /**
      * Close the window and switch the feature off, so it stays
@@ -876,10 +962,214 @@ class OeaFloatingWindowService : AccessibilityService() {
      */
     fun closeWindow() {
         OeaFloatingWindows.setEnabled(this, false)
-        collapse()
+        hideAll()
     }
 
     fun isWindowShowing(): Boolean = windowRoot?.parent != null
+
+    // ------------------------------------------------------------------ collapsed ball
+
+    /**
+     * Builds and attaches the collapsed ball: a small round, draggable
+     * button in Game Boost's floating-control style. One tap expands the
+     * workspace again; a drag moves it; on release it glides to the nearest
+     * screen edge and that position is remembered.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun showBall() {
+        if (ballRoot != null) return
+        val wm = getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
+        val metrics = resources.displayMetrics
+        val size = dp(48)
+        val ball = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF0A1020.toInt(), 0xFF2357FF.toInt(), 0xFF0B1735.toInt())
+            ).apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setStroke(dp(1), 0xAA4D74FF.toInt())
+            }
+            elevation = dp(7).toFloat()
+            contentDescription = "OEA floating workspace, collapsed. Tap to reopen it; drag to move."
+            isClickable = true
+            isFocusable = true
+        }
+        val label = TextView(this).apply {
+            text = "OEA\nAPPS"
+            gravity = Gravity.CENTER
+            setTextColor(0xFFF1F8FF.toInt())
+            textSize = 9f
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            setShadowLayer(dp(4).toFloat(), 0f, 0f, 0xCC6FB8FF.toInt())
+        }
+        ball.addView(label, FrameLayout.LayoutParams(size, size).apply {
+            gravity = Gravity.CENTER
+        })
+        val params = WindowManager.LayoutParams(
+            size, size,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            OeaFloatingWindows.restoreBallPosition(this@OeaFloatingWindowService) { x, y ->
+                this.x = x?.coerceIn(0, (metrics.widthPixels - size).coerceAtLeast(0))
+                    ?: (metrics.widthPixels - size).coerceAtLeast(0)
+                this.y = y?.coerceIn(0, (metrics.heightPixels - size).coerceAtLeast(0))
+                    ?: (metrics.heightPixels * 0.38f).toInt()
+            }
+        }
+        ballRoot = ball
+        ballParams = params
+        runCatching { wm.addView(ball, params) }.onFailure { error ->
+            android.util.Log.w("OeaFloatingWindow", "ball attach failed", error)
+            ballRoot = null
+            ballParams = null
+            return
+        }
+        ball.setOnTouchListener(BallTouchListener(ball))
+        // Small entrance so the collapse visibly "becomes" the ball.
+        ball.alpha = 0f
+        ball.scaleX = 0.6f
+        ball.scaleY = 0.6f
+        ball.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(180L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    /** Removes the ball, optionally with a short shrink animation. */
+    private fun removeBall(animate: Boolean) {
+        val ball = ballRoot ?: return
+        val wm = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        val detach = {
+            runCatching { wm?.removeView(ball) }
+            ballRoot = null
+            ballParams = null
+        }
+        if (animate) {
+            ball.animate()
+                .alpha(0f)
+                .scaleX(0.6f)
+                .scaleY(0.6f)
+                .setDuration(140L)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction(detach)
+                .start()
+        } else {
+            ball.animate().cancel()
+            detach()
+        }
+    }
+
+    private fun updateBall(ball: View, params: WindowManager.LayoutParams) {
+        ballParams = params
+        runCatching {
+            (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.updateViewLayout(ball, params)
+        }.onFailure { android.util.Log.w("OeaFloatingWindow", "ball updateViewLayout failed", it) }
+    }
+
+    /** Glides the ball to the nearest screen edge and persists the stop. */
+    private fun snapBallToEdge(ball: View) {
+        val lp = ball.layoutParams as? WindowManager.LayoutParams ?: return
+        val metrics = resources.displayMetrics
+        val maxX = (metrics.widthPixels - ball.width).coerceAtLeast(0)
+        val maxY = (metrics.heightPixels - ball.height).coerceAtLeast(0)
+        val dLeft = lp.x
+        val dRight = maxX - lp.x
+        val dTop = lp.y
+        val dBottom = maxY - lp.y
+        val nearest = minOf(dLeft, dRight, dTop, dBottom)
+        val targetX: Int
+        val targetY: Int
+        when (nearest) {
+            dLeft -> { targetX = 0; targetY = lp.y }
+            dRight -> { targetX = maxX; targetY = lp.y }
+            dTop -> { targetX = lp.x; targetY = 0 }
+            else -> { targetX = lp.x; targetY = maxY }
+        }
+        val startX = lp.x
+        val startY = lp.y
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 160L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { animation ->
+                val t = animation.animatedValue as Float
+                lp.x = (startX + (targetX - startX) * t).toInt()
+                lp.y = (startY + (targetY - startY) * t).toInt()
+                updateBall(ball, lp)
+            }
+            addListener(object : android.animation.Animator.AnimatorListener {
+                override fun onAnimationStart(animation: android.animation.Animator) = Unit
+                override fun onAnimationCancel(animation: android.animation.Animator) = Unit
+                override fun onAnimationRepeat(animation: android.animation.Animator) = Unit
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    OeaFloatingWindows.saveBallPosition(this@OeaFloatingWindowService, lp.x, lp.y)
+                }
+            })
+        }.start()
+    }
+
+    /**
+     * The ball's touch handling: a drag follows the finger (clamped to the
+     * screen) and settles at the nearest edge; a clean tap reopens the
+     * workspace.
+     */
+    private inner class BallTouchListener(private val ball: View) : View.OnTouchListener {
+        private var downRawX = 0f
+        private var downRawY = 0f
+        private var startX = 0
+        private var startY = 0
+        private var moved = false
+        private val touchSlop = ViewConfiguration.get(this@OeaFloatingWindowService).scaledTouchSlop
+
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downRawX = event.rawX
+                    downRawY = event.rawY
+                    (ball.layoutParams as? WindowManager.LayoutParams)?.let { lp ->
+                        startX = lp.x
+                        startY = lp.y
+                    }
+                    moved = false
+                    ball.animate().cancel()
+                    haptic()
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - downRawX
+                    val dy = event.rawY - downRawY
+                    if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) moved = true
+                    if (moved) {
+                        val lp = ball.layoutParams as? WindowManager.LayoutParams ?: return true
+                        val metrics = resources.displayMetrics
+                        lp.x = (startX + dx).toInt().coerceIn(0, (metrics.widthPixels - ball.width).coerceAtLeast(0))
+                        lp.y = (startY + dy).toInt().coerceIn(0, (metrics.heightPixels - ball.height).coerceAtLeast(0))
+                        updateBall(ball, lp)
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (moved) {
+                        snapBallToEdge(ball)
+                    } else if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        // A clean tap on the ball reopens the workspace.
+                        haptic()
+                        expand()
+                    }
+                    moved = false
+                    return true
+                }
+            }
+            return false
+        }
+    }
 
     companion object {
         private const val FLING_MIN_VELOCITY = 240f // dp/sec
