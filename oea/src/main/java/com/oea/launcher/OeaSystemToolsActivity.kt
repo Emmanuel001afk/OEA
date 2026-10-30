@@ -2682,18 +2682,16 @@ open class OeaSystemToolsActivity : Activity() {
         ) { runProjectionDiagnostics() }
         kit.row(
             group, R.drawable.oic_file_copy,
-            "Copy last Stage-B report",
+            "View / copy last Stage-B report",
             if (com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.lastReportAt(this) == 0L)
                 "No report yet — run the experiment once"
-            else "From ${android.text.format.DateFormat.format("d MMM HH:mm", com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.lastReportAt(this))}"
+            else "From ${android.text.format.DateFormat.format("d MMM HH:mm", com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.lastReportAt(this))} • tap to view, copy or share"
         ) {
             val text = com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.lastReport(this)
             if (text == null) {
                 toast("No report yet. Run the Stage-B experiment first.")
             } else {
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Stage-B report", text))
-                toast("Stage-B report copied. Paste it to the developer.")
+                showStageBReportDialog("Stage-B report", text)
             }
         }
         val liveStatus = com.oea.launcher.multitask.projection.OeaLiveWindows.statusSummary(this)
@@ -2701,15 +2699,7 @@ open class OeaSystemToolsActivity : Activity() {
             if (com.oea.launcher.multitask.projection.OeaLiveWindowManager.count() == 0) {
                 toast("No live windows. Open the floating workspace, turn live windows on and tap an app.")
             } else {
-                kit.confirm(
-                    "Stop all live windows",
-                    "Close every live app window and release their private displays. The projected apps stop.",
-                    "Stop all"
-                ) {
-                    com.oea.launcher.multitask.projection.OeaLiveWindowManager.stopAll()
-                    toast("All live windows closed.")
-                    rerender()
-                }
+                showLiveWindowsDialog()
             }
         }
         kit.note(box, "Live app windows are experimental and honest: OEA verifies that the chosen app really landed on the private display, and tells you when this phone or an app refuses (some manufacturers open the app full screen instead — OEA cancels then rather than pretend). Interaction travels through the app's own accessibility tree, so apps that expose no controls (many games, camera previews) are view-only.")
@@ -2720,8 +2710,10 @@ open class OeaSystemToolsActivity : Activity() {
     /**
      * Runs the Stage-B projection experiment against a user-chosen app:
      * picker, background run, live progress, and a scrollable report with
-     * a copy button. The experiment is read-mostly (it launches the app,
-     * measures and cleans up) and stores its report for later copying.
+     * copy and share buttons. The experiment is read-mostly (it launches
+     * the app, measures and cleans up) and stores its report continuously
+     * after every section, so the report survives even a crash or a kill
+     * mid-run.
      */
     private fun runProjectionDiagnostics() {
         val service = com.oea.launcher.multitask.projection.OeaLiveWindowManager.accessibilityService()
@@ -2750,7 +2742,7 @@ open class OeaSystemToolsActivity : Activity() {
         val packages = apps.map { it.activityInfo.packageName }.toTypedArray()
         android.app.AlertDialog.Builder(this)
             .setTitle("Run the experiment with which app?")
-            .setMessage("The app will be started on a private display, measured, and closed again. Nothing is typed or sent inside it.")
+            .setMessage("The app will be started on a private display, measured, and closed again. Nothing is typed or sent inside it. It takes about half a minute; the report appears here and is saved even if something fails.")
             .setItems(labels) { _, which ->
                 runProjectionDiagnosticsFor(packages[which], labels[which])
             }
@@ -2759,37 +2751,122 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private fun runProjectionDiagnosticsFor(pkg: String, label: String) {
-        toast("Running the Stage-B experiment with $label… watch the notifications area-free progress in the report.")
+        toast("Running the Stage-B experiment with $label… it takes about half a minute. Keep OEA open; the report appears (and is saved) even if a step fails.")
+        // Live progress: the experiment reports each line as it happens, so
+        // the user sees movement instead of a frozen screen, and knows which
+        // stage is running if the phone interrupts the experiment.
+        val progressText = TextView(this).apply {
+            setTextIsSelectable(false)
+            textSize = 11f
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            text = "Starting the Stage-B experiment with $label…\n"
+        }
+        val progressScroll = android.widget.ScrollView(this).apply { addView(progressText) }
+        val progressDialog = runCatching {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Stage-B experiment — $label")
+                .setView(progressScroll)
+                .setNegativeButton(android.R.string.cancel) { d, _ -> d.dismiss() }
+                .setCancelable(true)
+                .show()
+        }.getOrNull()
         Thread {
-            val report = com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.run(
-                this, pkg, label,
-                object : com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.Progress {
-                    override fun onProgress(line: String) = Unit
-                }
-            )
-            runOnUiThread {
-                if (isDestroyed || isFinishing) return@runOnUiThread
-                val scroll = android.widget.ScrollView(this)
-                val text = TextView(this).apply {
-                    setTextIsSelectable(true)
-                    textSize = 12f
-                    setPadding(dp(16), dp(12), dp(16), dp(16))
-                    setText(report)
-                    setTextIsSelectable(true)
-                }
-                scroll.addView(text)
-                android.app.AlertDialog.Builder(this)
-                    .setTitle("Stage-B report — $label")
-                    .setView(scroll)
-                    .setPositiveButton("Copy") { _, _ ->
-                        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Stage-B report", report))
-                        toast("Report copied.")
+            // run() catches everything itself and always saves a report; the
+            // wrapper below is the last-resort net so that no possible path —
+            // not even an error inside the reporting machinery — can end
+            // without a stored report.
+            val report = try {
+                com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.run(
+                    this, pkg, label,
+                    object : com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.Progress {
+                        override fun onProgress(line: String) {
+                            runOnUiThread {
+                                if (isDestroyed || isFinishing) return@runOnUiThread
+                                val existing = progressText.text.toString()
+                                val kept = if (existing.length > 6000) existing.substring(existing.length - 6000) else existing
+                                progressText.text = kept + line + "\n"
+                                progressScroll.fullScroll(android.view.View.FOCUS_DOWN)
+                            }
+                        }
                     }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+                )
+            } catch (t: Throwable) {
+                val crash = "Stage-B experiment crashed before it could write its own report.\n" +
+                        "Exception: ${t.javaClass.name}: ${t.message}\n" +
+                        t.stackTrace.take(10).joinToString("\n") { "    at $it" } + "\n"
+                runCatching {
+                    com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.save(this, crash)
+                }
+                crash
+            }
+            runOnUiThread {
+                runCatching { progressDialog?.dismiss() }
+                if (isDestroyed || isFinishing) return@runOnUiThread
+                showStageBReportDialog("Stage-B report — $label", report)
+                rerender()
             }
         }.start()
+    }
+
+    /**
+     * The saved Stage-B report, viewable directly in Settings: selectable
+     * text (long-press to select/copy), plus explicit Copy and Share
+     * buttons, so the report never depends on clipboard access alone.
+     */
+    private fun showStageBReportDialog(title: String, report: String) {
+        val scroll = android.widget.ScrollView(this)
+        val text = TextView(this).apply {
+            setTextIsSelectable(true)
+            textSize = 12f
+            setPadding(dp(16), dp(12), dp(16), dp(16))
+            setText(report)
+        }
+        scroll.addView(text)
+        android.app.AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scroll)
+            .setPositiveButton("Copy") { _, _ ->
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Stage-B report", report))
+                toast("Report copied.")
+            }
+            .setNeutralButton("Share") { _, _ ->
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(android.content.Intent.EXTRA_TEXT, report)
+                }
+                runCatching {
+                    startActivity(android.content.Intent.createChooser(send, "Share Stage-B report"))
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /**
+     * Live-window details: each session's state and full launch evidence,
+     * with the stop-all action. This is where a truncated status line (e.g.
+     * a platform permission denial) can be read in full.
+     */
+    private fun showLiveWindowsDialog() {
+        val sessions = com.oea.launcher.multitask.projection.OeaLiveWindowManager.list()
+        if (sessions.isEmpty()) {
+            toast("No live windows right now.")
+            return
+        }
+        val details = sessions.joinToString("\n\n") { s ->
+            s.describe() + "\n" + s.evidence().joinToString("\n") { "  $it" }
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Live windows now")
+            .setMessage(details)
+            .setPositiveButton("Stop all") { _, _ ->
+                com.oea.launcher.multitask.projection.OeaLiveWindowManager.stopAll()
+                toast("All live windows closed.")
+                rerender()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     /** OEA Overview: recent-use history, not Android's private task list. */

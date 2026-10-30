@@ -283,3 +283,80 @@ The acceptance criteria from the brief map as follows:
 | Frames stop (app frozen/died) | Watchdog demotes the badge to STALE/ENDED — a frozen picture never poses as live |
 | OEM blocks IME for overlay windows | The strip still works through set-text; if even that fails, per-field rejection is shown in the status line |
 | VD creation capped by OEM | Creation ladder reports every attempt; feature reports unavailable |
+
+## 7. First real device run (Infinix Smart 8, XOS, Android 13 Go) — findings and fixes
+
+Observed by the user on 2026-10-30 (PR #124 build):
+
+1. **WhatsApp live window FAILED.** Header "WhatsApp — FAILED", black
+   content, status "This window is no longer live" after tapping. The
+   session failed during the launch ladder, before any frame existed.
+2. **Andronix attempt: "Permission Denial: starting Intent { flg=0x18000000
+   cmp=com.oea.launcher/.multitask.projec… }".** `0x18000000` is exactly
+   `FLAG_ACTIVITY_NEW_TASK|FLAG_ACTIVITY_MULTIPLE_TASK` — the flags the
+   ladder's Step 3 sets on OEA's own trampoline — so the refused start is
+   the trampoline launch from the display-scoped context. The message was
+   truncated by the settings row; the full text is in the (now fixed)
+   Stage-B report and the Live-windows details dialog.
+3. **The Stage-B experiment produced no report at all.** "Copy last
+   Stage-B report" kept saying there was none.
+
+### Analysis (AOSP android-13.0.0_r1, fetched and quoted during this fix)
+
+- `ActivityTaskSupervisor.checkStartAnyActivityPermission` is the ONLY
+  place in Android 13 that throws `SecurityException("Permission Denial:
+  starting Intent { … }")` for an activity start, with three branches
+  (revoked action permission / not-exported / requires permission).
+  Starting our own non-exported activity from our own uid is always
+  granted on stock AOSP (`checkComponentPermission`: same app ⇒ granted).
+- `isCallerAllowedToLaunchOnDisplay` (the secondary-display gate) NEVER
+  throws — it returns false and the launch is aborted or redirected
+  silently. Its rules: DEFAULT_DISPLAY always OK; `INTERNAL_SYSTEM_WINDOW`
+  bypasses; untrusted display ⇒ target needs `FLAG_ALLOW_EMBEDDED` and the
+  caller needs `ACTIVITY_EMBEDDING` **or** its uid present on the display;
+  public display ⇒ anyone; private display ⇒ owner or uid-present.
+- Therefore the observed SecurityException is **not stock AOSP behaviour**
+  for this call: it comes from an XOS/Transsion framework addition (most
+  plausibly their background-activity-start / pop-up firewall for ordinary
+  apps). Which exact branch denied it can only be read from the full
+  exception text — which the fixed Stage-B report now captures verbatim
+  (class + message + first stack frames, for every route tried).
+
+### Fixes in this revision
+
+- **Stage-B report finalization (the missing-report bug):** the experiment
+  now (a) writes the report to storage after **every section**, so a hang
+  or process death still leaves everything measured so far; (b) runs
+  inside a catch-all that records the exception (class, message, stack),
+  saves and returns; (c) marks every stage PASSED / FAILED / INCONCLUSIVE
+  and prints unreached stages as **NOT RUN** (never as failed); (d) ends
+  with a stage table naming the exact failed stage and an overall verdict.
+  The Settings side gained a live progress dialog during the run, a
+  report dialog with **Copy and Share** buttons (no clipboard dependency),
+  a "View / copy last Stage-B report" row that refreshes after each run,
+  and a last-resort catch in the runner thread itself.
+- **Launch ladder:** the occupancy Presentation is now shown and its
+  window's attach to the display is **confirmed before any launch**
+  (accessibility window list or the Presentation's own decor view), which
+  is what makes OEA's uid "present on the display" for the AOSP gate. The
+  starter is then tried through several legal routes in order — display
+  context, presentation context (owns a window on the display), NEW_TASK
+  only — each recorded separately with the complete exception text. A
+  route counts only when the trampoline confirms the display it landed on.
+- **Live-window details:** Settings › "Live windows now" opens a dialog
+  with each session's state and full evidence, so a truncated status line
+  can be read in full.
+- No new permissions, no manifest changes, no exported components. The
+  architecture is unchanged; only the diagnostics workflow and the launch
+  routes were hardened.
+
+### Still unverified on the device
+
+- Whether any launch route now lands the starter on the virtual display
+  (the next Stage-B run answers this and identifies the exact denial if
+  none do).
+- The interaction/frames/preservation pillars (unreachable until the
+  launch succeeds).
+- Whether the XOS per-app control ("Display pop-up windows while running
+  in the background" / auto-launch for OEA) is what denied the start —
+  the report's full exception text will say.

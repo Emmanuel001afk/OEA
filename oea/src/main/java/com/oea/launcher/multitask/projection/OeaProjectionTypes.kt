@@ -66,13 +66,46 @@ data class OeaEvidenceLine(
     }
 }
 
+/**
+ * One legal launch route tried by the starter ladder.
+ *
+ * AOSP's secondary-display launch gate never throws — it silently aborts —
+ * so a route where startActivity returns is NOT a success until the
+ * trampoline confirms the display it actually landed on. This type records
+ * both halves of that truth:
+ *  - [threw]: the complete exception (`class: message` plus the first stack
+ *    frames) when the platform refused the start outright;
+ *  - [landed]: whether OEA's starter verifiably reached the virtual display.
+ */
+data class OeaLaunchRouteAttempt(
+    val label: String,
+    val threw: String?,
+    val landed: Boolean,
+    val note: String
+) {
+    fun toEvidenceLine(): OeaEvidenceLine = OeaEvidenceLine(
+        "Starter route: $label",
+        when {
+            threw != null -> "refused — $threw"
+            landed -> "landed on the private display"
+            else -> "did not land — $note"
+        }
+    )
+}
+
 /** Result of the whole launch ladder for one target application. */
 data class OeaProjectionLaunchResult(
     val success: Boolean,
     val displayId: Int,
     val state: OeaProjectionState,
     val headline: String,
-    val evidence: List<OeaEvidenceLine>
+    val evidence: List<OeaEvidenceLine>,
+    /** True if the 1×1 occupancy Presentation was shown without throwing. */
+    val occupancyShown: Boolean = false,
+    /** True if that Presentation's window verifiably attached to the display. */
+    val occupancyAttached: Boolean = false,
+    /** Every starter route that was tried, in order. */
+    val routeAttempts: List<OeaLaunchRouteAttempt> = emptyList()
 ) {
     fun evidenceText(): String = evidence.joinToString("\n")
 }

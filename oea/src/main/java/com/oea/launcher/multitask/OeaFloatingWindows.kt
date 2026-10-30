@@ -41,6 +41,8 @@ object OeaFloatingWindows {
     private const val KEY_HEIGHT = "floating_window_height"
     private const val KEY_X = "floating_window_x"
     private const val KEY_Y = "floating_window_y"
+    private const val KEY_BALL_X = "floating_ball_x"
+    private const val KEY_BALL_Y = "floating_ball_y"
 
     /** The service component, used for Settings deep-links and checks. */
     fun component(context: Context) = ComponentName(context, OeaFloatingWindowService::class.java)
@@ -69,8 +71,10 @@ object OeaFloatingWindows {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
         // If Android has not bound the service yet, the window appears
         // as soon as the user finishes enabling it in Accessibility.
+        // Off removes EVERYTHING the service draws — the window and the
+        // collapsed ball — because "off" must mean nothing above apps.
         val service = instance()
-        if (enabled) service?.expand() else service?.collapse()
+        if (enabled) service?.expand() else service?.hideAll()
     }
 
     /** True when Android has bound the accessibility service right now. */
@@ -114,11 +118,17 @@ object OeaFloatingWindows {
         }
     }
 
-    /** Collapses the window (keeps the service alive). */
+    /**
+     * Collapses the workspace into the small draggable ball (keeps the
+     * service alive; tap the ball to reopen).
+     */
     fun collapse() = instance()?.collapse()
 
-    /** Expands the window. */
+    /** Expands the window (removing the collapsed ball). */
     fun expand() = instance()?.expand()
+
+    /** Removes the window and the ball without touching the preference. */
+    fun hideAll() = instance()?.hideAll()
 
     /** True while the floating window is actually on screen. */
     fun isWindowShowing(): Boolean = instance()?.isWindowShowing() == true
@@ -131,6 +141,22 @@ object OeaFloatingWindows {
     /** Persists the size after a corner-resize gesture. */
     internal fun saveSize(context: Context, width: Int, height: Int) {
         prefs(context).edit().putInt(KEY_WIDTH, width).putInt(KEY_HEIGHT, height).apply()
+    }
+
+    /** Persists where the collapsed ball settled. */
+    internal fun saveBallPosition(context: Context, x: Int, y: Int) {
+        prefs(context).edit().putInt(KEY_BALL_X, x).putInt(KEY_BALL_Y, y).apply()
+    }
+
+    /** Restores the collapsed ball's resting position, if it ever settled. */
+    internal fun restoreBallPosition(context: Context, callback: (x: Int?, y: Int?) -> Unit) {
+        val p = prefs(context)
+        val x = p.getInt(KEY_BALL_X, Int.MIN_VALUE)
+        val y = p.getInt(KEY_BALL_Y, Int.MIN_VALUE)
+        callback(
+            if (x != Int.MIN_VALUE) x else null,
+            if (y != Int.MIN_VALUE) y else null
+        )
     }
 
     /**
