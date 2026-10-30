@@ -758,6 +758,25 @@
             android:excludeFromRecents="true"
             android:launchMode="singleTop" />
         <!--
+            Live app windows (experimental): this transparent starter is
+            placed on OEA's app-created virtual display first so a real
+            third-party app can inherit that display (AOSP multi-display
+            launch policy). allowEmbedded is required for any activity that
+            must live on an untrusted (app-created) display; the trampoline
+            draws nothing and finishes itself if it lands on the phone
+            screen. See multitask/projection/OeaProjectionTrampolineActivity.
+        -->
+        <activity
+            android:name="com.oea.launcher.multitask.projection.OeaProjectionTrampolineActivity"
+            android:exported="false"
+            android:allowEmbedded="true"
+            android:resizeableActivity="true"
+            android:launchMode="standard"
+            android:taskAffinity="com.oea.launcher.projection"
+            android:excludeFromRecents="true"
+            android:theme="@style/OeaCaptureTheme"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboardHidden|uiMode" />
+        <!--
             VIP's "audio keeps playing" switch. A notification alone would let
             Android freeze the process as soon as you leave, so the shade control
             and the playback keep-alive live in one small mediaPlayback service.
