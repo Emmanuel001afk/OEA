@@ -10,7 +10,14 @@
   floating window's browser and keyboard slots.
   flagRetrieveInteractiveWindows + canRetrieveWindowContent let
   the service notice which window is in front, which keeps the
-  floating container above games without polling.
+  floating container above games without polling — and, when the
+  user opts into live app windows, let OEA find the target app's
+  windows on the private display and perform node actions there
+  (the only input channel Android grants into a secondary app).
+  canTakeScreenshot (API 30+) is used only by the Stage-B
+  diagnostics to measure this phone's default-display capture
+  capability and interval; the private display itself needs no
+  screenshot because OEA owns its surface.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/oea_floating_window_description"
@@ -19,4 +26,5 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagDefault|flagRequestFilterKeyEvents|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
     android:notificationTimeout="100" />

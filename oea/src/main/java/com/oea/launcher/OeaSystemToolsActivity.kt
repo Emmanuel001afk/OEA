@@ -2649,7 +2649,147 @@ open class OeaSystemToolsActivity : Activity() {
             rerender()
         }
         kit.note(box, "Choose the default method above. Android freeform creates real, system-managed app windows when the phone allows it. OEA Floating Workspace draws its own launcher using the separately enabled OEA accessibility service; it does not need Display over other apps. Tapping an app requests Android freeform, but the OS may ignore that request. Neither method silently switches to the other.")
+
+        // ---- Live app windows (experimental): real app on a private display
+        kit.sectionTitle(box, "Live app windows (experimental)")
+        val liveReady = com.oea.launcher.multitask.projection.OeaLiveWindows.ready()
+        kit.switchRow(
+            group, R.drawable.oic_open_in_full,
+            "Live app windows",
+            "Open a real app inside an OEA floating window, on a private display, while your current app keeps the phone screen. Taps and typed text go to the real app through accessibility actions." +
+                    if (!liveReady) " Needs the OEA Floating Window accessibility service above." else "",
+            com.oea.launcher.multitask.projection.OeaLiveWindows.enabled(this)
+        ) { on ->
+            if (!on) {
+                com.oea.launcher.multitask.projection.OeaLiveWindows.setEnabled(this, false)
+                toast("Live app windows off. Tapping an app in the workspace requests Android freeform again.")
+            } else if (!liveReady) {
+                kit.confirm(
+                    "Live app windows",
+                    "Live app windows run inside the OEA Floating Window accessibility service (already listed above). Nothing is captured or recorded: OEA reads the projected app's accessibility nodes only to forward your taps and text. Turn the service on in Android's Accessibility settings, then switch this on.",
+                    "Open Accessibility"
+                ) { OeaFloatingWindows.openSetup(this) }
+            } else {
+                com.oea.launcher.multitask.projection.OeaLiveWindows.setEnabled(this, true)
+                toast("Live app windows on. Open the floating workspace and tap an app.")
+            }
+            rerender()
+        }
+        kit.row(
+            group, R.drawable.oic_speed,
+            "Run the Stage-B experiment",
+            "Measures, on this phone, whether a chosen app really runs on the private display, whether taps/text can reach it, and whether your foreground app stays in place. Produces a report."
+        ) { runProjectionDiagnostics() }
+        kit.row(
+            group, R.drawable.oic_file_copy,
+            "Copy last Stage-B report",
+            if (com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.lastReportAt(this) == 0L)
+                "No report yet — run the experiment once"
+            else "From ${android.text.format.DateFormat.format("d MMM HH:mm", com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.lastReportAt(this))}"
+        ) {
+            val text = com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.lastReport(this)
+            if (text == null) {
+                toast("No report yet. Run the Stage-B experiment first.")
+            } else {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Stage-B report", text))
+                toast("Stage-B report copied. Paste it to the developer.")
+            }
+        }
+        val liveStatus = com.oea.launcher.multitask.projection.OeaLiveWindows.statusSummary(this)
+        kit.row(group, R.drawable.oic_layers, "Live windows now", liveStatus) {
+            if (com.oea.launcher.multitask.projection.OeaLiveWindowManager.count() == 0) {
+                toast("No live windows. Open the floating workspace, turn live windows on and tap an app.")
+            } else {
+                kit.confirm(
+                    "Stop all live windows",
+                    "Close every live app window and release their private displays. The projected apps stop.",
+                    "Stop all"
+                ) {
+                    com.oea.launcher.multitask.projection.OeaLiveWindowManager.stopAll()
+                    toast("All live windows closed.")
+                    rerender()
+                }
+            }
+        }
+        kit.note(box, "Live app windows are experimental and honest: OEA verifies that the chosen app really landed on the private display, and tells you when this phone or an app refuses (some manufacturers open the app full screen instead — OEA cancels then rather than pretend). Interaction travels through the app's own accessibility tree, so apps that expose no controls (many games, camera previews) are view-only.")
+
         present(page)
+    }
+
+    /**
+     * Runs the Stage-B projection experiment against a user-chosen app:
+     * picker, background run, live progress, and a scrollable report with
+     * a copy button. The experiment is read-mostly (it launches the app,
+     * measures and cleans up) and stores its report for later copying.
+     */
+    private fun runProjectionDiagnostics() {
+        val service = com.oea.launcher.multitask.projection.OeaLiveWindowManager.accessibilityService()
+        if (service == null) {
+            kit.confirm(
+                "Turn on OEA Floating Window first",
+                "The experiment runs inside the OEA Floating Window accessibility service. Enable it in Android's Accessibility settings, come back and run again.",
+                "Open Accessibility"
+            ) { OeaFloatingWindows.openSetup(this) }
+            return
+        }
+        val launchIntent = android.content.Intent(android.content.Intent.ACTION_MAIN)
+            .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        val apps = runCatching {
+            @Suppress("DEPRECATION")
+            packageManager.queryIntentActivities(launchIntent, 0)
+                .filter { it.activityInfo.packageName != packageName }
+                .distinctBy { it.activityInfo.packageName }
+                .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
+        }.getOrDefault(emptyList())
+        if (apps.isEmpty()) {
+            toast("No launchable apps found.")
+            return
+        }
+        val labels = apps.map { it.loadLabel(packageManager).toString() }.toTypedArray()
+        val packages = apps.map { it.activityInfo.packageName }.toTypedArray()
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Run the experiment with which app?")
+            .setMessage("The app will be started on a private display, measured, and closed again. Nothing is typed or sent inside it.")
+            .setItems(labels) { _, which ->
+                runProjectionDiagnosticsFor(packages[which], labels[which])
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun runProjectionDiagnosticsFor(pkg: String, label: String) {
+        toast("Running the Stage-B experiment with $label… watch the notifications area-free progress in the report.")
+        Thread {
+            val report = com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.run(
+                this, pkg, label,
+                object : com.oea.launcher.multitask.projection.OeaProjectionDiagnostics.Progress {
+                    override fun onProgress(line: String) = Unit
+                }
+            )
+            runOnUiThread {
+                if (isDestroyed || isFinishing) return@runOnUiThread
+                val scroll = android.widget.ScrollView(this)
+                val text = TextView(this).apply {
+                    setTextIsSelectable(true)
+                    textSize = 12f
+                    setPadding(dp(16), dp(12), dp(16), dp(16))
+                    setText(report)
+                    setTextIsSelectable(true)
+                }
+                scroll.addView(text)
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Stage-B report — $label")
+                    .setView(scroll)
+                    .setPositiveButton("Copy") { _, _ ->
+                        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Stage-B report", report))
+                        toast("Report copied.")
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+        }.start()
     }
 
     /** OEA Overview: recent-use history, not Android's private task list. */

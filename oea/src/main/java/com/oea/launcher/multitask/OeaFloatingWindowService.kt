@@ -26,6 +26,8 @@ import android.widget.ScrollView
 import android.widget.LinearLayout
 import com.oea.launcher.R
 import com.oea.launcher.model.OeaAppInfo
+import com.oea.launcher.multitask.projection.OeaLiveWindowManager
+import com.oea.launcher.multitask.projection.OeaLiveWindows
 import kotlin.math.abs
 
 /**
@@ -95,6 +97,11 @@ class OeaFloatingWindowService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // Live app windows (experimental) also live in this service: they
+        // render a real app on an app-created virtual display inside OEA
+        // floating windows. The manager only keeps state; it draws nothing
+        // until the user starts a live window from the workspace.
+        OeaLiveWindowManager.attach(this)
         // The accessibility config (res/xml/oea_floating_window.xml)
         // is applied by the framework before this runs. The flags are
         // re-asserted at runtime so a config change can never leave
@@ -126,12 +133,14 @@ class OeaFloatingWindowService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         hideWindow(animate = false)
+        OeaLiveWindowManager.detach()
         instance = null
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         hideWindow(animate = false)
+        OeaLiveWindowManager.detach()
         instance = null
         super.onDestroy()
     }
@@ -139,11 +148,15 @@ class OeaFloatingWindowService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     /**
-     * Required by AccessibilityService. The floating window needs no
-     * window-content events: it only uses the overlay window and the
-     * hardware-key filter, so events are acknowledged and dropped.
+     * Required by AccessibilityService. The workspace itself needs no
+     * window-content events, so they are dropped unless a live app window
+     * is running — then they are forwarded (they carry the target app's
+     * state changes on the private display, which keeps projections from
+     * looking live when they are stale).
      */
-    override fun onAccessibilityEvent(event: android.view.accessibility.AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: android.view.accessibility.AccessibilityEvent?) {
+        if (event != null) OeaLiveWindowManager.onAccessibilityEvent(event)
+    }
 
     /**
      * Hardware-key filter (enabled by flagRequestFilterKeyEvents).
@@ -365,10 +378,11 @@ class OeaFloatingWindowService : AccessibilityService() {
     }
 
     /**
-     * OEA's overlay is an app launcher, not a host for another app's Activity.
-     * Taps therefore request a real Android freeform task. Android/OEM policy may
-     * refuse or ignore that request (then Android can still launch full-screen);
-     * accessibility alone cannot force another app into a task window.
+     * OEA's overlay workspace. Tapping an app requests a real Android
+     * freeform task by default; when the user turns on live app windows
+     * (experimental), tapping instead starts an OEA live window: the real
+     * app on a private virtual display, presented and controlled through
+     * this overlay while the phone screen keeps the user's current app.
      */
     private fun buildWorkspaceContent(content: FrameLayout) {
         val body = LinearLayout(this).apply {
@@ -383,11 +397,17 @@ class OeaFloatingWindowService : AccessibilityService() {
             setPadding(dp(4), dp(2), dp(4), dp(6))
         })
         body.addView(TextView(this).apply {
-            text = "Tap an app to request Android freeform. This panel is a floating launcher, not an embedded app window. Android/OEM may ignore the request and open the app full-screen; tap the arrow above to hide this panel and check. Reboot after enabling freeform in Developer options."
+            text = if (OeaLiveWindows.enabled(this@OeaFloatingWindowService)) {
+                "Live windows are on: tap an app to open it here for real, on a private display. Your current app stays on the phone screen. Long-press an app for the old freeform request."
+            } else {
+                "Tap an app to request Android freeform. This panel is a floating launcher, not an embedded app window. Android/OEM may ignore the request and open the app full-screen; tap the arrow above to hide this panel and check. Reboot after enabling freeform in Developer options."
+            }
             setTextColor(0xFFD6E2F3.toInt())
             textSize = 11f
             setPadding(dp(4), 0, dp(4), dp(8))
         })
+        buildLiveWindowsHeader(body)
+
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val launchIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
         val apps = runCatching {
@@ -405,6 +425,7 @@ class OeaFloatingWindowService : AccessibilityService() {
                 setPadding(dp(8), dp(12), dp(8), dp(12))
             })
         } else {
+            val liveMode = OeaLiveWindows.enabled(this)
             apps.forEach { info ->
                 val row = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -433,11 +454,28 @@ class OeaFloatingWindowService : AccessibilityService() {
                 }, LinearLayout.LayoutParams(0, -2, 1f))
                 row.setOnClickListener {
                     val label = info.loadLabel(packageManager).toString()
+                    if (liveMode) {
+                        val message = OeaLiveWindowManager.start(
+                            this, info.activityInfo.packageName, label
+                        )
+                        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+                    } else {
+                        val result = OeaMultitaskLauncher.launchFloating(
+                            this,
+                            OeaAppInfo(info.activityInfo.packageName, info.activityInfo.name, label)
+                        )
+                        android.widget.Toast.makeText(this, result.message, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                // Escape hatch: long-press always keeps the old freeform path.
+                row.setOnLongClickListener {
+                    val label = info.loadLabel(packageManager).toString()
                     val result = OeaMultitaskLauncher.launchFloating(
                         this,
                         OeaAppInfo(info.activityInfo.packageName, info.activityInfo.name, label)
                     )
                     android.widget.Toast.makeText(this, result.message, android.widget.Toast.LENGTH_LONG).show()
+                    true
                 }
                 list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(5) })
             }
@@ -445,6 +483,97 @@ class OeaFloatingWindowService : AccessibilityService() {
         val scroll = ScrollView(this).apply { isFillViewport = true; addView(body) }
         body.addView(list, LinearLayout.LayoutParams(-1, -2))
         content.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    /**
+     * The live-windows section of the workspace: an on/off pill, a capacity
+     * line, and a Restore row per running session. Toggling rebuilds the
+     * workspace so the app rows change meaning immediately.
+     */
+    private fun buildLiveWindowsHeader(body: LinearLayout) {
+        val liveOn = OeaLiveWindows.enabled(this)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(2), dp(4), dp(6))
+        }
+        header.addView(TextView(this).apply {
+            text = "LIVE APP WINDOWS"
+            setTextColor(if (liveOn) 0xFF7AE7C7.toInt() else 0xFF9CCEFF.toInt())
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        val toggle = TextView(this).apply {
+            text = if (liveOn) "ON ✓" else "OFF"
+            setTextColor(0xFFF1F8FF.toInt())
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isClickable = true
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(if (liveOn) 0x332DE1A0 else 0x33FFFFFF)
+                cornerRadius = dp(12).toFloat()
+            }
+            contentDescription = if (liveOn) "Turn live app windows off" else "Turn live app windows on"
+        }
+        toggle.setOnClickListener {
+            haptic()
+            OeaLiveWindows.setEnabled(this, !liveOn)
+            android.widget.Toast.makeText(
+                this,
+                if (!liveOn)
+                    "Live windows on. Tapping an app opens it here for real, on a private display."
+                else
+                    "Live windows off. Tapping an app requests Android freeform again.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            rebuildWorkspace()
+        }
+        header.addView(toggle, LinearLayout.LayoutParams(-2, -2))
+        body.addView(header, LinearLayout.LayoutParams(-1, -2))
+
+        val sessions = OeaLiveWindowManager.list()
+        if (liveOn) {
+            body.addView(TextView(this).apply {
+                text = "${OeaLiveWindowManager.count()} of ${OeaLiveWindowManager.MAX_WINDOWS} windows • " +
+                        (if (OeaLiveWindowManager.canStart()) "tap an app below to add one" else "close one to add another")
+                setTextColor(0xFF9CCEFF.toInt())
+                textSize = 10f
+                setPadding(dp(4), 0, dp(4), dp(4))
+            })
+            sessions.forEach { session ->
+                val row = TextView(this).apply {
+                    text = "• ${session.describe()}  —  tap to ${if (session.minimised) "restore" else "hide"}"
+                    setTextColor(0xFFD6E2F3.toInt())
+                    textSize = 11f
+                    isClickable = true
+                    setPadding(dp(8), dp(6), dp(8), dp(6))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(0x142DE1A0)
+                        cornerRadius = dp(8).toFloat()
+                    }
+                }
+                row.setOnClickListener {
+                    haptic()
+                    if (session.minimised) session.restore() else session.onMinimise()
+                    rebuildWorkspace()
+                }
+                row.setOnLongClickListener {
+                    OeaLiveWindowManager.stop(session)
+                    android.widget.Toast.makeText(this, "Closed the ${session.appLabel} live window.", android.widget.Toast.LENGTH_SHORT).show()
+                    rebuildWorkspace()
+                    true
+                }
+                body.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+            }
+        }
+    }
+
+    /** Rebuilds the whole workspace (used when the live-windows mode changes). */
+    private fun rebuildWorkspace() {
+        if (windowRoot == null) return
+        hideWindow(animate = false)
+        showWindow(animate = false)
     }
 
     private fun iconButton(res: Int, description: String, onClick: () -> Unit): ImageView = ImageView(this).apply {
