@@ -24,26 +24,39 @@ import java.util.concurrent.TimeUnit
  *
  *  0. Create the virtual display ([OeaVirtualDisplayHost.create]) — done by
  *     the caller before this runs.
- *  1. Show a 1×1 occupancy Presentation on it. This both proves OEA can put
- *     *any* window on the display and makes OEA's uid "present" on it, which
- *     the AOSP launch check (`isCallerAllowedToLaunchOnDisplay`) asks for on
- *     untrusted displays.
+ *  1. Show a 1×1 occupancy Presentation on it, then WAIT until that
+ *     Presentation's window verifiably attached to the display. This both
+ *     proves OEA can put *any* window on the display and makes OEA's uid
+ *     "present" on it, which the AOSP launch check
+ *     (`isCallerAllowedToLaunchOnDisplay`, Android 13) asks for on
+ *     untrusted displays. The first device run showed a platform denial at
+ *     the starter launch; attaching the occupancy window first is a legal
+ *     way to satisfy even the strictest caller checks before asking again.
  *  2. Ask Android up front whether the launch is allowed
  *     ([ActivityManager.isActivityStartAllowedOnDisplay]) — a public,
  *     non-destructive probe that is recorded even when it disagrees with
  *     what actually happens, because OEMs differ.
  *  3. Start the trampoline activity with launchDisplayId pointing at the
- *     virtual display, from the display-scoped context.
- *  4. Wait until the trampoline reports it really is on the virtual display,
- *     then let it start the target application into its own task.
+ *     virtual display — through SEVERAL legal routes, in order, because the
+ *     first Infinix/XOS run refused the plain display-context start:
+ *       a. from the display-scoped context (NEW_TASK|MULTIPLE_TASK);
+ *       b. from the occupancy Presentation's context — that context owns a
+ *          real attached window on the display, which is what the AOSP
+ *          caller check (and several OEM firewalls) wants to see;
+ *       c. from the display-scoped context with NEW_TASK only.
+ *     A route counts as successful ONLY when the trampoline reports it
+ *     really landed on the virtual display (an startActivity that returns
+ *     without throwing can still be silently dropped by the OEM).
+ *  4. Once landed, the trampoline starts the target application into its
+ *     own task.
  *  5. Verify through the accessibility window list that the target package
  *     now has a window on the virtual display — the ground truth the user
  *     can trust. If the package instead appears on the physical screen, the
  *     launch is reported as leaked, not successful.
  *
- * If any step fails the display is released and the failure says exactly
- * which step and why. A full-screen launch of the target on the phone is
- * never counted as success.
+ * If every route fails the display is released and the failure says exactly
+ * which route was refused and the complete exception text. A full-screen
+ * launch of the target on the phone is never counted as success.
  *
  * Threading: runs on the caller's background thread (it waits); the few
  * main-thread-only operations are hopped via [onMain].
@@ -55,6 +68,9 @@ object OeaProjectionLaunch {
 
     /** How long the target app may take to appear on the display. */
     private const val TARGET_LAND_MS = 6_500L
+
+    /** How long the occupancy Presentation may take to attach its window. */
+    private const val OCCUPANCY_ATTACH_MS = 2_500L
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -78,6 +94,11 @@ object OeaProjectionLaunch {
         return holder[0] as T
     }
 
+    private fun describeThrowable(t: Throwable): String {
+        val frames = t.stackTrace.take(3).joinToString("") { "\n      at $it" }
+        return "${t.javaClass.name}: ${t.message}$frames"
+    }
+
     /**
      * Runs the ladder for the target app on an already-created [host].
      * Call from a background thread (the session's projection thread).
@@ -92,6 +113,7 @@ object OeaProjectionLaunch {
         val evidence = mutableListOf<OeaEvidenceLine>()
         val start = SystemClock.uptimeMillis()
         fun elapsed() = SystemClock.uptimeMillis() - start
+        val controller = OeaProjectionController { OeaLiveWindowManager.accessibilityService() }
 
         // The display-scoped context: everything launched from here is
         // associated with the virtual display.
@@ -102,35 +124,75 @@ object OeaProjectionLaunch {
             null
         }
         if (display == null) {
-            return fail(host, evidence, "Virtual display ${host.displayId} disappeared before launch.", appLabel)
+            return fail(
+                host, evidence, "Virtual display ${host.displayId} disappeared before launch.",
+                appLabel, elapsed = elapsed()
+            )
         }
         val displayContext = try {
             service.createDisplayContext(display)
         } catch (t: Throwable) {
             return fail(
                 host, evidence,
-                "Could not create a display context: ${t.message ?: t.javaClass.simpleName}", appLabel
+                "Could not create a display context: ${t.message ?: t.javaClass.simpleName}",
+                appLabel, elapsed = elapsed()
             )
         }
 
         // ---- Step 1: occupancy window (Presentation) on the display -------
         var occupancyShown = false
+        var occupancyAttached = false
+        var presentation: Presentation? = null
         var t0 = SystemClock.uptimeMillis()
         try {
-            onMain {
-                val presentation = OccupancyPresentation(displayContext, display)
-                presentation.show()
-                activeOccupancy = presentation
+            presentation = onMain {
+                val p = OccupancyPresentation(displayContext, display)
+                p.show()
+                activeOccupancy = p
+                p
             }
             occupancyShown = true
             evidence += OeaEvidenceLine(
                 "Occupancy presentation on display ${host.displayId}",
-                "shown", SystemClock.uptimeMillis() - t0
+                "show() returned without error", SystemClock.uptimeMillis() - t0
             )
         } catch (t: Throwable) {
             evidence += OeaEvidenceLine(
                 "Occupancy presentation on display ${host.displayId}",
-                "failed: ${t.message ?: t.javaClass.simpleName} (continuing; the starter may still be allowed)",
+                "failed: ${describeThrowable(t)} (continuing; the starter may still be allowed)",
+                SystemClock.uptimeMillis() - t0
+            )
+        }
+        // Wait until the occupancy window is really attached to the display.
+        // "Attached" means either the accessibility window list can see an
+        // OEA window on the display, or the Presentation's own decor view
+        // reports the virtual display. This is what makes OEA's uid present
+        // on the display before any launch is attempted.
+        if (occupancyShown && presentation != null) {
+            t0 = SystemClock.uptimeMillis()
+            while (SystemClock.uptimeMillis() - t0 < OCCUPANCY_ATTACH_MS) {
+                val viaA11y = controller.packageOnDisplay(host.displayId, OEA_SELF_PACKAGE)
+                val viaDecor = try {
+                    onMain {
+                        presentation.isShowing &&
+                                presentation.window?.decorView?.display?.displayId == host.displayId
+                    }
+                } catch (_: Throwable) {
+                    false
+                }
+                if (viaA11y || viaDecor) {
+                    occupancyAttached = true
+                    break
+                }
+                try {
+                    Thread.sleep(120)
+                } catch (_: Throwable) {
+                }
+            }
+            evidence += OeaEvidenceLine(
+                "Occupancy window attached to display ${host.displayId}",
+                if (occupancyAttached) "yes (uid present on display before the launch)" else
+                    "not confirmed within ${OCCUPANCY_ATTACH_MS / 1000}s — continuing anyway",
                 SystemClock.uptimeMillis() - t0
             )
         }
@@ -160,67 +222,100 @@ object OeaProjectionLaunch {
             )
         }
 
-        // ---- Step 3+4: trampoline onto the display, then the target --------
-        val spec = OeaProjectionTrampolineSpec(packageName, activityName, host.displayId)
-        val landed = CountDownLatch(1)
-        val trampolineError = arrayOfNulls<String>(1)
-        val landedTaskId = intArrayOf(-1)
-        spec.onLanded = {
-            landedTaskId[0] = spec.taskId
-            landed.countDown()
+        // ---- Step 3: the starter, through every legal route ----------------
+        val routeContexts = mutableListOf<Pair<String, Context>>()
+        routeContexts += "display context" to displayContext
+        val occ = presentation
+        if (occupancyShown && occ != null) {
+            routeContexts += "presentation context (owns a window on the display)" to occ.context
         }
-        spec.onFailure = { reason ->
-            trampolineError[0] = reason
-            landed.countDown()
-        }
-        OeaProjectionTrampolineSpec.current = spec
-
-        t0 = SystemClock.uptimeMillis()
-        var trampolineStartError: String? = null
-        try {
-            val trampolineIntent = Intent(displayContext, OeaProjectionTrampolineActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK
-            }
-            val options = ActivityOptions.makeBasic()
-            options.launchDisplayId = host.displayId
-            displayContext.startActivity(trampolineIntent, options.toBundle())
-        } catch (t: Throwable) {
-            trampolineStartError = "OEA's starter could not be launched: ${t.message ?: t.javaClass.simpleName}"
-        }
-        if (trampolineStartError != null) {
-            OeaProjectionTrampolineSpec.current = null
-            dismissOccupancy()
-            return fail(host, evidence, trampolineStartError, appLabel, elapsed())
-        }
-        // Background thread: safe to block while the trampoline boots.
-        val reached = try {
-            landed.await(TRAMPOLINE_LAND_MS, TimeUnit.MILLISECONDS)
-        } catch (_: Throwable) {
-            false
-        }
-        val trampolineOk = reached && trampolineError[0] == null
-        evidence += OeaEvidenceLine(
-            "OEA starter on display ${host.displayId}",
-            if (trampolineOk) "landed on the virtual display (task ${landedTaskId[0]})"
-            else "did not land: ${trampolineError[0] ?: "no report within ${TRAMPOLINE_LAND_MS / 1000}s"}",
-            SystemClock.uptimeMillis() - t0
+        val flagSets = listOf(
+            "NEW_TASK|MULTIPLE_TASK" to
+                (Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
+            "NEW_TASK only" to Intent.FLAG_ACTIVITY_NEW_TASK
         )
-        if (!trampolineOk) {
+        val attempts = mutableListOf<OeaLaunchRouteAttempt>()
+        var landedTaskId = -1
+        var anyLanded = false
+        outer@ for ((ctxLabel, ctx) in routeContexts) {
+            for ((flagLabel, flags) in flagSets) {
+                val routeLabel = "$ctxLabel, $flagLabel"
+                // Clear any leftover starter from a previous route first, so a
+                // late landing can never report into the wrong handshake.
+                OeaProjectionTrampolineActivity.finishLiving()
+                OeaProjectionTrampolineSpec.current = null
+
+                val spec = OeaProjectionTrampolineSpec(packageName, activityName, host.displayId)
+                val landed = CountDownLatch(1)
+                val trampolineError = arrayOfNulls<String>(1)
+                spec.onLanded = {
+                    landedTaskId = spec.taskId
+                    landed.countDown()
+                }
+                spec.onFailure = { reason ->
+                    trampolineError[0] = reason
+                    landed.countDown()
+                }
+                OeaProjectionTrampolineSpec.current = spec
+
+                t0 = SystemClock.uptimeMillis()
+                var threw: String? = null
+                try {
+                    val trampolineIntent = Intent(ctx, OeaProjectionTrampolineActivity::class.java).apply {
+                        this.flags = flags
+                    }
+                    val options = ActivityOptions.makeBasic()
+                    options.launchDisplayId = host.displayId
+                    ctx.startActivity(trampolineIntent, options.toBundle())
+                } catch (t: Throwable) {
+                    threw = describeThrowable(t)
+                }
+                var landedOk = false
+                var note = ""
+                if (threw == null) {
+                    // Background thread: safe to block while the trampoline boots.
+                    val reached = try {
+                        landed.await(TRAMPOLINE_LAND_MS, TimeUnit.MILLISECONDS)
+                    } catch (_: Throwable) {
+                        false
+                    }
+                    landedOk = reached && trampolineError[0] == null
+                    if (!landedOk) {
+                        note = trampolineError[0]
+                            ?: "startActivity returned normally but the starter never confirmed landing within ${TRAMPOLINE_LAND_MS / 1000}s (this manufacturer may have silently dropped it)"
+                    }
+                }
+                val attempt = OeaLaunchRouteAttempt(routeLabel, threw, landedOk, note)
+                attempts += attempt
+                evidence += attempt.toEvidenceLine().copy(ms = SystemClock.uptimeMillis() - t0)
+                if (landedOk) {
+                    anyLanded = true
+                    break@outer
+                }
+            }
+        }
+
+        if (!anyLanded) {
             OeaProjectionTrampolineSpec.current = null
             OeaProjectionTrampolineActivity.finishLiving()
             dismissOccupancy()
+            val refusal = attempts.firstNotNullOfOrNull { it.threw }
+            val headline = when {
+                refusal != null ->
+                    "OEA's starter could not be launched — the platform refused it with: ${refusal.substringBefore('\n')}. " +
+                            "The complete error and every route tried are in the Stage-B report."
+                else ->
+                    "OEA's starter never reached the virtual display: ${attempts.size} legal launch routes were tried and none landed."
+            }
             return fail(
-                host, evidence,
-                trampolineError[0]
-                    ?: "OEA's starter never reached the virtual display within ${TRAMPOLINE_LAND_MS / 1000}s.",
-                appLabel, elapsed()
+                host, evidence, headline, appLabel, elapsed(),
+                occupancyShown, occupancyAttached, attempts
             )
         }
 
         // ---- Step 5: verify the target package on the virtual display ------
         // The trampoline has started the target by now; poll the window list.
         t0 = SystemClock.uptimeMillis()
-        val controller = OeaProjectionController { OeaLiveWindowManager.accessibilityService() }
         // An app that already runs full screen on the phone may simply come
         // to the front there instead of starting fresh on the private
         // display (its task already lives on display 0). Record that before
@@ -270,7 +365,10 @@ object OeaProjectionLaunch {
             displayId = host.displayId,
             state = OeaProjectionState.LIVE,
             headline = "$appLabel is live on the virtual display. The phone screen is untouched.",
-            evidence = evidence
+            evidence = evidence,
+            occupancyShown = occupancyShown,
+            occupancyAttached = occupancyAttached,
+            routeAttempts = attempts
         )
     }
 
@@ -291,7 +389,10 @@ object OeaProjectionLaunch {
         evidence: MutableList<OeaEvidenceLine>,
         reason: String,
         appLabel: String,
-        elapsed: Long = -1L
+        elapsed: Long = -1L,
+        occupancyShown: Boolean = false,
+        occupancyAttached: Boolean = false,
+        routeAttempts: List<OeaLaunchRouteAttempt> = emptyList()
     ): OeaProjectionLaunchResult {
         evidence += OeaEvidenceLine("Result", reason, elapsed)
         host.release()
@@ -300,7 +401,10 @@ object OeaProjectionLaunch {
             displayId = host.displayId,
             state = OeaProjectionState.FAILED,
             headline = reason,
-            evidence = evidence
+            evidence = evidence,
+            occupancyShown = occupancyShown,
+            occupancyAttached = occupancyAttached,
+            routeAttempts = routeAttempts
         )
     }
 
@@ -326,4 +430,6 @@ object OeaProjectionLaunch {
             }
         }
     }
+
+    private const val OEA_SELF_PACKAGE = "com.oea.launcher"
 }

@@ -319,6 +319,63 @@ class OeaProjectionController(private val serviceProvider: () -> AccessibilitySe
         }
     }
 
+    // ---------------------------------------------------------------- probes (continued)
+
+    /**
+     * Non-destructive end-to-end interaction proof for the experiment: it
+     * focuses the first focusable control of the target app on the display
+     * and immediately releases the focus again. Nothing is clicked, typed,
+     * scrolled or sent — but if this succeeds, the very channel a live
+     * window uses for taps and text demonstrably reaches the real app.
+     */
+    fun interactionProbe(displayId: Int, packageName: String? = null): OeaNodeOutcome {
+        val node = findFirstFocusable(displayId, packageName)
+            ?: return OeaNodeOutcome.Failed(
+                "No focusable control was exposed to try; nothing was touched."
+            )
+        try {
+            val focused = try {
+                node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            } catch (t: Throwable) {
+                return OeaNodeOutcome.Failed(
+                    "Focus threw ${t.javaClass.simpleName}: ${t.message}"
+                )
+            }
+            try {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLEAR_FOCUS)
+            } catch (_: Throwable) {
+            }
+            return if (focused) {
+                OeaNodeOutcome.Ok("focused and released ${describe(node)}")
+            } else {
+                OeaNodeOutcome.Rejected(
+                    "The app refused a focus action through accessibility."
+                )
+            }
+        } finally {
+            recycleQuietly(node)
+        }
+    }
+
+    private fun findFirstFocusable(displayId: Int, packageName: String?): AccessibilityNodeInfo? {
+        for (window in windowsOnDisplay(displayId, packageName)) {
+            val root = try {
+                window.root
+            } catch (_: Throwable) {
+                null
+            } ?: continue
+            var found: AccessibilityNodeInfo? = null
+            walk(root) { node ->
+                if (node.isFocusable) {
+                    found = node
+                    false
+                } else true
+            }
+            if (found != null) return found
+        }
+        return null
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /**
