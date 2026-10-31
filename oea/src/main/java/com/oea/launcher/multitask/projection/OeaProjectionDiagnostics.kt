@@ -190,10 +190,14 @@ object OeaProjectionDiagnostics {
         )
         if (firstFailed == "starter-launch") {
             rec.line(
-                "Hint for a starter-launch denial on this phone: check the phone's own per-app launch " +
-                        "controls for OEA (Infinix/XOS: Settings \u203a Apps \u203a OEA \u203a notifications & other permissions, " +
-                        "'Display pop-up windows while running in the background' / auto-launch), then run the experiment " +
-                        "again. OEA cannot and will not bypass a platform security control."
+                "Reading a starter-launch denial on this phone: if the evidence above shows " +
+                        "SecurityExceptions mentioning launchDisplayId, this manufacturer refuses the direct " +
+                        "projection routes outright and the deciding question is whether any task-move API " +
+                        "(the reparent lines) was accepted. If instead the no-options start was refused as a " +
+                        "background start, check the phone's per-app launch controls for OEA (Infinix/XOS: " +
+                        "Settings \u203a Apps \u203a OEA \u203a notifications & other permissions, 'Display pop-up windows " +
+                        "while running in the background' / auto-launch) and run the experiment again. " +
+                        "OEA cannot and will not bypass a platform security control."
             )
         }
     }
@@ -312,16 +316,16 @@ object OeaProjectionDiagnostics {
         var t0 = SystemClock.uptimeMillis()
         val host = when (val r = OeaVirtualDisplayHost.create(context, "OEA Stage-B")) {
             is OeaVirtualDisplayHost.CreateResult.Created -> {
-                val displayDesc = try {
+                val flagsLabel = try {
                     (context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
                         ?.getDisplay(r.host.displayId)?.let { d ->
-                            "display ${d.displayId}, flags=${d.flags} (${d})"
+                            decodeDisplayFlags(d.flags) + " (raw ${d.flags})"
                         }
                 } catch (_: Throwable) {
                     null
-                } ?: "display ${r.host.displayId}"
-                rec.line("Created: ${r.host.width}x${r.host.height} @${r.host.densityDpi}dpi, flags=${r.host.flagsLabel}")
-                rec.line("Display state as the OS sees it: $displayDesc")
+                } ?: "unavailable"
+                rec.line("Created: ${r.host.width}x${r.host.height} @${r.host.densityDpi}dpi, requested flags=${r.host.flagsLabel}")
+                rec.line("Display as the OS sees it: $flagsLabel — Android never marks an app-created display TRUSTED, and that bit is what the launch rule below keys on.")
                 rec.stage("virtual-display", "PASSED", "display ${r.host.displayId} created (${r.host.flagsLabel})")
                 rec.saveNow()
                 r.host
@@ -334,10 +338,39 @@ object OeaProjectionDiagnostics {
             }
         }
 
-        // ---------------------------------------------------------------- launch
-        rec.section("Launch ladder (pillar 1)")
+        // ---------------------------------------------------------------- the rule
+        rec.section("The launch rule this experiment is measured against (verified in AOSP sources)")
+        rec.line("Android 13/14/15 place an activity on an app-created display only when ALL of these hold:")
+        rec.line("  1. the activity itself declares android:allowEmbedded=\"true\";")
+        rec.line("  2. the caller holds the signature permission ACTIVITY_EMBEDDING (system apps only) OR the caller's uid already has an activity record on that display (a Presentation window does NOT count);")
+        rec.line("  3. the display's owner or the platform otherwise permits it — an app-created display is never TRUSTED, and some manufacturers (this is what the first XOS run showed) turn Android's silent 'fall back to the phone' into a thrown SecurityException mentioning launchDisplayId.")
+        rec.line("Consequence: a third-party app, which never declares allowEmbedded, cannot be placed on an app-created display by any ordinary app on stock Android 13–15 — and OEA's own apps can, once one OEA activity record is on the display. The ladder below measures exactly that, route by route.")
         val launchIntent = pm.getLaunchIntentForPackage(targetPackage)
         val activityName = launchIntent?.component?.className
+        val targetAllowsEmbedded = if (activityName == null) null else try {
+            val cn = android.content.ComponentName(targetPackage, activityName)
+            val aInfo = if (Build.VERSION.SDK_INT >= 33) {
+                pm.getActivityInfo(cn, PackageManager.ComponentInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getActivityInfo(cn, 0)
+            }
+            // ActivityInfo.FLAG_ALLOW_EMBEDDED == 0x80000000 (hidden constant; value from AOSP).
+            (aInfo.flags and 0x80000000.toInt()) != 0
+        } catch (_: Throwable) {
+            null
+        }
+        rec.line(
+            "Target declares android:allowEmbedded: " + when (targetAllowsEmbedded) {
+                true -> "yes — the target is allowed on an app-created display as far as this rule goes"
+                false -> "NO — Android itself will never place it on an app-created display (this is a platform rule, not an OEA defect)"
+                null -> "unknown (could not read the target's manifest flags)"
+            }
+        )
+        rec.saveNow()
+
+        // ---------------------------------------------------------------- launch
+        rec.section("Launch ladder (pillar 1)")
         if (activityName == null) {
             rec.line("FAILED: no launchable activity for $targetPackage")
             rec.stage("starter-launch", "FAILED", "no launchable activity")
@@ -345,7 +378,15 @@ object OeaProjectionDiagnostics {
             return
         }
         t0 = SystemClock.uptimeMillis()
-        val launch = OeaProjectionLaunch.launch(service, host, targetPackage, activityName, appLabel)
+        // A foreground OEA activity (this Settings screen) is given to the
+        // ladder as an extra launch context: some manufacturers key their
+        // launch checks on the caller being a visible activity, and the
+        // no-options re-parent start needs a foreground caller on devices
+        // that police background starts.
+        val hostContext = context as? android.app.Activity
+        val launch = OeaProjectionLaunch.launch(
+            service, host, targetPackage, activityName, appLabel, hostContext
+        )
         val launchMs = SystemClock.uptimeMillis() - t0
         launch.evidence.forEach { rec.line(it.toString()) }
         rec.stage(
@@ -366,7 +407,9 @@ object OeaProjectionDiagnostics {
             if (launch.success) "PASSED" else "FAILED",
             if (launch.success) "a legal launch route landed the starter on the private display"
             else launch.routeAttempts.firstNotNullOfOrNull { it.threw }?.substringBefore('\n')
-                ?: "no route landed the starter"
+                ?: if (launch.reparentAttempts.isNotEmpty())
+                    "no route landed the starter; ${launch.reparentAttempts.size} task-move API(s) were also tried — see the reparent lines"
+                else "no route landed the starter"
         )
         if (!launch.success) {
             rec.line("Launch failed after ${launchMs}ms — ${launch.headline}")
@@ -496,6 +539,21 @@ object OeaProjectionDiagnostics {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * Decodes the public bits of `Display.getFlags()` for the report. The
+     * TRUSTED bit (1 shl 7) is a hidden constant; its value comes from the
+     * AOSP sources and it is the bit the launch rule keys on — an
+     * app-created display must never have it.
+     */
+    private fun decodeDisplayFlags(flags: Int): String {
+        val parts = mutableListOf<String>()
+        if (flags and android.view.Display.FLAG_PRIVATE != 0) parts += "PRIVATE"
+        if (flags and android.view.Display.FLAG_PRESENTATION != 0) parts += "PRESENTATION"
+        if (flags and android.view.Display.FLAG_SECURE != 0) parts += "SECURE"
+        parts += if (flags and (1 shl 7) != 0) "TRUSTED" else "UNTRUSTED"
+        return parts.joinToString("+")
+    }
 
     private fun readMemory(am: ActivityManager?): Pair<Long, Long> {
         val info = ActivityManager.MemoryInfo()
