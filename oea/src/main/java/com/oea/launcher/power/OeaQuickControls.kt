@@ -120,9 +120,9 @@ object OeaQuickControls {
         }
         sheet.addView(grid)
 
-        // ---- Quick Settings tiles (best-effort toggles)
+        // ---- Quick Settings tiles (real state, real action where Android allows)
         OeaFaultShield.guard("quick-controls:qs-tiles") {
-            kit.sectionTitle(sheet, "Quick Settings")
+            kit.sectionTitle(sheet, "Connectivity")
             val qsGroup = kit.group(sheet)
             // Flashlight: one shared owner, so the label reflects the real LED —
             // including a change made from a Home gesture or the Camera screen.
@@ -134,16 +134,112 @@ object OeaQuickControls {
                 return true
             }
             // Each row is independent; failures are contained.
+
+            // ---- Bluetooth: a REAL toggle. Android 12+ grants it to ordinary
+            // apps with the runtime permission BLUETOOTH_CONNECT (declared for
+            // exactly this); Android 11- uses the legacy pair.
             runCatching {
-                kit.row(qsGroup, R.drawable.oic_wallpaper, "Wi-Fi", "Open Wi-Fi settings") {
-                    launch(Intent(Settings.ACTION_WIFI_SETTINGS))
+                val adapter = bluetoothAdapter(context)
+                if (adapter != null) {
+                    val hasControl = bluetoothPermissionGranted(context)
+                    val state = runCatching { adapter.isEnabled }.getOrDefault(false)
+                    if (hasControl) {
+                        kit.row(qsGroup, R.drawable.oic_tune, "Bluetooth", if (state) "On · tap to turn off" else "Off · tap to turn on") {
+                            runCatching {
+                                if (adapter.isEnabled) adapter.disable() else adapter.enable()
+                            }.onFailure { toast("Android refused the Bluetooth change: ${it.message}") }
+                        }
+                    } else {
+                        kit.row(qsGroup, R.drawable.oic_tune, "Bluetooth", "Allow Nearby devices to control it here") {
+                            requestBluetoothPermission(context)
+                        }
+                    }
+                } else {
+                    kit.row(qsGroup, R.drawable.oic_tune, "Bluetooth", "Not available on this device")
                 }
             }
+
+            // ---- Wi-Fi: real state, and the in-place system panel for changes.
+            // Android 10+ forbids third-party apps from switching Wi-Fi
+            // themselves; the system panel is the surface Android provides.
             runCatching {
-                kit.row(qsGroup, R.drawable.oic_tune, "Bluetooth", "Open Bluetooth settings") {
-                    launch(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                val wifi = wifiState(context)
+                kit.row(qsGroup, R.drawable.oic_wallpaper, "Wi-Fi", when (wifi) {
+                    0 -> "Disabled · open the Wi-Fi panel"
+                    1 -> "Enabled · no connection · open the panel"
+                    3 -> "Enabled · open the panel"
+                    else -> "Open the Wi-Fi panel"
+                }) {
+                    launch(wifiPanelIntent())
                 }
             }
+
+            // ---- Auto-rotate: a REAL toggle via the same WRITE_SETTINGS flow
+            // the brightness slider already uses.
+            runCatching {
+                val canWrite = Settings.System.canWrite(context)
+                val autoRotate = Settings.System.getInt(
+                    context.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1
+                ) == 1
+                kit.row(qsGroup, R.drawable.oic_auto_awesome, "Auto-rotate", when {
+                    canWrite -> if (autoRotate) "On · tap to turn off" else "Off · tap to turn on"
+                    else -> "Allow Modify system settings to toggle here"
+                }) {
+                    if (canWrite) {
+                        runCatching {
+                            Settings.System.putInt(
+                                context.contentResolver, Settings.System.ACCELEROMETER_ROTATION,
+                                if (autoRotate) 0 else 1
+                            )
+                        }.onFailure { toast("Android refused the rotation change") }
+                    } else {
+                        launch(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}")))
+                    }
+                }
+            }
+
+            // ---- Airplane mode: state is readable; the internet panel is the
+            // compliant change surface (apps cannot switch it).
+            runCatching {
+                val on = Settings.Global.getInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
+                kit.row(qsGroup, R.drawable.oic_sports_esports, "Airplane mode", if (on) "On · open internet panel" else "Off · open internet panel") {
+                    launch(internetPanelIntent())
+                }
+            }
+
+            // ---- Location: apps cannot switch it; show the real mode and the
+            // honest shortcut. (isLocationEnabled is API 28+; older devices
+            // fall back to the location-mode setting.)
+            runCatching {
+                val lm = context.getSystemService(android.location.LocationManager::class.java)
+                val on = if (Build.VERSION.SDK_INT >= 28) {
+                    lm?.let { runCatching { it.isLocationEnabled }.getOrDefault(false) } ?: false
+                } else {
+                    @Suppress("DEPRECATION")
+                    runCatching {
+                        android.provider.Settings.Secure.getInt(
+                            context.contentResolver,
+                            android.provider.Settings.Secure.LOCATION_MODE,
+                            android.provider.Settings.Secure.LOCATION_MODE_OFF
+                        ) != android.provider.Settings.Secure.LOCATION_MODE_OFF
+                    }.getOrDefault(false)
+                }
+                kit.row(qsGroup, R.drawable.oic_home, "Location", if (on) "On · open location settings" else "Off · open location settings") {
+                    launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                }
+            }
+
+            // ---- Battery saver: readable, not switchable by apps.
+            runCatching {
+                val pm = context.getSystemService(android.os.PowerManager::class.java)
+                val on = pm?.isPowerSaveMode == true
+                kit.row(qsGroup, R.drawable.oic_battery_full, "Battery saver", if (on) "On · open battery saver" else "Off · open battery saver") {
+                    launch(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
+                }
+            }
+
+            // ---- Flashlight: the one connectivity-adjacent LED OEA owns
+            // outright.
             runCatching {
                 var torchRowRef: LinearLayout? = null
                 val torchRow = kit.row(qsGroup, R.drawable.oic_contrast, "Flashlight", if (torchOn) "On" else "Tap to toggle") {
@@ -156,21 +252,6 @@ object OeaQuickControls {
                     }
                 }
                 torchRowRef = torchRow
-            }
-            runCatching {
-                kit.row(qsGroup, R.drawable.oic_auto_awesome, "Auto-rotate", "Open display settings") {
-                    launch(Intent(Settings.ACTION_DISPLAY_SETTINGS))
-                }
-            }
-            runCatching {
-                kit.row(qsGroup, R.drawable.oic_home, "Location", "Open location settings") {
-                    launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                }
-            }
-            runCatching {
-                kit.row(qsGroup, R.drawable.oic_sports_esports, "Airplane mode", "Open wireless settings") {
-                    launch(Intent(Settings.ACTION_WIRELESS_SETTINGS))
-                }
             }
         }
 
@@ -389,5 +470,75 @@ object OeaQuickControls {
             })
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         group.addView(box)
+    }
+
+    // ---------------------------------------------------- connectivity helpers
+
+    /** The real Bluetooth adapter, when the device has one. */
+    private fun bluetoothAdapter(context: Context): android.bluetooth.BluetoothAdapter? = runCatching {
+        if (Build.VERSION.SDK_INT >= 31) {
+            context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter
+        } else {
+            @Suppress("DEPRECATION")
+            android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+        }
+    }.getOrNull()
+
+    /** Whether we may read AND change the adapter state right now. */
+    fun bluetoothPermissionGranted(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= 31) {
+            context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Asks for BLUETOOTH_CONNECT (Android 12+) from whatever activity is
+     * hosting the sheet. The sheet is rebuilt on resume, so the real toggle
+     * appears as soon as the user grants it.
+     */
+    private fun requestBluetoothPermission(context: Context) {
+        if (Build.VERSION.SDK_INT < 31) return
+        val activity = context as? android.app.Activity
+        if (activity == null) {
+            runCatching {
+                context.startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:${context.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            return
+        }
+        runCatching {
+            activity.requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT), 4781)
+        }
+    }
+
+    /** Wi-Fi state from WifiManager: 0=disabled, 1=enabling, 2=enabling, 3=enabled. */
+    private fun wifiState(context: Context): Int = runCatching {
+        @Suppress("DEPRECATION")
+        context.getSystemService(android.net.wifi.WifiManager::class.java)?.wifiState ?: -1
+    }.getOrDefault(-1)
+
+    /**
+     * The in-place system Wi-Fi panel (Android 10+): Android will not let a
+     * third-party app switch Wi-Fi itself (WifiManager.setWifiEnabled is
+     * system-only since Android 10), so this panel is the real change
+     * surface. Older devices fall back to the Wi-Fi settings screen.
+     */
+    private fun wifiPanelIntent(): Intent = if (Build.VERSION.SDK_INT >= 29) {
+        Intent(Settings.Panel.ACTION_WIFI)
+    } else {
+        Intent(Settings.ACTION_WIFI_SETTINGS)
+    }
+
+    /** The in-place internet panel (Wi-Fi + mobile data + airplane mode). */
+    private fun internetPanelIntent(): Intent = if (Build.VERSION.SDK_INT >= 29) {
+        Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
+    } else {
+        Intent(Settings.ACTION_WIRELESS_SETTINGS)
     }
 }

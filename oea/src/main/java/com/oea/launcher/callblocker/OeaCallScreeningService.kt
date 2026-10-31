@@ -36,7 +36,15 @@ class OeaCallScreeningService : CallScreeningService() {
         val rawNumber = callDetails.handle?.schemeSpecificPart.orEmpty()
         val number = normalize(rawNumber)
         val presentation = callDetails.handlePresentation
-        if (!OeaCallBlockRules.shouldBlockIncomingCall(this, rawNumber, presentation)) {
+        val verdict = OeaCallBlockRules.screeningVerdict(this, rawNumber, presentation)
+        // Every decision is recorded (kept, disposable, separate from the
+        // rules) so the blocker screen can answer the important diagnostic
+        // question after the fact: was the screening service invoked at all?
+        OeaCallBlockRules.noteDecision(this, verdict)
+        OeaCallBlockRules.noteScreenedAt(this)
+        OeaCallBlockRules.pruneHistory(this)
+        OeaCallBlockRules.ensureDailyCleanup(this)
+        if (!verdict.blocked) {
             respondToCall(callDetails, CallResponse.Builder().build())
             return
         }
@@ -66,9 +74,143 @@ object OeaCallBlockRules {
     private const val ALLOW_CONTACTS = "allow_contacts"
     private const val ALLOW_STARRED = "allow_starred"
     private const val ALLOW_LIST = "allow_list"
+
+    // History (and only history) lives in its OWN preferences file. Cleanup
+    // can therefore never touch a rule, an exemption or the enabled state,
+    // no matter what it removes or when it runs.
+    private const val HISTORY_PREFS = "oea_call_blocker_history"
     private const val HISTORY = "history"
+    private const val DECISIONS = "decisions"
+    private const val LAST_SCREENED_AT = "last_screened_at"
+
+    // Retention is a SETTING, so it lives with the rules — but it only ever
+    // governs the history file above.
+    private const val RETENTION = "history_retention"
+
+    /** Hard safety cap so history can never grow without bound on any mode. */
+    private const val HARD_CAP = 1000
+
+    /** Decision-log cap (diagnostics, not history). */
+    private const val DECISION_CAP = 50
 
     data class BlockedCall(val number: String, val timestamp: Long)
+
+    /** One screening decision, recorded whether the call was blocked or not. */
+    data class ScreeningDecision(val number: String, val blocked: Boolean, val reason: String, val timestamp: Long)
+
+    /** Why a call was blocked or allowed, in one short readable string. */
+    data class Verdict(val blocked: Boolean, val reason: String)
+
+    // ------------------------------------------------------------ retention
+
+    /** Retention modes for blocked-call history. */
+    val RETENTIONS = listOf(
+        "cap100" to "Keep latest 100",
+        "d7" to "Delete after 7 days",
+        "d30" to "Delete after 30 days",
+        "d90" to "Delete after 90 days",
+        "forever" to "Keep everything (up to 1000)"
+    )
+
+    fun retention(context: Context): String {
+        val id = prefs(context).getString(RETENTION, "cap100") ?: "cap100"
+        return if (RETENTIONS.any { it.first == id }) id else "cap100"
+    }
+
+    fun setRetention(context: Context, id: String) {
+        val safe = if (RETENTIONS.any { it.first == id }) id else "cap100"
+        prefs(context).edit().putString(RETENTION, safe).apply()
+        pruneHistory(context)
+    }
+
+    /**
+     * Applies the selected retention to the history (and nothing else).
+     * Returns how many entries were removed. Cheap: when nothing expires,
+     * no write happens at all.
+     */
+    fun pruneHistory(context: Context): Int {
+        val p = historyPrefs(context)
+        val entries = p.getStringSet(HISTORY, emptySet()).orEmpty()
+        if (entries.isEmpty()) return 0
+        val mode = retention(context)
+        val now = System.currentTimeMillis()
+        val maxAge = when (mode) {
+            "d7" -> 7L * 24 * 60 * 60 * 1000
+            "d30" -> 30L * 24 * 60 * 60 * 1000
+            "d90" -> 90L * 24 * 60 * 60 * 1000
+            else -> Long.MAX_VALUE
+        }
+        val cap = if (mode == "cap100") 100 else HARD_CAP
+        var kept = entries.filter { entry ->
+            val ts = entry.substringAfterLast('|').toLongOrNull() ?: Long.MAX_VALUE
+            now - ts <= maxAge
+        }.toMutableList()
+        var removed = entries.size - kept.size
+        if (kept.size > cap) {
+            kept.sortByDescending { it.substringAfterLast('|').toLongOrNull() ?: 0L }
+            removed += kept.size - cap
+            kept = kept.take(cap).toMutableList()
+        }
+        if (removed > 0) {
+            p.edit().putStringSet(HISTORY, kept.toSet()).apply()
+        }
+        return removed
+    }
+
+    // ------------------------------------------------------------ decisions
+
+    /** Records a screening decision (kept for diagnostics, separate from rules). */
+    fun noteDecision(context: Context, verdict: Verdict, number: String? = null, at: Long = System.currentTimeMillis()) {
+        val p = historyPrefs(context)
+        val normalized = normalize(number.orEmpty()).ifEmpty { "Unknown/private" }
+        val old = p.getStringSet(DECISIONS, emptySet()).orEmpty().toMutableSet()
+        val flag = if (verdict.blocked) "B" else "A"
+        old.add("$flag|${verdict.reason.replace('|', ' ')}|$normalized|$at")
+        while (old.size > DECISION_CAP) {
+            val oldest = old.minByOrNull { it.substringAfterLast('|').toLongOrNull() ?: Long.MIN_VALUE } ?: break
+            old.remove(oldest)
+        }
+        p.edit().putStringSet(DECISIONS, old).apply()
+    }
+
+    /** Recent screening decisions, newest first. */
+    fun recentDecisions(context: Context): List<ScreeningDecision> =
+        historyPrefs(context).getStringSet(DECISIONS, emptySet()).orEmpty()
+            .mapNotNull { raw ->
+                val parts = raw.split('|')
+                if (parts.size != 4) return@mapNotNull null
+                val ts = parts[3].toLongOrNull() ?: return@mapNotNull null
+                ScreeningDecision(parts[2], parts[0] == "B", parts[1], ts)
+            }.sortedByDescending { it.timestamp }
+
+    /** When the system last invoked OEA's screening service (0 = never). */
+    fun lastScreenedAt(context: Context): Long =
+        historyPrefs(context).getLong(LAST_SCREENED_AT, 0L)
+
+    fun noteScreenedAt(context: Context, at: Long = System.currentTimeMillis()) {
+        historyPrefs(context).edit().putLong(LAST_SCREENED_AT, at).apply()
+    }
+
+    // ------------------------------------------------------------ daily alarm
+
+    /**
+     * Schedules the once-a-day history cleanup (inexact, battery-friendly).
+     * Re-scheduled from every screening event, from the blocker screen and
+     * after reboot, because Android alarms do not survive reboots. It only
+     * ever prunes the history file — never rules.
+     */
+    fun ensureDailyCleanup(context: Context) {
+        val am = context.getSystemService(android.app.AlarmManager::class.java) ?: return
+        val intent = android.content.Intent(context, OeaCallBlockerCleanupReceiver::class.java)
+        val pi = android.app.PendingIntent.getBroadcast(
+            context, 4701, intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        runCatching {
+            val first = System.currentTimeMillis() + 6L * 60 * 60 * 1000
+            am.setInexactRepeating(android.app.AlarmManager.RTC_WAKEUP, first, android.app.AlarmManager.INTERVAL_DAY, pi)
+        }
+    }
 
     fun enabled(context: Context) = prefs(context).getBoolean(ENABLED, true)
     fun setEnabled(context: Context, value: Boolean) = prefs(context).edit().putBoolean(ENABLED, value).apply()
@@ -96,7 +238,7 @@ object OeaCallBlockRules {
         prefs(context).edit().putStringSet(ALLOW_LIST, numbers.map(::normalize).filter(String::isNotEmpty).toSet()).apply()
     }
 
-    fun blockedHistory(context: Context): List<BlockedCall> = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty()
+    fun blockedHistory(context: Context): List<BlockedCall> = historyPrefs(context).getStringSet(HISTORY, emptySet()).orEmpty()
         .mapNotNull { entry ->
             val split = entry.lastIndexOf('|')
             if (split <= 0) null else {
@@ -106,26 +248,34 @@ object OeaCallBlockRules {
         }.sortedByDescending { it.timestamp }
 
     fun clearBlockedHistory(context: Context) {
-        prefs(context).edit().remove(HISTORY).apply()
+        // History AND the disposable decision log — never the rules.
+        historyPrefs(context).edit().remove(HISTORY).remove(DECISIONS).apply()
     }
 
-    fun shouldBlockIncomingCall(context: Context, rawNumber: String?, presentation: Int): Boolean {
-        if (!enabled(context)) return false
+    /**
+     * The full screening decision with the reason it produced, so the log can
+     * say more than "blocked" or "allowed".
+     */
+    fun screeningVerdict(context: Context, rawNumber: String?, presentation: Int): Verdict {
+        if (!enabled(context)) return Verdict(false, "blocking paused")
         val normalized = normalize(rawNumber.orEmpty())
         val isPrivate = presentation == TelecomManager.PRESENTATION_RESTRICTED ||
             presentation == TelecomManager.PRESENTATION_UNKNOWN ||
             presentation == TelecomManager.PRESENTATION_PAYPHONE
         if (normalized.isNotEmpty() && shouldBlock(context, rawNumber.orEmpty())) {
-            return true
+            return Verdict(true, "matched a blocking rule")
         }
         if ((normalized.isEmpty() || isPrivate) && blockUnknown(context)) {
             if (normalized.isNotEmpty() && matchesAnyExact(numberVariants(rawNumber.orEmpty()), getAllowList(context))) {
-                return false
+                return Verdict(false, "on the allow list")
             }
-            return true
+            return Verdict(true, "unknown/private number")
         }
-        return false
+        return Verdict(false, "no rule matched")
     }
+
+    fun shouldBlockIncomingCall(context: Context, rawNumber: String?, presentation: Int): Boolean =
+        screeningVerdict(context, rawNumber, presentation).blocked
 
     fun shouldBlock(context: Context, number: String): Boolean {
         if (!enabled(context)) return false
@@ -165,13 +315,14 @@ object OeaCallBlockRules {
     }
 
     fun recordBlockedAt(context: Context, number: String, timestamp: Long) {
-        val old = prefs(context).getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
+        val p = historyPrefs(context)
+        val old = p.getStringSet(HISTORY, emptySet()).orEmpty().toMutableSet()
         old.add(normalize(number).ifEmpty { "Unknown/private" } + "|" + timestamp)
-        while (old.size > 100) {
+        while (old.size > HARD_CAP) {
             val oldest = old.minByOrNull { it.substringAfterLast('|').toLongOrNull() ?: Long.MIN_VALUE } ?: break
             old.remove(oldest)
         }
-        prefs(context).edit().putStringSet(HISTORY, old).apply()
+        p.edit().putStringSet(HISTORY, old).apply()
     }
 
     fun normalizeNumber(value: String): String = normalize(value)
@@ -225,6 +376,23 @@ object OeaCallBlockRules {
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun historyPrefs(context: Context) = context.getSharedPreferences(HISTORY_PREFS, Context.MODE_PRIVATE)
     private fun normalize(value: String) = value.filter(Char::isDigit).takeLast(15)
     private fun digitsRule(value: String) = value.filter(Char::isDigit).take(5)
+}
+
+/**
+ * Runs the once-a-day history cleanup (and re-schedules it after reboot,
+ * since Android alarms do not survive reboots). It prunes the blocked-call
+ * history according to the retention the user selected — and touches
+ * NOTHING else: rules, exemptions and the enabled state live in a different
+ * file this receiver has no access path to.
+ */
+class OeaCallBlockerCleanupReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: android.content.Intent) {
+        com.oea.launcher.fault.OeaFaultShield.guard("call-blocker:cleanup") {
+            OeaCallBlockRules.pruneHistory(context)
+            OeaCallBlockRules.ensureDailyCleanup(context)
+        }
+    }
 }

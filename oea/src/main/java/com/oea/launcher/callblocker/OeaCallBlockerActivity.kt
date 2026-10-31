@@ -39,6 +39,11 @@ class OeaCallBlockerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Re-arm the daily cleanup alarm (alarms do not survive reboots, and
+        // re-arming is cheap) and apply the retention now — opening the
+        // blocker screen is a natural moment to drop expired entries.
+        runCatching { OeaCallBlockRules.ensureDailyCleanup(this) }
+        runCatching { OeaCallBlockRules.pruneHistory(this) }
         if (::content.isInitialized) render()
     }
 
@@ -291,6 +296,64 @@ class OeaCallBlockerActivity : Activity() {
     }
 
     private fun renderHistory() {
+        section("SCREENING HEALTH")
+        // The honest diagnostic for "blocking stopped": if calls came in but
+        // there is no recent screening event, the system never invoked OEA
+        // (role lost, or the manufacturer's auto-launch blocked it) — a
+        // different problem from rules not matching, and visible right here.
+        val lastScreened = OeaCallBlockRules.lastScreenedAt(this)
+        val lastScreenedText = if (lastScreened <= 0L) "never recorded" else
+            DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(lastScreened))
+        row(
+            "Screening service",
+            when {
+                roleHeld() -> "Call screening role held · last invoked $lastScreenedText"
+                dialerRoleHeld() -> "OEA is the default Phone app · last screening event $lastScreenedText"
+                else -> "No screening role · Android will not invoke OEA for calls · last event $lastScreenedText"
+            }
+        ) {
+            AlertDialog.Builder(this)
+                .setTitle("Why blocking can stop")
+                .setMessage(
+                    "Android only calls OEA's screening service while OEA holds the Call " +
+                        "Screening role (or is the default Phone app). If calls ring through and " +
+                        "'last invoked' above is old, the system is not calling OEA at all:\n\n" +
+                        "• Another app may have taken the screening role — tap Setup to take it back.\n" +
+                        "• XOS-class phones can also refuse to start OEA for a call: check " +
+                        "Settings › Apps › OEA › Auto-launch / 'Display pop-up windows while running " +
+                        "in the background', and battery optimization.\n\n" +
+                        "If screening IS being invoked, the log below shows every decision OEA made " +
+                        "and why. History size never affects blocking — rules and history are stored " +
+                        "separately."
+                )
+                .setPositiveButton("Setup") { _, _ -> requestRole() }
+                .setNegativeButton("Close", null)
+                .show()
+        }
+        val decisions = OeaCallBlockRules.recentDecisions(this)
+        if (decisions.isEmpty()) {
+            empty("No screening decisions recorded yet. After the next screened call, every decision OEA made appears here with its reason.")
+        } else {
+            decisions.take(8).forEach { d ->
+                val date = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(d.timestamp))
+                row(if (d.blocked) "Blocked · ${d.number}" else "Allowed · ${d.number}", "${d.reason} · $date")
+            }
+        }
+
+        section("HISTORY RETENTION")
+        val current = OeaCallBlockRules.retention(this)
+        OeaCallBlockRules.RETENTIONS.forEach { (id, label) ->
+            row(label, if (id == current) "Selected" else "") {
+                OeaCallBlockRules.setRetention(this, id)
+                render()
+            }
+        }
+        row("Delete old entries now", "Applies the selected retention immediately") {
+            val removed = OeaCallBlockRules.pruneHistory(this)
+            android.widget.Toast.makeText(this, if (removed > 0) "$removed old entries deleted" else "Nothing to delete yet", android.widget.Toast.LENGTH_SHORT).show()
+            render()
+        }
+
         section("RECENTLY BLOCKED")
         val history = OeaCallBlockRules.blockedHistory(this)
         if (history.isEmpty()) empty("No blocked calls recorded yet. Entries appear here when OEA rejects matching calls.")
@@ -565,7 +628,7 @@ class OeaCallBlockerActivity : Activity() {
         })
     }
 
-    private fun row(title: String, subtitle: String, action: () -> Unit) {
+    private fun row(title: String, subtitle: String, action: () -> Unit = {}) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
