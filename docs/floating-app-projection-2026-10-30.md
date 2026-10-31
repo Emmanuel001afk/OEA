@@ -448,9 +448,12 @@ hardening of a stock rule that normally does NOT throw. The stock rule:
   launch options at all** (transparent, non-focusable, non-touchable, so
   the user never notices it on the phone), its task id is taken from the
   handshake, and every task-move API the device exposes is tried in order:
-  OEM-public `ActivityManager.moveTaskToDisplay`,
-  `ActivityTaskManager.getService().moveRootTaskToDisplay/moveTaskToDisplay`,
-  the raw `activity_task` binder, and finally
+  OEM-public `ActivityManager.moveTaskToDisplay`, the same move calls
+  through the raw `activity_task` binder (the platform blocklist forbids
+  reflecting into the `ActivityTaskManager.getService()` wrapper for apps
+  targeting API 36+, so that route is dead by construction and is not
+  attempted — the binder handle reaches the same system service and the
+  system server enforces its own permissions on every call), and finally
   `startActivityFromRecents(taskId, options with launchDisplayId)`. Each
   call is recorded with its exact outcome — including which permission the
   platform demanded. If any of them moves the starter, the chicken-and-egg

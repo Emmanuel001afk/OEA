@@ -21,16 +21,23 @@ import java.lang.reflect.InvocationTargetException
  *
  *  1. `ActivityManager.moveTaskToDisplay(taskId, displayId)` — an OEM-public
  *     API on several Android 13 forks (it is hidden in stock AOSP);
- *  2. `ActivityTaskManager.getService().moveRootTaskToDisplay(taskId,
- *     displayId)` / `moveTaskToDisplay` — the system-server entry (stock
- *     AOSP requires the signature permission INTERNAL_SYSTEM_WINDOW here,
- *     so this only succeeds on builds whose manufacturer relaxed it);
- *  3. the same calls through the raw `activity_task` binder, for builds
- *     where the framework class above is stripped;
- *  4. `ActivityManager.startActivityFromRecents(taskId, options)` with
+ *  2. the same `moveRootTaskToDisplay`/`moveTaskToDisplay` calls through
+ *     the raw `activity_task` binder, for builds where the framework
+ *     wrapper above is unavailable — the system server still enforces its
+ *     own permissions on every call (stock AOSP requires the signature
+ *     permission INTERNAL_SYSTEM_WINDOW here, so this only succeeds on
+ *     builds whose manufacturer relaxed it);
+ *  3. `ActivityManager.startActivityFromRecents(taskId, options)` with
  *     `launchDisplayId` in the options, which re-launches a task that is
  *     already in Recents onto a display (subject to the same display rule
  *     as any launch, so it only helps once the rule can pass).
+ *
+ * (The `ActivityTaskManager.getService()` wrapper of route 2 is deliberately
+ * NOT used: the platform blocklist forbids reflecting into it for apps
+ * targeting API 36 and above, so it is dead by construction on modern
+ * targets. The raw binder reaches the same system service through a handle
+ * the platform itself hands out, and every outcome — accepted, refused, or
+ * permission-demanded — is recorded as evidence.)
  *
  * Every attempt is returned as evidence with its exact outcome — including
  * the permissions the platform demanded — because this ladder is exactly the
@@ -64,7 +71,6 @@ object OeaTaskMove {
     fun moveTaskToDisplay(context: Context, taskId: Int, displayId: Int): List<Attempt> {
         val attempts = mutableListOf<Attempt>()
         attempts += tryAmMove(context, taskId, displayId)
-        attempts += tryAtmService(taskId, displayId)
         attempts += tryRawBinder(taskId, displayId)
         return attempts
     }
@@ -110,25 +116,6 @@ object OeaTaskMove {
             Attempt("ActivityManager.moveTaskToDisplay", true, "call accepted")
         } catch (t: Throwable) {
             Attempt("ActivityManager.moveTaskToDisplay", false, unwrap("moveTaskToDisplay", t))
-        }
-    }
-
-    private fun tryAtmService(taskId: Int, displayId: Int): Attempt {
-        val label = "ActivityTaskManager.getService()"
-        return try {
-            val atmClass = Class.forName("android.app.ActivityTaskManager")
-            val getService = atmClass.getDeclaredMethod("getService")
-            getService.isAccessible = true
-            val service = getService.invoke(null)
-                ?: return Attempt(label, false, "getService() returned null")
-            val moved = invokeMove(service, taskId, displayId)
-                ?: return Attempt(
-                    label, false,
-                    "no moveRootTaskToDisplay/moveTaskToDisplay method"
-                )
-            Attempt("$label.$moved", true, "call accepted")
-        } catch (t: Throwable) {
-            Attempt(label, false, unwrap("ActivityTaskManager", t))
         }
     }
 
