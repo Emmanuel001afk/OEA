@@ -270,6 +270,7 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             }
             actions += Action(R.drawable.oic_splitscreen, "Split") { splitWith(app) }
             actions += Action(R.drawable.oic_select_window, "Float") { floating(app) }
+            actions += Action(R.drawable.oic_palette, "Change icon") { w.openIconPicker(app) }
             actions += Action(R.drawable.oic_ac_unit, if (frozen) "Unfreeze" else "Freeze") { freezeToggle(app) }
             actions += Action(if (locked) R.drawable.oic_lock_open else R.drawable.oic_lock, if (locked) "Unlock" else "Lock") { lockToggle(app) }
             if (ref.source == OeaWorkspace.Source.DRAWER && pkg != context.packageName) {

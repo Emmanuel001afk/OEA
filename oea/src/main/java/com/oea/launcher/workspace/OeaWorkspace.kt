@@ -58,6 +58,8 @@ import com.oea.launcher.assistant.OeaSystemActions
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.focus.OeaFocusStore
 import com.oea.launcher.icons.OeaIconController
+import com.oea.launcher.icons.OeaIconOverrides
+import com.oea.launcher.icons.OeaIconPickerActivity
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.notifications.OeaNotificationListener
 import com.oea.launcher.notifications.OeaNotificationState
@@ -201,6 +203,8 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private var rebuildPosted = false
     private var resumed = false
     private var closeDrawerOnPause = false
+    /** [OeaIconOverrides.version] as last seen; a change means tiles need new drawables. */
+    private var seenIconOverrideVersion = 0
     // Declared before init: the drawer reports its backdrop while Home is constructed.
     private var drawerWallpaperVisible = false
     private var blurApplied = false
@@ -829,6 +833,13 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         } else {
             refreshBadges()
         }
+        // A per-app icon may have been changed in the picker while Home was
+        // behind it; the tiles hold their old drawables until a rebuild.
+        val iconVersion = OeaIconOverrides.version()
+        if (iconVersion != seenIconOverrideVersion) {
+            seenIconOverrideVersion = iconVersion
+            scheduleRebuild()
+        }
         applySafeModeVisibility()
         applyWallpaperBackdrop()
         glance.refresh()
@@ -1380,6 +1391,15 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pruneHiddenApps()
         var items = ws.items()
         var folders = ws.folders()
+        // App-family folders follow the installed catalogue. Runs only when
+        // family membership actually changed, and preserves every manual edit.
+        if (apps.isNotEmpty() && catalogueAuthoritative) {
+            val smart = OeaSmartFolders.reconcile(context, apps, folders, cols to rows)
+            if (smart.changed) {
+                folders = smart.folders
+                if (smart.items.isNotEmpty()) items = items + smart.items
+            }
+        }
         // Legacy data: folder members were also stored as items carrying folderId.
         val folderIds = folders.map { it.id }.toSet()
         val legacyMembers = items.filter { it.folderId != null && it.folderId in folderIds }
@@ -2074,6 +2094,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (activity != null) activity.startActivity(intent) else context.startActivity(Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         true
     }.getOrDefault(false)
+
+    /** Opens the per-app icon picker; the change is cosmetic and never affects launching. */
+    internal fun openIconPicker(app: OeaAppInfo) {
+        startSafely(OeaIconPickerActivity.intent(context, app.packageName, app.className.takeIf { it.isNotBlank() }, app.label))
+    }
 
     internal fun openSystemTool(screen: String?) {
         val intent = Intent(context, OeaSystemToolsActivity::class.java)
@@ -2791,7 +2816,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         fun detach(d: DragState) {
             when (d.source) {
                 Source.HOME_ITEM -> items.removeAll { it.id == d.key }
-                Source.HOME_FOLDER -> folders.removeAll { it.id == d.key }
+                Source.HOME_FOLDER -> {
+                    folders.removeAll { it.id == d.key }
+                    // Deleting an automatic family folder is a decision: the
+                    // family is switched off instead of silently recreated.
+                    OeaSmartFolders.onFolderDeleted(context, d.key)
+                }
                 Source.DOCK -> if (d.ref.dockIndex in dock.indices && dock[d.ref.dockIndex] == d.key) dock.removeAt(d.ref.dockIndex) else dock.remove(d.key)
                 Source.FOLDER_MEMBER -> removeFromFolder(d.ref.memberOf, d.key)
                 Source.DRAWER, Source.WIDGET -> Unit
@@ -2803,6 +2833,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             if (index < 0) return
             val folder = folders[index]
             val members = folder.members.filterNot { it == key }
+            // A hand-removal from an automatic family folder is remembered:
+            // that app is never re-added to the folder by a later reconcile.
+            if (OeaSmartFolders.familyIdOf(folder.id) != null) {
+                OeaSmartFolders.onMemberRemoved(context, folder.id, key)
+            }
             if (members.size >= 2 && !folder.isPair) {
                 folders[index] = folder.copy(members = members)
             } else {
@@ -2991,7 +3026,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val edit = Edit()
         when {
             ref.memberOf != null && ref.app != null -> edit.removeFromFolder(ref.memberOf, appKey(ref.app))
-            ref.folder != null -> edit.folders.removeAll { it.id == ref.folder.id }
+            ref.folder != null -> {
+                edit.folders.removeAll { it.id == ref.folder.id }
+                OeaSmartFolders.onFolderDeleted(context, ref.folder.id)
+            }
             ref.dockIndex >= 0 && ref.app != null -> edit.dock.remove(appKey(ref.app))
             ref.item != null -> edit.items.removeAll { it.id == ref.item.id }
         }
@@ -3000,8 +3038,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     }
 
     internal fun updateFolder(folder: OeaWorkspaceStore.Folder) {
+        val previous = ws.folders().firstOrNull { it.id == folder.id }
         val folders = ws.folders().map { if (it.id == folder.id) folder else it }
         ws.replaceFolders(folders)
+        // Apps the user removed from an automatic family folder in the editor
+        // are remembered so reconcile never adds them back.
+        if (previous != null) {
+            previous.members.filterNot { it in folder.members }.forEach { removed ->
+                OeaSmartFolders.onMemberRemoved(context, folder.id, removed)
+            }
+        }
         // Apps moved into a folder leave their own Home cells.
         ws.replaceItems(ws.items().filterNot { it.id in folder.members })
         rebuild()

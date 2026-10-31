@@ -96,7 +96,20 @@ class OeaIconController(private val context: Context) {
 
     fun iconBitmap(packageName: String, className: String? = null): Bitmap? {
         val style = currentStyle()
-        val key = style.key + "|" + packageName + "/" + className.orEmpty()
+        // A per-app icon override changes the source drawable, so it (and, for
+        // gallery pictures, the picture's last-modified stamp) belongs in the
+        // cache key or a changed icon would keep showing the old bitmap.
+        val override = OeaIconOverrides.spec(context, packageName, className)
+        val overrideKey = when {
+            override == null -> ""
+            override.startsWith("pack:") ->
+                // Pinned to the pack it was picked from; that pack's own update
+                // stamp must re-render the picked icon too.
+                "|ov:$override@${stampOf(override.removePrefix("pack:").substringBefore(':', ""))}"
+            override.startsWith("image:") -> "|ov:$override@${OeaIconOverrides.imageStamp(context, override)}"
+            else -> "|ov:$override"
+        }
+        val key = style.key + "|" + packageName + "/" + className.orEmpty() + overrideKey
         rendered.get(key)?.let { return it }
         // Rendered icons persist across process restarts: after Android kills
         // OEA in the background, Home comes back with its icons immediately
@@ -149,8 +162,8 @@ class OeaIconController(private val context: Context) {
     }
 
     fun invalidatePackage(packageName: String) {
-        rawStates.keys.filter { it.contains("|$packageName/") }.forEach { rawStates.remove(it) }
-        rendered.snapshot().keys.filter { it.contains("|$packageName/") }.forEach { rendered.remove(it) }
+        rawStates.keys.filter { it.contains("|$packageName/") || it.contains("|ov:pack:$packageName:") }.forEach { rawStates.remove(it) }
+        rendered.snapshot().keys.filter { it.contains("|$packageName/") || it.contains("|ov:pack:$packageName:") }.forEach { rendered.remove(it) }
         stamps.remove(packageName)
         // An updated icon pack changes every icon it themes.
         if (packageName == store.iconPackPackage()) {
@@ -226,10 +239,24 @@ class OeaIconController(private val context: Context) {
     private class Raw(val drawable: Drawable, val fromPack: Boolean)
 
     private fun rawIcon(packageName: String, className: String?, pack: String?): Raw? {
-        val key = "${pack.orEmpty()}|$packageName/${className.orEmpty()}"
+        val override = OeaIconOverrides.spec(context, packageName, className)
+        val key = "${pack.orEmpty()}|$packageName/${className.orEmpty()}|${override.orEmpty()}"
         rawStates[key]?.let { state ->
             val d = state.newDrawable()?.mutate() ?: return@let
             return Raw(d, rawFromPack[key] == true)
+        }
+        // A hand-picked per-app icon wins over both the pack and the system
+        // icon; when its source is gone (pack uninstalled, picture deleted)
+        // we deliberately fall through to the normal resolution below.
+        if (override != null) {
+            val picked = overrideRaw(packageName, className, override)
+            if (picked != null) {
+                picked.drawable.constantState?.let {
+                    rawStates[key] = it
+                    rawFromPack[key] = picked.fromPack
+                }
+                return Raw(picked.drawable.mutate(), picked.fromPack)
+            }
         }
         val packDrawable = loadPackIcon(pack, packageName, className)
         val drawable = packDrawable
@@ -244,6 +271,89 @@ class OeaIconController(private val context: Context) {
             rawFromPack[key] = packDrawable != null
         }
         return Raw(drawable.mutate(), packDrawable != null)
+    }
+
+    /** Resolves a per-app override spec to a drawable, or null when unavailable. */
+    private fun overrideRaw(packageName: String, className: String?, spec: String): Raw? = when {
+        spec == OeaIconOverrides.SYSTEM -> runCatching {
+            if (!className.isNullOrBlank()) packageManager.getActivityIcon(ComponentName(packageName, className))
+            else packageManager.getApplicationIcon(packageName)
+        }.getOrNull()?.let { Raw(it, false) }
+
+        spec.startsWith("pack:") -> {
+            // "pack:<pack package>:<drawable name>" — pinned to the pack it was
+            // picked from, so switching the global pack does not silently move
+            // a hand-picked icon to a different pack's drawable of the same name.
+            val rest = spec.removePrefix("pack:")
+            val packPkg = rest.substringBefore(':', "")
+            val drawableName = rest.substringAfter(':', "")
+            if (packPkg.isBlank() || drawableName.isBlank()) null
+            else {
+                val resources = runCatching { packageManager.getResourcesForApplication(packPkg) }.getOrNull()
+                val id = resources?.let { res ->
+                    res.getIdentifier(drawableName, "drawable", packPkg).takeIf { it != 0 }
+                        ?: res.getIdentifier(drawableName, "mipmap", packPkg)
+                } ?: 0
+                if (id == 0) null
+                else runCatching { resources!!.getDrawable(id, null) }.getOrNull()?.let { Raw(it, true) }
+            }
+        }
+
+        spec.startsWith("image:") -> {
+            val file = OeaIconOverrides.imageFile(context, spec)
+            if (file == null) null
+            else runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull()?.let { Raw(BitmapDrawable(context.resources, it), false) }
+        }
+
+        else -> null
+    }
+
+    /**
+     * Drops every cached rendering of one component (after its override
+     * changed). Disk entries are per package, which also covers the rare case
+     * of one app exposing several launcher activities.
+     */
+    fun invalidateComponent(packageName: String, className: String?) {
+        val marker = "|$packageName/${className.orEmpty()}"
+        rawStates.keys.filter { it.contains(marker) }.forEach { rawStates.remove(it) }
+        rawFromPack.keys.filter { it.contains(marker) }.forEach { rawFromPack.remove(it) }
+        rendered.snapshot().keys.filter { it.contains(marker) }.forEach { rendered.remove(it) }
+        val dir = diskDir()
+        diskExecutor.execute {
+            runCatching { dir.listFiles { file -> file.name.startsWith(packageName + "_") }?.forEach { it.delete() } }
+        }
+    }
+
+    /**
+     * The names of every icon an installed pack offers (its `drawable.xml`
+     * catalog plus every drawable actually mapped in `appfilter.xml`), in pack
+     * order. Used by the per-app icon picker; empty when the pack lists none.
+     */
+    fun packIconNames(packPackage: String?): List<String> {
+        if (packPackage.isNullOrBlank()) return emptyList()
+        packIconNamesCache[packPackage]?.let { return it }
+        val resources = runCatching { packageManager.getResourcesForApplication(packPackage) }.getOrNull()
+        val result = linkedSetOf<String>()
+        if (resources != null) {
+            val catalogId = resources.getIdentifier("drawable", "xml", packPackage)
+            if (catalogId != 0) {
+                runCatching {
+                    resources.getXml(catalogId).use { parser ->
+                        var event = parser.eventType
+                        while (event != XmlPullParser.END_DOCUMENT) {
+                            if (event == XmlPullParser.START_TAG && parser.name == "item") {
+                                parser.getAttributeValue(null, "drawable")?.takeIf { it.isNotBlank() }?.let(result::add)
+                            }
+                            event = parser.next()
+                        }
+                    }
+                }
+            }
+            result += mappings(packPackage, resources).values
+        }
+        val listed = result.toList()
+        packIconNamesCache[packPackage] = listed
+        return listed
     }
 
     private fun render(drawable: Drawable, fromPack: Boolean, style: Style): Bitmap {
@@ -385,6 +495,9 @@ class OeaIconController(private val context: Context) {
             sharedInstance ?: OeaIconController(context.applicationContext).also { sharedInstance = it }
         }
 
+        /** Install/update stamp of a package as last seen, 0 when unknown. */
+        fun stampOf(packageName: String): Long = stamps[packageName] ?: 0L
+
         private const val DISK_DIR = "oea_icons"
         private const val DISK_MAX_FILES = 2400
         private const val DISK_KEEP_FILES = 1600
@@ -399,6 +512,7 @@ class OeaIconController(private val context: Context) {
         private val rawStates = ConcurrentHashMap<String, Drawable.ConstantState>()
         private val rawFromPack = ConcurrentHashMap<String, Boolean>()
         private val packMappings = ConcurrentHashMap<String, Map<String, String>>()
+        private val packIconNamesCache = ConcurrentHashMap<String, List<String>>()
         private val rendered = object : LruCache<String, Bitmap>(
             (Runtime.getRuntime().maxMemory() / 7).coerceAtMost(56L * 1024 * 1024).toInt()
 ) {
@@ -416,6 +530,27 @@ class OeaIconController(private val context: Context) {
                     val r = s / 2f
                     val small = s * 0.12f
                     addRoundRect(RectF(0f, 0f, s, s), floatArrayOf(r, r, r, r, small, small, r, r), Path.Direction.CW)
+                }
+                "dotted" -> Path().apply {
+                    // A circle whose outline is carried by a ring of small
+                    // discs, the classic "dotted" icon shape. Built as a union
+                    // so the mask stays one filled region for shader drawing.
+                    val r = s / 2f
+                    val bumps = 14
+                    val bumpR = r * 0.13f
+                    val base = r - bumpR
+                    addCircle(r, r, base, Path.Direction.CW)
+                    val ring = Path()
+                    for (i in 0 until bumps) {
+                        val a = 2.0 * Math.PI * i / bumps
+                        ring.addCircle(
+                            r + base * cos(a).toFloat(),
+                            r + base * sin(a).toFloat(),
+                            bumpR,
+                            Path.Direction.CW
+                        )
+                    }
+                    op(ring, Path.Op.UNION)
                 }
                 "squircle" -> Path().apply {
                     val half = s / 2f
