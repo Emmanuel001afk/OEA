@@ -2,6 +2,14 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Bluetooth: required for the Quick Controls Bluetooth toggle to read
+         and change the real adapter state on Android 12+ (BLUETOOTH_CONNECT
+         is a runtime permission, requested from the controls sheet) and for
+         the same on Android 11 and below (legacy pair). Nothing else uses
+         these. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -882,6 +890,24 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Monitors selected games and provides OEA game-session controls." />
         </service>
+        <!--
+            Call blocker history cleanup: fires once a day from an inexact
+            AlarmManager alarm (scheduled by the screening service and the
+            blocker screen) and after boot (alarms do not survive reboots).
+            It only prunes disposable blocked-call history according to the
+            user's retention choice; blocking rules, exemptions and the
+            enabled state live in a separate file it never touches.
+        -->
+        <receiver
+            android:name="com.oea.launcher.callblocker.OeaCallBlockerCleanupReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name="com.oea.launcher.power.OeaBootReceiver"
             android:exported="true"

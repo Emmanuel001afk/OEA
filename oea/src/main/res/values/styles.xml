@@ -22,6 +22,12 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowActivityTransitions">false</item>
+        <!-- The Dynamic Island must be able to render INTO the display cutout
+             region so its pill can wrap the front camera (punch hole) instead
+             of hanging below it. shortEdges guarantees that in every
+             orientation. Ignored on API < 27 devices, which have no cutouts
+             this code needs to consider. -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
 
     <!-- OEA tool screens (Settings, Game Boost) draw edge-to-edge and pad

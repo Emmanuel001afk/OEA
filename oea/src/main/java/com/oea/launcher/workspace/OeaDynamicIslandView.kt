@@ -388,17 +388,17 @@ class OeaDynamicIslandView(
 
     /**
      * The height Home keeps free for this surface while collapsed; both
-     * styles expand over Home instead of pushing it down.
+     * styles expand over Home instead of pushing it down. Uses the SAME
+     * geometry as [cameraPillTop] so the reserved space always matches where
+     * the pill is actually drawn (it may now sit inside the status bar area,
+     * wrapped around the camera).
      */
     fun reservedHeight(): Int = when {
         visibility != VISIBLE -> 0
         isCamera -> {
-            val cameraTop = if (isLandscape()) {
-                (if (statusBarHeight > 0) statusBarHeight else dp(8)) + dp(3) + dp(store.islandCameraOffsetY())
-            } else {
-                maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
-            }
-            (cameraTop + dp(CAMERA_PILL_DP) + dp(8) - statusBarHeight).coerceAtLeast(0)
+            val (_, screenHeight) = currentScreenSize()
+            val pillBottom = cameraPillTop(screenHeight, dp(CAMERA_PILL_DP)) + dp(CAMERA_PILL_DP) + dp(8)
+            (pillBottom - statusBarHeight).coerceAtLeast(0)
         }
         else -> lastCollapsedHeight.coerceAtLeast(0)
     }
@@ -1337,13 +1337,27 @@ class OeaDynamicIslandView(
     }
 
     private fun cameraPillTop(screenHeight: Int, pillHeight: Int): Int {
-        // Landscape: keep pill at stable top anchor, ignore cutout bottom which may be 0 or side-located.
-        val anchor = if (isLandscape()) {
-            (if (statusBarHeight > 0) statusBarHeight else dp(8)) + dp(3) + dp(store.islandCameraOffsetY())
-        } else {
-            maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3) + dp(store.islandCameraOffsetY())
+        // Portrait with a real top cutout: centre the pill ON the camera
+        // (the whole point of the camera style — a black pill that wraps the
+        // punch hole, like the island phones show). This requires the window
+        // to render into the cutout region, which OeaHomeTheme requests via
+        // layoutInDisplayCutoutMode=shortEdges; the view itself also draws a
+        // solid black pill, so covering the cutout area is safe.
+        val rect = if (isLandscape()) null else cutout
+        val base = when {
+            rect != null && rect.height() > 0 && rect.width() > 0 ->
+                rect.centerY() - pillHeight / 2
+            // Landscape: keep pill at stable top anchor, ignore cutout bottom
+            // which may be 0 or side-located.
+            isLandscape() ->
+                (if (statusBarHeight > 0) statusBarHeight else dp(8)) + dp(3)
+            // No usable cutout (older device, or none reported): sit just
+            // below where the status bar would put the camera.
+            else ->
+                maxOf(statusBarHeight, cutout?.bottom ?: 0) + dp(3)
         }
-        return anchor.coerceIn(0, (screenHeight - pillHeight).coerceAtLeast(0))
+        val top = base + dp(store.islandCameraOffsetY())
+        return top.coerceIn(0, (screenHeight - pillHeight).coerceAtLeast(0))
     }
 
     /** Requests a WindowManager resize/reposition after a payload or inset change. */

@@ -180,7 +180,10 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
     private fun refreshChips() {
         chips.removeAllViews()
         nextAlarm()?.let { (label, intent) -> addChip(R.drawable.oic_alarm, label) { start(intent) } }
-        if (batteryLevel >= 0 && (charging || batteryLevel <= 20)) {
+        // Battery is always on the home screen (the data is the system's own
+        // ACTION_BATTERY_CHANGED level; showing it only while charging or low
+        // left the phone without a readable percentage most of the time).
+        if (batteryLevel >= 0) {
             val label = if (charging) "$batteryLevel% • Charging" else "$batteryLevel% battery"
             addChip(if (charging) R.drawable.oic_battery_charging_full else R.drawable.oic_battery_full, label) {
                 start(Intent(Intent.ACTION_POWER_USAGE_SUMMARY))
@@ -275,15 +278,19 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
             screenTimeMillis = -1L
             return
         }
-        val launcher = context.packageName
         io.execute {
             val start = Calendar.getInstance().apply {
                 set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
             }.timeInMillis
+            // Screen time = the phone's foreground usage since local midnight.
+            // The launcher's own time IS screen time — excluding it made the
+            // figure systematically lower than the phone's real screen-on
+            // time. Only System UI stays out, because that is lock screen and
+            // the shade, not app usage.
             val total = runCatching {
                 val usm = context.getSystemService(UsageStatsManager::class.java)
                 usm.queryAndAggregateUsageStats(start, System.currentTimeMillis()).values
-                    .filter { it.packageName != launcher && !it.packageName.startsWith("com.android.systemui") }
+                    .filterNot { it.packageName.startsWith("com.android.systemui") }
                     .sumOf { it.totalTimeInForeground }
             }.getOrDefault(-1L)
             main.post {
