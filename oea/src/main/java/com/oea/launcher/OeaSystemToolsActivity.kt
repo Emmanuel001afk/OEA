@@ -67,6 +67,7 @@ import com.oea.launcher.wallpaper.OeaWallpaper
 import com.oea.launcher.wallpaper.OeaWallpaperRenderer
 import com.oea.launcher.wallpaper.OeaWallpaperStore
 import com.oea.launcher.workspace.OeaWorkspaceStore
+import com.oea.launcher.workspace.OeaSmartFolders
 import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
 import com.oea.launcher.widgets.OeaWidgetStudio
 import java.util.concurrent.Executors
@@ -355,6 +356,7 @@ open class OeaSystemToolsActivity : Activity() {
             when (screen) {
                 "power" -> showPower()
                 "home" -> showHome()
+                "smart_folders" -> showSmartFolders()
                 "appearance" -> showAppearance()
                 "drawer" -> showDrawer()
                 "gestures" -> showGestures()
@@ -516,7 +518,36 @@ open class OeaSystemToolsActivity : Activity() {
         kit.row(group, R.drawable.oic_auto_awesome, "OEA Widget Studio", "Choose an original look and surface opacity for OEA's own widgets") { openWidgetStudio() }
         kit.switchRow(group, R.drawable.oic_lock, "Lock Home layout", "Prevents icons and widgets from being moved or removed by accident", dataStore.homeLayoutLocked()) { dataStore.setHomeLayoutLocked(it) }
         kit.row(group, R.drawable.oic_home, "Default Home app", homeRoleStatus()) { requestDefaultHome() }
+        kit.sectionTitle(box, "Folders")
+        group = kit.group(box)
+        kit.row(group, R.drawable.oic_folder, "Smart folders", "Automatic folders for app families like Google or Microsoft") { navigate("smart_folders") }
         kit.note(box, "Tip: long-press an empty spot on Home for wallpaper, widgets and pages. Long-press an icon for shortcuts, split screen, floating window, freeze and lock.")
+        present(page)
+    }
+
+    /** Automatic app-family folders: what exists, what is on, what was overridden. */
+    private fun showSmartFolders() {
+        val page = page("Smart folders", "Folders OEA creates automatically for app families")
+        val box = page.content
+        kit.note(
+            box,
+            "OEA recognises app families by their package identifiers — never by their names or icons. " +
+                "A family folder appears once two or more of its apps are installed, and follows installs and uninstalls. " +
+                "Everything you do by hand wins: renamed folders stay renamed, moved folders stay moved, apps you take out are never re-added, " +
+                "and deleting a family folder turns that family off."
+        )
+        OeaSmartFolders.families(this).forEach { (family, enabled) ->
+            kit.sectionTitle(box, family.title)
+            val group = kit.group(box)
+            kit.switchRow(group, R.drawable.oic_folder, "Create this folder", "When two or more ${family.title} apps are installed", enabled) {
+                OeaSmartFolders.setEnabled(this, family.id, it)
+            }
+            kit.row(group, R.drawable.oic_restart_alt, "Reset my choices", "Forget apps you moved out of the ${family.title} folder") {
+                OeaSmartFolders.reset(this, family.id)
+                toast("Your ${family.title} folder choices were reset")
+            }
+        }
+        kit.note(box, "Apps that belong to no family always stay as normal icons.")
         present(page)
     }
 
@@ -708,7 +739,7 @@ open class OeaSystemToolsActivity : Activity() {
         kit.sectionTitle(box, "Icons")
         group = kit.group(box)
         choiceRow(group, R.drawable.oic_interests, "Icon shape",
-            listOf("system" to "System default", "circle" to "Circle", "squircle" to "Squircle", "rounded" to "Rounded square", "teardrop" to "Teardrop", "square" to "Square"),
+            listOf("system" to "System default", "circle" to "Circle", "squircle" to "Squircle", "rounded" to "Rounded square", "teardrop" to "Teardrop", "square" to "Square", "dotted" to "Dotted"),
             dataStore.iconShape()) { dataStore.setIconShape(it); OeaIconController.shared(this).invalidate() }
         if (Build.VERSION.SDK_INT >= 33) {
             kit.switchRow(group, R.drawable.oic_contrast, "Themed icons", "Tints icons with your colours when the app supports it", dataStore.themedIcons()) {
@@ -799,6 +830,7 @@ open class OeaSystemToolsActivity : Activity() {
         "square" -> "Square"
         "teardrop" -> "Teardrop"
         "rounded" -> "Rounded"
+        "dotted" -> "Dotted"
         else -> "System"
     }
 

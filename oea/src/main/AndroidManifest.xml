@@ -149,6 +149,15 @@
                 android:taskAffinity="com.oea.launcher.authority"
                 android:theme="@style/OeaPanelTheme"
                 android:windowSoftInputMode="adjustResize" />
+            <!-- Per-app icon picker: opened from an app's long-press menu, so
+                 it never needs to be exported to other apps. -->
+            <activity
+                android:name=".icons.OeaIconPickerActivity"
+                android:exported="false"
+                android:label="Change icon"
+                android:taskAffinity="com.oea.launcher.authority"
+                android:theme="@style/OeaPanelTheme"
+                android:windowSoftInputMode="adjustResize" />
             <activity-alias
                 android:name=".OeaSettingsAlias"
                 android:exported="true"
