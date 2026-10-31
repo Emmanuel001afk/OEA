@@ -113,13 +113,27 @@
             </intent-filter>
         </activity>
         <!-- OEA Settings: its own task, reachable from Home and as an app. -->
+        <!--
+            android:allowEmbedded on OEA's own launchable apps (every app in
+            the workspace's "OEA APPS" section; the home screen deliberately
+            does not get it): verified in the Android 13/14/15 AOSP sources
+            (ActivityTaskSupervisorService.isCallerAllowedToLaunchOnDisplay)
+            that an activity can only ever be placed on an app-created
+            virtual display — which is how OEA's live windows work — if the
+            activity itself declares allowEmbedded. Third-party apps never
+            declare it, which is a platform limit OEA reports honestly; for
+            OEA's own apps this attribute is the one thing that makes the
+            OEA-managed floating window possible at all. It grants no
+            permission and changes nothing on the phone screen.
+        -->
         <activity
             android:name=".OeaSystemToolsActivity"
             android:exported="false"
             android:label="OEA Settings"
             android:taskAffinity="com.oea.launcher.settings"
             android:theme="@style/OeaPanelTheme"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" />
             <activity
                 android:name=".privilege.OeaAuthorityActivity"
                 android:exported="false"
@@ -170,7 +184,8 @@
             android:taskAffinity="com.oea.launcher.freezer"
             android:launchMode="singleTask"
             android:theme="@style/OeaPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -188,7 +203,8 @@
             android:taskAffinity="com.oea.launcher.themes"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -211,7 +227,8 @@
             android:label="OEA mini-apps"
             android:launchMode="singleTop"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaClockActivity"
             android:exported="true"
@@ -250,7 +267,8 @@
             android:taskAffinity="com.oea.launcher.app.calendar"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -273,7 +291,8 @@
             android:taskAffinity="com.oea.launcher.app.image"
             android:launchMode="singleTask"
             android:theme="@style/OeaFullscreenAppTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <!-- MAIN + APP_GALLERY makes EMAGE discoverable as a picture app,
                  while LAUNCHER keeps its own icon in OEA Home and Android's
                  launcher. It does not claim a private or OEM-only gallery role. -->
@@ -319,7 +338,8 @@
             android:taskAffinity="com.oea.launcher.app.vip"
             android:launchMode="singleTask"
             android:theme="@style/OeaFullscreenAppTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -351,7 +371,8 @@
             android:resizeableActivity="true"
             android:theme="@style/OeaFullscreenAppTheme"
             android:screenOrientation="fullSensor"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
+            android:allowEmbedded="true" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaWeatherActivity"
             android:exported="true"
@@ -376,7 +397,8 @@
             android:taskAffinity="com.oea.launcher.app.calculator"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -391,7 +413,8 @@
             android:taskAffinity="com.oea.launcher.app.messaging"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -419,7 +442,8 @@
             android:taskAffinity="com.oea.launcher.app.notes"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -434,7 +458,8 @@
             android:taskAffinity="com.oea.launcher.app.camera"
             android:launchMode="singleTask"
             android:theme="@style/OeaFullscreenAppTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -454,7 +479,8 @@
             android:taskAffinity="com.oea.launcher.app.console"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -465,7 +491,8 @@
         <activity-alias
             android:name="com.oea.launcher.miniapps.OeaGalleryActivity"
             android:exported="false"
-            android:targetActivity="com.oea.launcher.miniapps.OeaImageActivity" />
+            android:targetActivity="com.oea.launcher.miniapps.OeaImageActivity"
+            android:allowEmbedded="true" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaVoiceActivity"
             android:exported="true"
@@ -491,7 +518,8 @@
             android:taskAffinity="com.oea.launcher.games"
             android:theme="@style/OeaGameBoostTheme"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:allowEmbedded="true" />
         <activity
             android:name="com.oea.launcher.games.OeaEndlessDaysActivity"
             android:exported="true"
@@ -518,7 +546,8 @@
             android:launchMode="singleTask"
             android:theme="@style/OeaGameTheme"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -534,7 +563,8 @@
             android:launchMode="singleTask"
             android:theme="@style/OeaGameTheme"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:allowEmbedded="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -634,7 +664,8 @@
             android:icon="@drawable/ic_oea_phone"
             android:roundIcon="@drawable/ic_oea_phone"
             android:taskAffinity="com.oea.launcher.phone"
-            android:theme="@style/OeaTheme">
+            android:theme="@style/OeaTheme"
+            android:allowEmbedded="true" >
             <!-- The no-data DIAL filter is required for Android's default-dialer
                  role resolver; the tel filter handles links and prefilled numbers. -->
             <intent-filter>
@@ -673,7 +704,8 @@
             android:launchMode="singleTop"
             android:taskAffinity="com.oea.launcher.incall"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
-            android:theme="@style/OeaInCallTheme" />
+            android:theme="@style/OeaInCallTheme"
+            android:allowEmbedded="true" />
         <activity
             android:name="com.oea.launcher.phone.OeaInCallPopupActivity"
             android:exported="false"

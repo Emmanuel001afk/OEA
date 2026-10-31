@@ -360,3 +360,148 @@ Observed by the user on 2026-10-30 (PR #124 build):
 - Whether the XOS per-app control ("Display pop-up windows while running
   in the background" / auto-launch for OEA) is what denied the start —
   the report's full exception text will say.
+
+---
+
+## Investigation update — 2026-10-31: the device denial decoded
+
+### What the device said
+
+The PR #125 build ran on the Infinix Smart 8 (XOS, Android 13). The Stage-B
+report renders inside the OEA FLOAT overlay (working), and every launch
+route for every target (Calculator, Andronix, Attend) failed with the same
+platform refusal:
+
+```
+java.lang.SecurityException: Permission Denial: starting Intent
+{ flg=0x18000000 cmp=com.oea.launcher/.multitask.projection.OeaProjectionTrampolineActivity }
+from ProcessRecord{… 4882:com.oea.launcher/u0a410} (pid=4882, uid=10410)
+with launchDisplayId=2        (other runs: 3, 4 — per-run virtual-display ids)
+```
+
+`flg=0x18000000` = NEW_TASK|MULTIPLE_TASK — our intent, unmodified. The
+refusing check names `launchDisplayId` explicitly and fires for OEA's own
+activity, not just third-party targets.
+
+### What the AOSP sources establish (13 r1 & r84, 14 r75, 15 r36)
+
+The "with launchDisplayId=N" throw exists in **no** stock AOSP version
+checked (searched ActivityStarter, ActivityTaskSupervisorService,
+ActivityTaskManagerService, ActivityOptions, ActivityManager,
+LauncherAppsService, LaunchParamsController, TaskLaunchParamsModifier,
+RootWindowContainer across those five tags). It is this manufacturer's
+hardening of a stock rule that normally does NOT throw. The stock rule:
+
+1. **`ActivityTaskSupervisorService.isCallerAllowedToLaunchOnDisplay`**
+   (identical in 13 r1 and r84): on the default display → allowed;
+   INTERNAL_SYSTEM_WINDOW holders → allowed; on an **untrusted** display
+   (every app-created virtual display — `VirtualDisplayAdapter` sets
+   FLAG_TRUSTED only for callers that passed VIRTUAL_DISPLAY_FLAG_TRUSTED,
+   which requires the signature permission ADD_TRUSTED_DISPLAY):
+   - the **target activity itself** must declare
+     `android:allowEmbedded="true"`, otherwise the placement is refused —
+     unconditionally, regardless of display ownership, FLAG_PUBLIC, or the
+     caller having a window there;
+   - and the caller needs the signature permission ACTIVITY_EMBEDDING **or**
+     an **activity record** of its uid already on that display. A
+     Presentation window does not count (`DisplayContent.isUidPresent`
+     counts ActivityRecords only) — so the occupancy Presentation premise
+     of the first ladder was wrong, and the first OEA activity on the
+     display is a chicken-and-egg problem: it cannot be launched there
+     directly.
+2. **`RootWindowContainer.getOrCreateRootTask`** (13 r84 :2799) gates
+   EVERY placement candidate — `launchDisplayId`, launch task display
+   area, and **task inheritance** — through
+   `ActivityRecord.canBeLaunchedOnDisplay` (:3150) → the rule above, with
+   the target's real `launchedFromPid/Uid`. Android 15's
+   `ActivityRecord.canBeLaunchedOnDisplay` is identical. So "start the
+   target with no options so it inherits the trampoline's display" is
+   gated by the **target's** allowEmbedded bit too.
+3. **Consequences, now source-proven rather than assumed:**
+   - a **third-party** target (which never declares allowEmbedded) cannot
+     be placed on an app-created display by any ordinary app on stock
+     Android 13–15 — not by launchDisplayId, not by task inheritance;
+   - OEA's **own** activities (which do declare allowEmbedded) can be
+     placed there **once one OEA activity record is already on the
+     display**;
+   - stock Android silently falls back to the phone screen on refusal;
+     this manufacturer instead throws the observed SecurityException;
+   - `moveRootTaskToDisplay`/`moveTaskToDisplay` require the signature
+     permission INTERNAL_SYSTEM_WINDOW on stock 13 (ATMS :2976), but
+     several OEM builds expose `ActivityManager.moveTaskToDisplay` to
+     ordinary apps — that API is the one remaining legal way to get the
+     first OEA activity record onto the display on this device.
+4. The manifest parser still honours `android:allowEmbedded`
+   (PackageParser 13 r84 :4441 sets FLAG_ALLOW_EMBEDDED from it) and the
+   gate still reads the bit (ATS 13 r84 :1177), so the attribute is live
+   on Android 13 despite its deprecation notice.
+5. Dead routes confirmed and closed: LauncherApps keeps the real caller
+   identity (same gate); `isActivityStartAllowedOnDisplay` probes the same
+   rule; the "with launchDisplayId" throw fires before background-start
+   (BAL) evaluation, so BAL status on this device is still unknown and is
+   now measured separately by the no-options start.
+
+### The evidence-based correction (this change)
+
+- **New re-parent route** (`OeaTaskMove.kt`): after the direct
+  launchDisplayId routes are refused, the starter is started with **no
+  launch options at all** (transparent, non-focusable, non-touchable, so
+  the user never notices it on the phone), its task id is taken from the
+  handshake, and every task-move API the device exposes is tried in order:
+  OEM-public `ActivityManager.moveTaskToDisplay`, the same move calls
+  through the raw `activity_task` binder (the platform blocklist forbids
+  reflecting into the `ActivityTaskManager.getService()` wrapper for apps
+  targeting API 36+, so that route is dead by construction and is not
+  attempted — the binder handle reaches the same system service and the
+  system server enforces its own permissions on every call), and finally
+  `startActivityFromRecents(taskId, options with launchDisplayId)`. Each
+  call is recorded with its exact outcome — including which permission the
+  platform demanded. If any of them moves the starter, the chicken-and-egg
+  problem is solved legally: the starter is an activity record on the
+  display, OEA's uid is present, and the target inherits the display.
+- **Foreground activity context route:** the Stage-B experiment now runs
+  the ladder with the Settings activity as an additional launch context
+  (some manufacturers key their checks on the caller being a visible
+  activity; the no-options start also needs a foreground caller where
+  background starts are policed).
+- **`allowEmbedded` on OEA's own apps:** every launchable OEA app (the
+  workspace's "OEA APPS" set, home excluded) now declares
+  `android:allowEmbedded="true"` — the single source-verified condition
+  under which an activity may ever be placed on an app-created display.
+  No permission is granted and nothing changes on the phone screen; the
+  attribute is inert until a placement the platform already permits
+  happens. Third-party apps cannot be given this bit (their manifests are
+  not ours) — that limit is a platform rule, reported honestly.
+- **Starter hardening:** its window is now non-focusable and
+  non-touchable, and its self-timeout rose to 16 s so it survives the
+  whole re-parent sequence.
+- **Report:** a "The launch rule this experiment is measured against"
+  section (with the target's own allowEmbedded bit read from its
+  manifest), decoded display flags (PRIVATE/PRESENTATION/SECURE and the
+  TRUSTED bit that must be absent), the probe answers per context, every
+  reparent API outcome, and failure headlines that name the platform rule
+  instead of a generic error.
+- **Honesty guarantees unchanged:** a target that ends up on the phone is
+  reported as leaked, never as success; a stage that never ran is NOT RUN.
+
+### What the next device run must decide
+
+1. Does any reparent API on this XOS build accept a task move to our
+   display? (If yes: OEA's own apps become live windows — the full
+   pillars then get tested for real. If no: the direct routes plus the
+   reparent ladder together prove that this device's platform gives an
+   ordinary app no path to its own virtual display, and the report will
+   say exactly that, with every refusal.)
+2. Is the no-options starter start allowed from the foreground Settings
+   activity (BAL status on this device)?
+3. For a third-party target, the report now separates "the starter could
+   not be placed" from "the target could not be placed because it does
+   not declare allowEmbedded" — the latter is expected to be a hard
+   platform NO on every device.
+
+If (1) fails on this device, the OEA-managed floating window for
+**third-party apps** is platform-blocked on Android 13–15 in general
+(source-proven, not device-specific), and the product decision is: OEA
+apps through the live-window pipeline where the platform allows it, and
+the native freeform method for everything else — with the Stage-B report
+as the evidence the user can read, copy and share.

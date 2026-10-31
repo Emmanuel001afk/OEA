@@ -105,7 +105,9 @@ data class OeaProjectionLaunchResult(
     /** True if that Presentation's window verifiably attached to the display. */
     val occupancyAttached: Boolean = false,
     /** Every starter route that was tried, in order. */
-    val routeAttempts: List<OeaLaunchRouteAttempt> = emptyList()
+    val routeAttempts: List<OeaLaunchRouteAttempt> = emptyList(),
+    /** Every task-reparent API that was tried (re-parent route), in order. */
+    val reparentAttempts: List<OeaTaskMove.Attempt> = emptyList()
 ) {
     fun evidenceText(): String = evidence.joinToString("\n")
 }

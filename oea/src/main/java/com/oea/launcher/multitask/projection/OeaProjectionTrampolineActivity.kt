@@ -9,27 +9,38 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Display
+import android.view.WindowManager
 
 /**
  * The OEA activity that must already sit on the virtual display before the
  * target application is started, and must stay there as the launch source.
  *
- * Why this exists (AOSP multi-display launch policy, verified in the
- * Android 13 sources): an ordinary app may place *its own* activity on a
- * virtual display it created (it is the display owner), but it cannot aim a
- * *third-party* activity at that display with launchDisplayId. However, an
- * activity started with no launch options inherits the display of the task
- * it is launched into. So OEA:
+ * Why this exists (AOSP launch policy, verified in the Android 13/14/15
+ * sources): an activity may only be placed on an app-created (untrusted)
+ * display while the caller's uid already has an ACTIVITY RECORD on that
+ * display — a Presentation window does not count. So OEA:
  *
- *   1. puts this transparent activity on the virtual display;
- *   2. verifies it really landed there (OEMs can ignore launchDisplayId);
+ *   1. puts this transparent activity on the virtual display — directly
+ *      with launchDisplayId where the device allows it, or by starting it
+ *      on the phone and having its task moved there (see
+ *      [OeaTaskMove] — the first device run showed this manufacturer
+ *      throwing the SecurityException "…with launchDisplayId=N" for the
+ *      direct routes);
+ *   2. verifies it really landed there (its 100ms poll compares the
+ *      display it lives on with the expected one);
  *   3. only then starts the real target application from it, into the same
- *      task, so the target inherits the virtual display;
- *   4. keeps this activity beneath the target as the launch source record.
+ *      task, so the target inherits the virtual display. NOTE the rule the
+ *      sources establish: the target must itself declare
+ *      android:allowEmbedded to be placeable on an app-created display —
+ *      true for OEA's own apps, never for third-party apps, which is a
+ *      platform limit OEA reports honestly rather than works around.
  *
- * The activity draws nothing and never appears to the user. If the OEM puts
- * it on the physical screen instead, it finishes itself immediately and the
- * launch is reported as failed — never silently degraded.
+ * The activity draws nothing, never appears to the user, and never
+ * intercepts input (its window is non-focusable and non-touchable, so the
+ * seconds it spends on the phone while its task is being re-parented are
+ * invisible and harmless to whatever the user is doing). If it never
+ * reaches the expected display it finishes itself at [SELF_TIMEOUT_MS] and
+ * the launch is reported as failed — never silently degraded.
  *
  * Manifest requirements (all declared there):
  *   - android:allowEmbedded="true" — required for an activity to be placed
@@ -46,6 +57,14 @@ class OeaProjectionTrampolineActivity : Activity() {
         super.onCreate(savedInstanceState)
         live.add(this)
         try {
+            // Invisible AND non-interceptive while it sits on the phone
+            // during the re-parent route: no focus, no touches, no dim.
+            window?.setFlags(
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            )
             maybeStart("onCreate")
             window?.decorView?.post { maybeStart("post") }
             pollUntilStarted()
@@ -156,7 +175,7 @@ class OeaProjectionTrampolineActivity : Activity() {
 
     companion object {
         private const val TAG = "OeaProjectionTramp"
-        private const val SELF_TIMEOUT_MS = 12_000L
+        private const val SELF_TIMEOUT_MS = 16_000L
         private const val POLL_MS = 100L
         private val mainHandler = Handler(Looper.getMainLooper())
         private val live = java.util.concurrent.CopyOnWriteArraySet<OeaProjectionTrampolineActivity>()
