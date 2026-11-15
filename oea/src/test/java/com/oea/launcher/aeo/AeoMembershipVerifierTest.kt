@@ -57,7 +57,7 @@ class AeoMembershipVerifierTest {
     @Test fun acceptsValidMembershipCredential() {
         val result = verify(sign())
         assertTrue(result is AeoMembershipVerifier.Result.Success<*>)
-        val membership = (result as AeoMembershipVerifier.Result.Success<*>).value
+        val membership = (result as AeoMembershipVerifier.Result.Success<*>).value as AeoMembershipVerifier.Membership
         assertEquals("com.ema.assistant", membership.platformId)
         assertEquals("AEO", membership.ecosystem)
     }
