@@ -29,8 +29,8 @@ class AeoMembershipVerifierTest {
         .put("ecosystem", "AEO")
         .put("credential_type", "aeo-membership")
         .put("credential_version", 1)
-        .put("sub", "com.ema.assistant")
-        .put("platform", JSONObject().put("id", "com.ema.assistant").put("name", "EMA"))
+        .put("sub", "com.oea.launcher")
+        .put("platform", JSONObject().put("id", "com.oea.launcher").put("name", "EMA"))
         .put("publisher", JSONObject().put("id", "com.aeo.platforms").put("key_id", "ema-test-key"))
         .put("scope", org.json.JSONArray().put("member"))
         .put("jti", "7f4e8c1a-4b8d-4c5a-9e2d-2f7a8b9c0d1e")
@@ -108,7 +108,7 @@ class AeoMembershipVerifierTest {
         val result = verify(sign())
         assertTrue(result is AeoMembershipVerifier.Result.Success<*>)
         val membership = (result as AeoMembershipVerifier.Result.Success<*>).value as AeoMembershipVerifier.Membership
-        assertEquals("com.ema.assistant", membership.platformId)
+        assertEquals("com.oea.launcher", membership.platformId)
         assertEquals("AEO", membership.ecosystem)
     }
 
@@ -144,7 +144,7 @@ class AeoMembershipVerifierTest {
         val registration = JSONObject()
             .put("ecosystem", "AEO")
             .put("protocol", AeoMembershipVerifier.PROTOCOL)
-            .put("platformId", "com.ema.assistant")
+            .put("platformId", "com.oea.launcher")
             .put("displayName", "EMA")
             .put("membershipCredential", token)
         assertTrue(AeoMembershipVerifier.verifyRegistration(
