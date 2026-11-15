@@ -231,6 +231,55 @@ object AeoMembershipVerifier {
         }
     }
 
+    const val TRUST_BUNDLE_TYPE = "AEO-TRUST-BUNDLE+jwt"
+    const val TRUST_BUNDLE_AUDIENCE = "urn:aeo:trust-bundle"
+
+    data class PinnedRootKey(val kid: String, val publicKey: ByteArray, val notBefore: Long? = null, val notAfter: Long? = null, val revokedAt: Long? = null)
+    data class VerifiedTrustBundle(val version: Long, val issuedAt: Long, val expiresAt: Long, val trustedKeys: List<TrustedIssuerKey>, val revokedCredentialIds: Set<String>)
+
+    /** Caller must persist the accepted version and pass it as minimumVersion to prevent rollback. */
+    fun verifyTrustBundle(compactJws: String, pinnedRootKeys: List<PinnedRootKey>, minimumVersion: Long = 0, nowSeconds: Long = System.currentTimeMillis() / 1000, clockSkewSeconds: Long = 60, apiLevel: Int = Build.VERSION.SDK_INT): Result<VerifiedTrustBundle> {
+        return try {
+            require(apiLevel >= 33) { "Ed25519 trust-bundle verification requires Android API 33 or newer" }
+            require(compactJws.isNotBlank() && compactJws.length <= MAX_TOKEN_LENGTH * 4) { "Trust bundle is missing or exceeds the size limit" }
+            require(pinnedRootKeys.isNotEmpty() && minimumVersion >= 0 && clockSkewSeconds in 0..300) { "Pinned AEO root keys and valid verifier settings are required" }
+            val parts = compactJws.split('.')
+            require(parts.size == 3 && parts.all { it.isNotEmpty() }) { "Trust bundle must be a three-part compact JWS" }
+            val header = JSONObject(decodeUtf8(parts[0]))
+            val payload = JSONObject(decodeUtf8(parts[1]))
+            require(header.length() == 3 && header.optString("alg") == "EdDSA" && header.optString("typ") == TRUST_BUNDLE_TYPE && header.optString("kid").matches(Regex("[A-Za-z0-9._-]{1,128}"))) { "Trust bundle does not match the AEO root-signature profile" }
+            val roots = pinnedRootKeys.filter { it.kid == header.getString("kid") }
+            require(roots.size == 1) { "Pinned AEO root key is missing or ambiguous" }
+            val root = roots.single()
+            require(root.publicKey.size == 32 && (root.notBefore == null || nowSeconds + clockSkewSeconds >= root.notBefore) && (root.notAfter == null || nowSeconds - clockSkewSeconds <= root.notAfter) && (root.revokedAt == null || nowSeconds < root.revokedAt)) { "Pinned AEO root key is invalid, expired, or revoked" }
+            require(payload.getString("iss") == "AEO" && payload.getString("aud") == TRUST_BUNDLE_AUDIENCE && payload.getString("bundle_type") == "aeo-trust-bundle" && payload.getInt("bundle_version") == 1) { "Trust bundle issuer, audience, or profile version is invalid" }
+            val version = payload.getLong("version"); val iat = payload.getLong("iat"); val nbf = payload.getLong("nbf"); val exp = payload.getLong("exp")
+            require(version >= 1 && version >= minimumVersion && exp > iat && nbf >= iat && nbf <= exp && iat <= nowSeconds + clockSkewSeconds && nbf <= nowSeconds + clockSkewSeconds && exp > nowSeconds - clockSkewSeconds && exp - iat <= 7L * 24 * 60 * 60) { "Trust bundle is expired, stale, or has an invalid lifetime/version" }
+            val signatureBytes = decodeBase64Url(parts[2])
+            require(signatureBytes.size == 64) { "Ed25519 trust-bundle signature must be 64 bytes" }
+            val rootPublic = KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(rawEd25519Prefix + root.publicKey))
+            val verifier = Signature.getInstance("Ed25519"); verifier.initVerify(rootPublic); verifier.update((parts[0] + "." + parts[1]).toByteArray(StandardCharsets.US_ASCII))
+            require(verifier.verify(signatureBytes)) { "Trust bundle signature is invalid" }
+            val keyArray = payload.getJSONArray("keys")
+            require(keyArray.length() in 1..100) { "Trust bundle must contain 1 to 100 issuer keys" }
+            val seen = mutableSetOf<String>()
+            val issuerKeys = (0 until keyArray.length()).map { index ->
+                val item = keyArray.getJSONObject(index); val keyId = item.getString("kid"); val issuer = item.getString("issuer"); val algorithm = item.getString("algorithm"); val publicKey = decodeBase64Url(item.getString("publicKey"))
+                require(keyId.matches(Regex("[A-Za-z0-9._-]{1,128}")) && seen.add(keyId) && issuer.isNotBlank() && algorithm == "Ed25519" && publicKey.size == 32) { "Trust bundle contains an invalid or duplicate issuer key" }
+                val notBefore = if (item.has("notBefore")) item.getLong("notBefore") else null; val notAfter = if (item.has("notAfter")) item.getLong("notAfter") else null; val revokedAt = if (item.has("revokedAt")) item.getLong("revokedAt") else null
+                require(notBefore == null || notAfter == null || notAfter > notBefore) { "Issuer key validity interval is invalid" }
+                TrustedIssuerKey(keyId, issuer, publicKey, notBefore, notAfter, revokedAt)
+            }
+            val revokedArray = payload.optJSONArray("revokedCredentialIds") ?: org.json.JSONArray()
+            require(revokedArray.length() <= 10_000) { "Trust bundle revocation list is too large" }
+            val revokedIds = (0 until revokedArray.length()).map { revokedArray.getString(it) }
+            require(revokedIds.all { it.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")) } && revokedIds.toSet().size == revokedIds.size) { "Trust bundle revocation list is invalid" }
+            Result.Success(VerifiedTrustBundle(version, iat, exp, issuerKeys, revokedIds.toSet()))
+        } catch (error: Throwable) {
+            Result.Failure(if (error.message?.contains("API 33") == true) "crypto_unavailable" else if (error.message?.contains("signature") == true) "invalid_trust_bundle_signature" else "invalid_trust_bundle", error.message ?: "Trust-bundle verification failed")
+        }
+    }
+
     private fun decodeUtf8(segment: String): String =
         StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
