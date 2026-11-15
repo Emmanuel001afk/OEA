@@ -58,9 +58,9 @@ object AeoMembershipVerifier {
         val membership: Membership
     )
 
-    sealed class Result {
-        data class Success<T>(val value: T) : Result()
-        data class Failure(val code: String, val message: String) : Result()
+    sealed class Result<out T> {
+        data class Success<T>(val value: T) : Result<T>()
+        data class Failure(val code: String, val message: String) : Result<Nothing>()
     }
 
     fun verify(
@@ -70,7 +70,7 @@ object AeoMembershipVerifier {
         nowSeconds: Long = System.currentTimeMillis() / 1000,
         clockSkewSeconds: Long = 60,
         apiLevel: Int = Build.VERSION.SDK_INT
-    ): Result {
+    ): Result<Membership> {
         return try {
             require(apiLevel >= 33) {
                 "Ed25519 verification requires Android API 33 or newer; no crypto downgrade is permitted"
@@ -203,7 +203,7 @@ object AeoMembershipVerifier {
         isCredentialRevoked: (issuer: String, credentialId: String, platformId: String) -> Boolean,
         nowSeconds: Long = System.currentTimeMillis() / 1000,
         apiLevel: Int = Build.VERSION.SDK_INT
-    ): Result {
+    ): Result<VerifiedRegistration> {
         return try {
             require(registration.getString("ecosystem") == "AEO" &&
                 registration.getString("protocol") == PROTOCOL) {
@@ -217,12 +217,13 @@ object AeoMembershipVerifier {
             val credential = registration.getString("membershipCredential")
             when (val result = verify(credential, trustedKeys, isCredentialRevoked, nowSeconds, apiLevel = apiLevel)) {
                 is Result.Failure -> result
-                is Result.Success -> {
-                    require(result.value.platformId == platformId &&
-                        result.value.platformName == displayName) {
+                is Result.Success<*> -> {
+                    val membership = result.value as Membership
+                    require(membership.platformId == platformId &&
+                        membership.platformName == displayName) {
                         "Registration identity does not match signed membership credential"
                     }
-                    Result.Success(VerifiedRegistration(PROTOCOL, platformId, displayName, result.value))
+                    Result.Success(VerifiedRegistration(PROTOCOL, platformId, displayName, membership))
                 }
             }
         } catch (error: Throwable) {
