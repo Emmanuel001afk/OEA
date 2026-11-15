@@ -77,4 +77,5 @@ dependencies {
     // and the bundled-wallpaper model are pure Kotlin, so they are covered by
     // fast JVM tests rather than a device.
     testImplementation libs.junit
+    testImplementation 'org.json:json:20240303'
 }
