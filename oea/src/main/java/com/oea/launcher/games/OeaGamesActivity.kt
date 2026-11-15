@@ -245,31 +245,24 @@ open class OeaGamesActivity : Activity(), SessionListener {
         present(p)
     }
 
+    /**
+     * One game's card, in that game's own palette and its own words.
+     *
+     * The hub is a shelf of three different products, not three skins of one:
+     * Send Off's card is a deployment order, Chess's is a fixture on the club
+     * board, Endless Days' is an arcade marquee. The card itself lives in
+     * [OeaGameCard] so the hub only has to decide what pressing it does.
+     */
     private fun gameCard(parent: ViewGroup, d: GameDescriptor) {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = kit.rounded(palette.card, 26)
-            clipToOutline = true
-        }
-        val cover = View(this).apply { background = GameCoverDrawable(d, kit.dpf(26f)) }
-        card.addView(cover, LinearLayout.LayoutParams(-1, kit.dp(150)))
-        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(kit.dp(18), kit.dp(14), kit.dp(18), kit.dp(16)) }
-        body.addView(kit.text(d.title, 22f, palette.text, OeaType.medium))
-        body.addView(kit.text(d.tagline, 13.5f, palette.textSecondary).apply { setPadding(0, kit.dp(2), 0, kit.dp(10)) })
-        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val modeLabels = d.modes.map { when (it) { PlayMode.SOLO -> "Solo"; PlayMode.SAME_DEVICE -> d.sameDeviceLabel; PlayMode.LAN -> "Wi-Fi/hotspot"; PlayMode.ONLINE -> "Online" } } +
-            listOf(d.dimension.label) + (if (d.maxPlayers > 1) listOf("Up to ${d.maxPlayers}") else emptyList())
-        for (label in modeLabels) chips.addView(kit.text(label, 11.5f, palette.textSecondary).apply {
-            background = kit.rounded(palette.cardHigh, 12)
-            setPadding(kit.dp(9), kit.dp(4), kit.dp(9), kit.dp(4))
-        }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(6) })
-        body.addView(kit.hscroll(chips))
-        val buttons = mutableListOf<View>()
-        buttons += kit.primaryButton("Play", R.drawable.oic_play_arrow) { playSheet(d) }
-        if (d.supports(PlayMode.LAN) || d.supports(PlayMode.ONLINE)) buttons += kit.tonalButton("With friends", R.drawable.oic_sports_esports) { navigate(Page.Game(d.id)) }
-        body.addView(kit.buttonRow(*buttons.toTypedArray()), LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(12) })
-        card.addView(body)
-        parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(14) })
+        val card = OeaGameCard(
+            this,
+            kit,
+            d,
+            onOpen = { navigate(Page.Game(d.id)) },
+            onPlay = { playSheet(d) },
+            onFriends = if (d.supports(PlayMode.LAN) || d.supports(PlayMode.ONLINE)) ({ navigate(Page.Game(d.id)) }) else null
+        )
+        parent.addView(card.view(), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(14) })
     }
 
     /** Solo and same-device modes (multiplayer goes through the game page). */
@@ -348,19 +341,70 @@ open class OeaGamesActivity : Activity(), SessionListener {
 
     // ================================================================ game page (multiplayer)
 
+    /**
+     * A game's own page in the hub: its picture, its rule, then the ways to
+     * actually play it — solo and same-device as well as hosting.
+     *
+     * This page used to be multiplayer-only, so tapping a game in the hub told
+     * you nothing about what a solo match would be. It now opens with the same
+     * identity the icon promises and offers the modes that game really has, in
+     * that game's words ("Deploy", "Pass & play", "Duel on this phone").
+     */
     private fun renderGame(id: String) {
         val d = OeaEngine.registry.find(id) ?: return run { page = Page.Home; render() }
-        val p = page(d.title, d.description)
+        val p = page(d.title, OeaGameCopy.line(d))
         val box = p.content
-        val cover = View(this).apply { background = GameCoverDrawable(d, kit.dpf(26f)) }
-        box.addView(cover, 1, LinearLayout.LayoutParams(-1, kit.dp(140)).apply { bottomMargin = kit.dp(12) })
+        val gameScheme = OeaGamesArt.scheme(d.id)
+        val cover = View(this).apply { background = OeaGamesArt.cover(d.id, gameScheme, kit.dpf(18f)) }
+        box.addView(cover, 1, LinearLayout.LayoutParams(-1, kit.dp(160)).apply { bottomMargin = kit.dp(12) })
         if (OeaGameRescue.isUnstable(this, id)) repairCard(box, d)
+
+        // --------------------------------------------------------------- play
+        kit.sectionTitle(box, "Play now")
+        var g = kit.group(box)
+        when (d.id) {
+            "arena" -> {
+                kit.row(g, R.drawable.oic_sports_esports, "Deploy solo", "Battle Royale against bots, on the island you last chose") {
+                    startSheet(d, PlayMode.SOLO)
+                }
+                kit.row(g, R.drawable.oic_tune, "Briefing", "Pick the mode, island, bot count, skill and weapon pool before you drop") {
+                    startSheet(d, PlayMode.SOLO)
+                }
+            }
+            "chess" -> {
+                kit.row(g, R.drawable.oic_play_arrow, "Vs the OEA AI", "Ten levels, from Beginner to Maximum") {
+                    startSheet(d, PlayMode.SOLO)
+                }
+                kit.row(g, R.drawable.oic_person, "Pass & play", "Two players, one phone, the board turns to whoever is to move") {
+                    startSheet(d, PlayMode.SAME_DEVICE)
+                }
+            }
+            "runner" -> {
+                kit.row(g, R.drawable.oic_play_arrow, "Run", "One endless run on the night yard") {
+                    startSheet(d, PlayMode.SOLO)
+                }
+                kit.row(g, R.drawable.oic_person, "Duel on this phone", "Split screen face to face, or take turns on the same track") {
+                    startSheet(d, PlayMode.SAME_DEVICE)
+                }
+            }
+            else -> {
+                if (d.supports(PlayMode.SOLO)) {
+                    kit.row(g, R.drawable.oic_play_arrow, "Solo", d.tagline) { startSheet(d, PlayMode.SOLO) }
+                }
+                if (d.supports(PlayMode.SAME_DEVICE)) {
+                    kit.row(g, R.drawable.oic_person, d.sameDeviceLabel, "${d.sameDevicePlayers} players on this phone") {
+                        startSheet(d, PlayMode.SAME_DEVICE)
+                    }
+                }
+            }
+        }
+
         if (d.maxPlayers <= 1) {
             kit.note(box, "${d.title} is single-player.")
             present(p); return
         }
         kit.sectionTitle(box, "Host a game")
-        var g = kit.group(box)
+        g = kit.group(box)
         if (d.supports(PlayMode.LAN)) kit.row(g, R.drawable.oic_wifi, "Host on Wi-Fi / hotspot", "Friends on your Wi-Fi or your phone's hotspot see the game instantly") { host(d, lan = true) }
         if (d.supports(PlayMode.ONLINE)) kit.row(g, R.drawable.oic_qr_code, "Host online with a code", "Send an invite code or QR to a friend anywhere") { host(d, lan = false) }
         kit.sectionTitle(box, "Join a friend")
@@ -725,6 +769,9 @@ open class OeaGamesActivity : Activity(), SessionListener {
 
     // ================================================================ settings pages
 
+    /** True when a game on this phone uses look/aim controls (today: Send Off). */
+    private fun hasShooter(): Boolean = OeaEngine.registry.all().any { it.id == "arena" }
+
     private fun qualityLabel(): String {
         val q = OeaEngine.settings.quality
         return if (q == "auto") "Auto (${OeaEngine.device.recommendedTier.label})" else QualityTier.parse(q)?.label ?: q
@@ -771,9 +818,17 @@ open class OeaGamesActivity : Activity(), SessionListener {
         kit.switchRow(g, R.drawable.oic_touch_app, "Haptics", null, s.haptics) { s.haptics = it }
         kit.switchRow(g, R.drawable.oic_music_note, "Sound effects", null, s.sound) { s.sound = it }
         kit.switchRow(g, R.drawable.oic_headset, "Music", null, s.music) { s.music = it }
-        kit.stepperRow(g, R.drawable.oic_gesture, "Aim sensitivity", "Send Off and other shooters", (s.lookSensitivity * 10f).toInt(), 2, 30, { String.format(java.util.Locale.US, "%.1f×", it / 10f) }) { s.lookSensitivity = it / 10f }
-        kit.stepperRow(g, R.drawable.oic_gesture, "ADS sensitivity", "Extra multiplier while aiming down sights", (s.adsSensitivity * 10f).toInt(), 3, 15, { String.format(java.util.Locale.US, "%.0f%%", it * 10f) }) { s.adsSensitivity = it / 10f }
-        kit.stepperRow(g, R.drawable.oic_tune, "Turn speed limit", "Caps how fast the view can turn — glitch-proof aiming", (s.turnSpeedLimit / 10f).toInt(), 0, 36, { if (it == 0) "Off" else String.format(java.util.Locale.US, "%d°/s", it * 10) }) { s.turnSpeedLimit = it * 10f }
+        // Look and aim belong to the games you look around inside. Chess and
+        // Endless Days have no aim-down-sights, no look axis and no turn limit,
+        // so listing those sliders here was three controls that did nothing.
+        if (hasShooter()) {
+            kit.sectionTitle(box, "Aiming · Send Off")
+            val aim = kit.group(box)
+            kit.stepperRow(aim, R.drawable.oic_gesture, "Look sensitivity", "How far a drag turns the view", (s.lookSensitivity * 10f).toInt(), 2, 30, { String.format(java.util.Locale.US, "%.1f×", it / 10f) }) { s.lookSensitivity = it / 10f }
+            kit.stepperRow(aim, R.drawable.oic_gesture, "ADS sensitivity", "Extra multiplier while aiming down sights", (s.adsSensitivity * 10f).toInt(), 3, 15, { String.format(java.util.Locale.US, "%.0f%%", it * 10f) }) { s.adsSensitivity = it / 10f }
+            kit.stepperRow(aim, R.drawable.oic_tune, "Turn speed limit", "Caps how fast the view can turn — glitch-proof aiming", (s.turnSpeedLimit / 10f).toInt(), 0, 36, { if (it == 0) "Off" else String.format(java.util.Locale.US, "%d°/s", it * 10) }) { s.turnSpeedLimit = it * 10f }
+            kit.note(box, "These three reach Send Off's camera and nothing else; Chess and Endless Days never read them.")
+        }
         // ------------------------------------------------------------ reading the screen
         // Accessibility that changes what the games themselves draw, so it lives with
         // the other engine settings rather than inside one game's menu.

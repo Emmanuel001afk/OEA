@@ -327,6 +327,22 @@ jobs:
           grep -q "class OeaChessGameActivity : OeaStandaloneGameActivity" $L/games/OeaGameEntries.kt
           grep -q "oeaGameEntryScreens" $L/games/OeaGameEntries.kt
           grep -q "oeaGameScreens" $L/gameboost/OeaGameBoostService.kt
+          # Each game has its own front screen and its own materials: a shooter
+          # deck, a chess club room and a rail-arcade marquee. A single shared
+          # menu for all three is exactly what this redesign removed, so the
+          # three screens and their per-game schemes must stay.
+          test -f $G/OeaGameFront.kt && test -f $G/ArenaFront.kt && test -f $G/ChessFront.kt && test -f $G/RunnerFront.kt
+          grep -q "class ArenaFront" $G/ArenaFront.kt
+          grep -q "class ChessFront" $G/ChessFront.kt
+          grep -q "class RunnerFront" $G/RunnerFront.kt
+          grep -q "object GameSchemes" $G/ui/GameUi.kt
+          grep -q "0xFF38C8EE" $G/ui/GameUi.kt
+          grep -q "0xFFF2E8D6" $G/ui/GameUi.kt
+          grep -q "0xFF6BCBFF" $G/ui/GameUi.kt
+          grep -q "GameFrontHost" $G/OeaStandaloneGameActivity.kt
+          # The front screen is locked to the game's own orientation from the
+          # icon in, rather than flipping when a match starts.
+          grep -q "SCREEN_ORIENTATION_SENSOR_LANDSCAPE" $G/OeaStandaloneGameActivity.kt
           # APK size controls must not be switched off by accident.
           grep -q "minifyEnabled true" oea/build.gradle
           grep -q "abiFilters" oea/build.gradle

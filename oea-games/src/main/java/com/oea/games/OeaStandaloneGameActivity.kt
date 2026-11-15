@@ -46,6 +46,8 @@ import com.oea.games.ui.GameCoverDrawable
 import com.oea.games.ui.GameInsets
 import com.oea.games.ui.GameKit
 import com.oea.games.ui.GamePalette
+import com.oea.games.ui.GameScheme
+import com.oea.games.ui.GameSchemes
 import com.oea.games.ui.GameType
 
 /**
@@ -67,7 +69,7 @@ import com.oea.games.ui.GameType
  * language, so a separately installed game looks like OEA rather than like a
  * stack of platform dialogs over an empty window.
  */
-open class OeaStandaloneGameActivity : Activity(), HostUi {
+open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
     protected open val standaloneGameId: String = ""
 
     private var host: GameHost? = null
@@ -81,9 +83,15 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
     /** True when the hub/automation launched us with extras: exit then finishes. */
     private var directLaunch = false
 
-    /** The palette and toolkit, tinted with this game's accent. */
-    private var palette: GamePalette = GameColors.palette()
+    /** The game's own materials, from its launcher icon. */
+    private var scheme: GameScheme = GameSchemes.lab
+
+    /** The palette and toolkit, built from the game's own scheme. */
+    private var palette: GamePalette = GameColors.from(GameSchemes.lab)
     private var kit: GameKit? = null
+
+    /** The game's own front screen, built once per screen. */
+    private var front: GameFront? = null
 
     // Multiplayer state (one session at a time, like the engine itself).
     private var browser: LanBrowser? = null
@@ -137,11 +145,24 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             return
         }
         this.descriptor = descriptor
-        palette = GameColors.palette(
-            descriptor.accent,
+        scheme = GameSchemes.forId(descriptor.id, descriptor.accent)
+        palette = GameColors.from(
+            scheme,
             highContrast = runCatching { OeaEngine.settings.highContrastMenus }.getOrDefault(false)
         )
         kit = null
+        front = null
+        // Lock the front screen to the game's own orientation. A shooter's
+        // command deck is a widescreen deck and must not open in portrait and
+        // then flip when the match starts; a runner and a chess board are
+        // portrait apps from the icon in.
+        runCatching {
+            requestedOrientation = when (descriptor.orientation) {
+                com.oea.engine.core.GameOrientation.PORTRAIT -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                com.oea.engine.core.GameOrientation.LANDSCAPE -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                com.oea.engine.core.GameOrientation.ANY -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            }
+        }
         GameInsets.edgeToEdge(window)
         descriptor.options.forEach { option ->
             chosenOptions[option.id] = OeaEngine.settings.lastOption(descriptor.id, option.id)
@@ -188,24 +209,58 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         return opt.choices.firstOrNull { it.value == v }?.label ?: v
     }
 
-    /** One line describing the match that Play will start. */
-    private fun matchSummary(d: GameDescriptor): String {
-        val bits = mutableListOf<String>()
-        bits += if (d.maxPlayers > 1) "${d.minPlayers}–${d.maxPlayers} players" else "Single player"
-        bits += d.dimension.label
-        bits += d.modes.joinToString(" · ") { it.label }
-        return bits.joinToString("  ·  ")
-    }
-
     // ================================================================ front screen
 
     /**
-     * The game's home screen. Before this existed the front menu was a platform
-     * dialog floating over an activity with no content view at all, which is why
-     * the standalone apps looked like a system popup on a black background.
+     * The game's home screen.
+     *
+     * There is no shared "cover, title, Play, list of rows" page any more: a
+     * shooter front end and a chess club and an arcade cabinet are different
+     * products, so each game builds its own screen in its own materials and
+     * this method only decides which one to show. A game without a front class
+     * falls back to the generic console page, which is what a third-party game
+     * written against the engine's public API gets by default.
      */
     private fun showHome() {
         val d = descriptor ?: return
+        val page = try {
+            val built = frontFor(d.id)?.build() ?: genericHome(d)
+            built
+        } catch (t: Throwable) {
+            // A front screen is a menu: if one ever fails to build, the game
+            // still has to open. Fall back to the console page rather than
+            // dropping the player on a blank window.
+            runCatching { genericHome(d) }.getOrElse { throw t }
+        }
+        setContentView(page)
+        if (toolkit().reducedMotion) {
+            page.alpha = 1f
+        } else {
+            page.alpha = 0f
+            page.animate().alpha(1f).setDuration(180L).start()
+        }
+    }
+
+    /**
+     * The front screen instance for an engine id.
+     *
+     * Each game has its own class: Send Off builds a landscape command deck,
+     * Chess a club room around a real board, Endless Days an arcade cabinet.
+     * They share the kit and the settings sheets, never the layout.
+     */
+    private fun frontFor(id: String): GameFront? = when (id) {
+        "arena" -> front ?: ArenaFront(this).also { front = it }
+        "chess" -> front ?: ChessFront(this).also { front = it }
+        "runner" -> front ?: RunnerFront(this).also { front = it }
+        else -> null
+    }
+
+    /**
+     * The generic console page: cover art, title, Play and the game's own
+     * options. This is what a game that has not designed a front screen gets —
+     * and it is deliberately plain, so a real front screen is worth writing.
+     */
+    private fun genericHome(d: GameDescriptor): View {
         val k = toolkit()
         val page = k.page(padBottomDp = 30)
         val content = page.content
@@ -215,7 +270,6 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             setImageDrawable(GameCoverDrawable(d, k.dpf(24f)))
         }
         content.addView(cover, LinearLayout.LayoutParams(-1, k.dp(168)))
-
         content.addView(
             k.text(d.title, 30f, palette.text, GameType.bold).apply {
                 setPadding(k.dp(4), k.dp(18), k.dp(4), 0)
@@ -228,39 +282,21 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
                 setLineSpacing(k.dpf(2f), 1f)
             }
         )
-        content.addView(
-            k.text(matchSummary(d), 12f, palette.textTertiary, GameType.medium).apply {
-                setPadding(k.dp(4), k.dp(10), k.dp(4), 0)
-                letterSpacing = 0.04f
-            }
-        )
-
         val play = k.primaryButton("Play") {
             beginMatch(PlayMode.SOLO, chosenOptions, System.nanoTime(), parsePlayers(null, d), null)
         }
         play.textSize = 16.5f
-        play.letterSpacing = 0.02f
         content.addView(play, LinearLayout.LayoutParams(-1, k.dp(56)).apply { topMargin = k.dp(20) })
 
         k.sectionTitle(content, "Before you start")
-
         val actions = k.group(content)
         actions.addView(
-            k.actionRow("⚙", "Match setup", optionsLine(d), highlight = false) { showMatchSetup() },
+            k.actionRow("⚙", "Match setup", optionsLine(d)) { showMatchSetup() },
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
         )
         if (d.maxPlayers > 1) {
             actions.addView(
                 k.actionRow("👥", "Play with friends", "Host on Wi-Fi or with an online code, or join one") { showFriendsMenu() },
-                LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
-            )
-        }
-        // Aim sliders only mean something to a game you look around inside. Showing
-        // them on a chess app is a control that does nothing, so each game is asked
-        // what its own fingers do and gets that screen instead.
-        if (d.dimension == com.oea.engine.core.GameDimension.D3 || d.dimension == com.oea.engine.core.GameDimension.D4) {
-            actions.addView(
-                k.actionRow("🎯", "Controls & aim", "Look and ADS sensitivity, turn limit, invert Y") { showControlsSheet() },
                 LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) }
             )
         }
@@ -277,19 +313,55 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
         actions.addView(
             k.actionRow("ⓘ", "About ${d.title}", d.description.lineSequence().firstOrNull()?.take(60) ?: "What this game is") { showAboutSheet() }
         )
+        k.note(content, "This is the full game, not a demo: matches, settings and multiplayer all run inside this app.")
+        return page.root
+    }
 
-        k.note(
-            content,
-            "This is the full game, not a demo: matches, settings and multiplayer all run inside this app. " +
-                "Nothing else needs to be installed."
-        )
+    // ------------------------------------------------------- GameFrontHost
 
-        setContentView(page.root)
-        if (toolkit().reducedMotion) {
-            page.root.alpha = 1f
-        } else {
-            page.root.alpha = 0f
-            page.root.animate().alpha(1f).setDuration(180L).start()
+    override val frontDescriptor: GameDescriptor get() = descriptor ?: throw IllegalStateException("No game")
+
+    override val frontScheme: GameScheme get() = scheme
+
+    override fun frontKit(): GameKit = toolkit()
+
+    override fun gamePrefs(): android.content.SharedPreferences =
+        getSharedPreferences("oea_game_${frontDescriptor.id}", MODE_PRIVATE)
+
+    override fun frontOption(id: String): String {
+        val d = frontDescriptor
+        val opt = d.options.firstOrNull { it.id == id } ?: return ""
+        return chosenOptions[id]
+            ?: OeaEngine.settings.lastOption(d.id, id)?.takeIf { v -> opt.choices.any { it.value == v } }
+            ?: opt.default
+    }
+
+    override fun frontSetOption(id: String, value: String) {
+        chosenOptions[id] = value
+        OeaEngine.settings.setLastOption(frontDescriptor.id, id, value)
+    }
+
+    override fun frontPlay(mode: PlayMode, players: List<LocalPlayer>) {
+        val d = frontDescriptor
+        beginMatch(mode, LinkedHashMap(chosenOptions), System.nanoTime(), players.ifEmpty { parsePlayers(null, d) }, null)
+    }
+
+    override fun frontFriends() = showFriendsMenu()
+
+    override fun frontControls() {
+        if (controlLegend.isEmpty()) showAccessSheet() else showLegendSheet()
+    }
+
+    override fun frontAccess() = showAccessSheet()
+
+    override fun frontToast(message: String) = toast(message)
+
+    override fun frontRebuild() {
+        if (host != null) return
+        try {
+            showHome()
+        } catch (_: Throwable) {
+            // A rebuild must never take the app down; the previous screen stays.
         }
     }
 
@@ -378,10 +450,11 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
                 scale = value
                 settings.uiScale = value
             }
-            k.switchRow(body, "High contrast menus", "Black grounds, white type, hard edges — ${d.title}'s own accent stays", settings.highContrastMenus) {
+            k.switchRow(body, "High contrast menus", "Black grounds, white type, hard edges — ${d.title}'s own colours stay", settings.highContrastMenus) {
                 settings.highContrastMenus = it
-                palette = GameColors.palette(d.accent, highContrast = it)
+                palette = GameColors.from(scheme, highContrast = it)
                 kit = null
+                front = null
                 dialog.dismiss()
                 showHome()
             }
@@ -390,7 +463,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi {
             }
             panel.addView(k.boundedScroll(body, 0.55f))
             k.note(panel, "Menu size is the one that moves touch targets as well as type, so a larger menu is still a tappable one. Saved per phone, not per match.")
-            panel.addView(k.buttonRow(k.quietButton("Reset to 100%") { settings.uiScale = 1f; dialog.dismiss(); kit = null; showHome() }, k.primaryButton("Done") { dialog.dismiss(); kit = null; showHome() }))
+            panel.addView(k.buttonRow(
+                k.quietButton("Reset to 100%") { settings.uiScale = 1f; dialog.dismiss(); kit = null; front = null; showHome() },
+                k.primaryButton("Done") { dialog.dismiss(); kit = null; front = null; showHome() }
+            ))
         }
     }
 

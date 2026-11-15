@@ -569,7 +569,14 @@ def main() -> int:
         "oea-games/src/main/java/com/oea/games/OeaStandaloneGameActivity.kt",
         "oea-games/src/main/java/com/oea/games/ui/GameUi.kt",
         "oea-games/src/main/java/com/oea/games/OeaGames.kt",
+        # The game front screens and their shared base: each game's own menu is
+        # built here, so these are checked like the shell they plug into.
+        "oea-games/src/main/java/com/oea/games/OeaGameFront.kt",
+        "oea-games/src/main/java/com/oea/games/ArenaFront.kt",
+        "oea-games/src/main/java/com/oea/games/ChessFront.kt",
+        "oea-games/src/main/java/com/oea/games/RunnerFront.kt",
         "oea/src/main/java/com/oea/launcher/games/OeaGameEntries.kt",
+        "oea/src/main/java/com/oea/launcher/games/OeaGamesArt.kt",
     }
     table = build_symbol_table(files)
     type_model = build_type_model(files)
@@ -592,10 +599,22 @@ def main() -> int:
         kits["GameType"] = declared_members(ui_src)
         kits["GameToggle"] = declared_members(ui_src)
 
-    activity = os.path.join(ROOT, "oea-games", "src", "main", "java", "com", "oea", "games", "OeaStandaloneGameActivity.kt")
-    if os.path.exists(activity):
-        rel = os.path.relpath(activity, ROOT)
-        problems += check_receiver_calls(rel, open(activity, encoding="utf-8").read(), kits,
+    # Every file that drives the games' toolkit: the shell plus each game's own
+    # front screen. A `kit.` call that does not exist in GameUi.kt is the exact
+    # mistake a compiler catches for us, and it is the one that slipped through
+    # when the kit grew new primitives.
+    for activity in (
+        "oea-games/src/main/java/com/oea/games/OeaStandaloneGameActivity.kt",
+        "oea-games/src/main/java/com/oea/games/ArenaFront.kt",
+        "oea-games/src/main/java/com/oea/games/ChessFront.kt",
+        "oea-games/src/main/java/com/oea/games/RunnerFront.kt",
+        "oea-games/src/main/java/com/oea/games/OeaGameFront.kt",
+    ):
+        path = os.path.join(ROOT, activity)
+        if not os.path.exists(path):
+            continue
+        rel = os.path.relpath(path, ROOT)
+        problems += check_receiver_calls(rel, open(path, encoding="utf-8").read(), kits,
                                          {"k": "GameKit", "kit": "GameKit", "toolkit()": "GameKit"})
 
     for manifest in (

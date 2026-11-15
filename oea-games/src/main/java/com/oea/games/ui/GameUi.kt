@@ -28,6 +28,7 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -66,7 +67,11 @@ data class GamePalette(
     val textTertiary: Int,
     val danger: Int,
     val success: Int,
-    val warning: Int
+    val warning: Int,
+    /** Secondary brand colour (dials, splits, highlights). Defaults to the accent. */
+    val signal: Int = accent,
+    /** Highest surface: pressed rows, chips and wells. Defaults to [cardHigh]. */
+    val well: Int = cardHigh
 )
 
 /** Colour maths and the OEA dark game palette. */
@@ -132,6 +137,54 @@ object GameColors {
         )
     }
 
+    /**
+     * A game's surfaces as the toolkit's palette, so every existing row, sheet
+     * and button is drawn in that game's own materials.
+     */
+    fun from(scheme: GameScheme, highContrast: Boolean = false): GamePalette {
+        val built = GamePalette(
+            accent = scheme.accent,
+            onAccent = scheme.onAccent,
+            accentSoft = scheme.accentSoft,
+            onAccentSoft = scheme.onAccentSoft,
+            background = scheme.ground,
+            card = scheme.panel,
+            cardHigh = scheme.well,
+            stroke = scheme.stroke,
+            text = scheme.text,
+            textSecondary = scheme.textSecondary,
+            textTertiary = scheme.textTertiary,
+            danger = scheme.danger,
+            success = scheme.success,
+            warning = scheme.signal
+        )
+        if (!highContrast) return built
+        return if (scheme.light) built.copy(
+            accentSoft = blend(scheme.well, scheme.accent, 0.4f),
+            onAccentSoft = Color.BLACK,
+            background = Color.WHITE,
+            card = Color.rgb(248, 246, 240),
+            cardHigh = Color.rgb(232, 226, 214),
+            stroke = alpha(Color.BLACK, 0x9E),
+            text = Color.BLACK,
+            textSecondary = Color.rgb(40, 38, 32),
+            textTertiary = Color.rgb(70, 66, 58)
+        ) else built.copy(
+            accentSoft = blend(Color.BLACK, scheme.accent, 0.55f),
+            onAccentSoft = Color.WHITE,
+            background = Color.BLACK,
+            card = Color.rgb(6, 6, 8),
+            cardHigh = Color.rgb(26, 27, 33),
+            stroke = alpha(Color.WHITE, 0x9E),
+            text = Color.WHITE,
+            textSecondary = Color.rgb(238, 240, 245),
+            textTertiary = Color.rgb(214, 218, 226),
+            danger = Color.rgb(255, 148, 158),
+            success = Color.rgb(124, 255, 198),
+            warning = Color.rgb(255, 216, 138)
+        )
+    }
+
     private fun luminance(color: Int): Float =
         (0.2126f * Color.red(color) + 0.7152f * Color.green(color) + 0.0722f * Color.blue(color)) / 255f
 }
@@ -142,6 +195,140 @@ object GameType {
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     val bold: Typeface = Typeface.create("sans-serif", Typeface.BOLD)
     val black: Typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+
+    /** Monospaced digits for clocks, scores and kill counts. */
+    val mono: Typeface = Typeface.create("monospace", Typeface.BOLD)
+
+    /** A brush/wood-lettering face for boards and records, with a safe fallback. */
+    val serif: Typeface = runCatching { Typeface.create("serif", Typeface.BOLD) }
+        .getOrDefault(Typeface.create("sans-serif", Typeface.BOLD))
+}
+
+/**
+ * A game's own surface palette.
+ *
+ * OEA's games are not three skins of one app: a shooter reads like a gun-metal
+ * command deck, a chess club like walnut and ivory, a rail runner like a neon
+ * arcade cabinet. This turns a game's signature colours (the same ones in its
+ * launcher icon) into a full set of surfaces, so every game screen can be built
+ * from its own materials instead of a shared "dark console with an accent".
+ *
+ * Everything is optional: an omitted value is derived from the three brand
+ * colours, so a new game only has to name its ground, its accent and its signal.
+ */
+data class GameScheme(
+    /** Page ground. */
+    val ground: Int,
+    /** Raised panels and cards. */
+    val panel: Int,
+    /** The highest surface: pressed rows, chips, wells. */
+    val well: Int,
+    val accent: Int,
+    val onAccent: Int,
+    /** Secondary brand colour: dials, splits, highlights. */
+    val signal: Int,
+    val text: Int,
+    val textSecondary: Int,
+    val textTertiary: Int,
+    val stroke: Int,
+    val danger: Int = 0xFFFF6E78.toInt(),
+    val success: Int = 0xFF50E1A0.toInt(),
+    /** Card radius in dp: 14 fits a briefing card, 26 a soft one. */
+    val radius: Int = 22,
+    /** True when the ground is light (the chess club is ivory, not black). */
+    val light: Boolean = false
+) {
+    val accentSoft: Int get() = GameColors.blend(panel, accent, if (light) 0.24f else 0.26f)
+    val onAccentSoft: Int get() = if (light) GameColors.blend(accent, Color.BLACK, 0.25f) else GameColors.blend(Color.WHITE, accent, 0.35f)
+    val signalSoft: Int get() = GameColors.blend(panel, signal, 0.22f)
+}
+
+/** The games' schemes, one per game, straight from their launcher icons. */
+object GameSchemes {
+    /**
+     * Send Off: deep navy hull, tactical cyan and amber visor. Metal, not glass —
+     * tight radii, hairline strokes, a HUD that looks like it is bolted on.
+     */
+    val arena = GameScheme(
+        ground = 0xFF101D35.toInt(),
+        panel = 0xFF16273F.toInt(),
+        well = 0xFF1E3350.toInt(),
+        accent = 0xFF38C8EE.toInt(),
+        onAccent = 0xFF06111D.toInt(),
+        signal = 0xFFFFB24D.toInt(),
+        text = 0xFFEAF4FF.toInt(),
+        textSecondary = 0xFF9DB4CE.toInt(),
+        textTertiary = 0xFF6C86A3.toInt(),
+        stroke = 0x33A9D6F5,
+        danger = 0xFFFF6B6B.toInt(),
+        success = 0xFF4FE0A6.toInt(),
+        radius = 14
+    )
+
+    /**
+     * Chess: a club study. Warm ivory paper, walnut board and brass fittings.
+     * A light scheme on purpose — a chess club is a room, not a cockpit.
+     */
+    val chess = GameScheme(
+        ground = 0xFFF2E8D6.toInt(),
+        panel = 0xFFFFFAF0.toInt(),
+        well = 0xFFEADCC2.toInt(),
+        accent = 0xFF6B452B.toInt(),
+        onAccent = 0xFFFFF6E6.toInt(),
+        signal = 0xFFC9962F.toInt(),
+        text = 0xFF25231C.toInt(),
+        textSecondary = 0xFF5F584A.toInt(),
+        textTertiary = 0xFF8A8071.toInt(),
+        stroke = 0x336B452B,
+        danger = 0xFFA8332B.toInt(),
+        success = 0xFF2F6D4F.toInt(),
+        radius = 18,
+        light = true
+    )
+
+    /**
+     * Endless Days: a neon rail arcade at dusk. Slate platform, electric cyan
+     * rails, sunset-orange beacons. Big radii, glow, a scoreboard on top.
+     */
+    val runner = GameScheme(
+        ground = 0xFF182132.toInt(),
+        panel = 0xFF202C42.toInt(),
+        well = 0xFF2A3852.toInt(),
+        accent = 0xFF6BCBFF.toInt(),
+        onAccent = 0xFF07131F.toInt(),
+        signal = 0xFFFF9354.toInt(),
+        text = 0xFFF4F8FF.toInt(),
+        textSecondary = 0xFFA6B7CE.toInt(),
+        textTertiary = 0xFF77879F.toInt(),
+        stroke = 0x33B7DAFF,
+        danger = 0xFFFF7A6B.toInt(),
+        success = 0xFF63E6B0.toInt(),
+        radius = 26
+    )
+
+    /** The Engine Lab keeps OEA's own amber console. */
+    val lab = GameScheme(
+        ground = 0xFF08090D.toInt(),
+        panel = 0xFF14161E.toInt(),
+        well = 0xFF20232E.toInt(),
+        accent = 0xFFFFA53D.toInt(),
+        onAccent = 0xFF140E04.toInt(),
+        signal = 0xFF4FC3F7.toInt(),
+        text = 0xFFF2F4F8.toInt(),
+        textSecondary = 0xFF9EA4B2.toInt(),
+        textTertiary = 0xFF686E7C.toInt(),
+        stroke = 0x16FFFFFF,
+        radius = 22
+    )
+
+    /** The scheme for an engine id, falling back to the game's own accent. */
+    fun forId(id: String, accent: Int = GameColors.OEA_AMBER): GameScheme = when (id) {
+        "arena" -> arena
+        "chess" -> chess
+        "runner" -> runner
+        "lab" -> lab
+        else -> lab.copy(accent = accent)
+    }
 }
 
 /**
@@ -386,6 +573,219 @@ class GameKit(
         )
     }
 
+    // --------------------------------------------------- game-identity surfaces
+
+
+    /** Typeface a game's headline uses. Chess sets its club signage in serif. */
+    var paletteTypeface: Typeface = GameType.black
+
+    /**
+     * A hero band in the game's own material: a gradient of [signal] into
+     * [accent] behind the title block, with an optional [art] motif drawn on the
+     * right. This is what replaces the shared "cover image + title + Play"
+     * header: every game gets a front-of-box that belongs to it.
+     */
+    fun heroBand(
+        parent: ViewGroup,
+        heightDp: Int,
+        title: String,
+        eyebrow: String?,
+        subtitle: String?,
+        art: Drawable,
+        leftInsetDp: Int = 20,
+        horizontal: Boolean = false,
+        footer: View? = null,
+        titleSizeSp: Float = if (horizontal) 30f else 34f
+    ): FrameLayout {
+        val band = FrameLayout(context).apply { clipToOutline = true }
+        band.addView(
+            View(context).apply { background = art },
+            FrameLayout.LayoutParams(-1, -1)
+        )
+        // A scrim from the band's foot upwards, so the art stays visible but
+        // the title, the numbers and the buttons always have contrast to sit on.
+        val shade = FrameLayout(context).apply {
+            background = GameArt.scrim(palette.background, 0xD8)
+        }
+        band.addView(shade, FrameLayout.LayoutParams(-1, -1))
+
+        val column = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(leftInsetDp), dp(18), dp(20), dp(18))
+            gravity = Gravity.BOTTOM
+        }
+        if (!eyebrow.isNullOrBlank()) {
+            column.addView(
+                text(eyebrow.uppercase(), 10.5f, palette.accent, GameType.medium).apply {
+                    letterSpacing = 0.22f
+                }
+            )
+        }
+        column.addView(
+            text(title, titleSizeSp, palette.text, paletteTypeface).apply {
+                letterSpacing = -0.02f
+                setPadding(0, dp(4), 0, 0)
+            }
+        )
+        if (!subtitle.isNullOrBlank()) {
+            column.addView(
+                text(subtitle, 13f, palette.textSecondary).apply {
+                    setPadding(0, dp(4), 0, 0)
+                    setLineSpacing(dpf(2f), 1f)
+                }
+            )
+        }
+        if (footer != null) {
+            footer.setPadding(0, dp(12), 0, 0)
+            column.addView(footer, LinearLayout.LayoutParams(-1, -2))
+        }
+        band.addView(column, FrameLayout.LayoutParams(-1, -1))
+        // The height is a floor, not a cage: the band grows if the footer (a
+        // record strip, a squad line) needs more room, and it never pushes its
+        // own type under the status bar — the page or the deck has already
+        // padded for the bars.
+        band.minimumHeight = dp(heightDp)
+        parent.addView(band, LinearLayout.LayoutParams(-1, -2))
+        return band
+    }
+
+
+    /** One number that matters, with its caption: XP, record, best score. */
+    fun statTile(value: String, caption: String, accent: Boolean = false, wide: Boolean = false): LinearLayout =
+        LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = ripple(rounded(if (accent) palette.accentSoft else palette.card, 14, palette.stroke, 1), 14)
+            addView(
+                text(value, if (wide) 26f else 22f, if (accent) palette.accent else palette.text, GameType.mono).apply {
+                    isSingleLine = true
+                }
+            )
+            addView(
+                text(caption.uppercase(), 9.5f, palette.textTertiary, GameType.medium).apply {
+                    letterSpacing = 0.12f
+                    setPadding(0, dp(3), 0, 0)
+                }
+            )
+        }
+
+    /** A row of [statTile]s that share the width evenly. */
+    fun statStrip(parent: ViewGroup, values: List<Pair<String, String>>, accentFirst: Boolean = true) {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        values.forEachIndexed { index, (value, caption) ->
+            row.addView(
+                statTile(value, caption, accent = accentFirst && index == 0),
+                LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) leftMargin = dp(8) }
+            )
+        }
+        parent.addView(row, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    /**
+     * A segmented selector: the game's primary choices (mode, time control,
+     * side) as a strip of mutually exclusive tabs, so a front screen can show
+     * where you are without a modal dialog in front of it.
+     */
+    fun segmented(
+        parent: ViewGroup,
+        labels: List<String>,
+        selected: Int,
+        onPick: (Int) -> Unit
+    ): LinearLayout {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = rounded(palette.card, 16, palette.stroke, 1)
+        }
+        labels.forEachIndexed { index, label ->
+            val active = index == selected
+            row.addView(
+                text(label, 13f, if (active) palette.onAccent else palette.textSecondary, GameType.medium).apply {
+                    gravity = Gravity.CENTER
+                    setPadding(dp(6), dp(10), dp(6), dp(10))
+                    background = if (active) ripple(rounded(palette.accent, 13), 13) else null
+                    isClickable = true
+                    setOnClickListener { onPick(index) }
+                },
+                LinearLayout.LayoutParams(0, -2, 1f)
+            )
+        }
+        parent.addView(row, LinearLayout.LayoutParams(-1, -2))
+        return row
+    }
+
+    /** A horizontally scrolling row of chips; one is selected. */
+    fun chipRow(parent: ViewGroup, labels: List<String>, selected: Int, onPick: (Int) -> Unit, accent: Int = palette.accent) {
+        val strip = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        labels.forEachIndexed { index, label ->
+            val active = index == selected
+            strip.addView(
+                text(label, 12f, if (active) palette.onAccent else palette.textSecondary, GameType.medium).apply {
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                    background = ripple(
+                        rounded(if (active) accent else palette.card, 12, if (active) 0 else palette.stroke, if (active) 0 else 1),
+                        12
+                    )
+                    isClickable = true
+                    setOnClickListener { onPick(index) }
+                },
+                LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(7) }
+            )
+        }
+        parent.addView(
+            HorizontalScrollView(context).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                clipToPadding = false
+                addView(strip)
+            },
+            LinearLayout.LayoutParams(-1, -2)
+        )
+    }
+
+    /**
+     * A labelled "this is what is chosen" row for the front screen: title, live
+     * value, and a chevron. Unlike [actionRow] it sits in a game's own group with
+     * no glyph badge, so a match setup reads like a scorecard line.
+     */
+    fun valueRow(
+        parent: ViewGroup,
+        title: String,
+        value: String,
+        subtitle: String? = null,
+        accentValue: Boolean = false,
+        onClick: () -> Unit
+    ): LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(54)
+        setPadding(dp(14), dp(11), dp(12), dp(11))
+        background = ripple(rounded(palette.card, 12, palette.stroke, 1), 12)
+        isClickable = true
+        contentDescription = if (subtitle.isNullOrBlank()) "$title: $value" else "$title: $value. $subtitle"
+        setOnClickListener { onClick() }
+        val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(text(title, 14.5f, palette.text, GameType.medium))
+        if (!subtitle.isNullOrBlank()) {
+            texts.addView(text(subtitle, 11.5f, palette.textTertiary).apply { setPadding(0, dp(2), 0, 0) })
+        }
+        addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(
+            text(value, 14f, if (accentValue) palette.accent else palette.textSecondary, GameType.medium).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), 0, dp(6), 0)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(-2, -2)
+        )
+        addView(text("›", 20f, palette.textTertiary).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(14), dp(20)))
+        parent.addView(this, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+    }
+
     fun group(parent: ViewGroup, marginTopDp: Int = 0): LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         parent.addView(this, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(marginTopDp) })
@@ -473,6 +873,71 @@ class GameKit(
 
     // ------------------------------------------------------------------ layout
 
+    /**
+     * A landscape "deck": a hero band across the top, two independent columns
+     * and a sticky action bar at the bottom.
+     *
+     * This is the shape a shooter front screen wants on a phone held sideways —
+     * career and loadout on one side, modes and the lobby on the other — and it
+     * is what a portrait game never needs. [GameKit.deck] collapses to one column
+     * on a portrait screen so the same code still opens sensibly if the device
+     * refuses to rotate.
+     */
+    class Deck(val root: FrameLayout, val top: FrameLayout, val left: LinearLayout, val right: LinearLayout, val bar: LinearLayout, val wide: Boolean)
+
+    fun deck(padBottomDp: Int = 14): Deck {
+        val wide = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val root = FrameLayout(context).apply { setBackgroundColor(palette.background) }
+        val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        val top = FrameLayout(context)
+        column.addView(top, LinearLayout.LayoutParams(-1, -2))
+
+        val left = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(10), dp(if (wide) 10 else 18), dp(20))
+        }
+        val right = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(if (wide) 10 else 18), dp(10), dp(18), dp(20))
+        }
+        if (wide) {
+            val body = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            body.addView(verticalScroll(left), LinearLayout.LayoutParams(0, -1, 1f))
+            body.addView(verticalScroll(right), LinearLayout.LayoutParams(0, -1, 1f))
+            column.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        } else {
+            val stack = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            stack.addView(left, LinearLayout.LayoutParams(-1, -2))
+            stack.addView(right, LinearLayout.LayoutParams(-1, -2))
+            column.addView(verticalScroll(stack), LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+
+        val bar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(padBottomDp))
+            setBackgroundColor(GameColors.blend(palette.background, palette.card, 0.85f))
+        }
+        column.addView(bar, LinearLayout.LayoutParams(-1, -2))
+        root.addView(column, FrameLayout.LayoutParams(-1, -1))
+
+        val base = intArrayOf(column.paddingLeft, column.paddingTop, column.paddingRight, column.paddingBottom)
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = GameInsets.bars(insets)
+            column.setPadding(base[0] + bars[0], base[1] + bars[1], base[2] + bars[2], base[3])
+            insets
+        }
+        return Deck(root, top, left, right, bar, wide)
+    }
+
+    private fun verticalScroll(child: View): ScrollView = ScrollView(context).apply {
+        isFillViewport = true
+        isVerticalScrollBarEnabled = false
+        overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        clipToPadding = false
+        addView(child, ViewGroup.LayoutParams(-1, -2))
+    }
+
     fun scroll(child: View): ScrollView = ScrollView(context).apply {
         isFillViewport = true
         isVerticalScrollBarEnabled = false
@@ -530,6 +995,16 @@ class GameKit(
     // ------------------------------------------------------------------ sheets
 
     /** Bottom sheet styled like OEA's. Returns the dialog so callers can dismiss it. */
+    fun hscroll(child: View): HorizontalScrollView = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        clipToPadding = false
+        addView(child)
+    }
+
+    /** Same as [hscroll]; named for rows of chips and swatches. */
+    fun hscrollRow(child: View): HorizontalScrollView = hscroll(child)
+
     fun sheet(title: String?, subtitle: String? = null, build: (LinearLayout, Dialog) -> Unit): Dialog {
         val activity = context as? Activity
             ?: throw IllegalStateException("Sheets need an Activity context")
@@ -642,6 +1117,25 @@ class GameKit(
         }
     }
 
+    /** A one-line text prompt in a sheet; [onResult] gets the text or null. */
+    fun prompt(title: String, hint: String, initial: String = "", onResult: (String?) -> Unit) {
+        val input = field(hint, initial)
+        sheet(title, null) { panel, dialog ->
+            panel.addView(input, LinearLayout.LayoutParams(-1, -2))
+            panel.addView(
+                buttonRow(
+                    quietButton("Cancel") { dialog.dismiss(); onResult(null) },
+                    primaryButton("OK") { dialog.dismiss(); onResult(input.text?.toString()) }
+                )
+            )
+        }
+        input.post {
+            input.requestFocus()
+            (context.getSystemService(android.view.inputmethod.InputMethodManager::class.java))
+                ?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
     fun confirm(
         title: String,
         message: String,
@@ -661,6 +1155,393 @@ class GameKit(
                 )
             )
         }
+    }
+}
+
+/**
+ * Each game's own front-of-box art, drawn in code.
+ *
+ * A shooter's band is a sight picture over a scope grid, a chess club's is a
+ * walnut board with a brass rule, a rail runner's is a receding track under
+ * neon. None of them is "the accent colour with the glyph in the corner", which
+ * is what made the three games look like one app before this existed.
+ */
+object GameArt {
+    /** A flat colour as a drawable, for views that only take a background. */
+    fun solid(color: Int): Drawable = ColorDrawable(color)
+
+    /** A vertical fade used to sink artwork behind type. */
+    fun scrim(color: Int, alpha: Int, fromTop: Boolean = false): Drawable {
+        val a = GameColors.alpha(color, alpha)
+        val clear = GameColors.alpha(color, 0)
+        return object : Drawable() {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            override fun draw(canvas: Canvas) {
+                val b = bounds
+                paint.shader = LinearGradient(
+                    0f, b.top.toFloat(), 0f, b.bottom.toFloat(),
+                    if (fromTop) intArrayOf(a, clear) else intArrayOf(clear, a),
+                    null, Shader.TileMode.CLAMP
+                )
+                canvas.drawRect(b, paint)
+            }
+            override fun setAlpha(alpha2: Int) { paint.alpha = alpha2 }
+            override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+            @Deprecated("Deprecated in Java")
+            override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+        }
+    }
+
+    /** The hero band of [gameId], in that game's own material. */
+    fun hero(gameId: String, scheme: GameScheme): Drawable = when (gameId) {
+        "arena" -> ArenaArt(scheme)
+        "chess" -> ChessArt(scheme)
+        "runner" -> RunnerArt(scheme)
+        else -> LabArt(scheme)
+    }
+
+    /** The small motif drawn beside a title, e.g. on a hub card. */
+    fun glyphArt(gameId: String, scheme: GameScheme): Drawable = when (gameId) {
+        "arena" -> ReticleArt(scheme)
+        "chess" -> KnightArt(scheme)
+        "runner" -> TrackArt(scheme)
+        else -> ReticleArt(scheme)
+    }
+
+    // ------------------------------------------------------------ the shooter
+
+    /** A sight picture: horizon, scope grid, range rings, a warm visor accent. */
+    private class ArenaArt(private val s: GameScheme) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val w = b.width().toFloat()
+            val h = b.height().toFloat()
+            if (w <= 0f || h <= 0f) return
+            paint.shader = LinearGradient(
+                0f, b.top.toFloat(), 0f, b.bottom.toFloat(),
+                intArrayOf(GameColors.blend(s.ground, Color.BLACK, 0.25f), GameColors.blend(s.ground, s.accent, 0.22f)),
+                null, Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(b, paint)
+            paint.shader = null
+            // Distant ridgeline.
+            val ridge = Path()
+            ridge.moveTo(b.left.toFloat(), b.top + h)
+            var x = b.left.toFloat()
+            var i = 0
+            while (x <= b.right) {
+                val y = b.top + h * (0.58f + 0.1f * sin(i * 0.7f + 0.4f))
+                ridge.lineTo(x, y)
+                x += w / 26f
+                i++
+            }
+            ridge.lineTo(b.right.toFloat(), b.top + h)
+            ridge.close()
+            paint.color = GameColors.alpha(Color.BLACK, 0x66)
+            canvas.drawPath(ridge, paint)
+            // Scope grid.
+            paint.strokeWidth = h * 0.004f
+            paint.color = GameColors.alpha(s.accent, 0x2A)
+            for (k in 1..7) canvas.drawLine(b.left + w * k / 8f, b.top.toFloat(), b.left + w * k / 8f, b.top + h, paint)
+            for (k in 1..3) canvas.drawLine(b.left.toFloat(), b.top + h * k / 4f, b.right.toFloat(), b.top + h * k / 4f, paint)
+            // Range rings on the right: the reticle.
+            val cx = b.left + w * 0.78f
+            val cy = b.top + h * 0.42f
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = h * 0.012f
+            for (k in 1..3) {
+                paint.color = GameColors.alpha(s.signal, 0x66 - k * 0x14)
+                canvas.drawCircle(cx, cy, h * 0.11f * k, paint)
+            }
+            paint.color = GameColors.alpha(s.accent, 0xD0)
+            paint.strokeWidth = h * 0.008f
+            canvas.drawLine(cx - h * 0.2f, cy, cx - h * 0.05f, cy, paint)
+            canvas.drawLine(cx + h * 0.05f, cy, cx + h * 0.2f, cy, paint)
+            canvas.drawLine(cx, cy - h * 0.2f, cx, cy - h * 0.05f, paint)
+            canvas.drawLine(cx, cy + h * 0.05f, cx, cy + h * 0.2f, paint)
+            paint.style = Paint.Style.FILL
+            paint.color = s.signal
+            canvas.drawCircle(cx, cy, h * 0.012f, paint)
+            // Amber scan sweep along the bottom edge.
+            paint.shader = LinearGradient(
+                b.left.toFloat(), 0f, b.right.toFloat(), 0f,
+                intArrayOf(GameColors.alpha(s.signal, 0), GameColors.alpha(s.signal, 0x88), GameColors.alpha(s.signal, 0)),
+                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(b.left.toFloat(), b.top + h * 0.94f, b.right.toFloat(), b.top + h, paint)
+            paint.shader = null
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    /** A scope reticle on its own, for a hub tile. */
+    private class ReticleArt(private val s: GameScheme) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val cx = b.exactCenterX()
+            val cy = b.exactCenterY()
+            val r = minOf(b.width(), b.height()) * 0.34f
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = r * 0.09f
+            paint.color = GameColors.alpha(s.accent, 0xC0)
+            canvas.drawCircle(cx, cy, r, paint)
+            paint.color = GameColors.alpha(s.signal, 0x90)
+            canvas.drawCircle(cx, cy, r * 0.55f, paint)
+            paint.strokeWidth = r * 0.07f
+            canvas.drawLine(cx - r * 1.4f, cy, cx - r * 0.3f, cy, paint)
+            canvas.drawLine(cx + r * 0.3f, cy, cx + r * 1.4f, cy, paint)
+            canvas.drawLine(cx, cy - r * 1.4f, cx, cy - r * 0.3f, paint)
+            canvas.drawLine(cx, cy + r * 0.3f, cx, cy + r * 1.4f, paint)
+            paint.style = Paint.Style.FILL
+            paint.color = s.signal
+            canvas.drawCircle(cx, cy, r * 0.1f, paint)
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    // -------------------------------------------------------------- the club
+
+    /** Walnut and brass: a board edge-on, a rank of pieces, a rule of gold. */
+    private class ChessArt(private val s: GameScheme) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val piece = Path()
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val w = b.width().toFloat()
+            val h = b.height().toFloat()
+            if (w <= 0f || h <= 0f) return
+            paint.shader = null
+            paint.color = s.ground
+            canvas.drawRect(b, paint)
+            // A walnut table across the lower two thirds.
+            paint.shader = LinearGradient(
+                0f, b.top + h * 0.3f, 0f, b.top + h,
+                intArrayOf(GameColors.blend(s.accent, Color.BLACK, 0.15f), GameColors.blend(s.accent, Color.BLACK, 0.45f)),
+                null, Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(b.left.toFloat(), b.top + h * 0.34f, b.right.toFloat(), b.top + h, paint)
+            paint.shader = null
+            // Brass rule.
+            paint.color = GameColors.alpha(s.signal, 0xCC)
+            canvas.drawRect(b.left.toFloat(), b.top + h * 0.335f, b.right.toFloat(), b.top + h * 0.345f, paint)
+            // The board itself, seen at a shallow angle: three rows of squares.
+            val boardTop = b.top + h * 0.44f
+            val sq = h * 0.15f
+            paint.color = GameColors.alpha(Color.WHITE, 0x1A)
+            canvas.drawRect(b.left.toFloat(), boardTop - sq * 0.3f, b.right.toFloat(), boardTop + sq * 3.2f, paint)
+            for (row in 0 until 4) {
+                for (col in 0 until (w / sq).toInt() + 1) {
+                    if ((row + col) % 2 != 0) continue
+                    paint.color = GameColors.alpha(Color.WHITE, 0x30)
+                    canvas.drawRect(
+                        b.left + col * sq, boardTop + row * sq,
+                        b.left + (col + 1) * sq, boardTop + (row + 1) * sq, paint
+                    )
+                }
+            }
+            // A knight and a pawn, in profile, sitting on the board.
+            drawPiece(canvas, b.left + w * 0.72f, boardTop + sq * 1.1f, sq * 1.25f)
+            // Cast a long warm light from the top left.
+            paint.shader = RadialGradient(
+                b.left + w * 0.1f, b.top.toFloat(), h * 0.9f,
+                GameColors.alpha(Color.WHITE, 0x40), Color.TRANSPARENT, Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(b, paint)
+            paint.shader = null
+        }
+
+        private fun drawPiece(canvas: Canvas, cx: Float, baseY: Float, size: Float) {
+            paint.style = Paint.Style.FILL
+            paint.color = GameColors.blend(s.panel, Color.WHITE, 0.15f)
+            piece.reset()
+            // Base, stem and a horselike head: a chess piece silhouette.
+            piece.addRect(cx - size * 0.30f, baseY - size * 0.14f, cx + size * 0.30f, baseY, Path.Direction.CW)
+            piece.addRect(cx - size * 0.18f, baseY - size * 0.62f, cx + size * 0.16f, baseY - size * 0.12f, Path.Direction.CW)
+            piece.moveTo(cx - size * 0.16f, baseY - size * 0.58f)
+            piece.lineTo(cx - size * 0.10f, baseY - size * 1.02f)
+            piece.lineTo(cx + size * 0.26f, baseY - size * 0.94f)
+            piece.lineTo(cx + size * 0.30f, baseY - size * 0.80f)
+            piece.lineTo(cx + size * 0.06f, baseY - size * 0.74f)
+            piece.lineTo(cx + size * 0.18f, baseY - size * 0.58f)
+            piece.close()
+            canvas.drawPath(piece, paint)
+            paint.color = GameColors.alpha(Color.BLACK, 0x44)
+            canvas.drawRect(cx - size * 0.34f, baseY - size * 0.05f, cx + size * 0.34f, baseY + size * 0.03f, paint)
+        }
+
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    /** A brass knight for a hub tile. */
+    private class KnightArt(private val s: GameScheme) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val cx = b.exactCenterX()
+            val cy = b.exactCenterY()
+            val size = minOf(b.width(), b.height()) * 0.9f
+            paint.color = s.signal
+            val p = Path()
+            val baseY = cy + size * 0.38f
+            p.addRect(cx - size * 0.28f, baseY - size * 0.10f, cx + size * 0.28f, baseY, Path.Direction.CW)
+            p.addRect(cx - size * 0.15f, baseY - size * 0.50f, cx + size * 0.13f, baseY - size * 0.08f, Path.Direction.CW)
+            p.moveTo(cx - size * 0.14f, baseY - size * 0.46f)
+            p.lineTo(cx - size * 0.08f, baseY - size * 0.92f)
+            p.lineTo(cx + size * 0.22f, baseY - size * 0.84f)
+            p.lineTo(cx + size * 0.26f, baseY - size * 0.70f)
+            p.lineTo(cx + size * 0.05f, baseY - size * 0.64f)
+            p.lineTo(cx + size * 0.16f, baseY - size * 0.46f)
+            p.close()
+            canvas.drawPath(p, paint)
+            paint.color = GameColors.alpha(Color.BLACK, 0x55)
+            canvas.drawCircle(cx + size * 0.02f, baseY - size * 0.80f, size * 0.022f, paint)
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    // --------------------------------------------------------------- the rail
+
+    /** Receding rails under neon lamps, with the skyline of the yard behind. */
+    private class RunnerArt(private val s: GameScheme) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val w = b.width().toFloat()
+            val h = b.height().toFloat()
+            if (w <= 0f || h <= 0f) return
+            paint.shader = LinearGradient(
+                0f, b.top.toFloat(), 0f, b.top + h * 0.7f,
+                intArrayOf(GameColors.blend(s.ground, s.signal, 0.12f), s.ground),
+                null, Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(b, paint)
+            paint.shader = null
+            // Sunset glow behind the yard.
+            paint.shader = RadialGradient(
+                b.left + w * 0.5f, b.top + h * 0.62f, h * 0.6f,
+                GameColors.alpha(s.signal, 0x66), Color.TRANSPARENT, Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(b, paint)
+            paint.shader = null
+            // Skyline.
+            paint.color = GameColors.alpha(Color.BLACK, 0x55)
+            var x = b.left.toFloat()
+            var i = 0
+            while (x < b.right) {
+                val bw = w / 16f * (0.6f + ((i * 37) % 10) / 12f)
+                val bh = h * (0.10f + ((i * 53) % 13) / 60f)
+                canvas.drawRect(x, b.top + h * 0.62f - bh, x + bw * 0.8f, b.top + h * 0.62f, paint)
+                x += bw
+                i++
+            }
+            // Rails converging to a vanishing point.
+            val vx = b.left + w * 0.5f
+            val vy = b.top + h * 0.58f
+            paint.strokeWidth = h * 0.018f
+            for (k in intArrayOf(-1, 0, 1)) {
+                val lane = vx + k * w * 0.055f
+                val spread = w * 0.42f
+                paint.color = if (k == 0) GameColors.alpha(s.accent, 0xE0) else GameColors.alpha(s.accent, 0x80)
+                canvas.drawLine(lane, vy, vx + k * spread + (lane - vx) * 2.2f, b.top + h, paint)
+            }
+            // Sleepers: short rungs that grow as they approach.
+            paint.strokeWidth = h * 0.008f
+            var t = 0.06f
+            while (t < 1f) {
+                val y = vy + (b.top + h - vy) * t * t
+                val half = w * 0.03f + w * 0.42f * t * t
+                paint.color = GameColors.alpha(s.text, (0x30 * (1f - t * 0.5f)).toInt())
+                canvas.drawLine(vx - half, y, vx + half, y, paint)
+                t += 0.045f
+            }
+            // Lamps along the platform, the game's own orange beacons.
+            for (k in 0 until 4) {
+                val p = 0.18f + k * 0.22f
+                val y = vy + (b.top + h - vy) * p * p
+                val half = w * 0.03f + w * 0.42f * p * p
+                paint.color = GameColors.alpha(s.signal, 0xCC)
+                canvas.drawCircle(vx - half, y - h * 0.02f, h * 0.008f + h * 0.01f * p, paint)
+                paint.color = GameColors.alpha(s.signal, 0x44)
+                canvas.drawCircle(vx + half, y - h * 0.02f, h * 0.008f + h * 0.01f * p, paint)
+            }
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    /** Three converging rails for a hub tile. */
+    private class TrackArt(private val s: GameScheme) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val vx = b.exactCenterX()
+            val top = b.top + b.height() * 0.18f
+            val bottom = b.top + b.height() * 0.96f
+            paint.strokeWidth = b.height() * 0.05f
+            for (k in intArrayOf(-1, 0, 1)) {
+                paint.color = if (k == 0) s.accent else GameColors.alpha(s.accent, 0x88)
+                val laneTop = vx + k * b.width() * 0.05f
+                canvas.drawLine(laneTop, top, vx + k * b.width() * 0.36f, bottom, paint)
+            }
+            paint.strokeWidth = b.height() * 0.02f
+            paint.color = GameColors.alpha(s.signal, 0xCC)
+            for (t in 1..5) {
+                val f = t / 5f
+                val y = top + (bottom - top) * f * f
+                val half = b.width() * 0.05f + b.width() * 0.36f * f * f
+                canvas.drawLine(vx - half, y, vx + half, y, paint)
+            }
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    // ---------------------------------------------------------------- the lab
+
+    private class LabArt(private val s: GameScheme) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            val w = b.width().toFloat()
+            val h = b.height().toFloat()
+            paint.shader = LinearGradient(
+                0f, b.top.toFloat(), w, b.top + h,
+                intArrayOf(GameColors.blend(s.ground, s.accent, 0.30f), s.ground),
+                null, Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(b, paint)
+            paint.shader = null
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = h * 0.012f
+            paint.color = GameColors.alpha(s.accent, 0x50)
+            for (i in 0 until 12) {
+                val x = b.left + w * (0.4f + 0.05f * i)
+                canvas.drawLine(x, b.top + h * (0.5f + 0.4f * sin(i.toFloat())), x + w * 0.1f, b.top + h * (0.5f - 0.4f * sin(i * 1.7f)), paint)
+            }
+            paint.style = Paint.Style.FILL
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
 }
 
