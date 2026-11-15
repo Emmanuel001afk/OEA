@@ -56,8 +56,8 @@ class AeoMembershipVerifierTest {
 
     @Test fun acceptsValidMembershipCredential() {
         val result = verify(sign())
-        assertTrue(result is AeoMembershipVerifier.Result.Success)
-        val membership = (result as AeoMembershipVerifier.Result.Success).value
+        assertTrue(result is AeoMembershipVerifier.Result.Success<*>)
+        val membership = (result as AeoMembershipVerifier.Result.Success<*>).value
         assertEquals("com.ema.assistant", membership.platformId)
         assertEquals("AEO", membership.ecosystem)
     }
@@ -99,7 +99,7 @@ class AeoMembershipVerifierTest {
             .put("membershipCredential", token)
         assertTrue(AeoMembershipVerifier.verifyRegistration(
             registration, listOf(key), { _, _, _ -> false }, now, apiLevel = 33
-        ) is AeoMembershipVerifier.Result.Success)
+        ) is AeoMembershipVerifier.Result.Success<*>)
 
         registration.put("displayName", "Other App")
         assertTrue(AeoMembershipVerifier.verifyRegistration(
