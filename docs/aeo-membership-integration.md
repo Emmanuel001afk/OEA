@@ -17,3 +17,8 @@ OEA supports Android API 26+. Built-in JCA Ed25519 is used only on API 33+, and 
 No AEO root key or production membership credential is embedded. Root-signed trust-bundle verification, persistent anti-rollback version storage, trust-root rotation/recovery, and the live issuer/revocation distribution process are not implemented by this adapter. Do not claim OEA is production-conformant until those are completed and peer authentication/authorization remain separately enforced.
 
 JVM tests cover valid credentials, signature tampering, unknown keys, revocation, wrong audience, API-level fail-closed behavior, and registration identity binding.
+
+
+## Root-signed trust bundles
+
+The adapter verifies AEO root-signed trust bundles against pinned Ed25519 root public keys, validates issuer-key records and credential revocation IDs, and enforces expiry and a caller-supplied minimum bundle version. The caller must persist the highest accepted version and pass it as `minimumVersion`; this verifier does not persist state. Root-key rotation/recovery and live issuer/revocation distribution remain production prerequisites. Android API levels below 33 fail closed because the platform Ed25519 provider is unavailable; no algorithm downgrade is used.
