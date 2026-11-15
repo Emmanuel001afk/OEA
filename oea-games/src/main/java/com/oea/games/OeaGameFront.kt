@@ -1,0 +1,284 @@
+package com.oea.games
+
+import android.content.SharedPreferences
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.oea.engine.OeaEngine
+import com.oea.engine.core.GameDescriptor
+import com.oea.engine.core.GameOption
+import com.oea.engine.core.LocalPlayer
+import com.oea.engine.core.PlayMode
+import com.oea.games.ui.GameKit
+import com.oea.games.ui.GamePalette
+import com.oea.games.ui.GameScheme
+import com.oea.games.ui.GameType
+
+/**
+ * What a game's front screen is allowed to ask of the activity hosting it.
+ *
+ * The three OEA games are not three skins of one menu. Send Off is a shooter
+ * bent around a soldier's career and a deploy button; Chess is a club room with
+ * a board on the table; Endless Days is an arcade cabinet with a score marquee.
+ * Each therefore builds its own screen, and this is the whole surface it needs
+ * from the shell: its colours, its remembered options, a way to start a match,
+ * the shared sheets, and the game's own save data.
+ */
+interface GameFrontHost {
+    /** The game this front belongs to. */
+    val frontDescriptor: GameDescriptor
+
+    /** The game's own materials, from its launcher icon. */
+    val frontScheme: GameScheme
+
+    fun frontKit(): GameKit
+
+    /** `SharedPreferences("oea_game_<id>")` — the same file the match reads. */
+    fun gamePrefs(): SharedPreferences
+
+    /** Remembered value of one of the game's own options. */
+    fun frontOption(id: String): String
+
+    /** Stores an option and remembers it for the next match. */
+    fun frontSetOption(id: String, value: String)
+
+    /** Starts a match now, using the options as they stand. */
+    fun frontPlay(mode: PlayMode, players: List<LocalPlayer> = emptyList())
+
+    /** Wi-Fi / hotspot / online hosting and joining. */
+    fun frontFriends()
+
+    /** The game's own control legend. */
+    fun frontControls()
+
+    /** Screen size, contrast and motion. */
+    fun frontAccess()
+
+    fun frontToast(message: String)
+
+    /** Rebuilds this screen after a setting or a record changed. */
+    fun frontRebuild()
+}
+
+/**
+ * Shared machinery for the game front screens: the kit, the palette, stat
+ * tiles, colour pickers and the sheets every game needs (sound, graphics,
+ * about) — but never the layout. Layout belongs to the game.
+ */
+abstract class GameFront(protected val host: GameFrontHost) {
+
+    protected val d: GameDescriptor get() = host.frontDescriptor
+    protected val kit: GameKit get() = host.frontKit()
+    protected val palette: GamePalette get() = kit.palette
+    protected val scheme: GameScheme get() = host.frontScheme
+    protected val prefs: SharedPreferences get() = host.gamePrefs()
+
+    /** The game's engine settings (audio, graphics, aim, access). */
+    protected val settings get() = OeaEngine.settings
+
+    /** Builds the whole front screen. Called again after any change. */
+    abstract fun build(): View
+
+    // ------------------------------------------------------------- options
+
+    protected fun option(id: String): GameOption? = d.options.firstOrNull { it.id == id }
+
+    protected fun value(id: String): String = host.frontOption(id)
+
+    protected fun label(id: String): String {
+        val opt = option(id) ?: return value(id)
+        return opt.choices.firstOrNull { it.value == value(id) }?.label ?: value(id)
+    }
+
+    protected fun choose(id: String) {
+        val opt = option(id) ?: return
+        val current = opt.choices.indexOfFirst { it.value == value(id) }.coerceAtLeast(0)
+        kit.choose(opt.label, opt.choices.getOrNull(current)?.description, opt.choices.map { it.label }, current, opt.choices.map { it.description }) { pick ->
+            host.frontSetOption(opt.id, opt.choices[pick].value)
+            host.frontRebuild()
+        }
+    }
+
+    /** Sets an option and rebuilds the screen in one step. */
+    protected fun set(id: String, newValue: String) {
+        host.frontSetOption(id, newValue)
+        host.frontRebuild()
+    }
+
+    // ------------------------------------------------------------- widgets
+
+    /** A thin progress bar for XP or a record. */
+    protected fun progressBar(fraction: Float, color: Int = palette.accent, heightDp: Int = 6): FrameLayout {
+        val f = fraction.coerceIn(0f, 1f)
+        val track = FrameLayout(kit.context).apply {
+            background = kit.rounded(palette.cardHigh, heightDp)
+            clipToOutline = true
+        }
+        val fill = View(kit.context).apply { background = kit.rounded(color, heightDp) }
+        track.addView(
+            fill,
+            FrameLayout.LayoutParams(0, kit.dp(heightDp)).apply { gravity = Gravity.START }
+        )
+        // Sized from the measured track, not from a one-shot post{}: a screen
+        // built before its first layout has a width of 0, which is how a
+        // progress bar ends up permanently empty.
+        track.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or: Int, ob: Int) {
+                val width = (v.width * f).toInt()
+                val params = fill.layoutParams as FrameLayout.LayoutParams
+                if (params.width != width) {
+                    params.width = width
+                    fill.layoutParams = params
+                }
+            }
+        })
+        return track
+    }
+
+    /** A caption line that matches the game's own letterspacing. */
+    protected fun caption(text: String, color: Int = palette.textTertiary): TextView =
+        kit.text(text.uppercase(), 10f, color, GameType.medium).apply { letterSpacing = 0.16f }
+
+    /** A row of colour swatches; the current one is ringed in the accent. */
+    protected fun colourRow(
+        parent: LinearLayout,
+        colors: IntArray,
+        selected: Int,
+        onPick: (Int) -> Unit
+    ) {
+        val row = LinearLayout(kit.context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        colors.forEach { c ->
+            val dot = View(kit.context).apply {
+                background = kit.oval(c, if (c == selected) palette.accent else 0, if (c == selected) 3 else 0)
+                isClickable = true
+                contentDescription = "Colour"
+                setOnClickListener { onPick(c) }
+            }
+            row.addView(dot, LinearLayout.LayoutParams(kit.dp(30), kit.dp(30)).apply { rightMargin = kit.dp(8) })
+        }
+        parent.addView(kit.hscrollRow(row), LinearLayout.LayoutParams(-1, -2))
+    }
+
+    /** A compact numeric stepper used for counts (bots, best-of, tier). */
+    protected fun stepperRow(parent: LinearLayout, title: String, value: Int, min: Int, max: Int, format: (Int) -> String, onChange: (Int) -> Unit) {
+        val row = LinearLayout(kit.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(kit.dp(14), kit.dp(10), kit.dp(10), kit.dp(10))
+            background = kit.rounded(palette.card, 12, palette.stroke, 1)
+        }
+        row.addView(kit.text(title, 14.5f, palette.text, GameType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+        fun bump(delta: Int) {
+            val next = (value + delta).coerceIn(min, max)
+            if (next != value) onChange(next)
+        }
+        row.addView(
+            kit.text("−", 20f, palette.textSecondary, GameType.bold).apply {
+                gravity = Gravity.CENTER
+                isClickable = true
+                setOnClickListener { bump(-1) }
+            },
+            LinearLayout.LayoutParams(kit.dp(38), kit.dp(36))
+        )
+        row.addView(
+            kit.text(format(value), 14f, palette.accent, GameType.mono).apply { gravity = Gravity.CENTER },
+            LinearLayout.LayoutParams(kit.dp(58), -2)
+        )
+        row.addView(
+            kit.text("+", 20f, palette.textSecondary, GameType.bold).apply {
+                gravity = Gravity.CENTER
+                isClickable = true
+                setOnClickListener { bump(1) }
+            },
+            LinearLayout.LayoutParams(kit.dp(38), kit.dp(36))
+        )
+        parent.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
+    }
+
+    // ---------------------------------------------------------------- sheets
+
+    /** Sound, music, volume and haptics — named the way a game would name them. */
+    protected fun audioSheet(title: String = "Sound") {
+        kit.sheet(title, "Shared with every OEA game on this phone, and applied live.") { panel, dialog ->
+            val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+            kit.switchRow(body, "Sound effects", "Weapons, steps, coins — the game's own noises", settings.sound) { settings.sound = it }
+            kit.switchRow(body, "Music", "The game's own soundtrack", settings.music) { settings.music = it }
+            kit.slider(body, "Volume", settings.volume, 0f, 1f, { "${(it * 100f).toInt()}%" }) { settings.volume = it }
+            kit.switchRow(body, "Haptics", "A tap on the phone for hits, jumps and moves", settings.haptics) { settings.haptics = it }
+            panel.addView(kit.boundedScroll(body, 0.62f))
+            panel.addView(kit.buttonRow(kit.primaryButton("Done") { dialog.dismiss(); host.frontRebuild() }))
+        }
+    }
+
+    /** Quality and frame rate for this game on this phone. */
+    protected fun graphicsSheet(title: String = "Graphics") {
+        val device = OeaEngine.device
+        kit.sheet(title, "${device.recommendedTier.label} tier on this phone · ${device.maxRefreshRate.toInt()} Hz") { panel, dialog ->
+            val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+            val qualities = listOf("auto", "low", "medium", "high", "ultra")
+            val labels = listOf("Auto (${device.recommendedTier.label})", "Low", "Medium", "High", "Ultra")
+            val index = qualities.indexOf(settings.quality).coerceAtLeast(0)
+            kit.valueRow(body, "Quality", labels[index], "Auto measures this phone once and stays there") {
+                kit.choose("Quality", null, labels, index, listOf("Measured for this phone", "Fastest, longest battery", "Balanced", "Shadows and bloom", "Supersampling — maximum image quality")) { pick ->
+                    settings.quality = qualities[pick]
+                    host.frontRebuild()
+                }
+            }
+            val rates = (listOf(0) + device.refreshRates.map { it.toInt() }.filter { it >= 30 }.distinct().sortedDescending() + listOf(60, 30)).distinct()
+            val rateLabels = rates.map { if (it == 0) "Max (${device.maxRefreshRate.toInt()} Hz)" else "$it fps" }
+            val rateIndex = rates.indexOf(settings.fpsTarget).coerceAtLeast(0)
+            kit.valueRow(body, "Frame rate", rateLabels[rateIndex], "What the screen should hold") {
+                kit.choose("Frame rate", null, rateLabels, rateIndex) { pick ->
+                    settings.fpsTarget = rates[pick]
+                    host.frontRebuild()
+                }
+            }
+            kit.switchRow(body, "Adaptive resolution", "Trades sharpness for a steady frame rate", settings.adaptiveResolution) { settings.adaptiveResolution = it }
+            kit.switchRow(body, "FPS counter", "Frame rate and resolution scale, on screen", settings.showFps) { settings.showFps = it }
+            kit.switchRow(body, "Steady performance", "Cooler and steadier, lower peaks", settings.sustainedPerformance) { settings.sustainedPerformance = it }
+            panel.addView(kit.boundedScroll(body, 0.66f))
+            panel.addView(kit.buttonRow(kit.primaryButton("Done") { dialog.dismiss(); host.frontRebuild() }))
+        }
+    }
+
+    protected fun aboutSheet() {
+        kit.sheet(d.title, d.tagline) { panel, dialog ->
+            panel.addView(
+                kit.text(d.description, 13.5f, palette.textSecondary).apply {
+                    setLineSpacing(kit.dpf(2f), 1f)
+                    setPadding(0, 0, 0, kit.dp(12))
+                }
+            )
+            panel.addView(
+                kit.text(
+                    "Players: ${if (d.maxPlayers > 1) "${d.minPlayers}–${d.maxPlayers}" else "1"}\n" +
+                        "Modes: ${d.modes.joinToString(", ") { it.label }}\n" +
+                        "Engine: OEA Engine ${OeaEngine.VERSION}",
+                    12.5f,
+                    palette.textTertiary
+                ).apply { setLineSpacing(kit.dpf(3f), 1f) }
+            )
+            panel.addView(kit.buttonRow(kit.primaryButton("Close") { dialog.dismiss() }))
+        }
+    }
+
+    // -------------------------------------------------------------- records
+
+    /** Reads a saved high score, tolerating both key spellings the engine uses. */
+    protected fun savedBest(key: String): Long {
+        val has = prefs.contains("best_$key")
+        return if (has) prefs.getLong("best_$key", 0L) else prefs.getLong(key, 0L)
+    }
+
+    /** A number that reads well on a marquee. */
+    protected fun pretty(value: Long): String = when {
+        value >= 1_000_000 -> "%.1fM".format(value / 1_000_000f)
+        value >= 10_000 -> "%.1fK".format(value / 1000f)
+        else -> value.toString()
+    }
+
+    protected fun trim(text: String, max: Int): String = if (text.length <= max) text else text.take(max - 1).trimEnd() + "…"
+
+}
