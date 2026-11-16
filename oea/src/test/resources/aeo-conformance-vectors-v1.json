@@ -1,0 +1,32 @@
+{
+  "profile": "AEO-UCCS-CONFORMANCE-VECTORS-1",
+  "description": "Public, test-only Ed25519 vectors. No private keys are included.",
+  "nowSeconds": 1800000000,
+  "pinnedRootKeys": [
+    {
+      "kid": "aeo-test-root-v1",
+      "issuer": "AEO",
+      "algorithm": "Ed25519",
+      "publicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+      "notBefore": 1799996400,
+      "notAfter": 1800086400
+    }
+  ],
+  "trustBundle": "eyJhbGciOiJFZERTQSIsInR5cCI6IkFFTy1UUlVTVC1CVU5ETEUrand0Iiwia2lkIjoiYWVvLXRlc3Qtcm9vdC12MSJ9.eyJpc3MiOiJBRU8iLCJhdWQiOiJ1cm46YWVvOnRydXN0LWJ1bmRsZSIsImJ1bmRsZV90eXBlIjoiYWVvLXRydXN0LWJ1bmRsZSIsImJ1bmRsZV92ZXJzaW9uIjoxLCJ2ZXJzaW9uIjo3LCJpYXQiOjE3OTk5OTk5NDAsIm5iZiI6MTc5OTk5OTk0MCwiZXhwIjoxODAwMDAzNjAwLCJrZXlzIjpbeyJraWQiOiJhZW8tdGVzdC1pc3N1ZXItdjEiLCJpc3N1ZXIiOiJodHRwczovL3Rlc3QtaXNzdWVyLmFlby5leGFtcGxlIiwiYWxnb3JpdGhtIjoiRWQyNTUxOSIsInB1YmxpY0tleSI6IktheTY0VUc4eXZDeUxocVUwMDBMeHpZZVVtMExfaExJbDVTOGt5S1diZGMiLCJub3RCZWZvcmUiOjE3OTk5OTY0MDAsIm5vdEFmdGVyIjoxODAwMDg2NDAwfV0sInJldm9rZWRDcmVkZW50aWFsSWRzIjpbIjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSJdfQ.O8Mfzhc_Sljwh2Zerw8nVP1cjznj9j4AMYew1oCyrYOTmFHrcmurJzF5urmIhrFK0YpMK5KISMrP_SQVHSszAA",
+  "membershipCredential": "eyJhbGciOiJFZERTQSIsInR5cCI6IkFFTy1NRU1CRVJTSElQK2p3dCIsImtpZCI6ImFlby10ZXN0LWlzc3Vlci12MSJ9.eyJpc3MiOiJodHRwczovL3Rlc3QtaXNzdWVyLmFlby5leGFtcGxlIiwiYXVkIjoidXJuOmFlbzpmcmFtZXdvcmsiLCJlY29zeXN0ZW0iOiJBRU8iLCJjcmVkZW50aWFsX3R5cGUiOiJhZW8tbWVtYmVyc2hpcCIsImNyZWRlbnRpYWxfdmVyc2lvbiI6MSwic3ViIjoiY29tLmFlby50ZXN0LXBsYXRmb3JtIiwicGxhdGZvcm0iOnsiaWQiOiJjb20uYWVvLnRlc3QtcGxhdGZvcm0iLCJuYW1lIjoiQUVPIENvbmZvcm1hbmNlIFRlc3QgUGxhdGZvcm0ifSwicHVibGlzaGVyIjp7ImlkIjoiY29tLmFlby50ZXN0LXB1Ymxpc2hlciIsImtleV9pZCI6InRlc3QtcmVsZWFzZS1rZXkifSwic2NvcGUiOlsibWVtYmVyIl0sImp0aSI6IjIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiIsImlhdCI6MTc5OTk5OTk3MCwibmJmIjoxNzk5OTk5OTcwLCJleHAiOjE4MDAwMDE4MDB9.GYJ6hcZ5hLJJkd7JVc1D0BH2FbcRoUN8zUWwDvarU4GFkegwAZSJ8HTiNUAXbSM0dx4E7lBJEkwX90HCWJ81BQ",
+  "registration": {
+    "ecosystem": "AEO",
+    "protocol": "uccs/1",
+    "platformId": "com.aeo.test-platform",
+    "displayName": "AEO Conformance Test Platform",
+    "membershipCredential": "eyJhbGciOiJFZERTQSIsInR5cCI6IkFFTy1NRU1CRVJTSElQK2p3dCIsImtpZCI6ImFlby10ZXN0LWlzc3Vlci12MSJ9.eyJpc3MiOiJodHRwczovL3Rlc3QtaXNzdWVyLmFlby5leGFtcGxlIiwiYXVkIjoidXJuOmFlbzpmcmFtZXdvcmsiLCJlY29zeXN0ZW0iOiJBRU8iLCJjcmVkZW50aWFsX3R5cGUiOiJhZW8tbWVtYmVyc2hpcCIsImNyZWRlbnRpYWxfdmVyc2lvbiI6MSwic3ViIjoiY29tLmFlby50ZXN0LXBsYXRmb3JtIiwicGxhdGZvcm0iOnsiaWQiOiJjb20uYWVvLnRlc3QtcGxhdGZvcm0iLCJuYW1lIjoiQUVPIENvbmZvcm1hbmNlIFRlc3QgUGxhdGZvcm0ifSwicHVibGlzaGVyIjp7ImlkIjoiY29tLmFlby50ZXN0LXB1Ymxpc2hlciIsImtleV9pZCI6InRlc3QtcmVsZWFzZS1rZXkifSwic2NvcGUiOlsibWVtYmVyIl0sImp0aSI6IjIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiIsImlhdCI6MTc5OTk5OTk3MCwibmJmIjoxNzk5OTk5OTcwLCJleHAiOjE4MDAwMDE4MDB9.GYJ6hcZ5hLJJkd7JVc1D0BH2FbcRoUN8zUWwDvarU4GFkegwAZSJ8HTiNUAXbSM0dx4E7lBJEkwX90HCWJ81BQ"
+  },
+  "expected": {
+    "trustBundleVersion": 7,
+    "issuerKeyId": "aeo-test-issuer-v1",
+    "membershipPlatformId": "com.aeo.test-platform",
+    "membershipPlatformName": "AEO Conformance Test Platform",
+    "revokedCredentialId": "11111111-1111-4111-8111-111111111111",
+    "activeCredentialId": "22222222-2222-4222-8222-222222222222"
+  }
+}
