@@ -62,7 +62,7 @@ object OeaMiniApps {
      */
     val all: List<App> = listOf(
         App(
-            "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.ic_oea_clock, OeaClockActivity::class.java
+            "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.ic_oea_clock, OeaClockActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaClockApp.build(host, palette) },
         App(
             "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.ic_oea_calendar, OeaCalendarActivity::class.java

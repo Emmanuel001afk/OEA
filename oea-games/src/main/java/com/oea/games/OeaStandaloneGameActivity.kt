@@ -1049,6 +1049,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         super.onResume()
         try {
             host?.onResume()
+            if (host != null) descriptor?.id?.let { onMatchStarted(it) }
         } catch (_: Throwable) {
         }
     }

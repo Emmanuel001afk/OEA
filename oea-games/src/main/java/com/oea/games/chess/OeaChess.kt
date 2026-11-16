@@ -164,8 +164,8 @@ class OeaChess : OeaGame() {
 
     /** Decides who plays White and sets up controllers. [localWhite] is used for solo play. */
     private fun newGame(localWhite: Boolean, networkWhiteId: Int = -1) {
-        aiJob?.cancel(); ai.stop(); aiJob = null
-        hintJob?.cancel(); hintMove = 0
+        aiJob?.cancel(); ai.stop(); aiJob = null; pendingAiMove = null
+        hintJob?.cancel(); hintJob = null; hintMove = 0
         game.restart()
         showResult = false
         drawOffered = false
@@ -277,6 +277,7 @@ class OeaChess : OeaGame() {
 
     /** Attempts a move by the local player; opens the promotion picker when needed. */
     private fun tryMove(from: Int, to: Int): Boolean {
+        if (!isLocalTurn()) return false
         val candidates = game.board.legalMoves().filter { Move.from(it) == from && Move.to(it) == to }
         if (candidates.isEmpty()) return false
         if (candidates.any { Move.promo(it) != 0 }) {
@@ -288,6 +289,7 @@ class OeaChess : OeaGame() {
     }
 
     private fun commit(move: Int, fromNetwork: Boolean) {
+        if (game.isOver) return
         val b = game.board
         val from = Move.from(move); val to = Move.to(move)
         val piece = b.squares[from]
@@ -371,6 +373,7 @@ class OeaChess : OeaGame() {
     }
 
     private fun undo() {
+        if (game.isOver) return
         when (mode) {
             PlayMode.SOLO -> {
                 aiJob?.cancel(); ai.stop(); aiJob = null; pendingAiMove = null
@@ -411,13 +414,15 @@ class OeaChess : OeaGame() {
     }
 
     private fun finishGame() {
-        aiJob?.cancel(); aiJob = null
+        aiJob?.cancel(); aiJob = null; pendingAiMove = null
+        hintJob?.cancel(); hintJob = null; hintMove = 0
+        selected = -1; targets = IntArray(0); dragging = false; pressPointer = -1; promotionFrom = -1
         clockRunning = -1
         showResult = true
         resultShownAt = nowMs()
         val r = game.result
         val me = localColor()
-        val won = (r == GameResult.WHITE_WINS && me == Piece.WHITE) || (r == GameResult.BLACK_WINS && me == Piece.BLACK)
+        val won = r.winnerColor() == me
         val draw = r == GameResult.DRAW
         if (mode == PlayMode.SAME_DEVICE) ctx.audio.play(sWin) else ctx.audio.play(if (won || draw) sWin else sLose)
         if (mode == PlayMode.SOLO) {
@@ -428,12 +433,9 @@ class OeaChess : OeaGame() {
         updateStatus()
     }
 
-    private fun resultTitle(): String = when (game.result) {
-        GameResult.WHITE_WINS -> if (mode == PlayMode.SAME_DEVICE || mode == PlayMode.SOLO && controllers[0] != Controller.LOCAL) "${game.whiteName} wins" else if (localColor() == Piece.WHITE) "You win!" else "${game.whiteName} wins"
-        GameResult.BLACK_WINS -> if (mode == PlayMode.SAME_DEVICE || mode == PlayMode.SOLO && controllers[1] != Controller.LOCAL) "${game.blackName} wins" else if (localColor() == Piece.BLACK) "You win!" else "${game.blackName} wins"
-        GameResult.DRAW -> "Draw"
-        GameResult.ONGOING -> ""
-    }
+    private fun resultTitle(): String = game.result.displayTitle(
+        if (mode == PlayMode.SAME_DEVICE) null else localColor(), game.whiteName, game.blackName,
+    )
 
     private fun nameOf(color: Int) = if (color == Piece.WHITE) game.whiteName else game.blackName
 
@@ -483,9 +485,11 @@ class OeaChess : OeaGame() {
                 }
                 MSG_TAKEBACK_REQ -> {
                     val target = r.u16()
+                    if (game.isOver) { s.broadcast(MSG_TAKEBACK_REPLY) { it.bool(false).u16(target) }; return@poll }
                     ctx.ui.confirm("Takeback", "${nameOf(localColor() xor 1)} asks to take back a move.", "Allow", "Decline") { ok ->
-                        s.broadcast(MSG_TAKEBACK_REPLY) { it.bool(ok).u16(target) }
-                        if (ok) applyTakeback(target)
+                        val accepted = ok && !game.isOver
+                        s.broadcast(MSG_TAKEBACK_REPLY) { it.bool(accepted).u16(target) }
+                        if (accepted) applyTakeback(target)
                     }
                 }
                 MSG_TAKEBACK_REPLY -> { val ok = r.bool(); val target = r.u16(); if (ok) applyTakeback(target) else showFlash("Takeback declined") }
@@ -523,6 +527,7 @@ class OeaChess : OeaGame() {
     }
 
     private fun applyTakeback(target: Int) {
+        if (game.isOver) return
         while (game.board.ply > target && game.undo()) Unit
         afterUndo()
     }
@@ -724,6 +729,7 @@ class OeaChess : OeaGame() {
     private fun openMenu() {
         val items = ArrayList<MenuItem>()
         items += MenuItem("resume", "Resume")
+        if (game.isOver) items += MenuItem("result", "Show result")
         if (mode == PlayMode.SOLO || mode == PlayMode.SAME_DEVICE) items += MenuItem("new", "New game", "Start over with the same settings")
         if (net != null && !game.isOver) items += MenuItem("draw", "Offer a draw")
         if (!game.isOver && mode != PlayMode.SAME_DEVICE) items += MenuItem("resign", "Resign", destructive = true)
@@ -734,6 +740,7 @@ class OeaChess : OeaGame() {
         items += MenuItem("exit", "Leave game", destructive = true)
         ctx.ui.menu("Chess", status, items) { id ->
             when (id) {
+                "result" -> { showResult = true; resultShownAt = nowMs() }
                 "new" -> newGame(controllers[Piece.WHITE] == Controller.LOCAL)
                 "draw" -> if (!drawOffered) { drawOffered = true; net?.broadcast(MSG_DRAW_OFFER); showFlash("Draw offered") }
                 "resign" -> ctx.ui.confirm("Resign?", "The game ends and your opponent wins.", "Resign") { ok -> if (ok) resign() }
@@ -879,15 +886,15 @@ class OeaChess : OeaGame() {
         val by = h - hud.safeBottom - buttonsH + 6f * d
         val labels = buildList {
             add("menu" to "☰")
-            if (mode != PlayMode.SAME_DEVICE || game.board.ply > 0) add("undo" to "↶")
-            if (mode == PlayMode.SOLO || mode == PlayMode.SAME_DEVICE) add("hint" to "★")
+            if (!game.isOver && (mode != PlayMode.SAME_DEVICE || game.board.ply > 0)) add("undo" to "↶")
+            if (!game.isOver && (mode == PlayMode.SOLO || mode == PlayMode.SAME_DEVICE)) add("hint" to "★")
             add("flip" to "⇅")
             add("view" to if (view3D) "2D" else "3D")
         }
         val slot = (w - 24f * d) / labels.size
         labels.forEachIndexed { i, (id, glyph) ->
             val cx = 12f * d + slot * (i + 0.5f)
-            if (hud.iconButton("btn_$id", glyph, cx, by + 24f * d, 24f)) onButton(id)
+            if (hud.iconButton("btn_$id", glyph, cx, by + 24f * d, 24f, enabled = !showResult && promotionFrom < 0)) onButton(id)
         }
         if (promotionFrom >= 0) renderPromotion(hud)
         if (showResult && game.isOver) renderResult(hud)
@@ -1084,7 +1091,7 @@ class OeaChess : OeaGame() {
         }
         if (hud.button("res_pgn", "Share PGN", x + 32f * d + bw, y + 120f * d, bw, 46f * d, ButtonStyle.SECONDARY)) sharePgn()
         if (hud.button("res_review", "Review board", x + 16f * d, y + 178f * d, bw, 46f * d, ButtonStyle.GHOST)) showResult = false
-        if (hud.button("res_exit", "Exit", x + 32f * d + bw, y + 178f * d, bw, 46f * d, ButtonStyle.GHOST)) ctx.ui.exit(HostResult(resultTitle(), won = resultTitle() == "You win!"))
+        if (hud.button("res_exit", "Exit", x + 32f * d + bw, y + 178f * d, bw, 46f * d, ButtonStyle.GHOST)) ctx.ui.exit(HostResult(resultTitle(), won = mode != PlayMode.SAME_DEVICE && game.result.winnerColor() == localColor()))
     }
 
     private object Ease3 { fun outCubic(t: Float) = 1f - (1f - t) * (1f - t) * (1f - t) }

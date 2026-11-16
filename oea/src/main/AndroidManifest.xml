@@ -487,6 +487,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <receiver android:name="com.oea.launcher.security.OeaSecurityPackageReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+        <service android:name="com.oea.launcher.security.OeaSecurityScanJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
+        <activity android:name="com.oea.launcher.security.OeaSecurityScanActivity" android:exported="false" android:label="Security scan" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaConsoleActivity"
             android:exported="true"
@@ -953,6 +962,15 @@
             android:exported="false" />
         <!-- The alarm notification's Snooze and Stop buttons fire this; without the
              declaration both of them are dead taps. -->
+        <service android:name="com.oea.launcher.miniapps.OeaClockRingService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+        <receiver android:name="com.oea.launcher.miniapps.OeaClockRestoreReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name="com.oea.launcher.miniapps.OeaClockSnoozeReceiver"
             android:exported="false" />

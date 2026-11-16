@@ -83,15 +83,28 @@ internal object OeaEmageEditor {
             stage.addView(editorView, FrameLayout.LayoutParams(-1, -1))
             root.addView(toolbar(listOf("Cancel" to { if (!saving) dialog.dismiss() else status("Please wait for the copy to finish.", announce = true) }, "↶" to { rotate(-90f) }, "↷" to { rotate(90f) }, "Mirror" to { mirror() }, "Reset crop" to { resetCrop() })))
             root.addView(stage)
-            root.addView(message, LinearLayout.LayoutParams(-1, -2))
-            root.addView(adjustmentRow("Brightness", -50, 50, 50) { brightness = (it - 50).toFloat(); refreshPreview() })
-            root.addView(adjustmentRow("Contrast", 50, 150, 100) { contrast = it / 100f; refreshPreview() })
-            root.addView(toolbar(listOf("Filter: ${filters[filterIndex]}" to { nextFilter() }, "Reset adjustments" to { resetAdjustments() }, "Save copy" to { save() })))
+            // On a short or landscape display the controls can be taller than
+            // the space below the preview. Scroll them instead of crushing the
+            // Save action or pushing it off-screen.
+            val controls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            controls.addView(message, LinearLayout.LayoutParams(-1, -2))
+            controls.addView(adjustmentRow("Brightness", -50, 50, 50) { brightness = (it - 50).toFloat(); refreshPreview() })
+            controls.addView(adjustmentRow("Contrast", 50, 150, 100) { contrast = it / 100f; refreshPreview() })
+            controls.addView(toolbar(listOf("Filter: ${filters[filterIndex]}" to { nextFilter() }, "Reset adjustments" to { resetAdjustments() }, "Save copy" to { save() })))
+            val controlScroll = object : android.widget.ScrollView(host) {
+                override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                    val limit = (resources.displayMetrics.heightPixels * 0.45f).toInt()
+                    val mode = View.MeasureSpec.getMode(heightMeasureSpec)
+                    val maxHeight = if (mode == View.MeasureSpec.UNSPECIFIED) limit
+                        else minOf(limit, View.MeasureSpec.getSize(heightMeasureSpec))
+                    super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST))
+                }
+            }.apply { isVerticalScrollBarEnabled = true; addView(controls) }
+            root.addView(controlScroll, LinearLayout.LayoutParams(-1, -2))
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setContentView(root)
             dialog.window?.apply {
                 setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.BLACK))
-                addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
                 OeaInsets.edgeToEdge(this, lightBars = false)
             }
             root.setOnApplyWindowInsetsListener { _, insets ->

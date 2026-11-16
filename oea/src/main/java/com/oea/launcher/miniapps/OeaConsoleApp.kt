@@ -39,7 +39,7 @@ import java.util.concurrent.Executors
  * - Our own ADB-inspired system (not a wrapper around ADB or Shizuku) — own format, own build, own verification
  * - Diagnostics (expanded with crash/ANR/startup failure organization)
  * - Device information and hardware/software specs (real APIs)
- * - Security analysis and antivirus-style checks (confirmed threat vs suspicious vs legit)
+ * - Security review of app permissions and links to Android protections (not malware detection)
  * - Storage cleanup and maintenance (real measurements)
  * - Memory, battery, temperature, performance (real BatteryManager, ActivityManager, PowerManager)
  * - Sound amplifier: real mic → earphone loopback with gain and a feedback limiter
@@ -81,10 +81,14 @@ object OeaConsoleApp {
             setPadding(kit.dp(16), kit.dp(14), kit.dp(16), kit.dp(14))
             background = kit.rounded(palette.card, 22, palette.stroke, 1)
         }
-        val battery = batteryInfo(host)
+        val battery = com.oea.launcher.power.OeaBatteryState.read(host)
         val lowModeActive = com.oea.launcher.perf.OeaLowMode.active(host)
         val deviceUltraSaving = isDeviceInUltraPowerSaving(host)
-        statsCard.addView(kit.text("Battery ${battery.first}% • ${if (battery.second) "Charging" else "Discharging"} • ${memoryInfo(host)}", 13f, palette.textSecondary))
+        val statsText = kit.text("Battery ${battery.text} • ${memoryInfo(host)}", 13f, palette.textSecondary)
+        statsCard.addView(statsText)
+        com.oea.launcher.power.OeaBatteryState.observe(statsCard) { state ->
+            statsText.text = "Battery ${state.text} • ${memoryInfo(host)}"
+        }
         statsCard.addView(kit.text(deviceSummary(host) + if (lowModeActive) " • LOW (Ultra Power Saving) ON" else " • LOW OFF" + if (deviceUltraSaving) " • Device Ultra Saving ON" else "", 12f, palette.textTertiary).apply { setPadding(0, kit.dp(4), 0, 0) })
         if (deviceUltraSaving) {
             statsCard.addView(kit.text("Device Ultra Power Saving is ON — OEM may block mini-apps, alarms, background work. OEA Console explains how to whitelist.", 12f, palette.danger).apply { setPadding(0, kit.dp(6), 0, 0) })
@@ -95,7 +99,7 @@ object OeaConsoleApp {
         val sections = listOf(
             "diagnostics" to "Diagnostics • ${OeaFaultLog.count()} recorded",
             "device" to "Device Info • Hardware & software",
-            "security" to "Security • Suspicious apps & permissions",
+            "security" to "Security • App permissions & protections",
             "storage" to "Storage • Cleanup & maintenance",
             "performance" to "Performance • Memory, battery, temperature, ultra saving",
             "sound" to "Sound Amplifier • Room sound to the earphones",
@@ -346,7 +350,7 @@ object OeaConsoleApp {
         try {
             val bm = ctx.getSystemService(android.os.BatteryManager::class.java)
             val capacity = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
-            if (capacity > 0) list.add("Battery" to "up to $capacity% measured capacity")
+            if (capacity > 0) list.add("Battery" to "$capacity% current charge")
         } catch (_: Throwable) {}
         list.add("Low mode (Ultra Saving)" to if (com.oea.launcher.perf.OeaLowMode.active(ctx)) "ON • ${com.oea.launcher.perf.OeaLowMode.summary(ctx)}" else "OFF")
         list.add("Device ultra saving" to if (isDeviceInUltraPowerSaving(ctx)) "ON • OEM may block mini-apps" else "OFF")
@@ -392,67 +396,96 @@ object OeaConsoleApp {
 
     // ------------------------------------------------------------------ security
 
+    private data class SecurityFinding(val packageName: String, val label: String, val details: String)
+    private data class SecurityReview(val checked: Int, val skipped: Int, val findings: List<SecurityFinding>, val error: String? = null)
+
     private fun showSecurity(host: Activity, kit: OeaKit) {
-        kit.sheet("Security Analysis", "Identifies suspicious apps, pop-up ads, unexpected permissions, unwanted behaviour. Distinguishes confirmed threat, suspicious indicator and legitimate permission. Explains why flagged.") { panel, _ ->
-            panel.addView(kit.text("Scanning installed apps…", 13f, kit.palette.textSecondary).apply { setPadding(kit.dp(6), kit.dp(12), kit.dp(6), kit.dp(6)) })
+        kit.sheet("Security review", "Review app permissions, scan file signatures and open Android security settings.") { panel, dialog ->
+            val progress = kit.text("Checking installed apps…", 13f, kit.palette.textSecondary).apply {
+                setPadding(kit.dp(6), kit.dp(12), kit.dp(6), kit.dp(6))
+            }
+            panel.addView(progress)
             val resultHost = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
             panel.addView(resultHost)
-
+            val actions = kit.group(panel)
+            kit.row(actions, R.drawable.oic_shield, "Malware signature scan", "Scan installed APKs or a selected file against imported SHA-256 signatures") {
+                host.startActivity(Intent(host, com.oea.launcher.security.OeaSecurityScanActivity::class.java))
+            }
+            kit.row(actions, R.drawable.oic_shield, "Android security settings", "Review device security and updates") {
+                runCatching { host.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
+                    .onFailure { android.widget.Toast.makeText(host, "Security settings unavailable", android.widget.Toast.LENGTH_SHORT).show() }
+            }
+            kit.row(actions, R.drawable.oic_open_in_new, "Google Play Protect", "Open Play Store to review Play Protect, if installed") {
+                val intent = host.packageManager.getLaunchIntentForPackage("com.android.vending")
+                if (intent != null) runCatching { host.startActivity(intent) }
+                else android.widget.Toast.makeText(host, "Google Play Store is not installed", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            kit.note(panel, "Play Protect is in Play Store › profile › Play Protect. OEA cannot run or control its scan. This local review checks permission declarations and grants, not app code, files, websites, live behavior or known malware signatures. A finding is not proof of malware; no findings do not mean the device is safe.")
             io.execute {
-                val findings = scanSecurity(host)
+                val review = scanSecurity(host.applicationContext)
                 host.runOnUiThread {
-                    if (host.isDestroyed) return@runOnUiThread
+                    if (host.isDestroyed || !dialog.isShowing) return@runOnUiThread
+                    progress.text = if (review.error != null) "Review failed: ${review.error}"
+                        else "Reviewed ${review.checked} apps" + if (review.skipped > 0) " • ${review.skipped} could not be inspected" else ""
                     resultHost.removeAllViews()
-                    if (findings.isEmpty()) {
-                        kit.banner(resultHost, R.drawable.oic_check_circle_fill, "No issues found", "No suspicious apps detected in quick scan. Best-effort check using package flags and permission analysis.", OeaKit.Tone.SUCCESS)
-                    } else {
-                        findings.forEach { (pkg, reason, level) ->
-                            val tone = when (level) {
-                                "threat" -> OeaKit.Tone.DANGER
-                                "suspicious" -> OeaKit.Tone.WARNING
-                                else -> OeaKit.Tone.INFO
-                            }
-                            val g = kit.group(resultHost)
-                            kit.banner(g, if (level == "threat") R.drawable.oic_warning_fill else R.drawable.oic_info, pkg, reason, tone = tone)
-                            kit.row(g, R.drawable.oic_info, "App info", "Open Android's app info") {
-                                try { host.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
-                            }
-                            kit.row(g, R.drawable.oic_delete, "Uninstall?", "Request uninstall via system dialog") {
-                                try { host.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg"))) } catch (_: Throwable) {}
-                            }
+                    if (review.error == null && review.findings.isEmpty()) {
+                        kit.banner(resultHost, R.drawable.oic_info, "No permission combinations flagged", "This limited review cannot establish that apps are safe.", OeaKit.Tone.INFO)
+                    }
+                    review.findings.forEach { finding ->
+                        val g = kit.group(resultHost)
+                        kit.banner(g, R.drawable.oic_info, finding.label, finding.details, OeaKit.Tone.WARNING)
+                        kit.row(g, R.drawable.oic_info, "App info", finding.packageName) {
+                            runCatching { host.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${finding.packageName}"))) }
+                                .onFailure { android.widget.Toast.makeText(host, "App info unavailable", android.widget.Toast.LENGTH_SHORT).show() }
+                        }
+                        kit.row(g, R.drawable.oic_delete, "Uninstall", "Ask Android to uninstall this app") {
+                            runCatching { host.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${finding.packageName}"))) }
+                                .onFailure { android.widget.Toast.makeText(host, "Uninstall unavailable", android.widget.Toast.LENGTH_SHORT).show() }
                         }
                     }
-                    kit.note(resultHost, "Analysis uses public PackageManager APIs only. Cannot inspect other apps' private data or network traffic. App having Accessibility is not automatically malicious — OEA explains why flagged. Confirmed threat = known malware package name or behavior, suspicious = multiple sensitive perms, legit = launcher with overlay permission is expected.")
                 }
             }
         }
     }
 
-    private fun scanSecurity(ctx: Context): List<Triple<String, String, String>> {
-        val list = mutableListOf<Triple<String, String, String>>()
-        try {
-            val pm = ctx.packageManager
-            val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            apps.forEach { app ->
-                if (app.packageName == ctx.packageName) return@forEach
-                val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                if (isSystem) return@forEach
-                try {
-                    val perms = pm.getPackageInfo(app.packageName, PackageManager.GET_PERMISSIONS)?.requestedPermissions ?: emptyArray()
-                    val suspiciousPerms = perms.filter { it.contains("SYSTEM_ALERT_WINDOW") || it.contains("BIND_ACCESSIBILITY") || it.contains("READ_SMS") || it.contains("READ_CALL_LOG") }
-                    if (suspiciousPerms.size >= 4) {
-                        list.add(Triple(app.packageName, "Requests multiple sensitive permissions: ${suspiciousPerms.joinToString()} — may be legitimate (e.g., launcher, automation, security) but worth reviewing. Level: suspicious indicator, not confirmed threat. Why flagged: combination of overlay + accessibility + SMS + call log is often used by adware, but also by legitimate apps. Check app's purpose and uninstall if unknown.", "suspicious"))
-                    } else if (suspiciousPerms.size >= 2) {
-                        list.add(Triple(app.packageName, "Requests sensitive permissions: ${suspiciousPerms.joinToString()} — likely legitimate if you installed it for that purpose (e.g., call blocker needs call log). Level: legitimate permission, informational.", "legit"))
-                    }
-                    // Known threat patterns (example: packages with "adware" or known bad)
-                    if (app.packageName.contains("adware", true) || app.packageName.contains("spyware", true)) {
-                        list.add(Triple(app.packageName, "Package name contains suspicious keyword — confirmed threat pattern. Recommend uninstall.", "threat"))
-                    }
-                } catch (_: Throwable) {}
-            }
-        } catch (_: Throwable) {}
-        return list.take(30)
+    private fun scanSecurity(ctx: Context): SecurityReview {
+        val pm = ctx.packageManager
+        val apps = try { pm.getInstalledApplications(0) } catch (e: Exception) {
+            return SecurityReview(0, 0, emptyList(), e.message ?: "Package list unavailable")
+        }
+        var checked = 0
+        var skipped = 0
+        val findings = mutableListOf<SecurityFinding>()
+        val sensitive = mapOf(
+            "android.permission.SYSTEM_ALERT_WINDOW" to "display over other apps (requested)",
+            "android.permission.READ_SMS" to "read SMS",
+            "android.permission.RECEIVE_SMS" to "receive SMS",
+            "android.permission.READ_CALL_LOG" to "read call log",
+            "android.permission.RECORD_AUDIO" to "microphone",
+            "android.permission.CAMERA" to "camera",
+            "android.permission.ACCESS_FINE_LOCATION" to "precise location"
+        )
+        apps.filter { it.packageName != ctx.packageName && it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }.forEach { app ->
+            try {
+                val info = pm.getPackageInfo(app.packageName, PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES)
+                val granted = mutableListOf<String>()
+                val requested = info.requestedPermissions ?: emptyArray()
+                requested.forEachIndexed { index, permission ->
+                    val label = sensitive[permission] ?: return@forEachIndexed
+                    val flags = info.requestedPermissionsFlags?.getOrNull(index) ?: 0
+                    if (permission == "android.permission.SYSTEM_ALERT_WINDOW" || flags and PackageManager.REQUESTED_PERMISSION_GRANTED != 0) granted.add(label)
+                }
+                val accessibility = info.services?.any { it.permission == "android.permission.BIND_ACCESSIBILITY_SERVICE" } == true
+                if (accessibility) granted.add("declares an accessibility service (not necessarily enabled)")
+                checked++
+                if (granted.size >= 2) {
+                    val label = runCatching { pm.getApplicationLabel(app).toString() }.getOrDefault(app.packageName)
+                    findings.add(SecurityFinding(app.packageName, label,
+                        "Review access: ${granted.joinToString(", ")}. These capabilities can be legitimate; check whether they match the app's purpose."))
+                }
+            } catch (_: Exception) { skipped++ }
+        }
+        return SecurityReview(checked, skipped, findings.sortedBy { it.label.lowercase(Locale.getDefault()) })
     }
 
     // ------------------------------------------------------------------ storage
@@ -526,11 +559,14 @@ object OeaConsoleApp {
     private fun showPerformance(host: Activity, kit: OeaKit) {
         kit.sheet("Performance • Ultra Power Saving", "Memory, battery, temperature, power saving — real APIs, with device ultra saving handling") { panel, _ ->
             val mem = memoryInfo(host)
-            val battery = batteryInfo(host)
+            val battery = com.oea.launcher.power.OeaBatteryState.read(host)
             val temp = batteryTemp(host)
             val g = kit.group(panel)
             kit.row(g, R.drawable.oic_memory, "Memory", mem, chevron = false)
-            kit.row(g, R.drawable.oic_battery_full, "Battery", "${battery.first}% • ${if (battery.second) "Charging" else "Not charging"}", chevron = false)
+            val batteryRow = kit.row(g, R.drawable.oic_battery_full, "Battery", battery.text, chevron = false)
+            com.oea.launcher.power.OeaBatteryState.observe(batteryRow) { state ->
+                ((batteryRow.getChildAt(1) as? LinearLayout)?.getChildAt(1) as? TextView)?.text = state.text
+            }
             kit.row(g, R.drawable.oic_thermostat, "Battery temperature", temp, chevron = false)
             kit.row(g, R.drawable.oic_battery_charging_full, "LOW mode (Ultra Saving)", com.oea.launcher.perf.OeaLowMode.summary(host)) {
                 try { host.startActivity(Intent(host, com.oea.launcher.OeaSystemToolsActivity::class.java).putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "low").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
@@ -586,14 +622,8 @@ object OeaConsoleApp {
         } catch (_: Throwable) { "Unavailable" }
     }
 
-    private fun batteryInfo(ctx: Context): Pair<Int, Boolean> {
-        return try {
-            val bm = ctx.getSystemService(BatteryManager::class.java)
-            val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-            val charging = bm.isCharging
-            level to charging
-        } catch (_: Throwable) { -1 to false }
-    }
+    private fun batteryInfo(ctx: Context): com.oea.launcher.power.OeaBatteryState =
+        com.oea.launcher.power.OeaBatteryState.read(ctx)
 
     private fun batteryTemp(ctx: Context): String {
         return try {
@@ -956,7 +986,7 @@ Our own build:
         "appops" -> "appops get <pkg> [op] — reads AppOpsManager (0=allow, 1=ignore, 2=deny, 4=default). Writes need root via 'shell cmd appops set ...'."
         "shell" -> "shell <cmd> — runs via su, scoped to OEA's own operations, exit code + stdout read back for verification. Refuses without root."
         "doze" -> "doze status|request — battery optimization whitelist; request opens ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS."
-        "security" -> "security scan — flags packages with dangerous combos (overlay+accessibility+recorder, sideloaded requesters). Quick, local."
+        "security" -> "security scan — local permission review, not malware detection."
         "performance" -> "performance trim|gc — relinquishes OEA's own memory; honest: cannot force other processes."
         "notification" -> "notification status — listener enabled check; badges/media/quick-reply need this."
         "diagnostics", "dump" -> "diagnostics summary — OEA fault store counts per subsystem; 'logcat' = last 5 stored entries; 'clear diagnostics' wipes."
@@ -1026,8 +1056,8 @@ Examples:
             "device" -> when (parts.getOrNull(1)?.lowercase()) {
                 "info" -> deviceDetails(ctx).joinToString("\n") { "${it.first}: ${it.second}" }
                 "battery" -> {
-                    val (level, charging) = batteryInfo(ctx)
-                    "Battery: $level% • ${if (charging) "charging" else "not charging"} • PowerSave: ${isPowerSaveMode(ctx)} • UltraSaving: ${isDeviceInUltraPowerSaving(ctx)}\nSource: BatteryManager, PowerManager"
+                    val battery = batteryInfo(ctx)
+                    "Battery: ${battery.text} • PowerSave: ${isPowerSaveMode(ctx)} • UltraSaving: ${isDeviceInUltraPowerSaving(ctx)}\nSource: Android battery broadcast, PowerManager"
                 }
                 "memory" -> memoryInfo(ctx)
                 "storage" -> storageStats(ctx).joinToString("\n") { "${it.first}: ${it.second}" }
@@ -1262,8 +1292,11 @@ Examples:
 
             "security" -> when (parts.getOrNull(1)?.lowercase()) {
                 "scan" -> {
-                    val findings = scanSecurity(ctx)
-                    if (findings.isEmpty()) "No suspicious apps found (quick scan)" else findings.joinToString("\n\n") { "${it.first} • ${it.third}\n${it.second}" }
+                    val review = scanSecurity(ctx)
+                    if (review.error != null) "Security review failed: ${review.error}"
+                    else "Reviewed ${review.checked} apps; ${review.skipped} unavailable. This is not a malware scan.\n" +
+                        if (review.findings.isEmpty()) "No permission combinations flagged; this does not establish safety."
+                        else review.findings.joinToString("\n\n") { "${it.label} (${it.packageName})\n${it.details}" }
                 }
                 else -> "Usage: security scan"
             }
@@ -1381,8 +1414,8 @@ Examples:
             }
 
             "battery" -> {
-                val (level, charging) = batteryInfo(ctx)
-                "Battery: $level% • ${if (charging) "charging" else "not charging"}\nSource: BatteryManager"
+                val battery = batteryInfo(ctx)
+                "Battery: ${battery.text}\nSource: Android battery broadcast"
             }
 
             "memory" -> memoryInfo(ctx)

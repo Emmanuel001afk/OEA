@@ -90,7 +90,24 @@ object OeaClockApp {
 
     fun build(host: Activity, palette: OeaPalette): View {
         val kit = OeaKit(host, palette)
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        val root = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(palette.background) }
+        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(kit.dp(20), 0, kit.dp(12), 0) }
+        val title = kit.text("Alarm", 25f, palette.text, OeaType.medium)
+        header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
+        val menu = kit.text("⋮", 30f, palette.text).apply { gravity = Gravity.CENTER; contentDescription = "Clock options" }
+        header.addView(menu, LinearLayout.LayoutParams(kit.dp(48), kit.dp(52)))
+        root.addView(header, LinearLayout.LayoutParams(-1, kit.dp(64)))
+        val scroll = android.widget.ScrollView(host).apply { isFillViewport = true; isVerticalScrollBarEnabled = false }
+        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(kit.dp(20), 0, kit.dp(20), kit.dp(24)) }
+        scroll.addView(column)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val tabBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(kit.dp(4), kit.dp(6), kit.dp(4), kit.dp(6)); setBackgroundColor(palette.card) }
+        root.addView(tabBar, LinearLayout.LayoutParams(-1, -2))
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = com.oea.launcher.ui.OeaInsets.bars(insets)
+            root.setPadding(bars[0], bars[1], bars[2], bars[3])
+            insets
+        }
         var refresh: () -> Unit = {}
         var currentTab = "alarms"
 
@@ -123,11 +140,11 @@ object OeaClockApp {
             }
             host.intent = null
         }
-        val is24h = prefs(host).getBoolean(KEY_24H, true)
+        val is24h = prefs(host).getBoolean(KEY_24H, android.text.format.DateFormat.is24HourFormat(host))
 
         // Live clock header
         val clockView = TextView(host).apply {
-            textSize = 52f
+            textSize = 38f
             typeface = OeaType.light
             setTextColor(palette.text)
             gravity = Gravity.CENTER
@@ -145,6 +162,8 @@ object OeaClockApp {
             gravity = Gravity.CENTER
             setPadding(kit.dp(6), 0, kit.dp(6), kit.dp(14))
         }
+        val analog = OeaAnalogClockView(host, palette)
+        val worldTimes = mutableListOf<Pair<java.util.TimeZone, TextView>>()
         val timeHandler = Handler(Looper.getMainLooper())
         val timeRunnable = object : Runnable {
             override fun run() {
@@ -153,18 +172,23 @@ object OeaClockApp {
                 val fmt = if (is24h) "HH:mm:ss" else "hh:mm:ss a"
                 clockView.text = SimpleDateFormat(fmt, Locale.getDefault()).format(now)
                 dateView.text = SimpleDateFormat("EEEE, MMM d, yyyy", Locale.getDefault()).format(now)
-                tzView.text = "${java.util.TimeZone.getDefault().id} • ${java.util.TimeZone.getDefault().displayName}"
+                tzView.text = java.util.TimeZone.getDefault().getDisplayName(java.util.TimeZone.getDefault().inDaylightTime(now), java.util.TimeZone.LONG, Locale.getDefault())
+                analog.invalidate()
+                worldTimes.forEach { (zone, view) ->
+                    view.text = SimpleDateFormat(if (is24h) "HH:mm" else "h:mm a", Locale.getDefault()).apply { timeZone = zone }.format(now)
+                }
                 timeHandler.postDelayed(this, 1000L)
             }
         }
         timeHandler.post(timeRunnable)
-        column.addView(clockView)
-        column.addView(dateView)
-        column.addView(tzView)
+        val clockHeader = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        clockHeader.addView(analog, LinearLayout.LayoutParams(kit.dp(224), kit.dp(224)).apply { topMargin = kit.dp(24); bottomMargin = kit.dp(12) })
+        clockHeader.addView(clockView)
+        clockHeader.addView(dateView)
+        clockHeader.addView(tzView)
+        column.addView(clockHeader)
 
-        // Tabs
-        val tabBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        column.addView(tabBar, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+        // The four primary destinations stay visible below the scrolling content.
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         column.addView(content)
 
@@ -205,62 +229,78 @@ object OeaClockApp {
 
         fun renderTabs() {
             tabBar.removeAllViews()
-            listOf("alarms" to "Alarms", "timer" to "Timer", "stopwatch" to "Stopwatch", "world" to "World", "bedtime" to "Bedtime").forEach { (id, label) ->
-                tabBar.addView(kit.chip(label, id == currentTab) {
-                    currentTab = id
-                    refresh()
-                }, LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { rightMargin = kit.dp(6) })
+            val tabs = listOf(Triple("alarms", "Alarm", R.drawable.oic_alarm), Triple("world", "World Clock", R.drawable.oic_public), Triple("timer", "Timer", R.drawable.oic_timer), Triple("stopwatch", "Stopwatch", R.drawable.oic_history))
+            tabs.forEach { (id, label, icon) ->
+                val selected = id == currentTab
+                val item = LinearLayout(host).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                    contentDescription = label + if (selected) ", selected" else ""
+                    setOnClickListener { currentTab = id; scroll.scrollTo(0, 0); refresh() }
+                }
+                val image = android.widget.ImageView(host).apply { setImageResource(icon); setColorFilter(if (selected) palette.accent else palette.textTertiary) }
+                item.addView(image, LinearLayout.LayoutParams(kit.dp(24), kit.dp(24)))
+                item.addView(kit.text(label, 11f, if (selected) palette.accent else palette.textTertiary, OeaType.medium).apply { gravity = Gravity.CENTER; maxLines = 1 }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(3) })
+                tabBar.addView(item, LinearLayout.LayoutParams(0, kit.dp(58), 1f))
             }
+        }
+        menu.setOnClickListener {
+            val popup = android.widget.PopupMenu(host, menu)
+            popup.menu.add(if (is24h) "Use 12-hour time" else "Use 24-hour time").setOnMenuItemClickListener {
+                prefs(host).edit().putBoolean(KEY_24H, !is24h).apply(); (host as? OeaMiniAppActivity)?.refresh(); true
+            }
+            popup.menu.add("Bedtime").setOnMenuItemClickListener { currentTab = "bedtime"; refresh(); true }
+            popup.menu.add("Alarm settings").setOnMenuItemClickListener { alarmSettings(host, kit); true }
+            popup.show()
         }
 
         refresh = {
             renderTabs()
+            title.text = when (currentTab) { "world" -> "World Clock"; "timer" -> "Timer"; "stopwatch" -> "Stopwatch"; "bedtime" -> "Bedtime"; else -> "Alarm" }
+            clockHeader.visibility = if (currentTab == "world") View.VISIBLE else View.GONE
             content.removeAllViews()
+            worldTimes.clear()
+            OeaClockRingService.current()?.let { ringing ->
+                val box = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(kit.dp(16), kit.dp(12), kit.dp(16), kit.dp(12)); background = kit.rounded(palette.accentSoft, 18) }
+                box.addView(kit.text("${ringing.getStringExtra("label") ?: "Alarm"} is ringing", 17f, palette.text, OeaType.medium))
+                box.addView(kit.buttonRow(
+                    kit.tonalButton("Snooze") { OeaClockRingService.respond(host, ringing, false); refresh() },
+                    kit.primaryButton("Stop") { OeaClockRingService.respond(host, ringing, true); refresh() }
+                ))
+                content.addView(box, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+            }
             when (currentTab) {
                 "alarms" -> {
                     val alarms = decodeAlarms(prefs(host).getString(KEY_ALARMS, ""))
                     if (alarms.isEmpty()) {
-                        kit.note(content, "No alarms yet. Tap Add alarm. Alarms use AlarmManager; exact alarms need permission on Android 12+. Device ultra power saving may delay alarms — whitelist OEA in battery settings.")
+                        content.addView(kit.text("No alarms yet", 20f, palette.text, OeaType.medium).apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(72), 0, kit.dp(8)) })
+                        content.addView(kit.text("Add an alarm to start your day.", 14f, palette.textSecondary).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, kit.dp(32)) })
                     } else {
-                        val group = kit.group(content)
                         alarms.forEach { alarm ->
-                            val toggle = kit.toggle(alarm.enabled) { checked ->
+                            val card = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(kit.dp(18), kit.dp(14), kit.dp(16), kit.dp(14)); background = kit.rounded(palette.card, 20, palette.stroke, 1) }
+                            val details = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+                            val formatted = if (is24h) String.format(Locale.getDefault(), "%02d:%02d", alarm.hour, alarm.minute) else String.format(Locale.getDefault(), "%d:%02d %s", (alarm.hour % 12).let { if (it == 0) 12 else it }, alarm.minute, if (alarm.hour < 12) "AM" else "PM")
+                            details.addView(kit.text(formatted, 30f, if (alarm.enabled) palette.text else palette.textTertiary, OeaType.light))
+                            val repeat = if (alarm.days.isEmpty()) "Once" else if (alarm.days.size == 7) "Every day" else listOf(1, 2, 3, 4, 5, 6, 0).filter { it in alarm.days }.joinToString(" ") { dayName(it) }
+                            details.addView(kit.text(listOf(alarm.label.ifBlank { "Alarm" }, repeat).joinToString(" · "), 13f, palette.textSecondary).apply { maxLines = 2 })
+                            card.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+                            card.addView(kit.toggle(alarm.enabled) { checked ->
                                 val updated = alarms.map { if (it.id == alarm.id) it.copy(enabled = checked) else it }
                                 prefs(host).edit().putString(KEY_ALARMS, encodeAlarms(updated)).apply()
-                                scheduleAlarm(host, alarm.copy(enabled = checked))
-                                refresh()
-                            }
-                            val subtitle = buildString {
-                                append(String.format(Locale.US, "%02d:%02d", alarm.hour, alarm.minute))
-                                if (alarm.label.isNotBlank()) append(" • ${alarm.label}")
-                                if (alarm.days.isNotEmpty()) append(" • ${alarm.days.sorted().joinToString { dayName(it) }}")
-                                append(" • Snooze ${alarm.snoozeMin}m • ${alarm.sound}")
-                                if (alarm.vibrate) append(" • Vibrate")
-                                if (!alarm.enabled) append(" • off")
-                            }
-                            kit.row(group, R.drawable.oic_alarm, alarm.label.ifBlank { "Alarm" }, subtitle, trailing = toggle, chevron = false) {
-                                editAlarm(host, kit, alarm) { refresh() }
-                            }
+                                scheduleAlarm(host, alarm.copy(enabled = checked)); refresh()
+                            })
+                            card.setOnClickListener { editAlarm(host, kit, alarm) { refresh() } }
+                            content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
                         }
                     }
-                    val actions = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(8), 0, 0) }
-                    actions.addView(kit.primaryButton("Add alarm", R.drawable.oic_add) {
-                        editAlarm(host, kit, null) { refresh() }
-                    }, LinearLayout.LayoutParams(-2, kit.dp(46)).apply { rightMargin = kit.dp(8) })
-                    actions.addView(kit.tonalButton(if (is24h) "24h" else "12h") {
-                        prefs(host).edit().putBoolean(KEY_24H, !is24h).apply()
-                        (host as? OeaMiniAppActivity)?.refresh()
-                    }, LinearLayout.LayoutParams(-2, kit.dp(46)))
-                    content.addView(actions)
-
-                    kit.sectionTitle(content, "Power scheduling & Ultra Power Saving")
-                    kit.note(content, "Scheduled power-off/on: Android does not let normal apps power off device. Only Device Owner, privileged system apps or root can schedule power operations. OEA explains this instead of pretending. Alarms and timers work without that.\n\nDevice Ultra Power Saving Mode (Samsung, Xiaomi, etc.): when device enters ultra saving, it may kill OEA's alarm service and block mini-apps. Fix: Settings › Battery › Unrestricted for OEA, and disable ultra saving or add OEA to allowed apps. OEA's own Low mode (Ultra Power Saving) is separate — it only makes launcher cheap, never kills alarms.")
-                    content.addView(kit.primaryButton("Battery optimization settings", R.drawable.oic_battery_full) {
-                        try { host.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } catch (_: Throwable) {
-                            try { host.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${host.packageName}"))) } catch (_: Throwable) {}
-                        }
-                    }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
+                    content.addView(kit.primaryButton("Add alarm", R.drawable.oic_add) { editAlarm(host, kit, null) { refresh() } }, LinearLayout.LayoutParams(-1, kit.dp(52)).apply { topMargin = kit.dp(12) })
+                    if (Build.VERSION.SDK_INT >= 33 && host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        content.addView(kit.tonalButton("Enable alarm notifications") { alarmSettings(host, kit) }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
+                    }
+                    if (Build.VERSION.SDK_INT >= 31 && host.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == false) {
+                        content.addView(kit.tonalButton("Allow alarms to ring on time") { alarmSettings(host, kit) }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
+                    }
                 }
+
                 "timer" -> {
                     val box = LinearLayout(host).apply {
                         orientation = LinearLayout.VERTICAL
@@ -413,22 +453,27 @@ object OeaClockApp {
                 }
                 "world" -> {
                     val savedZones = prefs(host).getStringSet(KEY_WORLD, setOf("UTC", "America/New_York", "Europe/London", "Africa/Lagos")) ?: setOf("Africa/Lagos")
-                    val g = kit.group(content)
                     savedZones.sorted().forEach { zid ->
                         val tz = java.util.TimeZone.getTimeZone(zid)
-                        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).apply { timeZone = tz }
-                        val label = zid.substringAfterLast('/')
-                        val offset = tz.rawOffset / (60*60*1000)
-                        kit.row(g, R.drawable.oic_schedule, label, "${sdf.format(Date())} • $zid • GMT${if (offset >=0) "+" else ""}$offset", chevron = false) {
-                            kit.sheet(label, zid) { panel, _ ->
-                                kit.note(panel, "Timezone: $zid\nOffset: GMT${if (offset>=0) "+" else ""}$offset\nDST: ${if (tz.inDaylightTime(Date())) "Yes" else "No"}\nCurrent: ${sdf.format(Date())}")
-                                panel.addView(kit.tonalButton("Remove") {
-                                    val newSet = savedZones.toMutableSet().apply { remove(zid) }
-                                    prefs(host).edit().putStringSet(KEY_WORLD, newSet).apply()
+                        val card = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(kit.dp(16), kit.dp(12), kit.dp(16), kit.dp(12)); background = kit.rounded(palette.card, 18, palette.stroke, 1) }
+                        val city = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+                        city.addView(kit.text(zid.substringAfterLast('/').replace('_', ' '), 16f, palette.text, OeaType.medium))
+                        val offset = tz.getOffset(System.currentTimeMillis()) / 60_000
+                        city.addView(kit.text("GMT${if (offset >= 0) "+" else "−"}${kotlin.math.abs(offset) / 60}:${String.format(Locale.US, "%02d", kotlin.math.abs(offset) % 60)}", 12f, palette.textSecondary))
+                        card.addView(city, LinearLayout.LayoutParams(0, -2, 1f))
+                        val zoneTime = kit.text(SimpleDateFormat(if (is24h) "HH:mm" else "h:mm a", Locale.getDefault()).apply { timeZone = tz }.format(Date()), 22f, palette.text, OeaType.light)
+                        worldTimes += tz to zoneTime
+                        card.addView(zoneTime)
+                        card.setOnClickListener {
+                            kit.sheet(zid.substringAfterLast('/').replace('_', ' '), zid) { panel, dialog ->
+                                panel.addView(kit.tonalButton("Remove city") {
+                                    dialog.dismiss()
+                                    prefs(host).edit().putStringSet(KEY_WORLD, savedZones.toMutableSet().apply { remove(zid) }).apply()
                                     refresh()
-                                }, LinearLayout.LayoutParams(-1, kit.dp(46)))
+                                }, LinearLayout.LayoutParams(-1, kit.dp(48)))
                             }
                         }
+                        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
                     }
                     content.addView(kit.primaryButton("Add city/timezone", R.drawable.oic_add) {
                         val allZones = java.util.TimeZone.getAvailableIDs().sorted()
@@ -457,7 +502,7 @@ object OeaClockApp {
                             filter("")
                         }
                     }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
-                    kit.note(content, "World clock shows time in major zones. Tap row for details. Add any timezone ID.")
+
                 }
                 "bedtime" -> {
                     val bedtimeEnabled = prefs(host).getBoolean(KEY_BEDTIME, false)
@@ -508,7 +553,7 @@ object OeaClockApp {
             }
         }
         refresh()
-        column.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+        root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {}
             override fun onViewDetachedFromWindow(v: View) {
                 timeHandler.removeCallbacksAndMessages(null)
@@ -516,7 +561,30 @@ object OeaClockApp {
                 swHandler.removeCallbacksAndMessages(null)
             }
         })
-        return column
+        return root
+    }
+
+    private fun alarmSettings(host: Activity, kit: OeaKit) {
+        kit.sheet("Alarm settings", "Make sure your alarms can reach you.") { panel, _ ->
+            val exact = Build.VERSION.SDK_INT < 31 || host.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == true
+            kit.note(panel, if (exact) "Precise alarms are allowed." else "Precise alarms are off. Android may delay alarms until you allow them.")
+            if (!exact && Build.VERSION.SDK_INT >= 31) panel.addView(kit.tonalButton("Allow precise alarms") {
+                runCatching { host.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:${host.packageName}"))) }
+            }, LinearLayout.LayoutParams(-1, kit.dp(48)))
+            panel.addView(kit.tonalButton("Alarm volume & sound") {
+                runCatching { host.startActivity(Intent(android.provider.Settings.ACTION_SOUND_SETTINGS)) }
+            }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
+            panel.addView(kit.tonalButton("Notification settings") {
+                runCatching { host.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, host.packageName)) }
+            }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
+            if (Build.VERSION.SDK_INT >= 33 && host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                panel.addView(kit.primaryButton("Allow notifications") { host.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 301) }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
+            }
+            panel.addView(kit.tonalButton("Battery settings") {
+                runCatching { host.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${host.packageName}"))) }
+            }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
+            kit.note(panel, "Check alarm volume and notification permissions. Battery restrictions and force-stopping OEA can prevent alarms.")
+        }
     }
 
     /** "Chime|content://media/external/audio/media/42" is how a picked ringtone is stored. */
@@ -604,7 +672,9 @@ object OeaClockApp {
         var sound = existing?.sound ?: "Default"
         var vibrate = existing?.vibrate ?: true
 
-        kit.sheet(if (isNew) "New alarm" else "Edit alarm", "Pick the time with the wheels — typing 7 for seven o'clock is how alarms get missed") { panel, dialog ->
+        kit.sheet(if (isNew) "New alarm" else "Edit alarm", "Choose a time and repeat days") { container, dialog ->
+            val panel = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            container.addView(kit.boundedScroll(panel, 0.68f))
             // Two platform number wheels, which is what a clock app is expected to
             // offer; the previous version asked for "Hour (0-23)" as a text field.
             val timeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -639,13 +709,13 @@ object OeaClockApp {
                             if (day in chosenDays) chosenDays -= day else chosenDays += day
                             paintDays()
                         },
-                        LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { rightMargin = kit.dp(4) }
+                        LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(4) }
                     )
                 }
             }
             panel.addView(kit.text("Repeats", 12f, kit.palette.textTertiary))
             paintDays()
-            panel.addView(dayRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
+            panel.addView(kit.hscroll(dayRow), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
             val snoozeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(4), 0, kit.dp(8)) }
             fun paintSnooze() {
                 snoozeRow.removeAllViews()
@@ -655,13 +725,13 @@ object OeaClockApp {
                             snooze = option
                             paintSnooze()
                         },
-                        LinearLayout.LayoutParams(0, kit.dp(38), 1f).apply { rightMargin = kit.dp(4) }
+                        LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(4) }
                     )
                 }
             }
             panel.addView(kit.text("Snooze for", 12f, kit.palette.textTertiary))
             paintSnooze()
-            panel.addView(snoozeRow, LinearLayout.LayoutParams(-1, -2))
+            panel.addView(kit.hscroll(snoozeRow), LinearLayout.LayoutParams(-1, -2))
             val soundGroup = kit.group(panel)
             fun paintSound() {
                 soundGroup.removeAllViews()
@@ -671,7 +741,7 @@ object OeaClockApp {
                         paintSound()
                     }
                 }
-                kit.note(soundGroup, "The ringtone plays from an alarm-priority notification channel, because an app may not hold the speaker while the phone sleeps. OEA asks for the phone's own alarm volume and honours silent mode only where Android lets an alarm do so.")
+                kit.note(soundGroup, "Rings at your phone’s alarm volume until you stop or snooze it.")
             }
             paintSound()
             val vibToggle = kit.toggle(vibrate) { vibrate = it }
@@ -682,12 +752,6 @@ object OeaClockApp {
 
             panel.addView(kit.buttonRow(
                 kit.quietButton("Cancel") { dialog.dismiss() },
-                if (!isNew) kit.quietButton("Delete", R.drawable.oic_delete) {
-                    val alarms = decodeAlarms(prefs(host).getString(KEY_ALARMS, "")).filterNot { it.id == existing!!.id }
-                    prefs(host).edit().putString(KEY_ALARMS, encodeAlarms(alarms)).apply()
-                    dialog.dismiss()
-                    onDone()
-                } else kit.quietButton("Cancel") { dialog.dismiss() },
                 kit.primaryButton(if (isNew) "Add" else "Save") {
                     val h = hourPicker.value.coerceIn(0, 23)
                     val m = minutePicker.value.coerceIn(0, 59)
@@ -710,10 +774,40 @@ object OeaClockApp {
                     onDone()
                 }
             ))
+            if (!isNew) panel.addView(kit.quietButton("Delete alarm", R.drawable.oic_delete) {
+                val alarms = decodeAlarms(prefs(host).getString(KEY_ALARMS, "")).filterNot { it.id == existing!!.id }
+                prefs(host).edit().putString(KEY_ALARMS, encodeAlarms(alarms)).apply()
+                cancelAlarm(host, existing!!.id)
+                dialog.dismiss(); onDone()
+            }, LinearLayout.LayoutParams(-1, kit.dp(48)))
         }
     }
 
-    private fun scheduleAlarm(context: Context, alarm: Alarm) {
+    internal fun cancelAlarm(context: Context, id: Long) {
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        for (snoozed in listOf(false, true)) {
+            val pi = alarmPendingIntent(context, id, snoozed, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+            if (pi != null) { am.cancel(pi); pi.cancel() }
+        }
+        // Cancel broadcasts from versions that used an ID without a data URI.
+        val legacy = PendingIntent.getBroadcast(context, id.toInt(), Intent(context, OeaClockAlarmReceiver::class.java), PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+        if (legacy != null) { am.cancel(legacy); legacy.cancel() }
+    }
+
+    internal fun alarmPendingIntent(context: Context, id: Long, snoozed: Boolean, flags: Int, payload: Intent? = null): PendingIntent? {
+        val intent = payload ?: Intent(context, OeaClockAlarmReceiver::class.java)
+        intent.data = android.net.Uri.parse("oea-clock://alarm/$id/${if (snoozed) "snooze" else "scheduled"}")
+        intent.putExtra("snoozed", snoozed)
+        return PendingIntent.getBroadcast(context, 0, intent, flags)
+    }
+
+    internal fun scheduleAlarm(context: Context, alarm: Alarm, cancelSnooze: Boolean = true) {
+        if (cancelSnooze) cancelAlarm(context, alarm.id)
+        else {
+            // Clear old pre-URI broadcasts without disturbing a pending snooze.
+            val legacy = PendingIntent.getBroadcast(context, alarm.id.toInt(), Intent(context, OeaClockAlarmReceiver::class.java), PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+            if (legacy != null) { context.getSystemService(AlarmManager::class.java)?.cancel(legacy); legacy.cancel() }
+        }
         if (!alarm.enabled) return
         try {
             val am = context.getSystemService(AlarmManager::class.java) ?: return
@@ -726,33 +820,19 @@ object OeaClockApp {
                 putExtra("hour", alarm.hour)
                 putExtra("minute", alarm.minute)
             }
-            val pi = PendingIntent.getBroadcast(context, alarm.id.toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            val now = java.util.Calendar.getInstance()
-            val cal = java.util.Calendar.getInstance().apply {
-                set(java.util.Calendar.HOUR_OF_DAY, alarm.hour)
-                set(java.util.Calendar.MINUTE, alarm.minute)
-                set(java.util.Calendar.SECOND, 0)
-                if (before(now)) add(java.util.Calendar.DAY_OF_YEAR, 1)
-                // If repeat days, adjust to next matching day
-                if (alarm.days.isNotEmpty()) {
-                    var attempts = 0
-                    while (attempts < 7 && !alarm.days.contains(get(java.util.Calendar.DAY_OF_WEEK) - 1)) {
-                        add(java.util.Calendar.DAY_OF_YEAR, 1)
-                        attempts++
-                    }
-                }
-            }
+            val pi = alarmPendingIntent(context, alarm.id, false, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE, intent) ?: return
+            val at = nextClockAlarm(java.util.Calendar.getInstance(), alarm.hour, alarm.minute, alarm.days)
             if (Build.VERSION.SDK_INT >= 31) {
                 if (am.canScheduleExactAlarms()) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                    am.setAlarmClock(AlarmManager.AlarmClockInfo(at, PendingIntent.getActivity(context, 0, Intent(context, OeaClockActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)), pi)
                 } else {
-                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
                 }
             } else {
                 @Suppress("DEPRECATION")
-                am.setExact(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                am.setAlarmClock(AlarmManager.AlarmClockInfo(at, PendingIntent.getActivity(context, 0, Intent(context, OeaClockActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)), pi)
             }
-        } catch (_: Throwable) {}
+        } catch (error: Throwable) { android.util.Log.e("OeaClock", "Could not schedule alarm", error) }
     }
     /** Pending duration for the timer tab, coming from an external Set-timer request. */
     private var presetTimerMs: Long? = null
@@ -825,16 +905,24 @@ object OeaClockApp {
         }
     }
 
-    /** Map Calendar's day constants onto OEA's Mon..Sun (0..6) index set. */
-    private fun calendarDayToOea(calendarDay: Int): Int? = when (calendarDay) {
-        java.util.Calendar.MONDAY -> 0
-        java.util.Calendar.TUESDAY -> 1
-        java.util.Calendar.WEDNESDAY -> 2
-        java.util.Calendar.THURSDAY -> 3
-        java.util.Calendar.FRIDAY -> 4
-        java.util.Calendar.SATURDAY -> 5
-        java.util.Calendar.SUNDAY -> 6
-        else -> null
+    private fun calendarDayToOea(calendarDay: Int): Int? =
+        if (calendarDay in java.util.Calendar.SUNDAY..java.util.Calendar.SATURDAY) calendarDay - 1 else null
+
+    internal fun alarmFired(context: Context, id: Long, snoozed: Boolean): Boolean {
+        val alarms = decodeAlarms(prefs(context).getString(KEY_ALARMS, ""))
+        val alarm = alarms.firstOrNull { it.id == id } ?: return false
+        if (!snoozed && !alarm.enabled) return false
+        if (!snoozed) {
+            if (alarm.days.isEmpty()) {
+                prefs(context).edit().putString(KEY_ALARMS, encodeAlarms(alarms.map { if (it.id == id) it.copy(enabled = false) else it })).apply()
+            } else scheduleAlarm(context, alarm, cancelSnooze = false)
+        }
+        return true
+    }
+
+    internal fun restoreAlarms(context: Context) {
+        decodeAlarms(prefs(context).getString(KEY_ALARMS, "")).filter { it.enabled }.forEach { scheduleAlarm(context, it, cancelSnooze = false) }
+        if (prefs(context).getBoolean(KEY_BEDTIME, false)) scheduleBedtime(context)
     }
 
     // Android passes Set-timer durations as ISO-8601, e.g. "PT1H30M" or "PT45S".
@@ -853,82 +941,24 @@ object OeaClockApp {
 
 class OeaClockAlarmReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val label = intent.getStringExtra("label") ?: "Alarm"
-        val snoozeMin = intent.getIntExtra("snooze", 10)
-        val sound = intent.getStringExtra("sound") ?: "Default"
-        val vibrate = intent.getBooleanExtra("vibrate", true)
-        val hour = intent.getIntExtra("hour", -1)
-        val minute = intent.getIntExtra("minute", -1)
+        val id = intent.getLongExtra("id", 0L)
+        if (!OeaClockApp.alarmFired(context, id, intent.getBooleanExtra("snoozed", false))) return
+        val ring = Intent(context, OeaClockRingService::class.java).putExtras(intent)
         try {
-            val nm = context.getSystemService(android.app.NotificationManager::class.java)
-            // A channel per chosen sound: Android fixes a channel's ringtone when the
-            // channel is created, and will not let an app change it afterwards, so the
-            // way to give two alarms two different tones is two channels.
-            val ringUri = OeaClockApp.ringtoneUri(sound)
-            val channelId = if (ringUri == null) "oea_alarm_default" else "oea_alarm_" + ringUri.hashCode().toString().replace('-', 'n')
-            val attributes = android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_ALARM)
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            if (Build.VERSION.SDK_INT >= 26) {
-                val channel = android.app.NotificationChannel(channelId, "OEA alarms", android.app.NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Alarms OEA wakes you with"
-                    enableVibration(vibrate)
-                    setSound(
-                        ringUri?.let { android.net.Uri.parse(it) }
-                            ?: RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_ALARM)
-                            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
-                        attributes
-                    )
-                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-                }
-                nm?.createNotificationChannel(channel)
-            }
-            val snoozeIntent = Intent(context, OeaClockSnoozeReceiver::class.java).apply {
-                putExtra("label", label)
-                putExtra("id", intent.getLongExtra("id", 0L))
-                putExtra("snooze", snoozeMin)
-                putExtra("sound", sound)
-                putExtra("vibrate", vibrate)
-            }
-            val id = intent.getLongExtra("id", 0L)
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            val snoozePi = PendingIntent.getBroadcast(context, (id + 1).toInt(), snoozeIntent, flags)
-            val dismissPi = PendingIntent.getBroadcast(
-                context,
-                (id + 2).toInt(),
-                Intent(context, OeaClockSnoozeReceiver::class.java).putExtra("dismissOnly", true).putExtra("id", id),
-                flags
-            )
-            val openAlarm = Intent(context, OeaClockActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                putExtra("tab", "alarms")
-            }
-            val openPi = PendingIntent.getActivity(context, id.toInt(), openAlarm, flags)
-            val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, channelId)
-            else @Suppress("DEPRECATION") android.app.Notification.Builder(context)
-            val notif = builder.setSmallIcon(R.drawable.ic_oea_launcher_monochrome)
-                .setContentTitle(label)
-                .setContentText(
-                    if (hour in 0..23 && minute in 0..59) "%02d:%02d · %s".format(hour, minute, OeaClockApp.soundLabel(context, sound))
-                    else OeaClockApp.soundLabel(context, sound)
-                )
-                .setCategory(android.app.Notification.CATEGORY_ALARM)
-                .setPriority(android.app.Notification.PRIORITY_MAX)
-                .setOngoing(true)
-                .setVisibility(android.app.Notification.VISIBILITY_PUBLIC)
-                .setContentIntent(openPi)
-                .setAutoCancel(false)
-                .addAction(android.app.Notification.Action.Builder(null, "Snooze ${snoozeMin}m", snoozePi).build())
-                .addAction(android.app.Notification.Action.Builder(null, "Stop", dismissPi).build())
-            // The full-screen intent is what lights the phone up on the bedside table;
-            // where Android refuses it (the permission is granted to alarm apps on
-            // request), the same notification still arrives loudly in the shade.
-            if (Build.VERSION.SDK_INT >= 29) {
-                runCatching { builder.setFullScreenIntent(openPi, true) }
-            }
-            nm?.notify((id % Int.MAX_VALUE).toInt(), notif.build())
-        } catch (_: Throwable) {}
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(ring) else context.startService(ring)
+        } catch (error: Exception) {
+            // If Android refuses a service start, the alarm notification is a
+            // best-effort fallback rather than silently losing the alarm.
+            android.util.Log.w("OeaClock", "Alarm service unavailable; using notification", error)
+            runCatching { OeaClockRingService.showFallback(context, intent) }
+        }
+    }
+}
+
+class OeaClockRestoreReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        runCatching { OeaClockApp.restoreAlarms(context) }
+            .onFailure { android.util.Log.e("OeaClock", "Could not restore alarms", it) }
     }
 }
 
@@ -963,50 +993,22 @@ class OeaClockBedtimeReceiver : android.content.BroadcastReceiver() {
 class OeaClockSnoozeReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getLongExtra("id", 0L)
+        OeaClockRingService.stop(context, id)
+        context.getSystemService(android.app.NotificationManager::class.java)?.cancel(OeaClockRingService.notificationId(id))
         if (intent.getBooleanExtra("dismissOnly", false)) {
-            // "Stop" has to be more than closing the shade: the notification goes and
-            // nothing is re-armed, or a stop button that lets the alarm come back
-            // three times more is worse than no button.
-            runCatching {
-                context.getSystemService(android.app.NotificationManager::class.java)
-                    ?.cancel((id % Int.MAX_VALUE).toInt())
-                val am = context.getSystemService(AlarmManager::class.java)
-                val flags = PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-                arrayOf(id.toInt(), (id + 1).toInt(), (id + 2).toInt()).forEach { code ->
-                    val pending = PendingIntent.getBroadcast(context, code, Intent(context, OeaClockAlarmReceiver::class.java), flags)
-                    if (pending != null) {
-                        runCatching { am?.cancel(pending) }
-                        pending.cancel()
-                    }
-                }
-            }
+            // Stop only this ringing/snoozed occurrence, not the next repeat.
+            val am = context.getSystemService(AlarmManager::class.java)
+            val pi = OeaClockApp.alarmPendingIntent(context, id, true, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+            if (pi != null) { am?.cancel(pi); pi.cancel() }
             return
         }
-        val label = intent.getStringExtra("label") ?: "Alarm"
-        val snoozeMin = intent.getIntExtra("snooze", 10)
-        try {
-            val am = context.getSystemService(AlarmManager::class.java) ?: return
-            val newIntent = Intent(context, OeaClockAlarmReceiver::class.java).apply {
-                putExtra("label", label)
-                putExtra("id", id)
-                putExtra("snooze", snoozeMin)
-                // Forward the tone and the vibrate choice, or a snoozed alarm wakes you
-                // with a different sound than the one you set.
-                intent.getStringExtra("sound")?.let { putExtra("sound", it) }
-                for (key in arrayOf("hour", "minute")) {
-                    val value = intent.getIntExtra(key, -1)
-                    if (value >= 0) putExtra(key, value)
-                }
-                putExtra("vibrate", intent.getBooleanExtra("vibrate", true))
-            }
-            val pi = PendingIntent.getBroadcast(context, id.toInt(), newIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            val triggerAt = System.currentTimeMillis() + snoozeMin * 60 * 1000L
-            if (Build.VERSION.SDK_INT >= 31) {
-                if (am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-            } else {
-                @Suppress("DEPRECATION") am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-            }
-        } catch (_: Throwable) {}
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        val newIntent = Intent(context, OeaClockAlarmReceiver::class.java).putExtras(intent)
+        val pi = OeaClockApp.alarmPendingIntent(context, id, true, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE, newIntent) ?: return
+        val triggerAt = System.currentTimeMillis() + intent.getIntExtra("snooze", 10).coerceIn(1, 60) * 60_000L
+        runCatching {
+            if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+        }.onFailure { android.util.Log.e("OeaClock", "Could not snooze alarm", it) }
     }
 }

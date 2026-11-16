@@ -4,6 +4,8 @@ import android.view.KeyEvent
 import com.oea.engine.audio.MusicTrack
 import com.oea.engine.audio.Sfx
 import com.oea.engine.audio.Sound
+import com.oea.engine.audio.SfxRecipe
+import com.oea.engine.audio.Wave
 import com.oea.engine.core.Choice
 import com.oea.engine.core.GameDescriptor
 import com.oea.engine.core.GameDimension
@@ -92,6 +94,8 @@ class OeaRunner : OeaGame() {
     private var paused = false
     private var newRecord = false
     private var hintUntil = 0L
+    private var lastCoinSoundAt = 0L
+    private var trackChoice = "night"
     private val env = Environment.sunset().apply {
         fogDensity = 0.0105f
         shadowDistance = 34f
@@ -116,16 +120,15 @@ class OeaRunner : OeaGame() {
 
     override fun onCreate() {
         val launch = ctx.launch
-        // Turning is deliberate: a swipe must travel this far to count (the engine
-        // default of 26dp fired on finger drift), and lane changes are rate-limited.
-        ctx.input.swipeThresholdDp = SWIPE_THRESHOLD_DP
+        // A shorter swipe responds quickly; players can choose a longer gesture.
+        ctx.input.swipeThresholdDp = if (launch.option("swipes", "responsive") == "deliberate") 44f else 28f
         mode = launch.mode
         net = ctx.net
         seed = net?.seed?.takeIf { it != 0L } ?: launch.seed
         split = mode == PlayMode.SAME_DEVICE && launch.option("duel", "split") == "split"
         turns = mode == PlayMode.SAME_DEVICE && !split
         raceGoal = when (net?.matchSettings?.get("race") ?: launch.option("race", "survival")) { "2k" -> 2000f; "5k" -> 5000f; else -> 0f }
-        sCoin = ctx.audio.load("run-coin", Sfx.COIN)
+        sCoin = ctx.audio.load("run-coin-soft", SfxRecipe(Wave.SINE, 0.12f, 660f, 800f, attack = 0.01f, decay = 18f, volume = 0.35f))
         sJump = ctx.audio.load("run-jump", Sfx.JUMP)
         sLand = ctx.audio.load("run-land", Sfx.LAND)
         sWhoosh = ctx.audio.load("run-whoosh", Sfx.WHOOSH)
@@ -134,9 +137,19 @@ class OeaRunner : OeaGame() {
         sCount = ctx.audio.load("run-count", Sfx.COUNTDOWN)
         sGo = ctx.audio.load("run-go", Sfx.GO)
         sHit = ctx.audio.load("run-hit", Sfx.HIT)
-        ctx.audio.playMusic("runner", MusicTrack(bpm = 124, bars = 8, root = 55, minor = true, progression = listOf(0, 5, 3, 4), seed = 7))
+        trackChoice = launch.option("track", "night")
+        startMusic()
         setupRunners()
         startCountdown(if (net != null) (net!!.startAt - net!!.now()).coerceIn(1500L, 6000L) else 3000L)
+    }
+
+    private fun startMusic() {
+        val track = when (trackChoice) {
+            "sunrise" -> MusicTrack(bpm = 110, bars = 8, root = 57, minor = false, progression = listOf(0, 4, 5, 3), pad = true, energy = 0.5f, seed = 13)
+            "off" -> null
+            else -> MusicTrack(bpm = 118, bars = 8, root = 57, minor = true, progression = listOf(0, 5, 3, 4), pad = true, energy = 0.55f, seed = 7)
+        }
+        if (track != null) { ctx.audio.musicVolume = 0.3f; ctx.audio.playMusic("runner", track) }
     }
 
     private fun setupRunners() {
@@ -179,7 +192,11 @@ class OeaRunner : OeaGame() {
 
     private val events = object : RunnerEvents {
         override fun onCoin(r: Runner, x: Float, y: Float, z: Float) {
-            ctx.audio.play(sCoin, 0.55f, pitch = 1f + (r.coins % 8) * 0.03f)
+            val now = System.currentTimeMillis()
+            if (now - lastCoinSoundAt >= 120L) {
+                ctx.audio.play(sCoin, 0.25f, pitch = 1f + (r.coinStreak % 5) * 0.025f)
+                lastCoinSoundAt = now
+            }
             laneOf(r)?.particles?.burst(ParticlePreset.COIN_SPARKLE, x, y, z, 8)
         }
         override fun onJump(r: Runner) { ctx.audio.play(sJump, 0.6f) }
@@ -489,11 +506,19 @@ class OeaRunner : OeaGame() {
         val items = ArrayList<MenuItem>()
         if (paused) items += MenuItem("resume", "Resume")
         if (net == null) items += MenuItem("restart", "Restart run")
+        items += MenuItem("sound", if (ctx.settings.sound) "Sound effects: on" else "Sound effects: off")
+        items += MenuItem("music", if (ctx.settings.music && trackChoice != "off") "Music: on" else "Music: off")
         items += MenuItem("exit", if (net != null) "Leave race" else "Exit", destructive = true)
         ctx.ui.menu("Endless Days", if (paused) "Paused" else null, items) { id ->
             when (id) {
                 "resume", null -> paused = false
                 "restart" -> { paused = false; restart() }
+                "sound" -> { ctx.settings.sound = !ctx.settings.sound; openMenu() }
+                "music" -> {
+                    if (ctx.settings.music && trackChoice != "off") { ctx.settings.music = false; ctx.audio.stopMusic() }
+                    else { ctx.settings.music = true; if (trackChoice == "off") trackChoice = "night"; startMusic() }
+                    openMenu()
+                }
                 "exit" -> ctx.ui.exit(GameResult("Run ended", lanes[0].runner.score))
             }
         }
@@ -660,25 +685,18 @@ class OeaRunner : OeaGame() {
             r.draw(RunnerArt.head, if (ghost) body else RunnerArt.skinDark, x, y + 0.4f, z - 0.75f)
             return
         }
-        if (roll) {
-            // Tucked into a ball, spinning.
-            val spin = run.phase * 2.2f
-            r.draw(Mesh.unitSphere, body, x, y + 0.48f, z, 0f, spin, 0f, 0.95f, 0.95f, 0.95f)
-            r.draw(RunnerArt.head, if (ghost) body else RunnerArt.skinDark, x, y + 0.62f + sin(spin) * 0.25f, z + kotlin.math.cos(spin) * 0.25f, 0f, 0.8f)
-            return
-        }
         val speedK = MathX.clamp01((run.speed - Runner.START_SPEED) / (Runner.MAX_SPEED - Runner.START_SPEED))
         charPose.phase = run.phase * 1.05f
-        charPose.speed = if (run.grounded) 0.45f + speedK * 0.55f else 0f
+        charPose.speed = if (run.grounded) 0.9f + speedK * 0.1f else 0f
         charPose.airborne = !run.grounded
-        charPose.crouch = false
+        charPose.crouch = roll
         charPose.lean = run.lean
         charPose.aimHold = false
         charPose.detail = true
         val hipY = y + 0.92f
         rigFor(run.color, ghost).draw(r, x, y, z, 0f, charPose)
         // Glowing sport visor across the face.
-        if (!ghost) r.draw(Mesh.unitSphere, RunnerArt.visor, x, hipY + 0.62f, z + 0.12f, 0f, 0f, 0f, 0.30f, 0.10f, 0.16f)
+
         if (run.has(PowerType.JETPACK)) {
             r.draw(RunnerArt.jetpack, RunnerArt.jetpackMat, x, hipY + 0.5f, z - 0.32f, 0f, 0.8f)
             laneOf(run)?.particles?.let { p ->
@@ -694,12 +712,10 @@ class OeaRunner : OeaGame() {
     }
 
     private fun drawGhostRunner(r: Renderer3D, x: Float, y: Float, z: Float, color: Int, rolling: Boolean, phase: Float) {
-        val mat = RunnerArt.ghostMaterial(color)
-        if (rolling) { r.draw(Mesh.unitSphere, mat, x, y + 0.48f, z, 0f, 0.95f); return }
         charPose.phase = phase * 1.05f
-        charPose.speed = 0.7f
+        charPose.speed = 0.95f
         charPose.airborne = false
-        charPose.crouch = false
+        charPose.crouch = rolling
         charPose.lean = 0f
         charPose.aimHold = false
         charPose.detail = true
@@ -751,6 +767,7 @@ class OeaRunner : OeaGame() {
         hud.batch.circle(right - 12f * d, top + 16f * d, 6f * d, 0xFFFFE08A.toInt())
         hud.text("${r.coins}", right - 30f * d, top + 4f * d, 22f, Colors.WHITE, Align.RIGHT, bold = true)
         hud.text("${r.z.toInt()} m", right, top + 34f * d, 14f, 0xCCFFFFFF.toInt(), Align.RIGHT)
+        if (r.coinStreak >= 5) hud.text("FLOW ${r.coinStreak} · +${minOf(r.coinStreak / 5, 4) * 5} / coin", left, top + (if (r.multiplier > 1) 70f else 42f) * d + (if (split) 22f * d else 0f), 13f, 0xFFFFD36A.toInt(), bold = true)
         if (raceGoal > 0f) {
             val bw = right - left
             hud.bar(left, y + h - hud.safeBottom * (if (split && !rotated) 1f else 0f) - 24f * d, bw, 6f * d, r.z / raceGoal, ACCENT)
@@ -860,10 +877,8 @@ class OeaRunner : OeaGame() {
 
     companion object {
         const val ID = "runner"
-        /** Swipe distance (dp) that counts as a turn. Was the engine default, 26dp. */
-        const val SWIPE_THRESHOLD_DP = 44f
         /** Seconds before the same runner can change lane again. */
-        const val LANE_CHANGE_COOLDOWN = 0.22
+        const val LANE_CHANGE_COOLDOWN = 0.14
         private val ACCENT = 0xFFFFB03A.toInt()
         private const val MSG_STATE = 32
         private const val MSG_CRASH = 33
@@ -885,6 +900,8 @@ class OeaRunner : OeaGame() {
             maxPlayers = 8,
             modes = setOf(PlayMode.SOLO, PlayMode.SAME_DEVICE, PlayMode.LAN, PlayMode.ONLINE),
             options = listOf(
+                GameOption("swipes", "Swipe sensitivity", listOf(Choice("responsive", "Responsive", "Shorter swipes"), Choice("deliberate", "Deliberate", "Longer swipes")), "responsive"),
+                GameOption("track", "Yard music", listOf(Choice("night", "Night drive"), Choice("sunrise", "Sunrise"), Choice("off", "Off")), "night"),
                 GameOption("duel", "Same-phone mode", listOf(Choice("split", "Split-screen duel", "Both run at once, face to face"), Choice("turns", "Take turns", "Same track, best score wins")), "split", setOf(PlayMode.SAME_DEVICE)),
                 GameOption("race", "Race", listOf(Choice("survival", "Last runner standing", "Highest score when everyone has crashed"), Choice("2k", "First to 2 km"), Choice("5k", "First to 5 km")), "survival",
                     setOf(PlayMode.LAN, PlayMode.ONLINE)),

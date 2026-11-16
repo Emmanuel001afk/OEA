@@ -44,6 +44,12 @@ class OeaWorkspaceStore private constructor(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /** Alphabetical by default; a manual move switches only that folder to custom order. */
+    fun folderAlphabetical(id: String) = prefs.getBoolean("folder_alpha_$id", true)
+    fun setFolderAlphabetical(id: String, enabled: Boolean) {
+        prefs.edit().putBoolean("folder_alpha_$id", enabled).apply()
+    }
+
     fun pages() = prefs.getInt(KEY_PAGES, 1).coerceIn(1, MAX_PAGES)
 
     fun setPages(v: Int) {

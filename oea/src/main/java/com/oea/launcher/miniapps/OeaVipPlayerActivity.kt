@@ -418,7 +418,12 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
         topBar = buildTopBar()
         bottomBar = buildBottomBar()
-        chrome.addView(topBar, LinearLayout.LayoutParams(-1, -2))
+        val topScroll = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = true
+            isFillViewport = true
+            addView(topBar, android.widget.FrameLayout.LayoutParams(-2, -2))
+        }
+        chrome.addView(topScroll, LinearLayout.LayoutParams(-1, -2))
         chrome.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
         chrome.addView(bottomBar, LinearLayout.LayoutParams(-1, -2))
         root.addView(chrome, FrameLayout.LayoutParams(-1, -1))
@@ -440,6 +445,15 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         setContentView(root)
         root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitVideo() }
         lockPill = buildLockPill()
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = OeaInsets.bars(insets)
+            chrome.setPadding(bars[0], bars[1], bars[2], bars[3])
+            val lockParams = lockPill.layoutParams as FrameLayout.LayoutParams
+            lockParams.topMargin = bars[1] + dp(12)
+            lockParams.marginEnd = bars[2] + dp(16)
+            lockPill.layoutParams = lockParams
+            insets
+        }
         setChrome(true)
     }
 
@@ -478,7 +492,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(0xB3000000.toInt(), 0x00000000)
             )
-            setPadding(dp(4), dp(30), dp(6), dp(12))
+            setPadding(dp(4), dp(8), dp(6), dp(12))
         }
         bar.addView(iconButton(R.drawable.oic_arrow_back, "Close the player") { finish() })
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -493,7 +507,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
         info.addView(titleView)
         info.addView(albumView)
-        bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4); marginEnd = dp(6) })
+        bar.addView(info, LinearLayout.LayoutParams(dp(150), -2).apply { marginStart = dp(4); marginEnd = dp(6) })
         bar.addView(iconButton(R.drawable.oic_skip_previous, "Previous clip") { step(-1) }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_skip_next, "Next clip") { step(1) }, buttonSize())
         sleepPill = pill("Sleep", R.drawable.oic_timer, null) { showSleepSheet() }
@@ -586,8 +600,12 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         pills.addView(ccPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
         val queue = pill(queueLabel(), R.drawable.oic_queue_music, null) { showQueueSheet() }
         queuePill = queue
-        pills.addView(queue, LinearLayout.LayoutParams(0, dp(48), 1f))
-        bar.addView(pills, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        pills.addView(queue, LinearLayout.LayoutParams(-2, dp(48)))
+        val pillScroll = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = true
+            addView(pills, android.widget.FrameLayout.LayoutParams(-2, -2))
+        }
+        bar.addView(pillScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         return bar
     }
 

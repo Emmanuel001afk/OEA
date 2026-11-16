@@ -221,7 +221,7 @@ class OeaGameBoostActivity : Activity() {
         overlaySection()
         sessionSection()
         permissionsSection()
-        kit.note(content, "Game Boost runs only while one of your games is open: it can silence notifications, keep the screen awake and show live RAM with an in-game control. When no game is open it does not run in the background, uses no Usage access and shows no notification. Android does not let any app raise another app's CPU or GPU priority, so OEA never claims to.")
+        kit.note(content, "Game Boost shows its control only over games and restores Do Not Disturb when you leave. With Usage access but without OEA Assistant, it keeps a visible notification and checks the foreground while waiting for you to return; stop it from the notification or turn Game Boost off. Android does not let OEA raise another app's CPU or GPU priority.")
         scroll.post { scroll.scrollTo(0, y) }
         updateStats()
     }
@@ -511,11 +511,21 @@ class OeaGameBoostActivity : Activity() {
             p.edit().putBoolean("ram_handle_visible", on).apply()
             refreshService()
         }
-        kit.switchRow(group, R.drawable.oic_wifi, "Network quality in the panel", "Shows an approximate Slow, Medium or Fast link category inside the expanded panel; never covers the floating control.",
+        kit.switchRow(group, R.drawable.oic_wifi, "Network in the panel", "Show link status, game traffic, or both in the expanded panel.",
             p.getBoolean(OeaGameBoostService.PREF_NETWORK_QUALITY, true)) { on ->
             p.edit().putBoolean(OeaGameBoostService.PREF_NETWORK_QUALITY, on).apply()
             refreshService()
         }
+        val networkModes = listOf("status", "rates", "both")
+        val networkBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(12)) }
+        networkBox.addView(kit.text("Network display", 13f, palette.textSecondary, OeaType.medium))
+        networkBox.addView(kit.segmented(listOf("Status", "Down / up", "Both"), networkModes.indexOf(p.getString("network_display_mode", "status")).coerceAtLeast(0)) { i ->
+            p.edit().putString("network_display_mode", networkModes[i]).apply()
+            refreshService()
+            render()
+        })
+        networkBox.addView(kit.text("Status is Android's link estimate, not game-server latency. Down / up is the game app's current traffic (KB/s or MB/s), not a speed test; Android may block other apps' counters, shown as —. OEA games share the OEA app's traffic.", 11.5f, palette.textSecondary).apply { setPadding(0, dp(8), 0, 0) })
+        group.addView(networkBox)
         val sizes = listOf("small", "medium", "large")
         val sizeBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(14)) }
         sizeBox.addView(kit.text("Size", 13f, palette.textSecondary, OeaType.medium).apply { setPadding(dp(2), 0, 0, dp(8)) })
@@ -601,7 +611,7 @@ class OeaGameBoostActivity : Activity() {
         }
         if (Build.VERSION.SDK_INT >= 33) {
             val notify = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            kit.row(group, R.drawable.oic_notifications, "Notifications", "Shows a notification only while a game session runs", value = status(notify, false),
+            kit.row(group, R.drawable.oic_notifications, "Notifications", "Shows the session or Usage-access return watcher", value = status(notify, false),
                 iconBg = statusBg(notify), iconTint = statusTint(notify)) {
                 if (!notify) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 41)
             }
@@ -649,7 +659,7 @@ class OeaGameBoostActivity : Activity() {
             0,
             listOf(
                 "Follows game windows as they open and close. No polling and no Usage access.",
-                "Checked every two seconds only while a game session runs, plus once when you leave Home."
+                "Checks the foreground every two seconds during a session and while waiting for a return, with a visible notification. Pauses while the screen is off."
 )
 ) { pick ->
             if (pick == 0) OeaAssistant.openSetup(this) else openUsageAccess()
@@ -665,8 +675,7 @@ class OeaGameBoostActivity : Activity() {
             value = "Always", chevron = false)
         kit.row(group, R.drawable.oic_accessibility_new, "OEA Assistant", "Recommended. Follows which app's window is in front (package names only), with no polling",
             value = if (assistantOn) "On" else "Off", iconBg = statusBg(assistantOn), iconTint = statusTint(assistantOn)) { OeaAssistant.openSetup(this) }
-        kit.row(group, R.drawable.oic_insights, "Usage access", "Used only while a game session runs to notice when you leave it" +
-            if (OeaGameBoost.leaveHomeCheck(this)) ", and once when you leave Home" else "",
+        kit.row(group, R.drawable.oic_insights, "Usage access", "Checks the foreground during a game and while waiting for a return when Assistant is not connected",
             value = if (usage) "Allowed" else "Off", iconBg = statusBg(usage || assistantOn), iconTint = statusTint(usage || assistantOn)) { openUsageAccess() }
         kit.switchRow(group, R.drawable.oic_home, "Check once when leaving Home", "Catches games opened from Recents or a notification with a single Usage access check. Not needed with OEA Assistant.",
             OeaGameBoost.leaveHomeCheck(this)) { on -> OeaGameBoost.setLeaveHomeCheck(this, on) }

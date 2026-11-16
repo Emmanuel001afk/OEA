@@ -393,7 +393,6 @@ internal object OeaEmageViewer {
             }
             dialog.window?.apply {
                 setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.BLACK))
-                addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
                 OeaInsets.edgeToEdge(this, lightBars = false)
             }
             root.setOnApplyWindowInsetsListener { _, insets ->

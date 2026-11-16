@@ -16,22 +16,10 @@ import java.lang.ref.WeakReference
 import java.util.concurrent.Executors
 
 /**
- * When Game Boost runs, and nothing more.
- *
- * Game Boost used to keep a foreground service alive whenever its switch was
- * on, polling Usage access every second (and restarting itself each time OEA
- * Home resumed) even when no game was open. That was a steady battery drain
- * with a misleading "Game session active" notification.
- *
- * A session now starts only when a selected game actually comes to the front:
- *  - it was opened from OEA (Home, drawer, folders, search, Game Boost) — free;
- *  - OEA Assistant reports a game window (event driven, no polling);
- *  - optionally, one Usage access check right after the user leaves OEA Home
- *    (catches games opened from Recents or a notification).
- *
- * The session service watches for the user leaving the game only while the
- * game session lasts, pauses while the screen is off, and stops itself (with
- * its notification) when the session ends.
+ * Game sessions start on an OEA launch, an Assistant window event, or a
+ * bounded Usage Access check after leaving Home. The overlay and DND end when
+ * the player leaves. Without Assistant, an existing external-game session can
+ * continue as a visible, screen-on Usage Access watcher to detect a return.
  */
 object OeaGameBoost {
     const val ACTION_START_SESSION = "com.oea.launcher.gameboost.START_SESSION"

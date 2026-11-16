@@ -59,6 +59,19 @@ object Move {
 
 enum class GameResult(val pgn: String) { ONGOING("*"), WHITE_WINS("1-0"), BLACK_WINS("0-1"), DRAW("1/2-1/2") }
 
+internal fun GameResult.winnerColor(): Int? = when (this) {
+    GameResult.WHITE_WINS -> Piece.WHITE
+    GameResult.BLACK_WINS -> Piece.BLACK
+    else -> null
+}
+
+internal fun GameResult.displayTitle(localColor: Int?, whiteName: String, blackName: String): String {
+    if (this == GameResult.DRAW) return "Draw"
+    val winner = winnerColor() ?: return ""
+    if (localColor != null) return if (winner == localColor) "You win!" else "You lose"
+    return "${if (winner == Piece.WHITE) whiteName else blackName} wins"
+}
+
 enum class EndReason(val label: String) {
     NONE(""),
     CHECKMATE("Checkmate"),

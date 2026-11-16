@@ -8,18 +8,19 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.TrafficStats
+import android.os.SystemClock
 import android.view.View
 import java.util.Locale
 
-/**
- * A lightweight, approximate network-health category for the in-game panel.
- * It uses Android's active-network estimate and signal level, never traffic
- * counters or a periodic speed test. The floating button stays unobstructed.
- */
+/** Link quality is an Android link estimate, not a measurement of a game's server. */
 internal data class OeaNetworkQuality(
     val level: String,
     val link: String,
-    val color: Int
+    val color: Int,
+    val down: String = "—",
+    val up: String = "—",
+    val trafficScope: String = "Game traffic unavailable"
 )
 
 internal class OeaNetworkQualityReader(context: Context) {
@@ -33,8 +34,35 @@ internal class OeaNetworkQualityReader(context: Context) {
     @Volatile private var checkedNetwork: android.net.Network? = null
     @Volatile private var lastProbeAt = 0L
     @Volatile private var probeSucceeded: Boolean? = null
+    private var trafficGame: String? = null
+    private var trafficUid = -1
+    private val rates = OeaTrafficRates()
 
-    fun read(): OeaNetworkQuality = runCatching {
+    /** Android often blocks other apps' UID counters; never substitute device totals. */
+    private fun sampleTraffic(game: String?) {
+        if (game != trafficGame) {
+            trafficGame = game
+            val pkg = if (game != null && OeaGameBoostStore.isOeaGameKey(game)) appContext.packageName else game
+            trafficUid = if (pkg == null) -1 else runCatching { appContext.packageManager.getApplicationInfo(pkg, 0).uid }.getOrDefault(-1)
+            rates.reset()
+        }
+        if (trafficUid < 0) return
+        val rx = runCatching { TrafficStats.getUidRxBytes(trafficUid) }.getOrDefault(-1L)
+        val tx = runCatching { TrafficStats.getUidTxBytes(trafficUid) }.getOrDefault(-1L)
+        rates.sample(SystemClock.elapsedRealtime(), rx, tx)
+    }
+
+    fun close() { executor.shutdownNow() }
+
+
+    fun read(game: String?): OeaNetworkQuality {
+        sampleTraffic(game)
+        val quality = readLink()
+        val scope = if (game != null && OeaGameBoostStore.isOeaGameKey(game)) "OEA app traffic (shared by its games)" else "Game app traffic"
+        return quality.copy(down = rates.down, up = rates.up, trafficScope = if (rates.down == "—" || rates.up == "—") "Game traffic unavailable" else scope)
+    }
+
+    private fun readLink(): OeaNetworkQuality = runCatching {
         val manager = connectivity
             ?: return OeaNetworkQuality("UNKNOWN", "Unavailable", COLOR_OFFLINE)
         val network = manager.activeNetwork
@@ -67,18 +95,14 @@ internal class OeaNetworkQualityReader(context: Context) {
         }
         if (changed || now - lastProbeAt >= PROBE_INTERVAL_MS) scheduleProbe(network)
 
-        // Do not keep reporting a previous FAST/MEDIUM/SLOW result while a
-        // fresh reachability check is running. Cellular data can disappear
-        // while Android's validated capability and bandwidth estimate lag.
-        if (probing.get()) return OeaNetworkQuality("CHECKING", link, COLOR_OFFLINE)
+        // Retain the last answer while the refresh runs in the background.
         when (probeSucceeded) {
-            false -> return OeaNetworkQuality("NO INTERNET", link, COLOR_OFFLINE)
-            null -> return OeaNetworkQuality("CHECKING", link, COLOR_OFFLINE)
+            false -> return OeaNetworkQuality("PROBE FAILED", link, COLOR_OFFLINE)
+            null -> Unit // Android already validated this network; show its link estimate.
             true -> Unit
         }
 
-        // Android's bandwidth is an estimate, not measured throughput. Only
-        // show a quality grade after a recent request actually reached the internet.
+        // Android's bandwidth is an estimate, not measured throughput.
         val bandwidthKbps = caps.linkDownstreamBandwidthKbps.coerceAtLeast(0)
         val score = when {
             bandwidthKbps >= FAST_BANDWIDTH_KBPS -> 2
@@ -156,15 +180,15 @@ private fun Int.withAlphaByte(alpha: Int): Int =
     (this and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
 
 /**
- * Compact status strip inside the expanded Game Boost panel. It deliberately
- * reports a simple Slow / Medium / Fast network category instead of raw
- * download/upload counters, plus link type and battery state.
+ * Compact status strip: estimated link category and/or the selected game's
+ * actual traffic rate when Android exposes its UID counters.
  */
 internal class OeaGameStatusStripView(context: Context) : View(context) {
     private var quality = OeaNetworkQuality("UNKNOWN", "Unavailable", 0xFF9BAABD.toInt())
     private var battery = "—"
     private var batteryCaption = "BATTERY"
     private var showNetwork = true
+    private var networkMode = "status"
     private var base = 0xFF0A1020.toInt()
     private var accent = 0xFF2357FF.toInt()
     private val rect = RectF()
@@ -186,15 +210,16 @@ internal class OeaGameStatusStripView(context: Context) : View(context) {
         contentDescription = "Network quality and battery"
     }
 
-    fun update(network: OeaNetworkQuality, batteryText: String, charging: Boolean, showNetworkQuality: Boolean) {
+    fun update(network: OeaNetworkQuality, batteryText: String, charging: Boolean, showNetworkQuality: Boolean, mode: String) {
         val nextCaption = if (charging) "CHARGING" else "BATTERY"
-        if (network == quality && batteryText == battery && nextCaption == batteryCaption && showNetworkQuality == showNetwork) return
+        if (network == quality && batteryText == battery && nextCaption == batteryCaption && showNetworkQuality == showNetwork && mode == networkMode) return
         quality = network
         battery = batteryText
         batteryCaption = nextCaption
         showNetwork = showNetworkQuality
+        networkMode = mode
         contentDescription = if (showNetwork) {
-            "Network quality ${network.level.lowercase(Locale.US)}, ${network.link}, $nextCaption $batteryText"
+            "Link estimate ${network.level.lowercase(Locale.US)}, ${network.link}; ${network.trafficScope}, download ${network.down}, upload ${network.up}; $nextCaption $batteryText"
         } else {
             "$nextCaption $batteryText"
         }
@@ -228,17 +253,21 @@ internal class OeaGameStatusStripView(context: Context) : View(context) {
 
         caption.textSize = sp(7.5f)
         value.textSize = sp(11.5f)
-        if (showNetwork) {
-            val column = w / 3f
-            divider.color = Color.WHITE.withAlphaByte(0x1E)
-            divider.strokeWidth = maxOf(1f, dpf(0.6f))
-            canvas.drawLine(column, h * 0.22f, column, h * 0.78f, divider)
-            canvas.drawLine(column * 2f, h * 0.22f, column * 2f, h * 0.78f, divider)
-            drawColumn(canvas, 0f, column, h, "NETWORK", quality.level, quality.color)
-            drawColumn(canvas, column, column, h, "LINK", quality.link, Color.WHITE)
-            drawColumn(canvas, column * 2f, column, h, batteryCaption, battery, Color.WHITE)
-        } else {
+        if (!showNetwork) {
             drawColumn(canvas, 0f, w, h, batteryCaption, battery, Color.WHITE)
+            return
+        }
+        val columns = when (networkMode) {
+            "rates" -> listOf(Triple("GAME DOWN", quality.down, Color.WHITE), Triple("GAME UP", quality.up, Color.WHITE))
+            "both" -> listOf(Triple("LINK", quality.level, quality.color), Triple("GAME DOWN", quality.down, Color.WHITE), Triple("GAME UP", quality.up, Color.WHITE))
+            else -> listOf(Triple("LINK EST.", quality.level, quality.color), Triple("TYPE", quality.link, Color.WHITE))
+        } + Triple(batteryCaption, battery, Color.WHITE)
+        val column = w / columns.size
+        divider.color = Color.WHITE.withAlphaByte(0x1E)
+        divider.strokeWidth = maxOf(1f, dpf(0.6f))
+        columns.forEachIndexed { i, item ->
+            if (i > 0) canvas.drawLine(column * i, h * 0.22f, column * i, h * 0.78f, divider)
+            drawColumn(canvas, column * i, column, h, item.first, item.second, item.third)
         }
     }
 
@@ -255,10 +284,15 @@ internal class OeaGameStatusStripView(context: Context) : View(context) {
         val captionBaseline = height * 0.40f
         val valueBaseline = height * 0.78f
         caption.color = 0xFF9FB2C8.toInt()
-        canvas.drawText(label, left + pad, captionBaseline, caption)
-        value.color = valueColor
+        val captionSize = caption.textSize
         val available = width - pad * 2f
-        val shown = if (value.measureText(text) > available) text.take(5) else text
-        canvas.drawText(shown, left + pad, valueBaseline, value)
+        if (caption.measureText(label) > available && available > 0f) caption.textSize = captionSize * (available / caption.measureText(label)).coerceAtLeast(0.65f)
+        canvas.drawText(label, left + pad, captionBaseline, caption)
+        caption.textSize = captionSize
+        value.color = valueColor
+        val oldSize = value.textSize
+        if (value.measureText(text) > available && available > 0f) value.textSize = oldSize * (available / value.measureText(text)).coerceAtLeast(0.65f)
+        canvas.drawText(text, left + pad, valueBaseline, value)
+        value.textSize = oldSize
     }
 }
