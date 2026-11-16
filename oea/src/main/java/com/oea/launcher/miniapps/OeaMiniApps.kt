@@ -65,7 +65,7 @@ object OeaMiniApps {
             "clock", "Clock", "Alarms, timers, stopwatch, world clock — separate from Calendar", R.drawable.ic_oea_clock, OeaClockActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaClockApp.build(host, palette) },
         App(
-            "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.ic_oea_calendar, OeaCalendarActivity::class.java
+            "calendar", "Calendar", "Month, week and day views with events and reminders", R.drawable.ic_oea_calendar, OeaCalendarActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaCalendarApp.build(host, palette) },
         App(
             "emage", "EMAGE", "Every picture on this phone: albums, days, favourites and the OEA roll", R.drawable.ic_oea_image,
@@ -76,27 +76,27 @@ object OeaMiniApps {
             OeaVipActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaVideoApp.build(host, palette) },
         App(
-            "weather", "Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.ic_oea_weather, OeaWeatherActivity::class.java
+            "weather", "Weather", "Forecasts, real data from Open-Meteo, widgets", R.drawable.ic_oea_weather, OeaWeatherActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaWeatherApp.build(host, palette) },
         App(
-            "calculator", "Calculator", "Full calculator with scientific, history and tape", R.drawable.ic_oea_calculator, OeaCalculatorActivity::class.java
+            "calculator", "Calculator", "Full calculator with scientific, history and tape", R.drawable.ic_oea_calculator, OeaCalculatorActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaCalculatorApp.build(host, palette) },
         App(
             "messaging", "Messaging", "Conversations, replies and the SIM behind every message", R.drawable.ic_oea_messaging,
             OeaMessagingActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaMessagingApp.build(host, palette) },
         App(
-            "notes", "Notes", "Notes, private notes, voice notes, search and organization", R.drawable.ic_oea_notes, OeaNotesActivity::class.java
+            "notes", "Notes", "Notes, private notes, voice notes, search and organization", R.drawable.ic_oea_notes, OeaNotesActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaNotesApp.build(host, palette) },
         App(
             "camera", "Camera", "Full-screen camera: photo, video, zoom and the modes you need", R.drawable.ic_oea_camera,
             OeaCameraActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaCameraApp.build(host, palette) },
         App(
-            "console", "Console", "Central utility: diagnostics, device info, security, command system", R.drawable.ic_oea_console, OeaConsoleActivity::class.java
+            "console", "Console", "Central utility: diagnostics, device info, security, command system", R.drawable.ic_oea_console, OeaConsoleActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaConsoleApp.build(host, palette) },
         App(
-            "voice", "Voice", "Launcher's own speech recognizer — offline + launcher commands", R.drawable.ic_oea_voice, OeaVoiceActivity::class.java
+            "voice", "Voice", "Launcher's own speech recognizer — offline + launcher commands", R.drawable.ic_oea_voice, OeaVoiceActivity::class.java, Style.FullBleed
         ) { host, palette -> OeaVoiceApp.build(host, palette) }
     )
 
@@ -191,7 +191,14 @@ object OeaMiniApps {
             setPadding(kit.dp(12), kit.dp(12), kit.dp(12), kit.dp(12))
             setOnClickListener { onClick() }
         }
-        column.addView(kit.iconBadge(app.icon, kit.palette.accentSoft, kit.palette.onAccentSoft, 44))
+        column.addView(
+            android.widget.ImageView(kit.context).apply {
+                setImageResource(app.icon)
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            },
+            LinearLayout.LayoutParams(kit.dp(48), kit.dp(48))
+        )
         column.addView(
             kit.text(app.label, 14f, kit.palette.text, OeaType.medium).apply {
                 setPadding(0, kit.dp(8), 0, 0)

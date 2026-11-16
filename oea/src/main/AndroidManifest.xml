@@ -495,7 +495,11 @@
             </intent-filter>
         </receiver>
         <service android:name="com.oea.launcher.security.OeaSecurityScanJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
-        <activity android:name="com.oea.launcher.security.OeaSecurityScanActivity" android:exported="false" android:label="Security scan" />
+        <activity
+            android:name="com.oea.launcher.security.OeaSecurityScanActivity"
+            android:exported="false"
+            android:label="Security scan"
+            android:theme="@style/OeaPanelTheme" />
         <activity
             android:name="com.oea.launcher.miniapps.OeaConsoleActivity"
             android:exported="true"
@@ -690,7 +694,7 @@
             android:icon="@drawable/ic_oea_phone"
             android:roundIcon="@drawable/ic_oea_phone"
             android:taskAffinity="com.oea.launcher.phone"
-            android:theme="@style/OeaTheme"
+            android:theme="@style/OeaPanelTheme"
             android:allowEmbedded="true" >
             <!-- The no-data DIAL filter is required for Android's default-dialer
                  role resolver; the tel filter handles links and prefilled numbers. -->
@@ -777,7 +781,7 @@
             android:icon="@drawable/ic_oea_call_blocker"
             android:roundIcon="@drawable/ic_oea_call_blocker"
             android:taskAffinity="com.oea.launcher.callblocker"
-            android:theme="@style/OeaTheme">
+            android:theme="@style/OeaPanelTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

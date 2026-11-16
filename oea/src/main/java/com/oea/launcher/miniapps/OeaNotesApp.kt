@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.LinearLayout
 import com.oea.launcher.R
 import com.oea.launcher.applock.OeaAppLockStore
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaType
@@ -110,139 +111,240 @@ object OeaNotesApp {
     }
 
     fun build(host: Activity, palette: OeaPalette): View {
-        val kit = OeaKit(host, palette)
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        val kit = OeaAppKit(host, palette)
         var refresh: (String) -> Unit = {}
         var currentFilter = "all"
         var searchQuery = ""
         var currentFolder: String? = null
 
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("Notes", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(kit.circleIconButton(R.drawable.oic_search, "Search", palette.cardHigh, palette.text) {
-            kit.prompt("Search notes", null, "Search", searchQuery) { q ->
-                searchQuery = q.trim()
-                refresh(currentFilter)
-                null
-            }
-        }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })
-        header.addView(kit.circleIconButton(R.drawable.oic_mic, "Voice", palette.cardHigh, palette.text) {
-            startVoiceInput(host)
+        val indexBack = host.miniIndexBack()
+        val navItems = listOf(
+            OeaAppKit.NavItem("all", "Notes", R.drawable.oic_edit),
+            OeaAppKit.NavItem("checklist", "Lists", R.drawable.oic_check_circle_fill),
+            OeaAppKit.NavItem("private", "Private", R.drawable.oic_lock),
+            OeaAppKit.NavItem("archived", "Archived", R.drawable.oic_folder)
+        )
+        val shell = kit.appShell(
+            title = "Notes",
+            navItems = navItems,
+            initialNav = currentFilter,
+            onBack = indexBack
+        ) { id ->
+            refresh(id)
+        }
+        val column = shell.body
+
+        val searchBox = kit.searchField("Search notes, tags or folders", onQuery = { q ->
+            searchQuery = q.trim()
+            refresh(currentFilter)
         })
-        column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+        val searchRow = android.widget.FrameLayout(host).apply {
+            setPadding(kit.dp(16), 0, kit.dp(16), kit.dp(8))
+            addView(searchBox.root, android.widget.FrameLayout.LayoutParams(-1, -2))
+            visibility = View.GONE
+        }
+        shell.headerExtras.addView(searchRow, LinearLayout.LayoutParams(-1, -2))
+
+        fun toggleSearch() {
+            if (searchRow.visibility == View.VISIBLE) {
+                searchRow.visibility = View.GONE
+                searchBox.close()
+                if (searchQuery.isNotEmpty()) {
+                    searchQuery = ""
+                    searchBox.setText("")
+                    refresh(currentFilter)
+                }
+            } else {
+                searchRow.visibility = View.VISIBLE
+                searchBox.focus()
+            }
+        }
+
+        host.miniBackHook = {
+            when {
+                searchRow.visibility == View.VISIBLE -> { toggleSearch(); true }
+                currentFilter !in setOf("all", "checklist", "private", "archived") -> { refresh("all"); true }
+                else -> false
+            }
+        }
+
+        shell.bar.addAction(R.drawable.oic_search, "Search notes") { toggleSearch() }
+        shell.bar.addAction(R.drawable.oic_add, "New note") {
+            when (currentFilter) {
+                "checklist" -> createChecklistNote(host, kit) { refresh(currentFilter) }
+                "private" -> createNote(host, kit, private = true) { refresh(currentFilter) }
+                else -> createNote(host, kit, private = false) { refresh(currentFilter) }
+            }
+        }
+        shell.bar.addAction(R.drawable.oic_more_vert, "Notes options") {
+            kit.actions("Notes", null, listOf(
+                OeaAppKit.Action(R.drawable.oic_check_circle_fill, "New checklist", "Create a tappable to-do list") {
+                    createChecklistNote(host, kit) { refresh(currentFilter) }
+                },
+                OeaAppKit.Action(R.drawable.oic_lock, "New private note", "Protected with your App Lock PIN") {
+                    createNote(host, kit, private = true) { refresh("private") }
+                },
+                OeaAppKit.Action(R.drawable.oic_mic, "Dictate voice note", "Transcribe speech directly into a note") {
+                    startVoiceInput(host)
+                },
+                OeaAppKit.Action(R.drawable.oic_push_pin, "Pinned notes", "Show only pinned notes") {
+                    refresh("pinned")
+                },
+                OeaAppKit.Action(R.drawable.oic_alarm, "Reminders", "Notes with a scheduled reminder") {
+                    refresh("reminders")
+                },
+                OeaAppKit.Action(R.drawable.oic_share_filled, "Export notes", "Share or copy your saved notes") {
+                    val exportable = decode(prefs(host).getString(KEY_NOTES, "")) +
+                        decode(prefs(host).getString(KEY_ARCHIVED, "")).map { it.copy(archived = true) }
+                    val raw = exportable.joinToString("\n\n---\n\n") { it.text }
+                    if (raw.isBlank()) {
+                        android.widget.Toast.makeText(host, "No notes to export yet", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        runCatching {
+                            host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, raw), "Export notes"))
+                        }
+                    }
+                }
+            ))
+        }
 
         val folderBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        column.addView(kit.hscroll(folderBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-
-        val filterBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        column.addView(kit.hscroll(filterBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+        val folderScroll = kit.hscroll(folderBar)
+        column.addView(folderScroll, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
 
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         column.addView(content)
 
         refresh = refresh@{ filter ->
             currentFilter = filter
-            // Folders
-            folderBar.removeAllViews()
-            val allNotes = decode(prefs(host).getString(KEY_NOTES, "")) + decode(prefs(host).getString(KEY_PRIVATE, "")).map { it.copy(private = true) } + decode(prefs(host).getString(KEY_ARCHIVED, "")).map { it.copy(archived = true) }
-            val folders = allNotes.map { it.folder.ifBlank { "General" } }.distinct().sorted()
-            folderBar.addView(kit.chip("All folders", currentFolder == null) { currentFolder = null; refresh(filter) }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-            folders.forEach { folder ->
-                folderBar.addView(kit.chip("$folder (${allNotes.count { it.folder == folder }})", folder == currentFolder) {
-                    currentFolder = if (currentFolder == folder) null else folder
-                    refresh(filter)
-                }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+            if (filter in setOf("all", "checklist", "private", "archived")) {
+                shell.nav?.select(filter, notify = false)
+                shell.bar.setBack(indexBack)
+            } else {
+                shell.bar.setBack { refresh("all") }
+            }
+            shell.bar.title.text = when (filter) {
+                "checklist" -> "Lists"
+                "private" -> "Private"
+                "archived" -> "Archived"
+                "pinned" -> "Pinned"
+                "reminders" -> "Reminders"
+                "voice" -> "Voice Notes"
+                else -> "Notes"
             }
 
-            // Filters
-            filterBar.removeAllViews()
-            listOf("all" to "All", "pinned" to "Pinned", "private" to "Private", "voice" to "Voice", "checklist" to "Checklist", "archived" to "Archived", "reminders" to "Reminders").forEach { (id, label) ->
-                filterBar.addView(kit.chip(label, id == filter) { refresh(id) }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+            val allNotes = decode(prefs(host).getString(KEY_NOTES, "")) +
+                decode(prefs(host).getString(KEY_PRIVATE, "")).map { it.copy(private = true) } +
+                decode(prefs(host).getString(KEY_ARCHIVED, "")).map { it.copy(archived = true) }
+
+            val scopedNotes = allNotes.filter { note ->
+                when (filter) {
+                    "pinned" -> note.pinned && !note.private
+                    "private" -> note.private
+                    "voice" -> note.tag == "voice" && !note.private
+                    "checklist" -> note.checklist && !note.archived && !note.private
+                    "archived" -> note.archived && !note.private
+                    "reminders" -> note.reminder > 0 && !note.private
+                    else -> !note.archived && !note.private
+                }
+            }
+
+            folderBar.removeAllViews()
+            val folders = scopedNotes.map { it.folder.ifBlank { "General" } }.distinct().sorted()
+            if (folders.size > 1) {
+                folderScroll.visibility = View.VISIBLE
+                folderBar.addView(kit.chip("All", currentFolder == null) { currentFolder = null; refresh(filter) }, LinearLayout.LayoutParams(-2, kit.dp(38)).apply { rightMargin = kit.dp(6) })
+                folders.forEach { folder ->
+                    val count = scopedNotes.count { it.folder.ifBlank { "General" } == folder }
+                    folderBar.addView(kit.chip("$folder · $count", folder == currentFolder) {
+                        currentFolder = if (currentFolder == folder) null else folder
+                        refresh(filter)
+                    }, LinearLayout.LayoutParams(-2, kit.dp(38)).apply { rightMargin = kit.dp(6) })
+                }
+            } else {
+                currentFolder = null
+                folderScroll.visibility = View.GONE
             }
 
             content.removeAllViews()
-            val filtered = allNotes.filter { note ->
-                val matchesFilter = when (filter) {
-                    "pinned" -> note.pinned
-                    "private" -> note.private
-                    "voice" -> note.tag == "voice"
-                    "checklist" -> note.checklist
-                    "archived" -> note.archived
-                    "reminders" -> note.reminder > 0
-                    else -> !note.archived // all excludes archived unless filter is archived
-                }
-                val matchesFolder = currentFolder == null || note.folder == currentFolder
-                val matchesSearch = searchQuery.isBlank() || note.text.contains(searchQuery, ignoreCase = true) || note.tag.contains(searchQuery, ignoreCase = true) || note.folder.contains(searchQuery, ignoreCase = true)
-                matchesFilter && matchesFolder && matchesSearch
+            val filtered = scopedNotes.filter { note ->
+                val matchesFolder = currentFolder == null || note.folder.ifBlank { "General" } == currentFolder
+                val matchesSearch = searchQuery.isBlank() ||
+                    note.text.contains(searchQuery, ignoreCase = true) ||
+                    note.tag.contains(searchQuery, ignoreCase = true) ||
+                    note.folder.contains(searchQuery, ignoreCase = true)
+                matchesFolder && matchesSearch
             }
 
-            val actions = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-            actions.addView(kit.primaryButton("New note", R.drawable.oic_add) {
-                createNote(host, kit, private = false) { refresh(filter) }
-            }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { rightMargin = kit.dp(6) })
-            actions.addView(kit.tonalButton("Checklist", R.drawable.oic_check_circle_fill) {
-                createChecklistNote(host, kit) { refresh(filter) }
-            }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { rightMargin = kit.dp(6) })
-            actions.addView(kit.circleIconButton(R.drawable.oic_mic, "Voice note", palette.cardHigh, palette.text) {
-                startVoiceInput(host)
-            }, LinearLayout.LayoutParams(kit.dp(46), kit.dp(46)))
-            content.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+            shell.bar.setSubtitle(
+                when {
+                    searchQuery.isNotBlank() -> "${filtered.size} matching"
+                    filtered.isNotEmpty() -> "${filtered.size} ${if (filtered.size == 1) "note" else "notes"}"
+                    else -> ""
+                }
+            )
 
             if (filtered.isEmpty()) {
-                kit.note(content, when {
-                    searchQuery.isNotBlank() -> "No notes match \"$searchQuery\""
-                    filter == "private" -> "No private notes. Private notes protected behind App Lock PIN."
-                    filter == "voice" -> "No voice notes. Tap mic to dictate."
-                    filter == "checklist" -> "No checklist notes."
-                    filter == "archived" -> "No archived notes."
-                    filter == "reminders" -> "No reminders."
-                    currentFolder != null -> "No notes in folder \"$currentFolder\""
-                    else -> "No notes yet. Tap New note, Checklist, or mic for voice-to-text. Folders organize automatically."
-                })
-                // Export/import
-                content.addView(kit.tonalButton("Export all notes", R.drawable.oic_share_filled) {
-                    val json = encode(allNotes)
-                    kit.sheet("Export notes", "${allNotes.size} notes") { panel, _ ->
-                        kit.note(panel, json.take(8000))
-                        panel.addView(kit.buttonRow(
-                            kit.quietButton("Copy") {
-                                val cb = host.getSystemService(android.content.ClipboardManager::class.java) as android.content.ClipboardManager
-                                cb.setPrimaryClip(android.content.ClipData.newPlainText("OEA notes", json))
-                                android.widget.Toast.makeText(host, "Copied", android.widget.Toast.LENGTH_SHORT).show()
-                            },
-                            kit.primaryButton("Share") {
-                                try { host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, json), "Share notes")) } catch (_: Throwable) {}
-                            }
-                        ))
-                    }
-                }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(12) })
+                val (iconRes, emptyTitle, emptyBody) = when {
+                    searchQuery.isNotBlank() -> Triple(R.drawable.oic_search, "No matching notes", "Try a different keyword or clear the search.")
+                    filter == "private" -> Triple(R.drawable.oic_lock, "No private notes", "Private notes stay locked behind your App Lock PIN.")
+                    filter == "checklist" -> Triple(R.drawable.oic_check_circle_fill, "No checklists yet", "Create a to-do list and tick off items as you go.")
+                    filter == "archived" -> Triple(R.drawable.oic_folder, "Archive is empty", "Notes you archive stay tucked away here without being deleted.")
+                    filter == "pinned" -> Triple(R.drawable.oic_push_pin, "No pinned notes", "Pin important notes so they stay at the top.")
+                    filter == "reminders" -> Triple(R.drawable.oic_alarm, "No note reminders", "Open any note to attach a reminder time.")
+                    else -> Triple(R.drawable.oic_edit, "No notes yet", "Write a note, start a checklist, or dictate by voice.")
+                }
+                val ctaLabel = when {
+                    searchQuery.isNotBlank() -> "Clear search"
+                    filter == "archived" || filter == "pinned" || filter == "reminders" -> null
+                    filter == "checklist" -> "New checklist"
+                    filter == "private" -> "New private note"
+                    else -> "New note"
+                }
+                content.addView(
+                    kit.emptyState(iconRes, emptyTitle, emptyBody, ctaLabel) {
+                        when {
+                            searchQuery.isNotBlank() -> toggleSearch()
+                            filter == "checklist" -> createChecklistNote(host, kit) { refresh(filter) }
+                            filter == "private" -> createNote(host, kit, private = true) { refresh(filter) }
+                            else -> createNote(host, kit, private = false) { refresh(filter) }
+                        }
+                    },
+                    LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(12) }
+                )
                 return@refresh
             }
 
-            // Group by folder
-            filtered.groupBy { it.folder.ifBlank { "General" } }.forEach { (folder, notes) ->
-                kit.sectionTitle(content, "$folder • ${notes.size}")
+            val grouped = filtered.groupBy { it.folder.ifBlank { "General" } }
+            grouped.forEach { (folder, notes) ->
+                if (grouped.size > 1) kit.sectionTitle(content, "$folder · ${notes.size}")
                 val g = kit.group(content)
                 notes.forEach { note ->
+                    val lines = note.text.lineSequence().filter { it.isNotBlank() }.toList()
+                    val heading = if (note.private) (lines.firstOrNull()?.take(36) ?: "Private note") else (lines.firstOrNull()?.take(48) ?: "Note")
+                    val snippet = if (!note.private && !note.checklist && lines.size > 1) lines[1].take(48) else null
                     val subtitle = buildString {
-                        if (note.private) append("Private • ")
-                        if (note.pinned) append("Pinned • ")
-                        if (note.checklist) append("Checklist • ")
-                        if (note.archived) append("Archived • ")
-                        append(SimpleDateFormat("MMM d HH:mm", Locale.getDefault()).format(Date(note.updated)))
-                        if (note.tag.isNotBlank() && note.tag != "General") append(" • ${note.tag}")
-                        if (note.reminder > 0) append(" • Reminder ${SimpleDateFormat("MMM d HH:mm", Locale.getDefault()).format(Date(note.reminder))}")
-                        if (note.attachment.isNotBlank()) append(" • Attachment")
+                        if (note.pinned) append("Pinned · ")
+                        if (note.checklist) {
+                            val items = note.text.lineSequence().drop(1).filter { it.trim().startsWith("[") }.toList()
+                            val done = items.count { it.trim().startsWith("[x]", true) }
+                            if (items.isNotEmpty()) append("$done/${items.size} done · ")
+                        }
+                        if (snippet != null) append("$snippet · ")
+                        append(SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(note.updated)))
+                        if (note.reminder > 0) append(" · ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(note.reminder))}")
                     }
                     val icon = when {
                         note.private -> R.drawable.oic_lock
+                        note.pinned -> R.drawable.oic_push_pin
                         note.checklist -> R.drawable.oic_check_circle_fill
                         note.tag == "voice" -> R.drawable.oic_mic
                         else -> R.drawable.oic_edit
                     }
-                    kit.row(g, icon, note.text.lineSequence().firstOrNull()?.take(40) ?: "Note", subtitle, trailing = null) {
+                    val colorLabel = note.color.takeIf { it.isNotBlank() && it != "default" }?.replaceFirstChar { it.uppercase() }
+                    kit.row(g, icon, heading, subtitle, value = colorLabel, chevron = true) {
                         if (note.private) {
-                            kit.prompt("Unlock private note", "Enter App Lock PIN", "PIN", numeric = true, password = true, confirmLabel = "Unlock") { pin ->
+                            kit.prompt("Unlock private note", "Enter your App Lock PIN", "PIN", numeric = true, password = true, confirmLabel = "Unlock") { pin ->
                                 if (!OeaAppLockStore.verifyPin(host, pin)) return@prompt "Incorrect PIN"
                                 host.runOnUiThread { showNoteDetail(host, kit, note) { refresh(filter) } }
                                 null
@@ -253,21 +355,6 @@ object OeaNotesApp {
                     }
                 }
             }
-
-            // Bottom actions: colors, sort, export
-            val bottomRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(12), 0, 0) }
-            bottomRow.addView(kit.tonalButton("Export", R.drawable.oic_share_filled) {
-                val json = encode(filtered)
-                try { host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, json), "Export notes")) } catch (_: Throwable) {}
-            }, LinearLayout.LayoutParams(0, kit.dp(44), 1f).apply { rightMargin = kit.dp(6) })
-            bottomRow.addView(kit.quietButton("Manage folders", R.drawable.oic_folder) {
-                kit.sheet("Folders", "${folders.size} folders") { panel, _ ->
-                    folders.forEach { f ->
-                        kit.row(kit.group(panel), R.drawable.oic_folder, f, "${allNotes.count { it.folder == f }} notes", chevron = false)
-                    }
-                }
-            }, LinearLayout.LayoutParams(0, kit.dp(44), 1f))
-            content.addView(bottomRow)
         }
         refresh("all")
 
@@ -281,50 +368,76 @@ object OeaNotesApp {
             } catch (_: Throwable) {}
         }, 500L)
 
-        return column
+        return shell.root
     }
 
-    private fun createNote(host: Activity, kit: OeaKit, private: Boolean, onDone: () -> Unit) {
-        kit.sheet(if (private) "New private note" else "New note", if (private) "Protected behind App Lock PIN" else "Saved on this phone") { panel, dialog ->
-            val textField = kit.field("Write note (supports **bold** and *italic*, [ ] checklist)", "")
-            val tagField = kit.field("Tag (optional)", "General")
-            val folderField = kit.field("Folder (e.g., Work, Personal, Study)", "General")
-            val colorRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(8), 0, 0) }
+    private fun multilineField(kit: OeaKit, hint: String, initial: String): android.widget.EditText =
+        kit.field(hint, initial).apply {
+            isSingleLine = false
+            minLines = 4
+            maxLines = 9
+            gravity = Gravity.TOP or Gravity.START
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+
+    private fun createNote(host: Activity, kit: OeaAppKit, private: Boolean, onDone: () -> Unit) {
+        kit.sheet(if (private) "New private note" else "New note", if (private) "Protected with your App Lock PIN" else null) { panel, dialog ->
+            val textField = multilineField(kit, "Write your note…", "")
+            val folderField = kit.field("Folder (General, Work, Ideas…)", "General")
+            val tagField = kit.field("Tag (optional)", "")
+            val colorRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(4), 0, 0) }
             var selectedColor = "default"
-            listOf("default" to "Default", "yellow" to "Yellow", "green" to "Green", "blue" to "Blue", "pink" to "Pink").forEach { (colorId, label) ->
-                colorRow.addView(kit.chip(label, colorId == selectedColor) { selectedColor = colorId }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+            fun paintColors() {
+                colorRow.removeAllViews()
+                listOf("default" to "Default", "yellow" to "Amber", "green" to "Mint", "blue" to "Sky", "pink" to "Rose").forEach { (colorId, label) ->
+                    colorRow.addView(kit.chip(label, colorId == selectedColor) {
+                        selectedColor = colorId
+                        paintColors()
+                    }, LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(6) })
+                }
             }
+            paintColors()
             panel.addView(textField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(tagField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(folderField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+            panel.addView(tagField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(kit.hscroll(colorRow), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(kit.buttonRow(
                 kit.quietButton("Cancel") { dialog.dismiss() },
-                kit.primaryButton("Save") {
+                kit.primaryButton("Save note") {
                     val text = textField.text.toString().trim()
                     if (text.isEmpty()) {
-                        android.widget.Toast.makeText(host, "Write something", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(host, "Write something first", android.widget.Toast.LENGTH_SHORT).show()
                         return@primaryButton
                     }
-                    createNoteWithText(host, text, tagField.text.toString().trim().ifBlank { "General" }, folderField.text.toString().trim().ifBlank { "General" }, private, selectedColor, false) { onDone() }
+                    createNoteWithText(
+                        host,
+                        text,
+                        tagField.text.toString().trim().ifBlank { "General" },
+                        folderField.text.toString().trim().ifBlank { "General" },
+                        private,
+                        selectedColor,
+                        false
+                    ) { onDone() }
                     dialog.dismiss()
                 }
             ))
         }
     }
 
-    private fun createChecklistNote(host: Activity, kit: OeaKit, onDone: () -> Unit) {
-        kit.sheet("New checklist", "Todo with checkboxes — tap items to toggle in viewer") { panel, dialog ->
-            val titleField = kit.field("Title", "")
-            val itemsField = kit.field("Items (one per line, e.g., Buy milk\nCall mom)", "")
+    private fun createChecklistNote(host: Activity, kit: OeaAppKit, onDone: () -> Unit) {
+        kit.sheet("New checklist", "Put one item on each line") { panel, dialog ->
+            val titleField = kit.field("List title", "")
+            val itemsField = multilineField(kit, "Buy groceries\nCall Alex\nSend invoice", "")
             panel.addView(titleField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(itemsField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(kit.buttonRow(
                 kit.quietButton("Cancel") { dialog.dismiss() },
-                kit.primaryButton("Create checklist") {
+                kit.primaryButton("Create list") {
                     val title = titleField.text.toString().trim().ifBlank { "Checklist" }
-                    val items = itemsField.text.toString().lineSequence().filter { it.isNotBlank() }.map { "[ ] $it" }.joinToString("\n")
-                    val fullText = "$title\n$items"
+                    val items = itemsField.text.toString().lineSequence().map { it.trim() }.filter { it.isNotBlank() }.map { "[ ] $it" }.joinToString("\n")
+                    val fullText = if (items.isBlank()) title else "$title\n$items"
                     createNoteWithText(host, fullText, "checklist", "General", false, "default", true) { onDone() }
                     dialog.dismiss()
                 }
@@ -349,88 +462,117 @@ object OeaNotesApp {
         createNoteWithText(host, text, tag, "General", private, "default", false, onDone)
     }
 
-    private fun showNoteDetail(host: Activity, kit: OeaKit, note: Note, onDone: () -> Unit) {
-        kit.sheet(note.text.lineSequence().firstOrNull()?.take(30) ?: "Note", SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(note.updated))) { panel, dialog ->
-            // Render rich text
-            val textView = kit.text(renderMarkdown(note.text), 16f, kit.palette.text).apply { setLineSpacing(kit.dpf(3f), 1f); setPadding(kit.dp(4), kit.dp(8), kit.dp(4), kit.dp(12)) }
-            panel.addView(textView)
-            if (note.tag.isNotBlank()) {
-                panel.addView(kit.text("Tag: ${note.tag} • Folder: ${note.folder} • Color: ${note.color}", 13f, kit.palette.textSecondary).apply { setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(8)) })
-            }
-            if (note.checklist) {
-                // Render checklist items tappable
-                val checklistItems = note.text.lineSequence().drop(1).filter { it.trim().startsWith("[") }.toList()
-                if (checklistItems.isNotEmpty()) {
-                    kit.sectionTitle(panel, "Checklist")
-                    val g = kit.group(panel)
-                    checklistItems.forEach { item ->
-                        val checked = item.trim().startsWith("[x]", true)
-                        val label = item.replace(Regex("^\\[.?\\]\\s*"), "")
-                        kit.row(g, if (checked) R.drawable.oic_check_circle_fill else R.drawable.oic_circle, label, if (checked) "Done" else "Todo") {
-                            // Toggle
-                            val newText = note.text.replace(item, if (checked) item.replace("[x]", "[ ]", true) else item.replace("[ ]", "[x]"))
-                            updateNote(host, note, newText)
-                            dialog.dismiss()
+    private fun showNoteDetail(host: Activity, kit: OeaAppKit, initialNote: Note, onDone: () -> Unit) {
+        var note = initialNote
+        kit.sheet(note.text.lineSequence().firstOrNull()?.take(36) ?: "Note", SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(note.updated))) { panel, dialog ->
+            if (!note.checklist) {
+                val textView = kit.text(renderMarkdown(note.text), 15.5f, kit.palette.text).apply {
+                    setLineSpacing(kit.dpf(3f), 1f)
+                    setPadding(kit.dp(14), kit.dp(12), kit.dp(14), kit.dp(12))
+                    background = kit.rounded(kit.palette.card, 18, kit.palette.stroke, 1)
+                }
+                panel.addView(textView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+            } else {
+                val listGroup = kit.group(panel)
+                fun paintChecklist() {
+                    listGroup.removeAllViews()
+                    val lines = note.text.lines().toMutableList()
+                    lines.forEachIndexed { idx, raw ->
+                        if (idx == 0 || !raw.trim().startsWith("[")) return@forEachIndexed
+                        val checked = raw.trim().startsWith("[x]", true)
+                        val label = raw.replace(Regex("^\\s*\\[.?\\]\\s*"), "")
+                        kit.row(listGroup, if (checked) R.drawable.oic_check_circle_fill else R.drawable.oic_circle, label, if (checked) "Completed" else "To do") {
+                            lines[idx] = if (checked) "[ ] $label" else "[x] $label"
+                            val updatedText = lines.joinToString("\n")
+                            note = note.copy(text = updatedText, updated = System.currentTimeMillis())
+                            updateNoteFull(host, note, note)
+                            paintChecklist()
                             onDone()
                         }
                     }
                 }
+                paintChecklist()
             }
-            panel.addView(kit.buttonRow(
-                kit.quietButton(if (note.pinned) "Unpin" else "Pin") {
-                    togglePin(host, note)
+
+            val metaParts = buildList {
+                add(note.folder.ifBlank { "General" })
+                if (note.tag.isNotBlank() && note.tag != "General") add("#${note.tag}")
+                if (note.reminder > 0L) add("Reminder ${SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(Date(note.reminder))}")
+            }
+            panel.addView(kit.text(metaParts.joinToString(" · "), 12.5f, kit.palette.textSecondary).apply {
+                setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(10))
+            })
+
+            val actionsGroup = kit.group(panel)
+            kit.row(actionsGroup, R.drawable.oic_edit, "Edit note", null, chevron = true) {
+                dialog.dismiss()
+                kit.sheet("Edit note", null) { editPanel, editDialog ->
+                    val editor = multilineField(kit, "Note", note.text)
+                    editPanel.addView(editor, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+                    editPanel.addView(kit.buttonRow(
+                        kit.quietButton("Cancel") { editDialog.dismiss() },
+                        kit.primaryButton("Save") {
+                            val t = editor.text.toString().trim()
+                            if (t.isEmpty()) return@primaryButton
+                            updateNote(host, note, t)
+                            editDialog.dismiss()
+                            onDone()
+                        }
+                    ))
+                }
+            }
+            kit.row(actionsGroup, R.drawable.oic_push_pin, if (note.pinned) "Unpin note" else "Pin to top", null) {
+                togglePin(host, note)
+                dialog.dismiss()
+                onDone()
+            }
+            kit.row(
+                actionsGroup,
+                R.drawable.oic_alarm,
+                "Reminder",
+                if (note.reminder > 0L) SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(note.reminder)) else "None",
+                value = if (note.reminder > 0L) "Clear" else "Set",
+                chevron = note.reminder <= 0L
+            ) {
+                if (note.reminder > 0L) {
+                    updateNoteFull(host, note, note.copy(reminder = 0L))
                     dialog.dismiss()
                     onDone()
-                },
-                kit.tonalButton("Edit") {
-                    dialog.dismiss()
-                    kit.prompt("Edit note", null, "Note", note.text) { newText ->
-                        val t = newText.trim()
-                        if (t.isEmpty()) return@prompt "Cannot be empty"
-                        updateNote(host, note, t)
-                        onDone()
-                        null
-                    }
-                },
-                kit.quietButton("Delete", R.drawable.oic_delete) {
-                    dialog.dismiss()
-                    kit.confirm("Delete note?", "Removed from this phone", "Delete", destructive = true) {
-                        deleteNote(host, note)
+                } else {
+                    val cal = java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 1) }
+                    kit.pickTime("Note reminder", "Choose when to be reminded", cal.get(java.util.Calendar.HOUR_OF_DAY), 0) { h, m ->
+                        val target = java.util.Calendar.getInstance().apply {
+                            set(java.util.Calendar.HOUR_OF_DAY, h)
+                            set(java.util.Calendar.MINUTE, m)
+                            set(java.util.Calendar.SECOND, 0)
+                            if (timeInMillis <= System.currentTimeMillis()) add(java.util.Calendar.DAY_OF_YEAR, 1)
+                        }
+                        updateNoteFull(host, note, note.copy(reminder = target.timeInMillis))
+                        dialog.dismiss()
                         onDone()
                     }
                 }
-            ))
-            panel.addView(kit.buttonRow(
-                kit.quietButton(if (note.archived) "Unarchive" else "Archive") {
+            }
+            if (!note.private) {
+                kit.row(actionsGroup, R.drawable.oic_folder, if (note.archived) "Move out of archive" else "Archive note", null) {
                     toggleArchive(host, note)
                     dialog.dismiss()
                     onDone()
-                },
-                kit.tonalButton("Reminder") {
-                    kit.prompt("Reminder", "HH:mm or timestamp", "Reminder", note.reminder.toString()) { input ->
-                        val rem = input.toLongOrNull() ?: 0L
-                        updateNoteFull(host, note, note.copy(reminder = rem))
-                        dialog.dismiss()
+                }
+            }
+            kit.row(actionsGroup, R.drawable.oic_share_filled, "Share", null) {
+                try { host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, note.text), "Share note")) } catch (_: Throwable) {}
+            }
+            panel.addView(
+                kit.button("Delete note", kit.palette.cardHigh, kit.palette.danger, R.drawable.oic_delete) {
+                    dialog.dismiss()
+                    kit.confirm("Delete note?", "This permanently removes the note from your device.", "Delete", destructive = true) {
+                        deleteNote(host, note)
                         onDone()
-                        null
                     }
                 },
-                kit.tonalButton("Share") {
-                    try { host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, note.text), "Share note")) } catch (_: Throwable) {}
-                }
-            ))
-            panel.addView(kit.tonalButton("Set color", R.drawable.oic_palette) {
-                kit.sheet("Note color", null) { p2, d2 ->
-                    listOf("default", "yellow", "green", "blue", "pink").forEach { colorId ->
-                        kit.row(kit.group(p2), R.drawable.oic_palette, colorId.replaceFirstChar { it.uppercase() }, null) {
-                            d2.dismiss()
-                            updateNoteFull(host, note, note.copy(color = colorId))
-                            dialog.dismiss()
-                            onDone()
-                        }
-                    }
-                }
-            }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) })
+                LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(6) }
+            )
         }
     }
 

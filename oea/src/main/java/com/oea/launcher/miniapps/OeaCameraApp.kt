@@ -396,12 +396,21 @@ object OeaCameraApp {
         // The icon has to be tinted here too: setTextColor leaves a compound
         // drawable at whatever colour the chip was born with.
         fun styleChip(view: TextView, selected: Boolean) {
-            val foreground = if (selected) palette.onAccent else palette.text
+            val foreground = if (selected) palette.onAccent else Color.WHITE
             view.setTextColor(foreground)
-            view.background = kit.ripple(kit.rounded(if (selected) palette.accent else palette.cardHigh, 18), 18)
+            view.background = kit.ripple(
+                kit.rounded(
+                    if (selected) palette.accent else 0xC8161A22.toInt(),
+                    18,
+                    if (selected) 0 else 0x38FFFFFF,
+                    if (selected) 0 else 1
+                ),
+                18
+            )
             view.compoundDrawablesRelative.forEach { drawable -> drawable?.setTint(foreground) }
         }
 
+        com.oea.launcher.ui.OeaInsets.edgeToEdge(host.window, lightBars = false)
         val root = FrameLayout(host).apply { setBackgroundColor(Color.BLACK) }
 
         val cameraGranted = host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -450,7 +459,7 @@ object OeaCameraApp {
                 }
             }, LinearLayout.LayoutParams(-1, dp(50)))
             column.addView(
-                kit.tonalButton("Open system camera", R.drawable.oic_photo_library) {
+                kit.button("Open system camera", 0xC81C212B.toInt(), Color.WHITE, R.drawable.oic_photo_library) {
                     openSystemCamera(host, captureTarget, if (externalCapture && host.intent?.action == MediaStore.ACTION_VIDEO_CAPTURE) REQUEST_SYSTEM_VIDEO else REQUEST_SYSTEM_PHOTO)
                 },
                 LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) }

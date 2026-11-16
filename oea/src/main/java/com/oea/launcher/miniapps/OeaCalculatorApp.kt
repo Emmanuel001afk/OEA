@@ -8,6 +8,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.oea.launcher.R
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaType
@@ -55,347 +56,434 @@ object OeaCalculatorApp {
     }
 
     fun build(host: Activity, palette: OeaPalette): View {
-        val kit = OeaKit(host, palette)
+        val kit = OeaAppKit(host, palette)
         val prefs = prefs(host)
         var expression = ""
         var result = ""
         var mode = runCatching { CalcMode.valueOf(prefs.getString(KEY_MODE, "STANDARD") ?: "STANDARD") }.getOrDefault(CalcMode.STANDARD)
         var isDeg = prefs.getBoolean(KEY_DEG, true)
         var memory = prefs.getString(KEY_MEMORY, "0")?.toDoubleOrNull() ?: 0.0
+        var rebuildMode: () -> Unit = {}
 
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-
-        // Header with mode selector
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("Calculator", 20f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
-        column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-
-        val modeBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        fun renderModeBar() {
-            modeBar.removeAllViews()
-            CalcMode.values().forEach { m ->
-                modeBar.addView(kit.chip(m.label, m == mode) {
-                    mode = m
-                    prefs.edit().putString(KEY_MODE, m.name).apply()
-                    (host as? OeaMiniAppActivity)?.refresh()
-                }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
-            }
+        val indexBack = host.miniIndexBack()
+        val navItems = listOf(
+            OeaAppKit.NavItem(CalcMode.STANDARD.name, "Standard", R.drawable.oic_calculate),
+            OeaAppKit.NavItem(CalcMode.SCIENTIFIC.name, "Scientific", R.drawable.oic_insights),
+            OeaAppKit.NavItem(CalcMode.CONVERTER.name, "Convert", R.drawable.oic_splitscreen),
+            OeaAppKit.NavItem(CalcMode.GRAPHING.name, "Graph", R.drawable.oic_show_chart)
+        )
+        val shell = kit.appShell(
+            title = "Calculator",
+            navItems = navItems,
+            initialNav = if (mode == CalcMode.PROGRAMMER) CalcMode.STANDARD.name else mode.name,
+            onBack = indexBack
+        ) { id ->
+            mode = runCatching { CalcMode.valueOf(id) }.getOrDefault(CalcMode.STANDARD)
+            prefs.edit().putString(KEY_MODE, mode.name).apply()
+            rebuildMode()
         }
-        renderModeBar()
-        column.addView(kit.hscroll(modeBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+        val column = shell.body
+
+        host.miniBackHook = {
+            if (mode == CalcMode.PROGRAMMER) {
+                mode = CalcMode.STANDARD
+                prefs.edit().putString(KEY_MODE, mode.name).apply()
+                rebuildMode()
+                true
+            } else false
+        }
 
         // Display
-        val display = kit.text("", 34f, palette.text, OeaType.light).apply {
+        val display = kit.text("0", 42f, palette.text, OeaType.light).apply {
             gravity = Gravity.END
-            setPadding(kit.dp(18), kit.dp(16), kit.dp(18), kit.dp(4))
+            setPadding(kit.dp(20), kit.dp(22), kit.dp(20), kit.dp(4))
             setLineSpacing(kit.dpf(2f), 1f)
+            setFontFeatureSettings("tnum")
         }
-        val hint = kit.text("", 14f, palette.textTertiary).apply {
+        val hint = kit.text("", 15f, palette.textSecondary).apply {
             gravity = Gravity.END
-            setPadding(kit.dp(18), 0, kit.dp(18), kit.dp(10))
+            setPadding(kit.dp(20), 0, kit.dp(20), kit.dp(16))
             maxLines = 2
+            setFontFeatureSettings("tnum")
         }
         val card = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
-            background = kit.rounded(palette.card, 22, palette.stroke, 1)
+            background = kit.rounded(palette.card, 24, palette.stroke, 1)
             addView(display, LinearLayout.LayoutParams(-1, -2))
             addView(hint, LinearLayout.LayoutParams(-1, -2))
+            isClickable = true
+            setOnLongClickListener {
+                copy(host, result.ifEmpty { expression.ifEmpty { "0" } })
+                true
+            }
         }
         column.addView(card, LinearLayout.LayoutParams(-1, -2))
 
-        val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(0, kit.dp(10), 0, 0) }
+        val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(0, kit.dp(12), 0, 0) }
         column.addView(content)
 
         fun show() {
             display.text = expression.ifEmpty { "0" }
-            hint.text = if (result.isEmpty()) {
-                when (mode) {
-                    CalcMode.STANDARD -> "Tap = to calculate • Memory: ${format(memory)}"
-                    CalcMode.SCIENTIFIC -> "Scientific: sin cos tan log ln √ ^ π e ! • ${if (isDeg) "DEG" else "RAD"} • Memory: ${format(memory)}"
-                    CalcMode.PROGRAMMER -> "Programmer: BIN HEX OCT DEC • AND OR XOR NOT • Memory: ${format(memory)}"
-                    CalcMode.CONVERTER -> "Converter: length, weight, temp, etc."
-                    CalcMode.GRAPHING -> "Graphing: enter y = f(x), e.g., sin(x), x^2"
+            display.textSize = when {
+                expression.length > 18 -> 26f
+                expression.length > 12 -> 33f
+                else -> 42f
+            }
+            val live = if (result.isEmpty() && expression.length >= 2 && expression.any { it in "+−×÷^%!" }) {
+                val evaluated = when (mode) {
+                    CalcMode.PROGRAMMER -> ProgrammerEvaluator.evaluate(expression)
+                    else -> Evaluator.evaluate(expression, isDeg)
                 }
-            } else "= $result"
+                evaluated?.let { format(it) }?.takeIf { it != expression }
+            } else null
+            hint.text = when {
+                result.isNotEmpty() -> "= $result"
+                live != null -> "= $live"
+                memory != 0.0 -> "M = ${format(memory)}" + if (mode == CalcMode.SCIENTIFIC) " · ${if (isDeg) "DEG" else "RAD"}" else ""
+                mode == CalcMode.SCIENTIFIC -> if (isDeg) "Degrees" else "Radians"
+                mode == CalcMode.PROGRAMMER -> "HEX (0x) · BIN (0b) · OCT (0o) · DEC"
+                else -> ""
+            }
         }
 
-        // Tape
-        val tapeBox = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-        fun renderTape() {
-            tapeBox.removeAllViews()
+        fun openTapeSheet() {
             val lines = prefs.getString(KEY_TAPE, "").orEmpty().lineSequence().filter { it.isNotBlank() }.toList()
-            if (lines.isEmpty()) {
-                kit.note(tapeBox, "Tape empty. Every result saved here. Tap line to copy.")
-                return
-            }
-            val group = kit.group(tapeBox)
-            lines.take(20).forEach { line ->
-                val row = LinearLayout(host).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(kit.dp(14), kit.dp(11), kit.dp(14), kit.dp(11))
-                    isClickable = true
-                    setOnClickListener { copy(host, line) }
+            kit.sheet("Calculation history", if (lines.isEmpty()) "Recent answers appear here" else "Tap a line to reuse its answer, or copy it") { panel, dialog ->
+                if (lines.isEmpty()) {
+                    kit.note(panel, "No calculations recorded yet.")
+                } else {
+                    val list = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+                    val group = kit.group(list)
+                    lines.take(30).forEach { line ->
+                        val expr = line.substringBefore(" = ").trim()
+                        val ans = line.substringAfter(" = ", "").trim()
+                        kit.row(group, R.drawable.oic_history, ans.ifEmpty { line }, if (ans.isNotEmpty()) expr else null, value = "Use") {
+                            if (ans.isNotEmpty()) {
+                                expression = ans
+                                result = ""
+                                show()
+                            } else {
+                                copy(host, line)
+                            }
+                            dialog.dismiss()
+                        }
+                    }
+                    panel.addView(kit.boundedScroll(list, 0.52f))
+                    panel.addView(
+                        kit.button("Clear history", palette.cardHigh, palette.danger, R.drawable.oic_delete) {
+                            prefs.edit().remove(KEY_TAPE).apply()
+                            dialog.dismiss()
+                        },
+                        LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(10) }
+                    )
                 }
-                row.addView(kit.text(line, 14f, kit.palette.textSecondary).apply { maxLines = 2 }, LinearLayout.LayoutParams(0, -2, 1f))
-                group.addView(row)
             }
-            kit.note(tapeBox, "Tap line to copy • Memory: ${format(memory)} • ${lines.size} entries")
+        }
+
+        shell.bar.addAction(R.drawable.oic_file_copy, "Copy result") {
+            copy(host, result.ifEmpty { expression.ifEmpty { "0" } })
+        }
+        shell.bar.addAction(R.drawable.oic_history, "History") { openTapeSheet() }
+        shell.bar.addAction(R.drawable.oic_more_vert, "Calculator options") {
+            kit.actions("Calculator options", null, listOf(
+                OeaAppKit.Action(R.drawable.oic_developer_mode, "Programmer mode", "HEX, BIN, OCT and bitwise logic") {
+                    mode = CalcMode.PROGRAMMER
+                    prefs.edit().putString(KEY_MODE, mode.name).apply()
+                    rebuildMode()
+                },
+                OeaAppKit.Action(R.drawable.oic_tune, "Angle unit", if (isDeg) "Degrees (DEG) · Tap for Radians" else "Radians (RAD) · Tap for Degrees") {
+                    isDeg = !isDeg
+                    prefs.edit().putBoolean(KEY_DEG, isDeg).apply()
+                    show()
+                },
+                OeaAppKit.Action(R.drawable.oic_delete, "Clear memory", "Stored value: ${format(memory)}") {
+                    memory = 0.0
+                    prefs.edit().putString(KEY_MEMORY, "0").apply()
+                    show()
+                }
+            ))
         }
 
         fun press(key: String) {
             when (key) {
-                "C" -> { expression = ""; result = "" }
-                "⌫" -> if (expression.isNotEmpty()) expression = expression.dropLast(1)
+                "AC", "C" -> { expression = ""; result = "" }
+                "⌫" -> {
+                    if (expression.isNotEmpty()) expression = expression.dropLast(1)
+                    result = ""
+                }
+                "( )" -> {
+                    val open = expression.count { it == '(' }
+                    val close = expression.count { it == ')' }
+                    val last = expression.lastOrNull()
+                    expression += if (open > close && (last != null && (last.isDigit() || last == ')' || last == 'π' || last == 'e'))) ")" else "("
+                    result = ""
+                }
                 "=" -> {
                     val value = when (mode) {
                         CalcMode.PROGRAMMER -> ProgrammerEvaluator.evaluate(expression)
                         else -> Evaluator.evaluate(expression, isDeg)
                     }
-                    result = when {
-                        expression.isBlank() -> ""
-                        value == null -> "error"
-                        else -> format(value)
-                    }
-                    if (value != null) {
-                        prefs.edit().putString(KEY_TAPE, (("$expression = ${format(value)}") + "\n" + prefs.getString(KEY_TAPE, "").orEmpty()).trim().lineSequence().take(TAPE_LIMIT).joinToString("\n")).apply()
+                    if (expression.isBlank()) {
+                        result = ""
+                    } else if (value == null) {
+                        result = "Error"
+                    } else {
+                        val formatted = format(value)
+                        prefs.edit().putString(
+                            KEY_TAPE,
+                            (("$expression = $formatted") + "\n" + prefs.getString(KEY_TAPE, "").orEmpty())
+                                .trim().lineSequence().take(TAPE_LIMIT).joinToString("\n")
+                        ).apply()
+                        result = ""
+                        expression = formatted
                     }
                 }
                 "MC" -> { memory = 0.0; prefs.edit().putString(KEY_MEMORY, "0").apply() }
-                "MR" -> { expression += format(memory) }
+                "MR" -> { expression += format(memory); result = "" }
                 "M+" -> { Evaluator.evaluate(expression, isDeg)?.let { memory += it; prefs.edit().putString(KEY_MEMORY, memory.toString()).apply() } }
                 "M-" -> { Evaluator.evaluate(expression, isDeg)?.let { memory -= it; prefs.edit().putString(KEY_MEMORY, memory.toString()).apply() } }
                 "DEG/RAD" -> { isDeg = !isDeg; prefs.edit().putBoolean(KEY_DEG, isDeg).apply() }
                 else -> {
+                    result = ""
                     if (expression.length < 200) expression += key
                 }
             }
             show()
-            renderTape()
         }
 
-        // Build keypad based on mode
-        content.removeAllViews()
-        when (mode) {
-            CalcMode.STANDARD -> {
-                val rows = listOf(
-                    listOf("MC", "MR", "M+", "M-"),
-                    listOf("C", "(", ")", "÷"),
-                    listOf("7", "8", "9", "×"),
-                    listOf("4", "5", "6", "−"),
-                    listOf("1", "2", "3", "+"),
-                    listOf("0", ".", "%", "=")
-                )
-                rows.forEach { keys ->
-                    val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(5), 0, 0) }
-                    keys.forEachIndexed { idx, key ->
-                        row.addView(keyButton(host, kit, key) { press(key) }, LinearLayout.LayoutParams(0, kit.dp(58), 1f).apply { if (idx > 0) leftMargin = kit.dp(6) })
-                    }
-                    content.addView(row)
-                }
+        rebuildMode = {
+            if (mode != CalcMode.PROGRAMMER) shell.nav?.select(mode.name, notify = false)
+            shell.bar.setBack(
+                if (mode == CalcMode.PROGRAMMER) ({
+                    mode = CalcMode.STANDARD
+                    prefs.edit().putString(KEY_MODE, mode.name).apply()
+                    rebuildMode()
+                }) else indexBack
+            )
+            shell.bar.title.text = when (mode) {
+                CalcMode.STANDARD -> "Calculator"
+                CalcMode.SCIENTIFIC -> "Scientific"
+                CalcMode.PROGRAMMER -> "Programmer"
+                CalcMode.CONVERTER -> "Convert"
+                CalcMode.GRAPHING -> "Graph"
             }
-            CalcMode.SCIENTIFIC -> {
-                val rows = listOf(
-                    listOf("DEG/RAD", "sin(", "cos(", "tan(", "log(", "ln("),
-                    listOf("√(", "π", "e", "^", "!", "C"),
-                    listOf("(", ")", "%", "÷", "⌫", "="),
-                    listOf("7", "8", "9", "×", "MC", "MR"),
-                    listOf("4", "5", "6", "−", "M+", "M-"),
-                    listOf("1", "2", "3", "+", "0", ".")
-                )
-                rows.forEach { keys ->
-                    val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(5), 0, 0) }
-                    keys.forEachIndexed { idx, key ->
-                        if (key.trim().isEmpty()) {
-                            row.addView(View(host), LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { if (idx > 0) leftMargin = kit.dp(4) })
-                        } else {
-                            row.addView(keyButton(host, kit, key, small = true) { press(key) }, LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { if (idx > 0) leftMargin = kit.dp(4) })
-                        }
-                    }
-                    content.addView(row)
-                }
-            }
-            CalcMode.PROGRAMMER -> {
-                val rows = listOf(
-                    listOf("HEX", "DEC", "OCT", "BIN"),
-                    listOf("A", "B", "C", "D", "E", "F"),
-                    listOf("7", "8", "9", "AND", "OR", "C"),
-                    listOf("4", "5", "6", "XOR", "NOT", "⌫"),
-                    listOf("1", "2", "3", "<<", ">>", "="),
-                    listOf("0", ".", "+", "−", "×", "÷")
-                )
-                rows.forEach { keys ->
-                    val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(5), 0, 0) }
-                    keys.forEachIndexed { idx, key ->
-                        row.addView(keyButton(host, kit, key, small = true) { press(key) }, LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { if (idx > 0) leftMargin = kit.dp(4) })
-                    }
-                    content.addView(row)
-                }
-                kit.note(content, "Programmer mode: supports BIN (0b), HEX (0x), OCT (0o), DEC. Bitwise ops work on integers.")
-            }
-            CalcMode.CONVERTER -> {
-                // One family at a time, one multiply against the family's base unit.
-                // Currency is in the same list but its factors are the user's numbers,
-                // because OEA has no network in this mode and will not pretend otherwise.
-                var fam = OeaUnits.LENGTH
-                var fromIndex = 1
-                var toIndex = 0
-
-                val amount = kit.field("Amount", "1", numeric = true)
-                val out = android.widget.TextView(host).apply {
-                    textSize = 30f
-                    setTextColor(palette.text)
-                    setPadding(kit.dp(2), kit.dp(6), kit.dp(2), kit.dp(2))
-                }
-                val body = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-
-                fun names(f: OeaUnits.Family): List<String> =
-                    if (OeaUnits.isCurrency(f)) OeaUnits.CURRENCY_CODES else f.all.map { it.symbol }
-
-                fun convert(): Double? {
-                    val value = amount.text.toString().replace(',', '.').toDoubleOrNull() ?: return null
-                    val names = names(fam)
-                    return when {
-                        OeaUnits.isCurrency(fam) ->
-                            OeaUnits.convertCurrency(host, names[fromIndex], names[toIndex], value)
-                        OeaUnits.isTemperature(fam) ->
-                            OeaUnits.temperature(value, names[fromIndex], names[toIndex])
-                        else -> value * fam.all[fromIndex].toBase / fam.all[toIndex].toBase
-                    }
-                }
-
-                fun label(): String {
-                    val value = convert() ?: return "Enter a number"
-                    val names = names(fam)
-                    return "${OeaUnits.show(value)} ${names[toIndex]}"
-                }
-
-                fun refresh() {
-                    out.text = label()
-                }
-
-                fun pick(which: Int) {
-                    val names = names(fam)
-                    val chosen = if (which == 0) fromIndex else toIndex
-                    kit.choose(
-                        if (which == 0) "Convert from" else "Convert to",
-                        fam.name,
-                        names,
-                        chosen.coerceIn(0, names.size - 1)
-                    ) { index ->
-                        if (which == 0) fromIndex = index else toIndex = index
-                        refresh()
-                    }
-                }
-
-                fun build() {
-                    body.removeAllViews()
-                    val chips = LinearLayout(host).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        setPadding(0, kit.dp(2), 0, kit.dp(6))
-                    }
-                    OeaUnits.families.forEach { f ->
-                        chips.addView(
-                            kit.chip(f.name, f.name == fam.name) {
-                                fam = f
-                                fromIndex = if (OeaUnits.isCurrency(f)) 0 else 1
-                                toIndex = 0
-                                build()
-                            },
-                            LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(6) }
+            card.visibility = if (mode == CalcMode.CONVERTER || mode == CalcMode.GRAPHING) View.GONE else View.VISIBLE
+            content.removeAllViews()
+            when (mode) {
+                CalcMode.STANDARD -> {
+                    val memRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, kit.dp(4)) }
+                    listOf("MC", "MR", "M+", "M-").forEachIndexed { idx, key ->
+                        memRow.addView(
+                            keyButton(host, kit, key, small = true) { press(key) },
+                            LinearLayout.LayoutParams(0, kit.dp(42), 1f).apply { if (idx > 0) leftMargin = kit.dp(8) }
                         )
                     }
-                    body.addView(kit.hscroll(chips))
-                    body.addView(amount, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-                    body.addView(out, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(4) })
-                    val group = kit.group(body)
-                    kit.row(group, R.drawable.oic_arrow_back, "From", fam.name, value = names(fam)[fromIndex.coerceIn(0, names(fam).lastIndex)]) { pick(0) }
-                    kit.row(group, R.drawable.oic_chevron_right, "To", fam.name, value = names(fam)[toIndex.coerceIn(0, names(fam).lastIndex)]) { pick(1) }
-                    kit.row(group, R.drawable.oic_splitscreen, "Swap the pair", "Same family, other direction", chevron = false) {
-                        val t = fromIndex
-                        fromIndex = toIndex
-                        toIndex = t
-                        build()
+                    content.addView(memRow)
+                    val rows = listOf(
+                        listOf("AC", "( )", "%", "÷"),
+                        listOf("7", "8", "9", "×"),
+                        listOf("4", "5", "6", "−"),
+                        listOf("1", "2", "3", "+"),
+                        listOf("0", ".", "⌫", "=")
+                    )
+                    rows.forEach { keys ->
+                        val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(8), 0, 0) }
+                        keys.forEachIndexed { idx, key ->
+                            row.addView(
+                                keyButton(host, kit, key) { press(key) },
+                                LinearLayout.LayoutParams(0, kit.dp(62), 1f).apply { if (idx > 0) leftMargin = kit.dp(8) }
+                            )
+                        }
+                        content.addView(row)
                     }
-                    kit.row(group, R.drawable.oic_calculate, "Send to the display", "Puts the answer where the keypad is", chevron = false) {
+                }
+                CalcMode.SCIENTIFIC -> {
+                    val rows = listOf(
+                        listOf("DEG/RAD", "sin(", "cos(", "tan(", "log(", "ln("),
+                        listOf("√(", "π", "e", "^", "!", "AC"),
+                        listOf("(", ")", "%", "÷", "⌫", "="),
+                        listOf("7", "8", "9", "×", "MC", "MR"),
+                        listOf("4", "5", "6", "−", "M+", "M-"),
+                        listOf("1", "2", "3", "+", "0", ".")
+                    )
+                    rows.forEach { keys ->
+                        val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(6), 0, 0) }
+                        keys.forEachIndexed { idx, key ->
+                            row.addView(
+                                keyButton(host, kit, key, small = true) { press(key) },
+                                LinearLayout.LayoutParams(0, kit.dp(52), 1f).apply { if (idx > 0) leftMargin = kit.dp(5) }
+                            )
+                        }
+                        content.addView(row)
+                    }
+                }
+                CalcMode.PROGRAMMER -> {
+                    val rows = listOf(
+                        listOf("0x", "0b", "0o", "(", ")", "AC"),
+                        listOf("A", "B", "C", "D", "E", "F"),
+                        listOf("7", "8", "9", "AND", "OR", "⌫"),
+                        listOf("4", "5", "6", "XOR", "NOT", "÷"),
+                        listOf("1", "2", "3", "<<", ">>", "×"),
+                        listOf("0", ".", "+", "−", "%", "=")
+                    )
+                    rows.forEach { keys ->
+                        val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(6), 0, 0) }
+                        keys.forEachIndexed { idx, key ->
+                            val label = if (key == "C") "C" else key
+                            row.addView(
+                                keyButton(host, kit, label, small = true) {
+                                    if (key == "C") {
+                                        result = ""
+                                        if (expression.length < 200) expression += "C"
+                                        show()
+                                    } else press(key)
+                                },
+                                LinearLayout.LayoutParams(0, kit.dp(50), 1f).apply { if (idx > 0) leftMargin = kit.dp(5) }
+                            )
+                        }
+                        content.addView(row)
+                    }
+                }
+                CalcMode.CONVERTER -> {
+                    var fam = OeaUnits.LENGTH
+                    var fromIndex = 1
+                    var toIndex = 0
+
+                    val amount = kit.field("Enter value", "1", numeric = true)
+                    val out = TextView(host).apply {
+                        textSize = 34f
+                        typeface = OeaType.light
+                        setTextColor(palette.text)
+                        gravity = Gravity.END
+                        setPadding(kit.dp(18), kit.dp(16), kit.dp(18), kit.dp(16))
+                        background = kit.rounded(palette.card, 22, palette.stroke, 1)
+                        setFontFeatureSettings("tnum")
+                    }
+                    val body = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+
+                    fun names(f: OeaUnits.Family): List<String> =
+                        if (OeaUnits.isCurrency(f)) OeaUnits.CURRENCY_CODES else f.all.map { it.symbol }
+
+                    fun convert(): Double? {
+                        val value = amount.text.toString().replace(',', '.').toDoubleOrNull() ?: return null
+                        val names = names(fam)
+                        return when {
+                            OeaUnits.isCurrency(fam) ->
+                                OeaUnits.convertCurrency(host, names[fromIndex], names[toIndex], value)
+                            OeaUnits.isTemperature(fam) ->
+                                OeaUnits.temperature(value, names[fromIndex], names[toIndex])
+                            else -> value * fam.all[fromIndex].toBase / fam.all[toIndex].toBase
+                        }
+                    }
+
+                    fun refreshConv() {
                         val value = convert()
-                        if (value == null) {
-                            android.widget.Toast.makeText(host, "Nothing to send — the amount is not a number", android.widget.Toast.LENGTH_SHORT).show()
-                        } else {
+                        val names = names(fam)
+                        out.text = if (value == null) "—" else "${OeaUnits.show(value)} ${names[toIndex]}"
+                    }
+
+                    fun buildConv() {
+                        body.removeAllViews()
+                        val chips = LinearLayout(host).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            setPadding(0, 0, 0, kit.dp(10))
+                        }
+                        OeaUnits.families.forEach { f ->
+                            chips.addView(
+                                kit.chip(f.name, f.name == fam.name) {
+                                    fam = f
+                                    fromIndex = if (OeaUnits.isCurrency(f)) 0 else 1
+                                    toIndex = 0
+                                    buildConv()
+                                },
+                                LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(6) }
+                            )
+                        }
+                        body.addView(kit.hscroll(chips))
+                        body.addView(out, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+                        body.addView(amount, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+                        val group = kit.group(body)
+                        kit.row(group, R.drawable.oic_arrow_back, "From", fam.name, value = names(fam)[fromIndex.coerceIn(0, names(fam).lastIndex)], chevron = true) {
                             val names = names(fam)
-                            expression = "1 ${names[fromIndex]} → ${names[toIndex]} (${fam.name.lowercase(java.util.Locale.getDefault())})"
-                            result = OeaUnits.show(value)
-                            show()
-                            renderTape()
+                            kit.choose("Convert from", fam.name, names, fromIndex.coerceIn(0, names.lastIndex)) { index ->
+                                fromIndex = index
+                                buildConv()
+                            }
                         }
+                        kit.row(group, R.drawable.oic_chevron_right, "To", fam.name, value = names(fam)[toIndex.coerceIn(0, names(fam).lastIndex)], chevron = true) {
+                            val names = names(fam)
+                            kit.choose("Convert to", fam.name, names, toIndex.coerceIn(0, names.lastIndex)) { index ->
+                                toIndex = index
+                                buildConv()
+                            }
+                        }
+                        kit.row(group, R.drawable.oic_splitscreen, "Swap units", null, chevron = false) {
+                            val t = fromIndex
+                            fromIndex = toIndex
+                            toIndex = t
+                            buildConv()
+                        }
+                        kit.row(group, R.drawable.oic_calculate, "Send to Calculator", "Use result in Standard mode", chevron = true) {
+                            val value = convert()
+                            if (value == null) {
+                                android.widget.Toast.makeText(host, "Enter a valid number first", android.widget.Toast.LENGTH_SHORT).show()
+                            } else {
+                                expression = OeaUnits.show(value)
+                                result = ""
+                                mode = CalcMode.STANDARD
+                                prefs.edit().putString(KEY_MODE, mode.name).apply()
+                                rebuildMode()
+                            }
+                        }
+                        if (OeaUnits.isCurrency(fam)) {
+                            kit.row(group, R.drawable.oic_tune, "Edit exchange rates", "Saved offline on this device", chevron = true) {
+                                editCurrencyRates(host, kit, palette)
+                            }
+                            kit.note(body, "Currency rates are saved offline — update them whenever you need current bank figures.")
+                        }
+                        refreshConv()
                     }
-                    if (OeaUnits.isCurrency(fam)) {
-                        kit.row(group, R.drawable.oic_tune, "Set your own rates", "OEA stores these; it never fetches them", chevron = false) {
-                            editCurrencyRates(host, kit, palette)
-                            build()
-                        }
-                        kit.note(
-                            body,
-                            "Rates are the numbers you left in this screen (or OEA's rounded approximations if you changed none). They are held on the phone, not looked up, so they will not move with the market — update them when your bank does."
+
+                    amount.addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                        override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                        override fun afterTextChanged(t: android.text.Editable?) = refreshConv()
+                    })
+                    content.addView(body)
+                    buildConv()
+                }
+                CalcMode.GRAPHING -> {
+                    val graphCard = LinearLayout(host).apply {
+                        orientation = LinearLayout.VERTICAL
+                        background = kit.rounded(palette.card, 22, palette.stroke, 1)
+                        setPadding(kit.dp(8), kit.dp(8), kit.dp(8), kit.dp(8))
+                    }
+                    val graphView = GraphView(host, palette)
+                    graphCard.addView(graphView, LinearLayout.LayoutParams(-1, kit.dp(250)))
+                    content.addView(graphCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+                    val funcField = kit.field("y = f(x), e.g. sin(x) or x^2", "sin(x)")
+                    content.addView(funcField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+                    val presets = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, kit.dp(8)) }
+                    listOf("sin(x)", "cos(x)", "x^2", "x^3-2×x", "√(x)").forEach { fn ->
+                        presets.addView(
+                            kit.chip(fn, false) {
+                                funcField.setText(fn)
+                                graphView.setFunction(fn)
+                            },
+                            LinearLayout.LayoutParams(-2, kit.dp(38)).apply { rightMargin = kit.dp(6) }
                         )
-                    } else {
-                        kit.note(body, "${fam.name} converts against one base unit (${fam.base.label}), exactly. Temperature is the only family with an offset, and it is computed as one.")
                     }
-                    refresh()
-                }
-
-                amount.addTextChangedListener(object : android.text.TextWatcher {
-                    override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
-                    override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
-                    override fun afterTextChanged(t: android.text.Editable?) = refresh()
-                })
-                content.addView(body)
-                build()
-            }
-            CalcMode.GRAPHING -> {
-                val graphView = GraphView(host, palette)
-                content.addView(graphView, LinearLayout.LayoutParams(-1, kit.dp(240)).apply { bottomMargin = kit.dp(12) })
-                val funcField = kit.field("Function y = f(x), e.g., sin(x), x^2, x^3 - 2*x", "sin(x)")
-                content.addView(funcField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-                content.addView(kit.primaryButton("Plot", R.drawable.oic_show_chart) {
-                    val func = funcField.text.toString().trim()
-                    if (func.isNotBlank()) graphView.setFunction(func)
-                }, LinearLayout.LayoutParams(-1, kit.dp(48)))
-                kit.note(content, "Graphing unique: plots y = f(x) with Canvas, pinch zoom, pan. Supports sin, cos, tan, log, sqrt, ^, etc.")
-                // Still show basic keypad for quick input
-                val rows = listOf(
-                    listOf("x", "^", "sin(", "cos(", "C"),
-                    listOf("7", "8", "9", "÷", "⌫"),
-                    listOf("4", "5", "6", "×", "="),
-                    listOf("1", "2", "3", "−", "0"),
-                    listOf("0", ".", "(", ")", "+")
-                )
-                rows.forEach { keys ->
-                    val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(5), 0, 0) }
-                    keys.forEachIndexed { idx, key ->
-                        row.addView(keyButton(host, kit, key) { press(key) }, LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { if (idx > 0) leftMargin = kit.dp(6) })
-                    }
-                    content.addView(row)
+                    content.addView(kit.hscroll(presets))
+                    content.addView(kit.primaryButton("Plot function", R.drawable.oic_show_chart) {
+                        val func = funcField.text.toString().trim()
+                        if (func.isNotBlank()) graphView.setFunction(func)
+                    }, LinearLayout.LayoutParams(-1, kit.dp(48)))
                 }
             }
+            show()
         }
-
-        val actions = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(14), 0, 0) }
-        actions.addView(kit.tonalButton("Backspace", R.drawable.oic_arrow_back) { press("⌫") }, LinearLayout.LayoutParams(-2, kit.dp(46)))
-        actions.addView(kit.quietButton("Clear tape", R.drawable.oic_delete) {
-            prefs.edit().remove(KEY_TAPE).apply()
-            renderTape()
-        }, LinearLayout.LayoutParams(-2, kit.dp(46)).apply { leftMargin = kit.dp(8) })
-        actions.addView(kit.quietButton("Copy result", R.drawable.oic_text_fields) {
-            copy(host, result.ifEmpty { expression })
-        }, LinearLayout.LayoutParams(-2, kit.dp(46)).apply { leftMargin = kit.dp(8) })
-        column.addView(actions, LinearLayout.LayoutParams(-1, -2))
-
-        kit.sectionTitle(column, "Tape & Memory")
-        column.addView(tapeBox, LinearLayout.LayoutParams(-1, -2))
-        renderTape()
-        show()
-        return column
+        rebuildMode()
+        return shell.root
     }
 
     private class GraphView(ctx: Context, val palette: OeaPalette) : View(ctx) {
@@ -502,23 +590,27 @@ object OeaCalculatorApp {
 
     private fun keyButton(host: Activity, kit: OeaKit, key: String, small: Boolean = false, onClick: () -> Unit): View {
         val isEquals = key == "="
-        val isOperator = key in setOf("÷", "×", "−", "+", "C", "(", ")", "%", "^", "!", "⌫", "AND", "OR", "XOR", "NOT", "<<", ">>") || key.startsWith("sin") || key.startsWith("cos") || key.startsWith("tan") || key.startsWith("log") || key.startsWith("ln") || key.startsWith("√")
-        val isMemory = key.startsWith("M") || key == "DEG/RAD" || key in setOf("HEX", "DEC", "OCT", "BIN")
+        val isClear = key == "AC"
+        val isOperator = key in setOf("÷", "×", "−", "+", "( )", "(", ")", "%", "^", "!", "⌫", "AND", "OR", "XOR", "NOT", "<<", ">>") ||
+            key.startsWith("sin") || key.startsWith("cos") || key.startsWith("tan") || key.startsWith("log") || key.startsWith("ln") || key.startsWith("√")
+        val isMemory = key.startsWith("M") || key == "DEG/RAD" || key in setOf("0x", "0b", "0o")
         val text = TextView(host).apply {
             this.text = key
             gravity = Gravity.CENTER
             textSize = when {
-                small -> 13f
+                small && key.length > 3 -> 11.5f
+                small -> 13.5f
                 key.length > 3 -> 13f
-                key.length > 1 -> 15f
-                else -> 21f
+                key.length > 1 -> 16f
+                else -> 22f
             }
-            typeface = if (isEquals) OeaType.medium else OeaType.regular
+            typeface = if (isEquals || isOperator || isClear) OeaType.medium else OeaType.regular
             setTextColor(
                 when {
                     isEquals -> kit.palette.onAccent
-                    isMemory -> kit.palette.accent
-                    isOperator -> kit.palette.accent
+                    isClear -> kit.palette.danger
+                    isMemory -> kit.palette.text
+                    isOperator -> kit.palette.onAccentSoft
                     else -> kit.palette.text
                 }
             )
@@ -526,18 +618,24 @@ object OeaCalculatorApp {
                 kit.rounded(
                     when {
                         isEquals -> kit.palette.accent
-                        isMemory -> kit.palette.cardHigh
+                        isMemory || isClear -> kit.palette.cardHigh
                         isOperator -> kit.palette.accentSoft
                         else -> kit.palette.card
                     },
-                    18,
+                    20,
                     if (isEquals) 0 else kit.palette.stroke,
                     if (isEquals) 0 else 1
                 ),
-                18
+                20
             )
             isClickable = true
-            contentDescription = key
+            isFocusable = true
+            contentDescription = when (key) {
+                "⌫" -> "Backspace"
+                "AC" -> "Clear all"
+                "( )" -> "Brackets"
+                else -> key
+            }
             setOnClickListener { onClick() }
         }
         return text

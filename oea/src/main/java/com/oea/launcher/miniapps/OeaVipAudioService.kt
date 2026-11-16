@@ -146,7 +146,7 @@ class OeaVipAudioService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val builder = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(if (status.playing) R.drawable.ic_oea_video else R.drawable.ic_oea_video)
+            .setSmallIcon(if (status.playing) R.drawable.oic_play_arrow else R.drawable.oic_pause)
             .setContentTitle(status.title.ifBlank { "VIP" })
             .setContentText(if (status.subtitle.isNullOrBlank()) "Playing" else status.subtitle)
             .setContentIntent(open)

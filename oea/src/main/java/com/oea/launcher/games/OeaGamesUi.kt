@@ -24,12 +24,13 @@ object OeaGamesTheme {
     fun palette(): OeaPalette {
         val background = Color.rgb(8, 9, 13)
         val card = Color.rgb(20, 22, 30)
+        val accentSoft = OeaTheme.blend(card, ACCENT, 0.22f)
         return OeaPalette(
             dark = true,
             accent = ACCENT,
-            onAccent = Color.rgb(20, 12, 4),
-            accentSoft = OeaTheme.blend(card, ACCENT, 0.2f),
-            onAccentSoft = OeaTheme.blend(Color.WHITE, ACCENT, 0.3f),
+            onAccent = OeaTheme.onColor(ACCENT),
+            accentSoft = accentSoft,
+            onAccentSoft = OeaTheme.onColor(accentSoft),
             background = background,
             drawer = background,
             card = card,

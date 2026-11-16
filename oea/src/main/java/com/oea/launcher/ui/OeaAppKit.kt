@@ -139,86 +139,439 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         val title: TextView,
         val subtitle: TextView,
         val actions: LinearLayout,
-        val lead: View?
+        val lead: View?,
+        private val leadSlot: FrameLayout? = null,
+        private val titleBox: LinearLayout? = null
     ) {
-        fun setSubtitle(value: String) {
-            subtitle.text = value
-            subtitle.visibility = if (value.isBlank()) View.GONE else View.VISIBLE
+        fun setSubtitle(value: String?) {
+            val clean = value.orEmpty()
+            subtitle.text = clean
+            subtitle.visibility = if (clean.isBlank()) View.GONE else View.VISIBLE
+        }
+
+        /** Adds a round action to this app bar, in order. */
+        fun addAction(
+            iconRes: Int,
+            description: String,
+            active: Boolean = false,
+            onToggle: ((Boolean) -> Unit)? = null,
+            onClick: () -> Unit
+        ): View {
+            if (onToggle != null) {
+                val toggle = OeaIconToggle(context).apply {
+                    circleSizeDp = 48
+                    icon = icon(iconRes, if (active) palette.onAccent else palette.text)
+                    selectedBg = palette.accent
+                    selectedTint = palette.onAccent
+                    idleBg = palette.card
+                    tint = palette.text
+                    this.selected = active
+                    contentDescription = description
+                    isEnabled = true
+                    onChanged = { onToggle(selected) }
+                }
+                actions.addView(toggle, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
+                return toggle
+            }
+            val button = circleIconButton(iconRes, description, palette.card, palette.text) { onClick() }
+            actions.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
+            return button
+        }
+
+        /** Shows a back button only when the user has drilled into a sub-view. */
+        fun setBack(onBack: (() -> Unit)?) {
+            val slot = leadSlot ?: return
+            slot.removeAllViews()
+            if (onBack != null) {
+                slot.visibility = View.VISIBLE
+                slot.addView(
+                    circleIconButton(R.drawable.oic_arrow_back, "Back", palette.card, palette.text) { onBack() },
+                    FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER)
+                )
+            } else {
+                slot.visibility = View.GONE
+            }
+            (titleBox?.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.marginStart = if (onBack != null) dp(10) else dp(6)
+                titleBox.layoutParams = lp
+            }
         }
     }
 
     /**
-     * The bar of a full-bleed screen: a title, a live count under it, and round
-     * actions on the right. It pads itself for the status bar and the cutout, so a
-     * notch never eats a button.
+     * The bar of a full-bleed screen: a clean Clock-style title, an optional
+     * live count under it, and round actions on the right. It pads itself for
+     * the status bar and the cutout so a notch never eats a button.
      */
-    fun appBar(title: String, subtitle: String, onBack: (() -> Unit)? = null): AppBar {
+    fun appBar(title: String, subtitle: String = "", onBack: (() -> Unit)? = null, insetTop: Boolean = true): AppBar {
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+            minimumHeight = dp(62)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(8), dp(12), dp(8))
         }
         val top = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val big = text(title, 28f, palette.text, OeaType.regular).apply {
-            letterSpacing = -0.02f
+        val big = text(title, 25f, palette.text, OeaType.medium).apply {
+            letterSpacing = -0.01f
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        val sub = text(subtitle, 12f, palette.textSecondary, OeaType.medium).apply {
+        val sub = text(subtitle, 12f, palette.textSecondary, OeaType.regular).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(dp(3), dp(2), dp(3), 0)
+            setPadding(0, dp(2), 0, 0)
+            visibility = if (subtitle.isBlank()) View.GONE else View.VISIBLE
+        }
+        val leadSlot = FrameLayout(context).apply {
+            visibility = if (onBack != null) View.VISIBLE else View.GONE
         }
         val lead: View? = onBack?.let {
-            circleIconButton(R.drawable.oic_arrow_back, "Back", palette.card, palette.text) { it() }
-                .apply { layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)) }
+            circleIconButton(R.drawable.oic_arrow_back, "Back", palette.card, palette.text) { it() }.also { btn ->
+                leadSlot.addView(btn, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER))
+            }
+        }
+        val titleBox = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(big, LinearLayout.LayoutParams(-1, -2))
+            addView(sub, LinearLayout.LayoutParams(-1, -2))
         }
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        if (lead != null) top.addView(lead)
+        top.addView(leadSlot, LinearLayout.LayoutParams(dp(48), dp(48)))
         top.addView(
-            LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(big, LinearLayout.LayoutParams(-1, -2))
-                addView(sub, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(1) })
-            },
-            LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = if (lead != null) dp(11) else dp(4) }
+            titleBox,
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = if (onBack != null) dp(10) else dp(6) }
         )
         top.addView(actions, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(6) })
         bar.addView(top)
-        bar.setOnApplyWindowInsetsListener { v, insets ->
-            val bars = OeaInsets.bars(insets)
-            v.setPadding(v.paddingLeft, bars[1] + dp(8), v.paddingRight, v.paddingBottom)
-            insets
+        if (insetTop) {
+            bar.setOnApplyWindowInsetsListener { v, insets ->
+                val bars = OeaInsets.bars(insets)
+                v.setPadding(v.paddingLeft, bars[1] + dp(8), v.paddingRight, v.paddingBottom)
+                insets
+            }
         }
-        return AppBar(bar, big, sub, actions, lead)
+        return AppBar(bar, big, sub, actions, lead, leadSlot, titleBox)
     }
 
-    /** Adds a round action to an app bar, in order. */
-    fun AppBar.addAction(iconRes: Int, description: String, active: Boolean = false, onToggle: ((Boolean) -> Unit)? = null, onClick: () -> Unit): View {
-        if (onToggle != null) {
-            val toggle = OeaIconToggle(context).apply {
-                circleSizeDp = 48
-                icon = icon(iconRes, if (active) palette.onAccent else palette.text)
-                selectedBg = palette.accent
-                selectedTint = palette.onAccent
-                idleBg = palette.card
-                tint = palette.text
-                this.selected = active
-                contentDescription = description
-                isEnabled = true
-                onChanged = { onToggle(selected) }
-            }
-            actions.addView(toggle, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
-            return toggle
+    // ------------------------------------------------------------- bottom nav
+
+    data class NavItem(val id: String, val label: String, val iconRes: Int)
+
+    /**
+     * Pinned bottom destination bar modelled after Clock: icon inside a tonal
+     * active capsule, crisp label beneath, and a subtle hairline separating it
+     * from scrolling content.
+     */
+    inner class BottomNav(
+        val root: LinearLayout,
+        private val bar: LinearLayout,
+        private val items: List<NavItem>,
+        private val onSelect: (String) -> Unit
+    ) {
+        var selected: String = items.firstOrNull()?.id.orEmpty()
+            private set
+
+        fun select(id: String, notify: Boolean = false) {
+            val changed = selected != id
+            selected = id
+            render()
+            if (changed && notify) onSelect(id)
         }
-        val button = circleIconButton(iconRes, description, palette.card, palette.text) { onClick() }
-        actions.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
-        return button
+
+        fun render() {
+            bar.removeAllViews()
+            items.forEach { item ->
+                val active = item.id == selected
+                val slot = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    isClickable = true
+                    isFocusable = true
+                    background = ripple(null, 16)
+                    contentDescription = if (active) "${item.label}, selected" else item.label
+                    setOnClickListener {
+                        selected = item.id
+                        render()
+                        onSelect(item.id)
+                    }
+                }
+                val pill = FrameLayout(context).apply {
+                    background = if (active) rounded(palette.accentSoft, 15) else null
+                }
+                val iconColor = if (active) {
+                    if (OeaTheme.contrast(palette.accent, palette.accentSoft) >= 3.2f) palette.accent else palette.onAccentSoft
+                } else {
+                    palette.textSecondary
+                }
+                pill.addView(
+                    ImageView(context).apply {
+                        setImageDrawable(icon(item.iconRes, iconColor))
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                    },
+                    FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER)
+                )
+                slot.addView(pill, LinearLayout.LayoutParams(dp(54), dp(30)))
+                val labelColor = if (active) {
+                    if (OeaTheme.contrast(palette.accent, palette.card) >= 3.5f) palette.accent else palette.text
+                } else {
+                    palette.textSecondary
+                }
+                slot.addView(
+                    text(item.label, 11f, labelColor, if (active) OeaType.medium else OeaType.regular).apply {
+                        gravity = Gravity.CENTER
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    },
+                    LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) }
+                )
+                bar.addView(slot, LinearLayout.LayoutParams(0, dp(60), 1f))
+            }
+        }
+    }
+
+    fun bottomNav(items: List<NavItem>, initial: String = items.firstOrNull()?.id.orEmpty(), onSelect: (String) -> Unit): BottomNav {
+        val wrapper = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(palette.card)
+        }
+        wrapper.addView(
+            View(context).apply { setBackgroundColor(palette.stroke) },
+            LinearLayout.LayoutParams(-1, maxOf(1, dp(1)))
+        )
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(5), dp(4), dp(5))
+        }
+        wrapper.addView(row, LinearLayout.LayoutParams(-1, -2))
+        return BottomNav(wrapper, row, items, onSelect).apply { select(initial, notify = false) }
+    }
+
+    /** Full-bleed Clock-style app shell: calm top header, scrolling body, optional bottom bar. */
+    inner class AppShell(
+        val root: LinearLayout,
+        val bar: AppBar,
+        val headerExtras: LinearLayout,
+        val scroll: android.widget.ScrollView,
+        val body: LinearLayout,
+        val nav: BottomNav?
+    )
+
+    fun appShell(
+        title: String,
+        subtitle: String = "",
+        navItems: List<NavItem> = emptyList(),
+        initialNav: String = navItems.firstOrNull()?.id.orEmpty(),
+        onBack: (() -> Unit)? = null,
+        onNav: (String) -> Unit = {}
+    ): AppShell {
+        val root = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(palette.background)
+        }
+        val bar = appBar(title, subtitle, onBack = onBack, insetTop = false)
+        root.addView(bar.root, LinearLayout.LayoutParams(-1, -2))
+        val extras = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(extras, LinearLayout.LayoutParams(-1, -2))
+        val scroll = android.widget.ScrollView(context).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+        }
+        val body = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(4), dp(18), dp(24))
+        }
+        scroll.addView(body, FrameLayout.LayoutParams(-1, -2))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val nav = if (navItems.isNotEmpty()) {
+            bottomNav(navItems, initialNav) { id ->
+                scroll.scrollTo(0, 0)
+                onNav(id)
+            }.also { root.addView(it.root, LinearLayout.LayoutParams(-1, -2)) }
+        } else null
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = OeaInsets.bars(insets)
+            root.setPadding(bars[0], bars[1], bars[2], bars[3])
+            insets
+        }
+        return AppShell(root, bar, extras, scroll, body, nav)
+    }
+
+    // ------------------------------------------------------------- time wheel
+
+    inner class TimeWheel(
+        val root: LinearLayout,
+        private val readTime: () -> Pair<Int, Int>,
+        private val writeTime: (Int, Int) -> Unit
+    ) {
+        val hour: Int get() = readTime().first
+        val minute: Int get() = readTime().second
+        fun set(hour24: Int, minute: Int) = writeTime(hour24, minute)
+    }
+
+    /**
+     * High-contrast time wheels (24-hour or 12-hour with AM/PM) drawn entirely
+     * from [palette], with tap-on-centre to enter exact digits by keyboard.
+     */
+    fun timeWheel(
+        initialHour24: Int,
+        initialMinute: Int,
+        is24h: Boolean = android.text.format.DateFormat.is24HourFormat(context),
+        onChange: (hour24: Int, minute: Int) -> Unit = { _, _ -> }
+    ): TimeWheel {
+        val initialH = initialHour24.coerceIn(0, 23)
+        val initialM = initialMinute.coerceIn(0, 59)
+        val outer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val captions = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(4))
+        }
+        fun captionCell(label: String) = text(label, 11f, palette.textSecondary, OeaType.medium).apply {
+            gravity = Gravity.CENTER
+            letterSpacing = 0.06f
+        }
+        captions.addView(captionCell("HOUR"), LinearLayout.LayoutParams(0, -2, 1f))
+        captions.addView(View(context), LinearLayout.LayoutParams(dp(22), 1))
+        captions.addView(captionCell("MIN"), LinearLayout.LayoutParams(0, -2, 1f))
+        if (!is24h) {
+            captions.addView(View(context), LinearLayout.LayoutParams(dp(8), 1))
+            captions.addView(captionCell("AM/PM"), LinearLayout.LayoutParams(dp(76), -2))
+        }
+        outer.addView(captions, LinearLayout.LayoutParams(-1, -2))
+
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val hourWheel = OeaWheelPicker(
+            context = context,
+            palette = palette,
+            min = if (is24h) 0 else 1,
+            max = if (is24h) 23 else 12,
+            initial = if (is24h) initialH else ((initialH % 12).let { if (it == 0) 12 else it }),
+            wrap = true,
+            label = "Hour",
+            formatter = { if (is24h) String.format(java.util.Locale.getDefault(), "%02d", it) else it.toString() }
+        )
+        val minuteWheel = OeaWheelPicker(
+            context = context,
+            palette = palette,
+            min = 0,
+            max = 59,
+            initial = initialM,
+            wrap = true,
+            label = "Minute",
+            formatter = { String.format(java.util.Locale.getDefault(), "%02d", it) }
+        )
+        val periodWheel = if (!is24h) {
+            OeaWheelPicker(
+                context = context,
+                palette = palette,
+                min = 0,
+                max = 1,
+                initial = if (initialH >= 12) 1 else 0,
+                wrap = false,
+                label = "Period",
+                formatter = { if (it == 0) "AM" else "PM" }
+            )
+        } else null
+
+        fun currentHour24(): Int {
+            if (is24h) return hourWheel.value.coerceIn(0, 23)
+            val h12 = hourWheel.value.coerceIn(1, 12) % 12
+            return if ((periodWheel?.value ?: 0) == 1) h12 + 12 else h12
+        }
+
+        fun applyTime(h24: Int, m: Int) {
+            val ch = h24.coerceIn(0, 23)
+            val cm = m.coerceIn(0, 59)
+            if (is24h) {
+                hourWheel.setValue(ch, notify = false)
+            } else {
+                hourWheel.setValue((ch % 12).let { if (it == 0) 12 else it }, notify = false)
+                periodWheel?.setValue(if (ch >= 12) 1 else 0, notify = false)
+            }
+            minuteWheel.setValue(cm, notify = false)
+            onChange(ch, cm)
+        }
+
+        hourWheel.onValueChanged = { onChange(currentHour24(), minuteWheel.value) }
+        minuteWheel.onValueChanged = { onChange(currentHour24(), minuteWheel.value) }
+        periodWheel?.onValueChanged = { onChange(currentHour24(), minuteWheel.value) }
+
+        if (context is Activity) {
+            hourWheel.onCenterTap = {
+                val rangeHint = if (is24h) "0–23" else "1–12"
+                prompt("Set hour", "Enter an hour ($rangeHint)", rangeHint, hourWheel.value.toString(), numeric = true, confirmLabel = "Set") { raw ->
+                    val parsed = raw.trim().toIntOrNull()
+                    val valid = if (is24h) parsed != null && parsed in 0..23 else parsed != null && parsed in 1..12
+                    if (!valid) "Enter a number from $rangeHint"
+                    else {
+                        hourWheel.setValue(parsed!!, notify = true)
+                        null
+                    }
+                }
+            }
+            minuteWheel.onCenterTap = {
+                prompt("Set minute", "Enter minutes (0–59)", "00–59", String.format(java.util.Locale.US, "%02d", minuteWheel.value), numeric = true, confirmLabel = "Set") { raw ->
+                    val parsed = raw.trim().toIntOrNull()
+                    if (parsed == null || parsed !in 0..59) "Enter a number from 0 to 59"
+                    else {
+                        minuteWheel.setValue(parsed, notify = true)
+                        null
+                    }
+                }
+            }
+        }
+
+        row.addView(hourWheel, LinearLayout.LayoutParams(0, dp(152), 1f))
+        row.addView(
+            text(":", 28f, palette.text, OeaType.medium).apply { gravity = Gravity.CENTER },
+            LinearLayout.LayoutParams(dp(22), dp(152))
+        )
+        row.addView(minuteWheel, LinearLayout.LayoutParams(0, dp(152), 1f))
+        if (periodWheel != null) {
+            row.addView(View(context), LinearLayout.LayoutParams(dp(8), 1))
+            row.addView(periodWheel, LinearLayout.LayoutParams(dp(76), dp(152)))
+        }
+        outer.addView(row, LinearLayout.LayoutParams(-1, -2))
+        return TimeWheel(outer, { currentHour24() to minuteWheel.value }, ::applyTime)
+    }
+
+    /** Bottom sheet to choose a time with [timeWheel]. */
+    fun pickTime(
+        title: String,
+        subtitle: String? = null,
+        hour24: Int,
+        minute: Int,
+        is24h: Boolean = android.text.format.DateFormat.is24HourFormat(context),
+        confirmLabel: String = "Save",
+        onPicked: (hour24: Int, minute: Int) -> Unit
+    ) {
+        sheet(title, subtitle) { panel, dialog ->
+            val wheel = timeWheel(hour24, minute, is24h)
+            panel.addView(wheel.root, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            panel.addView(
+                buttonRow(
+                    quietButton("Cancel") { dialog.dismiss() },
+                    primaryButton(confirmLabel) {
+                        dialog.dismiss()
+                        onPicked(wheel.hour, wheel.minute)
+                    }
+                )
+            )
+        }
     }
 
     /** Swaps an app-bar button's icon without rebuilding the bar (a view model of one). */
@@ -372,6 +725,12 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         return ChipBar(hscroll(row), row)
     }
+
+    fun chipBar(options: List<Pair<String, String>>, selected: String = "", onPick: (String) -> Unit): View =
+        chipBar().apply {
+            this.onPick = onPick
+            setOptions(options, selected)
+        }.root
 
     // --------------------------------------------------------------------- states
 
@@ -839,7 +1198,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             }
     }
 
-    fun selectionBar(host: FrameLayout, buttons: List<Pair<Int, String>>, onCancel: () -> Unit): SelectionBar {
+    fun selectionBar(host: FrameLayout, buttons: List<Pair<Int, String>>, bottomClearanceDp: Int = 12, onCancel: () -> Unit): SelectionBar {
         val actionRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -885,7 +1244,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(2) }
         )
         host.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
-            setMargins(dp(12), 0, dp(12), dp(12))
+            setMargins(dp(12), 0, dp(12), dp(bottomClearanceDp))
         })
         return SelectionBar(bar, count, actionRow, allButton)
     }

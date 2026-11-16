@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.oea.launcher.R
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaType
@@ -95,138 +96,166 @@ object OeaVoiceApp {
     }
 
     fun build(host: Activity, palette: OeaPalette): View {
-        val kit = OeaKit(host, palette)
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("Voice", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(kit.iconBadge(R.drawable.oic_mic, palette.accentSoft, palette.onAccentSoft, 40))
-        column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
-
-        kit.note(column, "OEA's own voice screen: it drives Android's speech recogniser with its own UI and its own grammar of launcher commands, and prefers the offline recogniser when the phone has one. Nothing is uploaded unless the command is a web search. No recogniser on this phone? Type the command below — the same grammar answers.")
-
-        // Status
-        val statusCard = LinearLayout(host).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(kit.dp(16), kit.dp(14), kit.dp(16), kit.dp(14))
-            background = kit.rounded(palette.card, 22, palette.stroke, 1)
-        }
+        val kit = OeaAppKit(host, palette)
         val available = OeaSpeechEngine.isAvailable(host)
-        val hasPerm = OeaSpeechEngine.hasPermission(host)
-        statusCard.addView(kit.text("Recognizer: ${if (available) "Android's, in use" else "None on this phone — the typed line below runs the same grammar"}", 13f, palette.textSecondary))
-        statusCard.addView(kit.text("Permission: ${if (hasPerm) "Granted" else "Not granted — tap mic to request"}", 13f, palette.textSecondary).apply { setPadding(0, kit.dp(4), 0, 0) })
-        statusCard.addView(kit.text("Mode: ${if (available) "Offline preferred, online when it must" else "Text only"} • Language: ${java.util.Locale.getDefault().displayLanguage}", 12f, palette.textTertiary).apply { setPadding(0, kit.dp(4), 0, 0) })
-        column.addView(statusCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+        val lang = java.util.Locale.getDefault().displayLanguage
+        val shell = kit.appShell(
+            title = "Voice",
+            subtitle = if (available) "On-device commands · $lang" else "Typed commands · $lang",
+            onBack = host.miniIndexBack()
+        )
+        val column = shell.body
 
-        // The meter is the recogniser's own loudness, not a fake bouncing animation:
-        // it moves exactly when onRmsChanged says you are loud.
-        val meter = VoiceMeterView(host, palette)
-        column.addView(meter, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { bottomMargin = kit.dp(10) })
+        var isListening = false
+        var continuous = prefs(host).getBoolean(KEY_CONTINUOUS, false)
 
-        // Result area
+        val heroCard = LinearLayout(host).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(kit.dp(20), kit.dp(26), kit.dp(20), kit.dp(22))
+            background = kit.rounded(palette.card, 26, palette.stroke, 1)
+        }
+
+        val stateLabel = kit.text(
+            if (available) "Tap the microphone and speak" else "Type any launcher command below",
+            13f,
+            palette.textSecondary,
+            OeaType.medium
+        ).apply { gravity = Gravity.CENTER }
+
         val resultView = TextView(host).apply {
-            textSize = 16f
+            textSize = 20f
+            typeface = OeaType.regular
             setTextColor(palette.text)
-            setPadding(kit.dp(12), kit.dp(12), kit.dp(12), kit.dp(12))
-            background = kit.rounded(palette.cardHigh, 18, palette.stroke, 1)
-            text = "Tap mic and speak — try:\n• Open calculator\n• Search cats\n• Call mom\n• Set alarm\n• Play music\n• Turn on flashlight\n• Study mode\n• Change wallpaper"
+            gravity = Gravity.CENTER
+            setLineSpacing(kit.dpf(3f), 1f)
+            setPadding(kit.dp(8), kit.dp(10), kit.dp(8), kit.dp(12))
+            text = "“Open calculator”"
         }
-        column.addView(resultView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
 
-        val commandView = TextView(host).apply {
-            textSize = 13f
-            setTextColor(palette.textSecondary)
-            setPadding(kit.dp(12), kit.dp(8), kit.dp(12), kit.dp(8))
-            background = kit.rounded(palette.card, 16, palette.stroke, 1)
-            text = "Command: none"
+        val meter = VoiceMeterView(host, palette)
+
+        val micCircle = android.widget.FrameLayout(host).apply {
+            background = kit.ripple(kit.oval(palette.accent), 44)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Tap to speak"
         }
-        column.addView(commandView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+        val micIcon = android.widget.ImageView(host).apply {
+            setImageDrawable(kit.icon(R.drawable.oic_mic, palette.onAccent))
+        }
+        micCircle.addView(micIcon, android.widget.FrameLayout.LayoutParams(kit.dp(34), kit.dp(34), Gravity.CENTER))
 
-        // Mic button
-        val micBtn = kit.primaryButton("Tap to speak", R.drawable.oic_mic) {}
-        column.addView(micBtn, LinearLayout.LayoutParams(-1, kit.dp(56)).apply { bottomMargin = kit.dp(12) })
+        val commandBadge = kit.text("Ready", 12.5f, palette.onAccentSoft, OeaType.medium).apply {
+            gravity = Gravity.CENTER
+            setPadding(kit.dp(14), kit.dp(6), kit.dp(14), kit.dp(6))
+            background = kit.rounded(palette.accentSoft, 14)
+        }
 
-        // Command chips
+        heroCard.addView(stateLabel, LinearLayout.LayoutParams(-1, -2))
+        heroCard.addView(resultView, LinearLayout.LayoutParams(-1, -2))
+        heroCard.addView(meter, LinearLayout.LayoutParams(-1, kit.dp(44)).apply { bottomMargin = kit.dp(14) })
+        heroCard.addView(micCircle, LinearLayout.LayoutParams(kit.dp(80), kit.dp(80)).apply { bottomMargin = kit.dp(14) })
+        heroCard.addView(commandBadge, LinearLayout.LayoutParams(-2, -2))
+        column.addView(heroCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+
+        fun setMicVisual(active: Boolean) {
+            micCircle.background = kit.ripple(kit.oval(if (active) palette.danger else palette.accent), 44)
+            micCircle.contentDescription = if (active) "Stop listening" else "Tap to speak"
+            micIcon.setImageDrawable(kit.icon(if (active) R.drawable.oic_mic_off else R.drawable.oic_mic, if (active) com.oea.launcher.ui.OeaTheme.onColor(palette.danger) else palette.onAccent))
+        }
+
+        fun runPhrase(raw: String, speakAck: Boolean = false) {
+            val cleaned = raw.trim()
+            if (cleaned.isEmpty()) return
+            resultView.text = cleaned
+            val cmd = OeaSpeechEngine.parseCommand(host, cleaned)
+            if (cmd == null) {
+                commandBadge.text = "No matching command"
+                return
+            }
+            val label = cmd.type.name.replace('_', ' ').lowercase(java.util.Locale.getDefault())
+                .replaceFirstChar { it.uppercase() }
+            val executed = OeaSpeechEngine.executeCommand(host, cmd)
+            commandBadge.text = if (executed) "$label · Done" else "$label · Unavailable"
+            if (executed && speakAck) OeaSpeechEngine.speak(host, "Done")
+        }
+
+        kit.sectionTitle(column, "Quick commands")
         val chipsBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        column.addView(kit.hscroll(chipsBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
-        listOf("Open calculator", "Search cats", "Call mom", "Study mode", "Liquid mode", "Change wallpaper", "Turn on flashlight", "Set timer 5 minutes").forEach { example ->
+        listOf(
+            "Open calculator",
+            "Set timer 5 minutes",
+            "Study mode",
+            "Turn on flashlight",
+            "Change wallpaper",
+            "Open camera",
+            "Liquid mode"
+        ).forEach { example ->
             chipsBar.addView(kit.chip(example, false) {
-                resultView.text = example
-                val cmd = OeaSpeechEngine.parseCommand(host, example)
-                commandView.text = "Command: ${cmd?.type} • ${cmd?.query}"
-                if (cmd != null) {
-                    val executed = OeaSpeechEngine.executeCommand(host, cmd)
-                    commandView.text = "Command: ${cmd.type} • ${cmd.query} • Executed: $executed"
-                }
-            }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+                stateLabel.text = "Quick command"
+                runPhrase(example)
+            }, LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(6) })
         }
+        column.addView(kit.hscroll(chipsBar), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
 
-        // The same grammar, from the keyboard. This is not a demo box: every chip
-        // above and every line typed here goes through the identical parser, so
-        // "call mom" works whether it was said or typed.
-        kit.sectionTitle(column, "Type a command instead")
-        val typeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        val typedField = kit.field("open camera · search cats · call mom · 10 minute timer", "")
+        kit.sectionTitle(column, "Type a command")
+        val typeRow = LinearLayout(host).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val typedField = kit.field("e.g. open notes, set alarm, focus mode", "")
         typeRow.addView(typedField, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
         typeRow.addView(
-            kit.tonalButton("Run", R.drawable.oic_check) {
+            kit.primaryButton("Run", R.drawable.oic_send) {
                 val raw = typedField.text.toString().trim()
                 if (raw.isEmpty()) {
-                    android.widget.Toast.makeText(host, "Nothing to run", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(host, "Enter a command first", android.widget.Toast.LENGTH_SHORT).show()
                 } else {
-                    val cmd = OeaSpeechEngine.parseCommand(host, raw)
-                    resultView.text = raw
-                    if (cmd == null) {
-                        commandView.text = "Command: none matched — OEA will not guess"
-                        android.widget.Toast.makeText(host, "That is not one of OEA's commands", android.widget.Toast.LENGTH_SHORT).show()
-                    } else {
-                        val executed = OeaSpeechEngine.executeCommand(host, cmd)
-                        commandView.text = "Command: ${cmd.type} • ${cmd.query} • ${if (executed) "Run ✓" else "Nothing on this phone answered"}"
-                        if (executed) OeaSpeechEngine.speak(host, "Done")
-                    }
+                    stateLabel.text = "Typed command"
+                    runPhrase(raw, speakAck = true)
+                    typedField.setText("")
                     kit.hideKeyboard(typedField)
                 }
             },
-            LinearLayout.LayoutParams(-2, -2)
+            LinearLayout.LayoutParams(-2, kit.dp(48))
         )
-        column.addView(typeRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-
-        // Listener
-        var isListening = false
-        var continuous = prefs(host).getBoolean(KEY_CONTINUOUS, false)
-        // The switch is built further down, where the rest of that row lives, but the
-        // recogniser's error callback has to be able to switch it off — hence a holder.
-        val keepToggle = arrayOfNulls<com.oea.launcher.ui.OeaToggle>(1)
+        column.addView(typeRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
 
         fun listen() {
             if (isListening) return
-            // Re-read the grant: the first tap is often the one that answers the dialog.
             if (!OeaSpeechEngine.hasPermission(host)) {
                 try { host.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 5001) } catch (_: Throwable) {}
-                android.widget.Toast.makeText(host, "Grant microphone permission", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(host, "Allow microphone access to speak", android.widget.Toast.LENGTH_SHORT).show()
                 return
             }
             isListening = true
-            micBtn.text = "Listening… tap to stop"
-            resultView.text = "Listening…"
+            setMicVisual(true)
+            stateLabel.text = "Listening…"
+            commandBadge.text = "Speak now"
             OeaSpeechEngine.startListening(host, object : OeaSpeechEngine.Listener {
                 override fun onReady() {
-                    host.runOnUiThread { resultView.text = "Listening… speak now" }
+                    host.runOnUiThread {
+                        stateLabel.text = "Listening…"
+                        resultView.text = "Speak a command…"
+                    }
                 }
                 override fun onPartial(text: String) {
-                    host.runOnUiThread { resultView.text = text }
+                    host.runOnUiThread { if (text.isNotBlank()) resultView.text = text }
                 }
                 override fun onResult(text: String, command: OeaSpeechEngine.LauncherCommand?) {
                     host.runOnUiThread {
                         resultView.text = text
+                        stateLabel.text = "Heard"
                         if (command != null) {
-                            commandView.text = "Command: ${command.type} • ${command.query} • Confidence ${command.confidence}"
+                            val label = command.type.name.replace('_', ' ').lowercase(java.util.Locale.getDefault())
+                                .replaceFirstChar { it.uppercase() }
                             val executed = OeaSpeechEngine.executeCommand(host, command)
                             if (executed) {
-                                commandView.text = "Command: ${command.type} • ${command.query} • Executed ✓"
+                                commandBadge.text = "$label · Done"
                                 OeaSpeechEngine.speak(host, "Done")
                             } else {
-                                // If not executable, treat as search
+                                commandBadge.text = label
                                 if (command.type == OeaSpeechEngine.LauncherCommand.Type.SEARCH_WEB) {
                                     try {
                                         host.startActivity(Intent(Intent.ACTION_WEB_SEARCH).putExtra("query", command.query))
@@ -236,32 +265,23 @@ object OeaVoiceApp {
                                 }
                             }
                         } else {
-                            commandView.text = "Command: none — treated as search"
+                            commandBadge.text = "No matching command"
                         }
-                        micBtn.text = "Tap to speak"
                         isListening = false
-                        if (continuous) {
-                            if (com.oea.launcher.perf.OeaLowMode.active(host)) {
-                                commandView.text = "Command: done — keep-listening waits out LOW mode"
-                            } else {
-                                // One breath, then the ear opens again. This is the whole
-                                // of "continuous": it lives while this screen does.
-                                micBtn.postDelayed({ if (continuous) listen() }, 450L)
-                            }
+                        setMicVisual(false)
+                        if (continuous && !com.oea.launcher.perf.OeaLowMode.active(host)) {
+                            micCircle.postDelayed({ if (continuous && !host.isDestroyed) listen() }, 450L)
                         }
                     }
                 }
                 override fun onError(message: String) {
                     host.runOnUiThread {
-                        resultView.text = "Error: $message"
-                        // Never restart into an error: that is a loop that eats battery
-                        // and whistles at the phone.
+                        stateLabel.text = "Didn't catch that"
+                        commandBadge.text = message
                         continuous = false
                         prefs(host).edit().putBoolean(KEY_CONTINUOUS, false).apply()
-                        keepToggle[0]?.setChecked(false)
-                        commandView.text = "Try offline commands: open app, search, call, etc. · keep-listening stopped"
-                        micBtn.text = "Tap to speak"
                         isListening = false
+                        setMicVisual(false)
                     }
                 }
                 override fun onLevel(level: Float) {
@@ -270,65 +290,73 @@ object OeaVoiceApp {
                 override fun onStateChanged(state: OeaSpeechEngine.State) {
                     host.runOnUiThread {
                         meter.active = state == OeaSpeechEngine.State.LISTENING
-                        meter.caption = when (state) {
-                            OeaSpeechEngine.State.LISTENING -> "listening"
-                            OeaSpeechEngine.State.PROCESSING -> "making sense of it"
-                            OeaSpeechEngine.State.ERROR -> "the recogniser gave up"
-                            else -> "quiet"
+                        if (state == OeaSpeechEngine.State.PROCESSING) {
+                            stateLabel.text = "Processing…"
                         }
                     }
                 }
             }, preferOffline = true)
         }
 
-        micBtn.setOnClickListener {
+        micCircle.setOnClickListener {
             if (isListening) {
                 OeaSpeechEngine.stopListening()
-                micBtn.text = "Tap to speak"
                 isListening = false
+                setMicVisual(false)
+                stateLabel.text = "Stopped"
+                commandBadge.text = "Ready"
             } else {
                 listen()
             }
         }
 
-        // Continuous listening, honestly scoped: the recogniser is reopened after
-        // each command while this screen is up, and not at all in LOW mode.
-        val keepGroup = kit.group(column)
-        val keepRow = kit.switchRow(
-            keepGroup,
-            R.drawable.oic_mic,
-            "Keep listening",
-            "Reopens the ear after each command while this screen is open · off in LOW mode",
-            continuous
-        ) {
-            continuous = it
-            prefs(host).edit().putBoolean(KEY_CONTINUOUS, it).apply()
+        shell.bar.addAction(R.drawable.oic_volume_up, "Test spoken feedback") {
+            OeaSpeechEngine.speak(host, "OEA Voice is ready.")
         }
-        keepToggle[0] = keepRow
-        column.addView(kit.quietButton(if (continuous) "Listening stays on — stop it" else "Start listening again now", R.drawable.oic_play_arrow) {
-            if (continuous) {
-                continuous = false
-                prefs(host).edit().putBoolean(KEY_CONTINUOUS, false).apply()
-                keepToggle[0]?.setChecked(false, animate = false)
-            } else {
-                listen()
+        shell.bar.addAction(R.drawable.oic_more_vert, "Voice options") {
+            kit.sheet("Voice settings", "Recognition and spoken feedback") { panel, dialog ->
+                val g = kit.group(panel)
+                kit.switchRow(
+                    g,
+                    R.drawable.oic_mic,
+                    "Continuous listening",
+                    "Keep listening for follow-up commands while this screen is open",
+                    continuous
+                ) { value ->
+                    continuous = value
+                    prefs(host).edit().putBoolean(KEY_CONTINUOUS, value).apply()
+                }
+                kit.row(g, R.drawable.oic_volume_up, "Test voice feedback", "Play a sample spoken confirmation") {
+                    OeaSpeechEngine.speak(host, "OEA Voice is ready. Try saying open calculator.")
+                }
+                kit.row(g, R.drawable.oic_search, "Open Launcher Search", "Jump to universal search", chevron = true) {
+                    dialog.dismiss()
+                    try {
+                        host.startActivity(
+                            Intent(host, com.oea.launcher.OeaSystemToolsActivity::class.java)
+                                .putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "search")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } catch (_: Throwable) {}
+                }
+                kit.row(
+                    g,
+                    R.drawable.oic_info,
+                    "Speech engine",
+                    if (available) "Android recognizer (prefers offline packs)" else "Unavailable · typed commands active",
+                    value = if (OeaSpeechEngine.hasPermission(host)) "Mic on" else "Mic off",
+                    chevron = false
+                )
             }
-        }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) })
-
-        // TTS test
-        column.addView(kit.tonalButton("Test voice feedback (TTS)", R.drawable.oic_volume_up) {
-            OeaSpeechEngine.speak(host, "OEA Voice is ready. Try saying open calculator or search cats.")
-        }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
-
-        kit.note(column, "What OEA Voice is: its own screen, its own command grammar, the phone's recogniser underneath, and a preference for whatever offline recogniser the device offers. What it is not: a wake-word engine. Continuous listening here is a loop that restarts after each command while this screen is open and stops in LOW mode — the microphone is never held while OEA is in your pocket, because Android takes it back from a backgrounded app and OEA will not pretend otherwise. Bundling a speech model would add tens of megabytes to the APK for something the platform already has, so this build asks the platform instead and keeps the typed path as the honest fallback.")
-
-        // Integration with search
-        kit.sectionTitle(column, "Integrated with Search")
-        val searchGroup = kit.group(column)
-        kit.row(searchGroup, R.drawable.oic_search, "Voice search", "Tap mic in OEA search bar to use OEA Voice") {
-            try { host.startActivity(Intent(host, com.oea.launcher.OeaSystemToolsActivity::class.java).putExtra(com.oea.launcher.OeaSystemToolsActivity.EXTRA_SCREEN, "search").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
         }
 
-        return column
+        shell.root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) {
+                if (isListening) runCatching { OeaSpeechEngine.stopListening() }
+            }
+        })
+
+        return shell.root
     }
 }

@@ -149,8 +149,9 @@ object OeaTheme {
             cardHigh = blend(background, n800, 0.78f)
             text = sys(context, android.R.color.system_neutral1_50, dyn) ?: Color.rgb(242, 244, 247)
             textSecondary = sys(context, android.R.color.system_neutral2_200, dyn) ?: Color.rgb(170, 178, 190)
-            accentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_700, dyn)) ?: blend(background, accent, 0.28f)
-            onAccentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_100, dyn)) ?: blend(Color.WHITE, accent, 0.25f)
+            accentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_700, dyn)) ?: blend(background, accent, 0.26f)
+            val candidateSoft = (if (themed) null else sys(context, android.R.color.system_accent1_100, dyn)) ?: blend(Color.WHITE, accent, 0.22f)
+            onAccentSoft = if (contrast(candidateSoft, accentSoft) >= 4.5f) candidateSoft else onColor(accentSoft)
         } else {
             background = tint?.let { blend(Color.rgb(248, 249, 251), it, 0.07f) }
                 ?: sys(context, android.R.color.system_neutral1_10, dyn) ?: Color.rgb(246, 247, 250)
@@ -158,10 +159,11 @@ object OeaTheme {
             cardHigh = sys(context, android.R.color.system_neutral1_100, dyn) ?: Color.rgb(232, 235, 241)
             text = sys(context, android.R.color.system_neutral1_900, dyn) ?: Color.rgb(24, 27, 33)
             textSecondary = sys(context, android.R.color.system_neutral2_700, dyn) ?: Color.rgb(84, 92, 106)
-            accentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_100, dyn)) ?: blend(Color.WHITE, accent, 0.18f)
-            onAccentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_800, dyn)) ?: blend(Color.BLACK, accent, 0.55f)
+            accentSoft = (if (themed) null else sys(context, android.R.color.system_accent1_100, dyn)) ?: blend(Color.WHITE, accent, 0.16f)
+            val candidateSoft = (if (themed) null else sys(context, android.R.color.system_accent1_800, dyn)) ?: blend(Color.rgb(16, 20, 28), accent, 0.45f)
+            onAccentSoft = if (contrast(candidateSoft, accentSoft) >= 4.5f) candidateSoft else onColor(accentSoft)
         }
-        val onAccent = if (luminance(accent) > 0.45f) Color.rgb(16, 20, 28) else Color.WHITE
+        val onAccent = onColor(accent)
         return OeaPalette(
             dark = dark,
             accent = accent,
@@ -297,6 +299,19 @@ object OeaTheme {
         return (0.2126 * channel(Color.red(color)) + 0.7152 * channel(Color.green(color)) +
             0.0722 * channel(Color.blue(color))).toFloat()
     }
+
+    /** WCAG 2.1 contrast ratio between two opaque colors (1.0 to 21.0). */
+    fun contrast(first: Int, second: Int): Float {
+        val a = luminance(first)
+        val b = luminance(second)
+        val lighter = maxOf(a, b)
+        val darker = minOf(a, b)
+        return (lighter + 0.05f) / (darker + 0.05f)
+    }
+
+    /** Chooses dark or light ink by whichever has the stronger contrast on [surface]. */
+    fun onColor(surface: Int, darkInk: Int = Color.rgb(16, 20, 28), lightInk: Int = Color.WHITE): Int =
+        if (contrast(darkInk, surface) >= contrast(lightInk, surface)) darkInk else lightInk
 
     fun hsl(color: Int): FloatArray {
         val r = Color.red(color) / 255f

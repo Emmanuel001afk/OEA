@@ -14,9 +14,12 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.oea.launcher.R
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
+import com.oea.launcher.ui.OeaWheelPicker
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -89,27 +92,29 @@ object OeaClockApp {
     }
 
     fun build(host: Activity, palette: OeaPalette): View {
-        val kit = OeaKit(host, palette)
-        val root = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(palette.background) }
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(kit.dp(20), 0, kit.dp(12), 0) }
-        val title = kit.text("Alarm", 25f, palette.text, OeaType.medium)
-        header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-        val menu = kit.text("⋮", 30f, palette.text).apply { gravity = Gravity.CENTER; contentDescription = "Clock options" }
-        header.addView(menu, LinearLayout.LayoutParams(kit.dp(48), kit.dp(52)))
-        root.addView(header, LinearLayout.LayoutParams(-1, kit.dp(64)))
-        val scroll = android.widget.ScrollView(host).apply { isFillViewport = true; isVerticalScrollBarEnabled = false }
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(kit.dp(20), 0, kit.dp(20), kit.dp(24)) }
-        scroll.addView(column)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        val tabBar = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(kit.dp(4), kit.dp(6), kit.dp(4), kit.dp(6)); setBackgroundColor(palette.card) }
-        root.addView(tabBar, LinearLayout.LayoutParams(-1, -2))
-        root.setOnApplyWindowInsetsListener { _, insets ->
-            val bars = com.oea.launcher.ui.OeaInsets.bars(insets)
-            root.setPadding(bars[0], bars[1], bars[2], bars[3])
-            insets
-        }
+        val kit = OeaAppKit(host, palette)
         var refresh: () -> Unit = {}
         var currentTab = "alarms"
+        val navItems = listOf(
+            OeaAppKit.NavItem("alarms", "Alarm", R.drawable.oic_alarm),
+            OeaAppKit.NavItem("world", "World Clock", R.drawable.oic_public),
+            OeaAppKit.NavItem("timer", "Timer", R.drawable.oic_timer),
+            OeaAppKit.NavItem("stopwatch", "Stopwatch", R.drawable.oic_history)
+        )
+        val indexBack = host.miniIndexBack()
+        val shell = kit.appShell("Alarm", navItems = navItems, initialNav = currentTab, onBack = indexBack) { id ->
+            currentTab = id
+            refresh()
+        }
+        host.miniBackHook = {
+            if (currentTab == "bedtime") {
+                currentTab = "alarms"
+                refresh()
+                true
+            } else false
+        }
+        val root = shell.root
+        val column = shell.body
 
         // Android clock-role intents (Set alarm / Set timer / Show alarms): act
         // on them once, land on the right tab, then consume the intent so a
@@ -200,7 +205,7 @@ object OeaClockApp {
         var timerEndAt = 0L
         val timerHandler = Handler(Looper.getMainLooper())
         var timerText: TextView? = null
-        val timersList = mutableListOf<Pair<String, Long>>() // label to duration
+        val timersList = loadSavedTimers(host).toMutableList()
 
         // Stopwatch state
         var swRunning = false
@@ -227,43 +232,64 @@ object OeaClockApp {
             swHandler.post(swTicker)
         }
 
-        fun renderTabs() {
-            tabBar.removeAllViews()
-            val tabs = listOf(Triple("alarms", "Alarm", R.drawable.oic_alarm), Triple("world", "World Clock", R.drawable.oic_public), Triple("timer", "Timer", R.drawable.oic_timer), Triple("stopwatch", "Stopwatch", R.drawable.oic_history))
-            tabs.forEach { (id, label, icon) ->
-                val selected = id == currentTab
-                val item = LinearLayout(host).apply {
-                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                    contentDescription = label + if (selected) ", selected" else ""
-                    setOnClickListener { currentTab = id; scroll.scrollTo(0, 0); refresh() }
-                }
-                val image = android.widget.ImageView(host).apply { setImageResource(icon); setColorFilter(if (selected) palette.accent else palette.textTertiary) }
-                item.addView(image, LinearLayout.LayoutParams(kit.dp(24), kit.dp(24)))
-                item.addView(kit.text(label, 11f, if (selected) palette.accent else palette.textTertiary, OeaType.medium).apply { gravity = Gravity.CENTER; maxLines = 1 }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(3) })
-                tabBar.addView(item, LinearLayout.LayoutParams(0, kit.dp(58), 1f))
+        with(kit) {
+            shell.bar.addAction(R.drawable.oic_more_vert, "Clock options") {
+                kit.actions(
+                    "Clock options",
+                    null,
+                    listOf(
+                        OeaAppKit.Action(
+                            R.drawable.oic_schedule,
+                            if (is24h) "Use 12-hour time" else "Use 24-hour time",
+                            if (is24h) "Show AM and PM on clocks and alarm wheels" else "Show 00:00–23:59 across Clock"
+                        ) {
+                            prefs(host).edit().putBoolean(KEY_24H, !is24h).apply()
+                            (host as? OeaMiniAppActivity)?.refresh()
+                        },
+                        OeaAppKit.Action(R.drawable.oic_bedtime, "Bedtime", "Automatic Sleeping mode and wake schedule") {
+                            currentTab = "bedtime"
+                            shell.scroll.scrollTo(0, 0)
+                            refresh()
+                        },
+                        OeaAppKit.Action(R.drawable.oic_settings, "Alarm settings", "Volume, notifications, precise alarms and battery") {
+                            alarmSettings(host, kit)
+                        }
+                    )
+                )
             }
-        }
-        menu.setOnClickListener {
-            val popup = android.widget.PopupMenu(host, menu)
-            popup.menu.add(if (is24h) "Use 12-hour time" else "Use 24-hour time").setOnMenuItemClickListener {
-                prefs(host).edit().putBoolean(KEY_24H, !is24h).apply(); (host as? OeaMiniAppActivity)?.refresh(); true
-            }
-            popup.menu.add("Bedtime").setOnMenuItemClickListener { currentTab = "bedtime"; refresh(); true }
-            popup.menu.add("Alarm settings").setOnMenuItemClickListener { alarmSettings(host, kit); true }
-            popup.show()
         }
 
         refresh = {
-            renderTabs()
-            title.text = when (currentTab) { "world" -> "World Clock"; "timer" -> "Timer"; "stopwatch" -> "Stopwatch"; "bedtime" -> "Bedtime"; else -> "Alarm" }
+            shell.nav?.select(currentTab, notify = false)
+            shell.bar.setBack(
+                if (currentTab == "bedtime") ({ currentTab = "alarms"; refresh() }) else indexBack
+            )
+            shell.bar.title.text = when (currentTab) {
+                "world" -> "World Clock"
+                "timer" -> "Timer"
+                "stopwatch" -> "Stopwatch"
+                "bedtime" -> "Bedtime"
+                else -> "Alarm"
+            }
+            if (currentTab == "alarms") {
+                val active = decodeAlarms(prefs(host).getString(KEY_ALARMS, "")).filter { it.enabled }
+                val soonest = active.minOfOrNull { nextClockAlarm(java.util.Calendar.getInstance(), it.hour, it.minute, it.days) }
+                shell.bar.setSubtitle(if (soonest != null) "Next alarm in ${untilText(soonest)}" else "")
+            } else {
+                shell.bar.setSubtitle("")
+            }
             clockHeader.visibility = if (currentTab == "world") View.VISIBLE else View.GONE
             content.removeAllViews()
             worldTimes.clear()
             OeaClockRingService.current()?.let { ringing ->
-                val box = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(kit.dp(16), kit.dp(12), kit.dp(16), kit.dp(12)); background = kit.rounded(palette.accentSoft, 18) }
-                box.addView(kit.text("${ringing.getStringExtra("label") ?: "Alarm"} is ringing", 17f, palette.text, OeaType.medium))
+                val box = LinearLayout(host).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(kit.dp(16), kit.dp(12), kit.dp(16), kit.dp(12))
+                    background = kit.rounded(palette.accentSoft, 18, OeaTheme.alpha(palette.accent, 0x66), 1)
+                }
+                box.addView(kit.text("${ringing.getStringExtra("label") ?: "Alarm"} is ringing", 17f, palette.onAccentSoft, OeaType.medium))
                 box.addView(kit.buttonRow(
-                    kit.tonalButton("Snooze") { OeaClockRingService.respond(host, ringing, false); refresh() },
+                    kit.quietButton("Snooze") { OeaClockRingService.respond(host, ringing, false); refresh() },
                     kit.primaryButton("Stop") { OeaClockRingService.respond(host, ringing, true); refresh() }
                 ))
                 content.addView(box, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
@@ -272,27 +298,72 @@ object OeaClockApp {
                 "alarms" -> {
                     val alarms = decodeAlarms(prefs(host).getString(KEY_ALARMS, ""))
                     if (alarms.isEmpty()) {
-                        content.addView(kit.text("No alarms yet", 20f, palette.text, OeaType.medium).apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(72), 0, kit.dp(8)) })
-                        content.addView(kit.text("Add an alarm to start your day.", 14f, palette.textSecondary).apply { gravity = Gravity.CENTER; setPadding(0, 0, 0, kit.dp(32)) })
+                        content.addView(
+                            kit.emptyState(
+                                R.drawable.oic_alarm,
+                                "No alarms yet",
+                                "Set a wake-up or reminder alarm with repeat days and your own ringtone.",
+                                "Add alarm"
+                            ) { editAlarm(host, kit, null, is24h) { refresh() } },
+                            LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(16) }
+                        )
                     } else {
                         alarms.forEach { alarm ->
-                            val card = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(kit.dp(18), kit.dp(14), kit.dp(16), kit.dp(14)); background = kit.rounded(palette.card, 20, palette.stroke, 1) }
+                            val card = LinearLayout(host).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.CENTER_VERTICAL
+                                setPadding(kit.dp(18), kit.dp(14), kit.dp(16), kit.dp(14))
+                                background = kit.ripple(kit.rounded(palette.card, 20, palette.stroke, 1), 20)
+                                isClickable = true
+                                isFocusable = true
+                            }
                             val details = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-                            val formatted = if (is24h) String.format(Locale.getDefault(), "%02d:%02d", alarm.hour, alarm.minute) else String.format(Locale.getDefault(), "%d:%02d %s", (alarm.hour % 12).let { if (it == 0) 12 else it }, alarm.minute, if (alarm.hour < 12) "AM" else "PM")
-                            details.addView(kit.text(formatted, 30f, if (alarm.enabled) palette.text else palette.textTertiary, OeaType.light))
-                            val repeat = if (alarm.days.isEmpty()) "Once" else if (alarm.days.size == 7) "Every day" else listOf(1, 2, 3, 4, 5, 6, 0).filter { it in alarm.days }.joinToString(" ") { dayName(it) }
-                            details.addView(kit.text(listOf(alarm.label.ifBlank { "Alarm" }, repeat).joinToString(" · "), 13f, palette.textSecondary).apply { maxLines = 2 })
+                            val formatted = formatAlarmTime(alarm.hour, alarm.minute, is24h)
+                            details.addView(kit.text(formatted, 32f, if (alarm.enabled) palette.text else palette.textSecondary, OeaType.light).apply {
+                                alpha = if (alarm.enabled) 1f else 0.65f
+                            })
+                            val repeat = repeatSummary(alarm.days)
+                            details.addView(kit.text(listOf(alarm.label.ifBlank { "Alarm" }, repeat).joinToString(" · "), 13f, palette.textSecondary).apply {
+                                maxLines = 2
+                                setPadding(0, kit.dp(2), 0, 0)
+                            })
+                            if (alarm.days.isNotEmpty()) {
+                                val dots = LinearLayout(host).apply {
+                                    orientation = LinearLayout.HORIZONTAL
+                                    setPadding(0, kit.dp(6), 0, 0)
+                                }
+                                WEEK_ORDER.forEach { day ->
+                                    val on = day in alarm.days
+                                    dots.addView(
+                                        kit.text(dayShort(day), 10.5f, if (on) palette.onAccent else palette.textSecondary, if (on) OeaType.medium else OeaType.regular).apply {
+                                            gravity = Gravity.CENTER
+                                            background = kit.rounded(
+                                                if (on) (if (alarm.enabled) palette.accent else palette.accentSoft) else palette.cardHigh,
+                                                10,
+                                                if (on) 0 else palette.stroke,
+                                                if (on) 0 else 1
+                                            )
+                                            if (on && !alarm.enabled) setTextColor(palette.onAccentSoft)
+                                        },
+                                        LinearLayout.LayoutParams(kit.dp(22), kit.dp(22)).apply { rightMargin = kit.dp(4) }
+                                    )
+                                }
+                                details.addView(dots)
+                            }
                             card.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
                             card.addView(kit.toggle(alarm.enabled) { checked ->
                                 val updated = alarms.map { if (it.id == alarm.id) it.copy(enabled = checked) else it }
                                 prefs(host).edit().putString(KEY_ALARMS, encodeAlarms(updated)).apply()
                                 scheduleAlarm(host, alarm.copy(enabled = checked)); refresh()
                             })
-                            card.setOnClickListener { editAlarm(host, kit, alarm) { refresh() } }
+                            card.setOnClickListener { editAlarm(host, kit, alarm, is24h) { refresh() } }
                             content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
                         }
+                        content.addView(
+                            kit.primaryButton("Add alarm", R.drawable.oic_add) { editAlarm(host, kit, null, is24h) { refresh() } },
+                            LinearLayout.LayoutParams(-1, kit.dp(52)).apply { topMargin = kit.dp(8) }
+                        )
                     }
-                    content.addView(kit.primaryButton("Add alarm", R.drawable.oic_add) { editAlarm(host, kit, null) { refresh() } }, LinearLayout.LayoutParams(-1, kit.dp(52)).apply { topMargin = kit.dp(12) })
                     if (Build.VERSION.SDK_INT >= 33 && host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         content.addView(kit.tonalButton("Enable alarm notifications") { alarmSettings(host, kit) }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(12) })
                     }
@@ -304,37 +375,79 @@ object OeaClockApp {
                 "timer" -> {
                     val box = LinearLayout(host).apply {
                         orientation = LinearLayout.VERTICAL
-                        setPadding(kit.dp(14), kit.dp(14), kit.dp(14), kit.dp(14))
+                        setPadding(kit.dp(16), kit.dp(18), kit.dp(16), kit.dp(16))
                         background = kit.rounded(palette.card, 22, palette.stroke, 1)
                     }
-                    timerText = kit.text(formatMs(timerRemainingMs), 36f, palette.text, OeaType.light).apply { gravity = Gravity.CENTER }
-                    box.addView(timerText, LinearLayout.LayoutParams(-1, -2))
-                    // Presets
-                    val presetRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, kit.dp(10), 0, 0) }
-                    listOf(1 to "1m", 5 to "5m", 10 to "10m", 15 to "15m", 30 to "30m", 60 to "60m").forEach { (m, label) ->
-                        presetRow.addView(kit.chip(label, false) {
-                            timerDurationMs = m * 60 * 1000L
+                    val idleAtFull = !timerRunning && timerRemainingMs == timerDurationMs
+                    if (idleAtFull) {
+                        val totalSec = (timerDurationMs / 1000L).coerceIn(0L, 23 * 3600L + 59 * 60L + 59L).toInt()
+                        val initH = totalSec / 3600
+                        val initM = (totalSec % 3600) / 60
+                        val initS = totalSec % 60
+                        val capRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, kit.dp(4)) }
+                        listOf("HOURS", "MIN", "SEC").forEachIndexed { idx, c ->
+                            if (idx > 0) capRow.addView(View(host), LinearLayout.LayoutParams(kit.dp(14), 1))
+                            capRow.addView(kit.text(c, 11f, palette.textSecondary, OeaType.medium).apply { gravity = Gravity.CENTER; letterSpacing = 0.06f }, LinearLayout.LayoutParams(0, -2, 1f))
+                        }
+                        box.addView(capRow, LinearLayout.LayoutParams(-1, -2))
+                        val hWheel = OeaWheelPicker(host, palette, 0, 23, initH, wrap = true, label = "Hours") { String.format(Locale.getDefault(), "%02d", it) }
+                        val mWheel = OeaWheelPicker(host, palette, 0, 59, initM, wrap = true, label = "Minutes") { String.format(Locale.getDefault(), "%02d", it) }
+                        val sWheel = OeaWheelPicker(host, palette, 0, 59, initS, wrap = true, label = "Seconds") { String.format(Locale.getDefault(), "%02d", it) }
+                        fun syncWheels() {
+                            val sec = hWheel.value * 3600L + mWheel.value * 60L + sWheel.value
+                            timerDurationMs = (sec * 1000L).coerceAtLeast(1000L)
                             timerRemainingMs = timerDurationMs
-                            timerText?.text = formatMs(timerRemainingMs)
-                        }, LinearLayout.LayoutParams(-2, kit.dp(36)).apply { rightMargin = kit.dp(6) })
+                        }
+                        hWheel.onValueChanged = { syncWheels() }
+                        mWheel.onValueChanged = { syncWheels() }
+                        sWheel.onValueChanged = { syncWheels() }
+                        val wheelRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                        wheelRow.addView(hWheel, LinearLayout.LayoutParams(0, kit.dp(144), 1f))
+                        wheelRow.addView(kit.text(":", 24f, palette.text, OeaType.medium).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(kit.dp(14), kit.dp(144)))
+                        wheelRow.addView(mWheel, LinearLayout.LayoutParams(0, kit.dp(144), 1f))
+                        wheelRow.addView(kit.text(":", 24f, palette.text, OeaType.medium).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(kit.dp(14), kit.dp(144)))
+                        wheelRow.addView(sWheel, LinearLayout.LayoutParams(0, kit.dp(144), 1f))
+                        box.addView(wheelRow, LinearLayout.LayoutParams(-1, -2))
+                        timerText = null
+                        val presetRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, kit.dp(12), 0, 0) }
+                        listOf(1 to "1m", 3 to "3m", 5 to "5m", 10 to "10m", 15 to "15m", 30 to "30m", 60 to "1h").forEach { (m, label) ->
+                            val target = m * 60_000L
+                            presetRow.addView(kit.chip(label, timerDurationMs == target) {
+                                timerDurationMs = target
+                                timerRemainingMs = target
+                                refresh()
+                            }, LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(6) })
+                        }
+                        box.addView(kit.hscroll(presetRow), LinearLayout.LayoutParams(-1, -2))
+                    } else {
+                        timerText = kit.mono(kit.text(formatTimerMs(timerRemainingMs), 44f, palette.text, OeaType.light)).apply {
+                            gravity = Gravity.CENTER
+                            setPadding(0, kit.dp(18), 0, kit.dp(6))
+                        }
+                        box.addView(timerText, LinearLayout.LayoutParams(-1, -2))
+                        box.addView(
+                            kit.text("Total ${formatTimerMs(timerDurationMs)}", 13f, palette.textSecondary).apply {
+                                gravity = Gravity.CENTER
+                                setPadding(0, 0, 0, kit.dp(10))
+                            },
+                            LinearLayout.LayoutParams(-1, -2)
+                        )
                     }
-                    box.addView(kit.hscroll(presetRow), LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(8) })
 
-                    val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, kit.dp(10), 0, 0) }
-                    listOf(1 to "+1m", 5 to "+5m", 10 to "+10m").forEach { (m, label) ->
-                        row.addView(kit.tonalButton(label) {
-                            timerDurationMs += m * 60 * 1000L
-                            if (!timerRunning) timerRemainingMs = timerDurationMs
-                            timerText?.text = formatMs(timerRemainingMs)
-                        }, LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(8) })
-                    }
-                    box.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(8) })
-                    val controls = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, kit.dp(12), 0, 0) }
-                    controls.addView(kit.primaryButton(if (timerRunning) "Pause" else "Start", R.drawable.oic_play_arrow) {
+                    val controls = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, kit.dp(14), 0, 0) }
+                    controls.addView(kit.primaryButton(
+                        when {
+                            timerRunning -> "Pause"
+                            timerRemainingMs < timerDurationMs -> "Resume"
+                            else -> "Start"
+                        },
+                        if (timerRunning) R.drawable.oic_pause else R.drawable.oic_play_arrow
+                    ) {
                         if (timerRunning) {
                             timerRunning = false
                             timerRemainingMs = (timerEndAt - System.currentTimeMillis()).coerceAtLeast(0L)
                         } else {
+                            if (timerRemainingMs <= 0L) timerRemainingMs = timerDurationMs.coerceAtLeast(1000L)
                             timerRunning = true
                             timerEndAt = System.currentTimeMillis() + timerRemainingMs
                             timerHandler.post(object : Runnable {
@@ -342,19 +455,20 @@ object OeaClockApp {
                                     if (!timerRunning || host.isDestroyed) return
                                     val rem = (timerEndAt - System.currentTimeMillis()).coerceAtLeast(0L)
                                     timerRemainingMs = rem
-                                    timerText?.text = formatMs(rem)
+                                    timerText?.text = formatTimerMs(rem)
                                     if (rem <= 0L) {
                                         timerRunning = false
+                                        timerRemainingMs = timerDurationMs
                                         host.runOnUiThread {
                                             android.widget.Toast.makeText(host, "Timer finished", android.widget.Toast.LENGTH_LONG).show()
-                                            // Notification
                                             try {
                                                 val nm = host.getSystemService(android.app.NotificationManager::class.java)
                                                 if (Build.VERSION.SDK_INT >= 26) nm?.createNotificationChannel(android.app.NotificationChannel("oea_clock", "Clock", android.app.NotificationManager.IMPORTANCE_HIGH))
                                                 val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(host, "oea_clock") else @Suppress("DEPRECATION") android.app.Notification.Builder(host)
-                                                val notif = builder.setSmallIcon(R.drawable.ic_oea_launcher_monochrome).setContentTitle("Timer finished").setContentText("OEA Timer • ${formatMs(timerDurationMs)}").setAutoCancel(true).build()
+                                                val notif = builder.setSmallIcon(R.drawable.ic_oea_launcher_monochrome).setContentTitle("Timer finished").setContentText("Timer • ${formatTimerMs(timerDurationMs)}").setAutoCancel(true).build()
                                                 nm?.notify(1001, notif)
                                             } catch (_: Throwable) {}
+                                            refresh()
                                         }
                                     } else {
                                         timerHandler.postDelayed(this, 200L)
@@ -363,30 +477,48 @@ object OeaClockApp {
                             })
                         }
                         refresh()
-                    }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { rightMargin = kit.dp(8) })
-                    controls.addView(kit.quietButton("Reset") {
-                        timerRunning = false
-                        timerRemainingMs = timerDurationMs
-                        timerText?.text = formatMs(timerRemainingMs)
-                        refresh()
-                    }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { rightMargin = kit.dp(8) })
-                    controls.addView(kit.tonalButton("+1m") {
-                        timerEndAt += 60 * 1000L
-                        timerRemainingMs += 60 * 1000L
-                        timerText?.text = formatMs(timerRemainingMs)
-                    }, LinearLayout.LayoutParams(-2, kit.dp(46)))
-                    box.addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(12) })
+                    }, LinearLayout.LayoutParams(0, kit.dp(48), 1.3f).apply { rightMargin = kit.dp(8) })
+                    if (!idleAtFull) {
+                        controls.addView(kit.quietButton("Reset") {
+                            timerRunning = false
+                            timerRemainingMs = timerDurationMs
+                            refresh()
+                        }, LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { rightMargin = kit.dp(8) })
+                        controls.addView(kit.tonalButton("+1m") {
+                            timerDurationMs += 60_000L
+                            timerEndAt += 60_000L
+                            timerRemainingMs += 60_000L
+                            timerText?.text = formatTimerMs(timerRemainingMs)
+                        }, LinearLayout.LayoutParams(-2, kit.dp(48)))
+                    } else {
+                        controls.addView(kit.tonalButton("Save") {
+                            kit.prompt("Save timer", "Keep ${formatTimerMs(timerDurationMs)} for quick reuse", "Label (e.g. Tea, Workout)", "", confirmLabel = "Save") { raw ->
+                                val name = raw.trim().ifBlank { formatTimerMs(timerDurationMs) }
+                                timersList.removeAll { it.first.equals(name, ignoreCase = true) }
+                                timersList.add(0, name to timerDurationMs)
+                                saveTimers(host, timersList)
+                                refresh()
+                                null
+                            }
+                        }, LinearLayout.LayoutParams(-2, kit.dp(48)))
+                    }
+                    box.addView(controls, LinearLayout.LayoutParams(-1, -2))
                     content.addView(box)
 
-                    // Multiple timers list
                     if (timersList.isNotEmpty()) {
                         kit.sectionTitle(content, "Saved timers")
                         val g = kit.group(content)
-                        timersList.forEach { (label, dur) ->
-                            kit.row(g, R.drawable.oic_timer, label, formatMs(dur)) {
+                        timersList.forEachIndexed { idx, (label, dur) ->
+                            val removeBtn = kit.circleIconButton(R.drawable.oic_delete, "Remove $label", palette.cardHigh, palette.textSecondary) {
+                                timersList.removeAt(idx)
+                                saveTimers(host, timersList)
+                                refresh()
+                            }
+                            kit.row(g, R.drawable.oic_timer, label, formatTimerMs(dur), trailing = removeBtn, chevron = false) {
+                                timerRunning = false
                                 timerDurationMs = dur
                                 timerRemainingMs = dur
-                                timerText?.text = formatMs(dur)
+                                refresh()
                             }
                         }
                     }
@@ -394,13 +526,20 @@ object OeaClockApp {
                 "stopwatch" -> {
                     val box = LinearLayout(host).apply {
                         orientation = LinearLayout.VERTICAL
-                        setPadding(kit.dp(14), kit.dp(14), kit.dp(14), kit.dp(14))
+                        setPadding(kit.dp(16), kit.dp(24), kit.dp(16), kit.dp(16))
                         background = kit.rounded(palette.card, 22, palette.stroke, 1)
                     }
-                    swText = kit.text(formatMs(swElapsed), 36f, palette.text, OeaType.light).apply { gravity = Gravity.CENTER }
+                    val shown = if (swRunning) swElapsed + (System.currentTimeMillis() - swStartAt) else swElapsed
+                    swText = kit.mono(kit.text(formatMs(shown), 44f, palette.text, OeaType.light)).apply {
+                        gravity = Gravity.CENTER
+                        setPadding(0, kit.dp(8), 0, kit.dp(12))
+                    }
                     box.addView(swText, LinearLayout.LayoutParams(-1, -2))
-                    val controls = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, kit.dp(12), 0, 0) }
-                    controls.addView(kit.primaryButton(if (swRunning) "Pause" else "Start", R.drawable.oic_play_arrow) {
+                    val controls = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, kit.dp(10), 0, 0) }
+                    controls.addView(kit.primaryButton(
+                        if (swRunning) "Pause" else if (swElapsed > 0L) "Resume" else "Start",
+                        if (swRunning) R.drawable.oic_pause else R.drawable.oic_play_arrow
+                    ) {
                         if (swRunning) {
                             swRunning = false
                             swElapsed += System.currentTimeMillis() - swStartAt
@@ -411,44 +550,49 @@ object OeaClockApp {
                             swStartTicking()
                         }
                         refresh()
-                    }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { rightMargin = kit.dp(8) })
-                    controls.addView(kit.tonalButton("Lap") {
-                        val elapsed = if (swRunning) swElapsed + (System.currentTimeMillis() - swStartAt) else swElapsed
-                        swLaps.add(elapsed)
-                        refresh()
-                    }, LinearLayout.LayoutParams(0, kit.dp(46), 1f).apply { rightMargin = kit.dp(8) })
-                    controls.addView(kit.quietButton("Reset") {
-                        swRunning = false
-                        swElapsed = 0L
-                        swLaps.clear()
-                        swText?.text = formatMs(0L)
-                        refresh()
-                    }, LinearLayout.LayoutParams(0, kit.dp(46), 1f))
+                    }, LinearLayout.LayoutParams(0, kit.dp(48), 1.2f).apply { rightMargin = kit.dp(8) })
+                    if (swRunning || swElapsed > 0L) {
+                        controls.addView(kit.tonalButton("Lap") {
+                            val elapsed = if (swRunning) swElapsed + (System.currentTimeMillis() - swStartAt) else swElapsed
+                            if (swLaps.lastOrNull() != elapsed) swLaps.add(elapsed)
+                            refresh()
+                        }, LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { rightMargin = kit.dp(8) })
+                        controls.addView(kit.quietButton("Reset") {
+                            swRunning = false
+                            swHandler.removeCallbacks(swTicker)
+                            swElapsed = 0L
+                            swLaps.clear()
+                            swText?.text = formatMs(0L)
+                            refresh()
+                        }, LinearLayout.LayoutParams(0, kit.dp(48), 1f))
+                    }
                     box.addView(controls)
                     content.addView(box)
 
                     if (swLaps.isNotEmpty()) {
-                        kit.sectionTitle(content, "Laps • ${swLaps.size}")
+                        kit.sectionTitle(content, "Laps · ${swLaps.size}")
                         val g = kit.group(content)
-                        val fastest = swLaps.minOrNull()
-                        val slowest = swLaps.maxOrNull()
-                        swLaps.forEachIndexed { idx, lap ->
-                            val label = when (lap) {
-                                fastest -> "Lap ${idx + 1} • Fastest"
-                                slowest -> "Lap ${idx + 1} • Slowest"
-                                else -> "Lap ${idx + 1}"
+                        val splits = swLaps.mapIndexed { idx, total -> total - (swLaps.getOrNull(idx - 1) ?: 0L) }
+                        val fastest = if (splits.size >= 2) splits.minOrNull() else null
+                        val slowest = if (splits.size >= 2) splits.maxOrNull() else null
+                        swLaps.indices.reversed().forEach { idx ->
+                            val split = splits[idx]
+                            val total = swLaps[idx]
+                            val tag = when {
+                                fastest != null && split == fastest -> " · Fastest"
+                                slowest != null && split == slowest -> " · Slowest"
+                                else -> ""
                             }
-                            kit.row(g, R.drawable.oic_timer, label, formatMs(lap), chevron = false)
+                            kit.row(g, R.drawable.oic_timer, "Lap ${idx + 1}$tag", "Total ${formatMs(total)}", value = "+${formatMs(split)}", chevron = false)
                         }
                         content.addView(kit.tonalButton("Share laps", R.drawable.oic_share_filled) {
                             try {
-                                val text = swLaps.mapIndexed { i, l -> "Lap ${i+1}: ${formatMs(l)}" }.joinToString("\n")
-                                host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "OEA Stopwatch\nTotal: ${formatMs(swElapsed)}\n$text"), "Share laps"))
+                                val text = swLaps.mapIndexed { i, l -> "Lap ${i + 1}: +${formatMs(splits[i])} (total ${formatMs(l)})" }.joinToString("\n")
+                                val totalNow = if (swRunning) swElapsed + (System.currentTimeMillis() - swStartAt) else swElapsed
+                                host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "OEA Stopwatch\nTotal: ${formatMs(totalNow)}\n$text"), "Share laps"))
                             } catch (_: Throwable) {}
-                        }, LinearLayout.LayoutParams(-1, kit.dp(46)).apply { topMargin = kit.dp(8) })
+                        }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
                     }
-                    // Still running from before: keep the hands moving
-                    // on this fresh view too.
                     if (swRunning) swStartTicking()
                 }
                 "world" -> {
@@ -515,39 +659,29 @@ object OeaClockApp {
                         refresh()
                     }
                     if (bedtimeEnabled) {
-                        kit.row(group, R.drawable.oic_schedule, "Bedtime", "$bedtimeSaved • Tap to change") {
-                            kit.prompt("Bedtime", "HH:mm", bedtimeSaved) { input ->
-                                val cleaned = input.trim()
-                                if (!cleaned.matches(Regex("""\d{1,2}:\d{2}"""))) {
-                                    android.widget.Toast.makeText(host, "Use HH:mm, like 22:30", android.widget.Toast.LENGTH_SHORT).show()
-                                    return@prompt null
-                                }
-                                prefs(host).edit().putString("bedtime_time", cleaned).apply()
+                        val bedMin = parseHm(bedtimeSaved) ?: (22 * 60)
+                        val wakeMin = parseHm(wakeSaved) ?: (6 * 60)
+                        kit.row(group, R.drawable.oic_schedule, "Bedtime", "Turn on Sleeping mode", value = formatAlarmTime(bedMin / 60, bedMin % 60, is24h)) {
+                            kit.pickTime("Bedtime", "When Sleeping mode starts", bedMin / 60, bedMin % 60, is24h) { h, m ->
+                                prefs(host).edit().putString("bedtime_time", String.format(Locale.US, "%02d:%02d", h, m)).apply()
                                 scheduleBedtime(host)
                                 refresh()
-                                null
                             }
                         }
-                        kit.row(group, R.drawable.oic_schedule, "Wake up", "$wakeSaved • Tap to change") {
-                            kit.prompt("Wake up", "HH:mm", wakeSaved) { input ->
-                                val cleaned = input.trim()
-                                if (!cleaned.matches(Regex("""\d{1,2}:\d{2}"""))) {
-                                    android.widget.Toast.makeText(host, "Use HH:mm, like 06:30", android.widget.Toast.LENGTH_SHORT).show()
-                                    return@prompt null
-                                }
-                                prefs(host).edit().putString("wake_time", cleaned).apply()
+                        kit.row(group, R.drawable.oic_schedule, "Wake up", "Restore your previous mode", value = formatAlarmTime(wakeMin / 60, wakeMin % 60, is24h)) {
+                            kit.pickTime("Wake up", "When Sleeping mode ends", wakeMin / 60, wakeMin % 60, is24h) { h, m ->
+                                prefs(host).edit().putString("wake_time", String.format(Locale.US, "%02d:%02d", h, m)).apply()
                                 scheduleBedtime(host)
                                 refresh()
-                                null
                             }
                         }
-                        kit.note(content, "Bedtime: at bedtime time OEA puts the phone in Sleeping mode (DND on, quiet, islands hidden), and at wake time it puts back the mode you had before. Both are scheduled with exact alarms, so they survive the phone sleeping. If battery is low, Sleeping mode also keeps LOW (Ultra Power Saving) as that mode itself does.")
-                        content.addView(kit.primaryButton("Apply Sleeping mode now", R.drawable.oic_bedtime) {
+                        kit.note(content, "Turns on Sleeping mode at bedtime and restores your previous mode at wake-up using scheduled alarms.")
+                        content.addView(kit.primaryButton("Start Sleeping mode now", R.drawable.oic_bedtime) {
                             try { com.oea.launcher.ui.OeaModes.apply(host, com.oea.launcher.ui.OeaMode.SLEEPING) } catch (_: Throwable) {}
                             android.widget.Toast.makeText(host, "Sleeping mode applied", android.widget.Toast.LENGTH_SHORT).show()
                         }, LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) })
                     } else {
-                        kit.note(content, "Bedtime mode helps wind-down: DND + Sleeping mode automatically. Enable to configure.")
+                        kit.note(content, "Automatically enables Do Not Disturb and Sleeping mode overnight.")
                     }
                 }
             }
@@ -648,8 +782,71 @@ object OeaClockApp {
         }
     }
 
+    private val WEEK_ORDER = listOf(1, 2, 3, 4, 5, 6, 0)
+    private val WEEKDAYS = setOf(1, 2, 3, 4, 5)
+    private val WEEKENDS = setOf(6, 0)
+
     private fun dayName(day: Int): String = when (day) {
         0 -> "Sun"; 1 -> "Mon"; 2 -> "Tue"; 3 -> "Wed"; 4 -> "Thu"; 5 -> "Fri"; 6 -> "Sat"; else -> "$day"
+    }
+
+    private fun dayFullName(day: Int): String = when (day) {
+        0 -> "Sunday"; 1 -> "Monday"; 2 -> "Tuesday"; 3 -> "Wednesday"; 4 -> "Thursday"; 5 -> "Friday"; 6 -> "Saturday"; else -> "$day"
+    }
+
+    private fun dayShort(day: Int): String = when (day) {
+        0 -> "S"; 1 -> "M"; 2 -> "T"; 3 -> "W"; 4 -> "T"; 5 -> "F"; 6 -> "S"; else -> "$day"
+    }
+
+    private fun repeatSummary(days: Set<Int>): String = when {
+        days.isEmpty() -> "Once"
+        days.size == 7 -> "Every day"
+        days == WEEKDAYS -> "Weekdays"
+        days == WEEKENDS -> "Weekends"
+        else -> WEEK_ORDER.filter { it in days }.joinToString(", ") { dayName(it) }
+    }
+
+    private fun formatAlarmTime(hour: Int, minute: Int, is24h: Boolean): String =
+        if (is24h) String.format(Locale.getDefault(), "%02d:%02d", hour, minute)
+        else String.format(Locale.getDefault(), "%d:%02d %s", (hour % 12).let { if (it == 0) 12 else it }, minute, if (hour < 12) "AM" else "PM")
+
+    private fun untilText(triggerAt: Long): String {
+        val diffMin = ((triggerAt - System.currentTimeMillis()).coerceAtLeast(0L) + 30_000L) / 60_000L
+        if (diffMin <= 1L) return "less than a minute"
+        val days = diffMin / (24L * 60L)
+        val hours = (diffMin % (24L * 60L)) / 60L
+        val mins = diffMin % 60L
+        return buildList {
+            if (days > 0L) add("${days}d")
+            if (hours > 0L) add("${hours}h")
+            if (mins > 0L && days == 0L) add("${mins}m")
+        }.joinToString(" ").ifBlank { "1m" }
+    }
+
+    private fun formatTimerMs(ms: Long): String {
+        val totalSec = (ms.coerceAtLeast(0L) + 999L) / 1000L
+        val h = totalSec / 3600L
+        val m = (totalSec % 3600L) / 60L
+        val s = totalSec % 60L
+        return if (h > 0L) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
+        else String.format(Locale.US, "%02d:%02d", m, s)
+    }
+
+    private fun loadSavedTimers(ctx: Context): List<Pair<String, Long>> {
+        val raw = prefs(ctx).getString(KEY_TIMERS, "").orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return raw.split(SEP_ROW).mapNotNull { entry ->
+            val p = entry.split(SEP_FIELD)
+            val dur = p.getOrNull(1)?.toLongOrNull()?.takeIf { it > 0L } ?: return@mapNotNull null
+            p[0].ifBlank { formatTimerMs(dur) } to dur
+        }
+    }
+
+    private fun saveTimers(ctx: Context, list: List<Pair<String, Long>>) {
+        val encoded = list.take(20).joinToString(SEP_ROW) { (name, dur) ->
+            name.replace(SEP_ROW, " ").replace(SEP_FIELD, " ") + SEP_FIELD + dur
+        }
+        prefs(ctx).edit().putString(KEY_TIMERS, encoded).apply()
     }
 
     private fun formatMs(ms: Long): String {
@@ -662,99 +859,157 @@ object OeaClockApp {
         else String.format(Locale.US, "%02d:%02d.%02d", m, s, msPart)
     }
 
-    private fun editAlarm(host: Activity, kit: OeaKit, existing: Alarm?, onDone: () -> Unit) {
+    private fun editAlarm(host: Activity, kit: OeaAppKit, existing: Alarm?, is24h: Boolean, onDone: () -> Unit) {
         val isNew = existing == null
+        val palette = kit.palette
         var hour = existing?.hour ?: 7
         var minute = existing?.minute ?: 0
-        var label = existing?.label ?: ""
-        var days = existing?.days ?: emptySet()
+        val label = existing?.label ?: ""
+        val chosenDays = (existing?.days ?: emptySet()).toMutableSet()
         var snooze = existing?.snoozeMin ?: 10
         var sound = existing?.sound ?: "Default"
         var vibrate = existing?.vibrate ?: true
 
-        kit.sheet(if (isNew) "New alarm" else "Edit alarm", "Choose a time and repeat days") { container, dialog ->
-            val panel = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-            container.addView(kit.boundedScroll(panel, 0.68f))
-            // Two platform number wheels, which is what a clock app is expected to
-            // offer; the previous version asked for "Hour (0-23)" as a text field.
-            val timeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-            val hourPicker = android.widget.NumberPicker(host).apply {
-                minValue = 0
-                maxValue = 23
-                value = hour.coerceIn(0, 23)
-                wrapSelectorWheel = true
-                setFormatter { String.format(Locale.getDefault(), "%02d", it) }
+        kit.sheet(if (isNew) "New alarm" else "Edit alarm", "Scroll the wheels or tap the centre digit to type") { panel, dialog ->
+            val countdownView = kit.text("", 13f, palette.onAccentSoft, OeaType.medium).apply {
+                gravity = Gravity.CENTER
+                setPadding(kit.dp(12), kit.dp(8), kit.dp(12), kit.dp(8))
+                background = kit.rounded(palette.accentSoft, 14)
             }
-            val minutePicker = android.widget.NumberPicker(host).apply {
-                minValue = 0
-                maxValue = 59
-                value = minute.coerceIn(0, 59)
-                wrapSelectorWheel = true
-                setFormatter { String.format(Locale.getDefault(), "%02d", it) }
+            fun updateCountdown() {
+                val at = nextClockAlarm(java.util.Calendar.getInstance(), hour, minute, chosenDays)
+                val timeStr = formatAlarmTime(hour, minute, is24h)
+                countdownView.text = "$timeStr · Rings in ${untilText(at)}"
             }
-            timeRow.addView(hourPicker, LinearLayout.LayoutParams(0, kit.dp(140), 1f))
-            timeRow.addView(kit.text(":", 30f, kit.palette.textTertiary).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-2, kit.dp(140)))
-            timeRow.addView(minutePicker, LinearLayout.LayoutParams(0, kit.dp(140), 1f))
-            panel.addView(timeRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
-            val labelField = kit.field("Label", label)
-            panel.addView(labelField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            // Repeat days as seven chips: no more typing "1,2,3,4,5" into a box.
-            val chosenDays = days.toMutableSet()
-            val dayRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(4), 0, kit.dp(6)) }
+            panel.addView(countdownView, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+
+            // Palette-native wheels: high-contrast digits on both light and dark themes,
+            // with touch interception locked so the sheet never eats a wheel drag.
+            val timeWheel = kit.timeWheel(hour, minute, is24h) { h, m ->
+                hour = h
+                minute = m
+                updateCountdown()
+            }
+            panel.addView(timeWheel.root, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(14) })
+
+            // Repeat days: explicit surface, border and WCAG-checked active contrast.
+            val repeatCard = LinearLayout(host).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(kit.dp(14), kit.dp(12), kit.dp(14), kit.dp(12))
+                background = kit.rounded(palette.card, 20, palette.stroke, 1)
+            }
+            val repeatHeader = LinearLayout(host).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            repeatHeader.addView(kit.text("Repeat", 14.5f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
+            val repeatLabel = kit.text("", 12.5f, palette.accent, OeaType.medium)
+            if (OeaTheme.contrast(palette.accent, palette.card) < 3.5f) repeatLabel.setTextColor(palette.textSecondary)
+            repeatHeader.addView(repeatLabel)
+            repeatCard.addView(repeatHeader, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+            val dayRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val presetRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(8), 0, 0) }
             fun paintDays() {
+                repeatLabel.text = repeatSummary(chosenDays)
                 dayRow.removeAllViews()
-                listOf(1, 2, 3, 4, 5, 6, 0).forEach { day ->
-                    dayRow.addView(
-                        kit.chip(dayName(day), day in chosenDays) {
-                            if (day in chosenDays) chosenDays -= day else chosenDays += day
+                WEEK_ORDER.forEachIndexed { idx, day ->
+                    val on = day in chosenDays
+                    val bg = if (on) palette.accent else palette.cardHigh
+                    val fg = if (on) palette.onAccent else palette.text
+                    val cell = kit.text(dayName(day).take(2), 12.5f, fg, if (on) OeaType.bold else OeaType.medium).apply {
+                        gravity = Gravity.CENTER
+                        minimumHeight = kit.dp(44)
+                        isClickable = true
+                        isFocusable = true
+                        contentDescription = "${dayFullName(day)}, ${if (on) "selected" else "not selected"}"
+                        background = kit.ripple(kit.rounded(bg, 14, if (on) 0 else palette.stroke, if (on) 0 else 1), 14)
+                        setOnClickListener {
+                            if (on) chosenDays -= day else chosenDays += day
                             paintDays()
+                            updateCountdown()
+                        }
+                    }
+                    dayRow.addView(
+                        cell,
+                        LinearLayout.LayoutParams(0, kit.dp(44), 1f).apply {
+                            if (idx > 0) leftMargin = kit.dp(5)
+                        }
+                    )
+                }
+                presetRow.removeAllViews()
+                listOf(
+                    "Once" to emptySet<Int>(),
+                    "Weekdays" to WEEKDAYS,
+                    "Weekends" to WEEKENDS,
+                    "Every day" to WEEK_ORDER.toSet()
+                ).forEachIndexed { idx, (name, target) ->
+                    val active = chosenDays == target
+                    presetRow.addView(
+                        kit.chip(name, active) {
+                            chosenDays.clear()
+                            chosenDays.addAll(target)
+                            paintDays()
+                            updateCountdown()
                         },
-                        LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(4) }
+                        LinearLayout.LayoutParams(-2, kit.dp(38)).apply { if (idx > 0) leftMargin = kit.dp(6) }
                     )
                 }
             }
-            panel.addView(kit.text("Repeats", 12f, kit.palette.textTertiary))
             paintDays()
-            panel.addView(kit.hscroll(dayRow), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
-            val snoozeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(4), 0, kit.dp(8)) }
+            updateCountdown()
+            repeatCard.addView(dayRow, LinearLayout.LayoutParams(-1, -2))
+            repeatCard.addView(kit.hscroll(presetRow), LinearLayout.LayoutParams(-1, -2))
+            panel.addView(repeatCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+            val labelField = kit.field("Alarm label (optional)", label)
+            panel.addView(labelField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+            panel.addView(kit.text("Snooze length", 13f, palette.textSecondary, OeaType.medium).apply {
+                setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(6))
+            })
+            val snoozeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
             fun paintSnooze() {
                 snoozeRow.removeAllViews()
-                listOf(5, 10, 15, 30).forEach { option ->
+                listOf(5, 10, 15, 30).forEachIndexed { idx, option ->
                     snoozeRow.addView(
-                        kit.chip("${option} min", option == snooze) {
+                        kit.chip("${option}m", option == snooze) {
                             snooze = option
                             paintSnooze()
                         },
-                        LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(4) }
+                        LinearLayout.LayoutParams(0, kit.dp(44), 1f).apply { if (idx > 0) leftMargin = kit.dp(6) }
                     )
                 }
             }
-            panel.addView(kit.text("Snooze for", 12f, kit.palette.textTertiary))
             paintSnooze()
-            panel.addView(kit.hscroll(snoozeRow), LinearLayout.LayoutParams(-1, -2))
-            val soundGroup = kit.group(panel)
-            fun paintSound() {
-                soundGroup.removeAllViews()
-                kit.row(soundGroup, R.drawable.oic_music_note, "Alarm ringtone", soundLabel(host, sound), value = if (sound.isBlank()) "default" else "change", chevron = true) {
-                    pickRingtone(host, kit) { label, uri ->
-                        sound = if (uri.isNullOrBlank()) label else "$label|$uri"
-                        paintSound()
+            panel.addView(snoozeRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+            val optionsGroup = kit.group(panel)
+            fun paintOptions() {
+                optionsGroup.removeAllViews()
+                kit.row(
+                    optionsGroup,
+                    R.drawable.oic_music_note,
+                    "Ringtone",
+                    soundLabel(host, sound),
+                    chevron = true
+                ) {
+                    pickRingtone(host, kit) { pickedLabel, uri ->
+                        sound = if (uri.isNullOrBlank()) pickedLabel else "$pickedLabel|$uri"
+                        paintOptions()
                     }
                 }
-                kit.note(soundGroup, "Rings at your phone’s alarm volume until you stop or snooze it.")
+                kit.switchRow(optionsGroup, R.drawable.oic_notifications, "Vibrate", "Vibrate while the alarm rings", vibrate) {
+                    vibrate = it
+                }
             }
-            paintSound()
-            val vibToggle = kit.toggle(vibrate) { vibrate = it }
-            val vibRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            vibRow.addView(kit.text("Vibrate", 14f, kit.palette.text), LinearLayout.LayoutParams(0, -2, 1f))
-            vibRow.addView(vibToggle)
-            panel.addView(vibRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+            paintOptions()
 
             panel.addView(kit.buttonRow(
                 kit.quietButton("Cancel") { dialog.dismiss() },
-                kit.primaryButton(if (isNew) "Add" else "Save") {
-                    val h = hourPicker.value.coerceIn(0, 23)
-                    val m = minutePicker.value.coerceIn(0, 59)
+                kit.primaryButton(if (isNew) "Save alarm" else "Save") {
+                    val h = timeWheel.hour.coerceIn(0, 23)
+                    val m = timeWheel.minute.coerceIn(0, 59)
                     val l = labelField.text.toString().trim()
                     val d = chosenDays.toSet()
                     val sn = snooze.coerceIn(1, 60)
@@ -774,12 +1029,18 @@ object OeaClockApp {
                     onDone()
                 }
             ))
-            if (!isNew) panel.addView(kit.quietButton("Delete alarm", R.drawable.oic_delete) {
-                val alarms = decodeAlarms(prefs(host).getString(KEY_ALARMS, "")).filterNot { it.id == existing!!.id }
-                prefs(host).edit().putString(KEY_ALARMS, encodeAlarms(alarms)).apply()
-                cancelAlarm(host, existing!!.id)
-                dialog.dismiss(); onDone()
-            }, LinearLayout.LayoutParams(-1, kit.dp(48)))
+            if (!isNew) {
+                panel.addView(
+                    kit.button("Delete alarm", palette.cardHigh, palette.danger, R.drawable.oic_delete) {
+                        val alarms = decodeAlarms(prefs(host).getString(KEY_ALARMS, "")).filterNot { it.id == existing!!.id }
+                        prefs(host).edit().putString(KEY_ALARMS, encodeAlarms(alarms)).apply()
+                        cancelAlarm(host, existing!!.id)
+                        dialog.dismiss()
+                        onDone()
+                    },
+                    LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) }
+                )
+            }
         }
     }
 

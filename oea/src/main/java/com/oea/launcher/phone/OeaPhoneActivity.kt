@@ -2,65 +2,99 @@ package com.oea.launcher.phone
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.role.RoleManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.CallLog
 import android.provider.ContactsContract
+import android.provider.Settings
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
 import android.text.Editable
+import android.text.InputType
+import android.text.TextUtils
 import android.text.TextWatcher
+import android.util.Log
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
-import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.GridLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.oea.launcher.R
 import com.oea.launcher.callblocker.OeaCallBlockRules
+import com.oea.launcher.callblocker.OeaCallBlockerActivity
+import com.oea.launcher.fault.OeaFaultShield
+import com.oea.launcher.ui.OeaAppKit
+import com.oea.launcher.ui.OeaInsets
+import com.oea.launcher.ui.OeaKit
+import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaTheme
+import com.oea.launcher.ui.OeaType
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * OEA Phone keeps Dial, Recent calls, Missed calls, Contacts, and Blocked calls as
- * dedicated sections with full USSD (* / #) URI encoding and polished SIM selection.
+ * OEA Phone provides Keypad (with USSD-safe URI encoding, live contact matching, and dual-SIM
+ * selection), Recents (All & Missed), Contacts search, and Blocked call history.
  */
 class OeaPhoneActivity : Activity() {
+    private lateinit var palette: OeaPalette
+    private lateinit var kit: OeaAppKit
+    private lateinit var appBar: OeaAppKit.AppBar
+    private lateinit var bottomNav: OeaAppKit.BottomNav
     private lateinit var number: EditText
+    private lateinit var matchChip: LinearLayout
+    private lateinit var matchLabel: TextView
+    private lateinit var backspaceBtn: FrameLayout
+    private lateinit var roleBannerHost: LinearLayout
     private lateinit var dialScroll: ScrollView
-    private lateinit var dialPanel: LinearLayout
+    private lateinit var listPane: LinearLayout
+    private lateinit var recentsFilterHost: FrameLayout
+    private lateinit var searchField: OeaAppKit.SearchField
     private lateinit var listScroll: ScrollView
     private lateinit var list: LinearLayout
-    private lateinit var status: TextView
-    private lateinit var tabs: LinearLayout
-    private lateinit var search: EditText
+
     private var selectedTab = TAB_DIAL
+    private var missedOnly = false
+    private var contactQuery = ""
     private var contactRows: List<ContactRow> = emptyList()
+    private var contactsLoaded = false
     private var pendingCallNumber: String? = null
     private var pendingDeleteCallId: Long? = null
     private var pendingContactHistory: ContactRow? = null
     private val phonePrefs by lazy { getSharedPreferences("oea_phone_prefs", Context.MODE_PRIVATE) }
 
-    private data class ContactRow(val id: Long, val name: String, val phone: String)
+    private data class ContactRow(val id: Long, val name: String, val phone: String, val digits: String, val t9: String)
     private data class CallLogRow(val id: Long, val name: String, val number: String, val type: Int, val date: Long, val durationSeconds: Long)
 
     override fun onCreate(state: Bundle?) {
-        com.oea.launcher.fault.OeaFaultShield.guard("phone:create") {
+        OeaFaultShield.guard("phone:create") {
             super.onCreate(state)
-            selectedTab = state?.getString("phone_tab") ?: TAB_DIAL
-            build()
+            val saved = state?.getString("phone_tab") ?: TAB_DIAL
+            if (saved == TAB_MISSED) {
+                selectedTab = TAB_RECENT
+                missedOnly = true
+            } else {
+                selectedTab = saved
+                missedOnly = state?.getBoolean("phone_missed", false) ?: false
+            }
+            contactQuery = state?.getString("phone_query").orEmpty()
+            buildUi(state?.getString("phone_number").orEmpty())
             consumeDialIntent(intent)
         }
     }
@@ -87,120 +121,157 @@ class OeaPhoneActivity : Activity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putString("phone_tab", selectedTab)
+        outState.putString("phone_tab", if (selectedTab == TAB_RECENT && missedOnly) TAB_MISSED else selectedTab)
+        outState.putBoolean("phone_missed", missedOnly)
+        outState.putString("phone_query", contactQuery)
+        if (::number.isInitialized) outState.putString("phone_number", number.text?.toString().orEmpty())
         super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
         super.onResume()
-        if (::status.isInitialized) {
-            val defaultDialer = isDefaultDialer()
-            status.text = if (defaultDialer) {
-                "● Default phone app active • USSD & call protection ready"
+        OeaFaultShield.guard("phone:resume") {
+            val fresh = OeaTheme.resolve(this)
+            if (!::palette.isInitialized || fresh != palette) {
+                val keepNumber = if (::number.isInitialized) number.text?.toString().orEmpty() else ""
+                buildUi(keepNumber)
             } else {
-                "○ Tap to set OEA as Default Phone for full call & screening control"
+                contactsLoaded = false
+                refreshRoleBanner()
+                renderActiveTab()
+                updateDialAssist()
             }
-            status.setTextColor(if (defaultDialer) 0xFF7BE0B1.toInt() else 0xFFFFC477.toInt())
-            renderList()
         }
     }
 
-    private fun build() {
+    private fun buildUi(initialNumber: String) {
+        palette = OeaTheme.resolve(this)
+        kit = OeaAppKit(this, palette)
+        OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
+        if (selectedTab !in setOf(TAB_DIAL, TAB_RECENT, TAB_CONTACTS, TAB_BLOCKED)) selectedTab = TAB_DIAL
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(12))
-            setBackgroundColor(0xFF0C0F15.toInt())
+            setBackgroundColor(palette.background)
         }
 
-        val headerRow = LinearLayout(this).apply {
+        appBar = kit.appBar("Phone", insetTop = false)
+        appBar.addAction(R.drawable.oic_shield, "Call Blocker") { openCallBlocker() }
+        appBar.addAction(R.drawable.oic_more_vert, "Phone settings") { showPhoneSettingsSheet() }
+        root.addView(appBar.root, LinearLayout.LayoutParams(-1, -2))
+
+        val bodyFrame = FrameLayout(this)
+        dialScroll = buildDialPane(initialNumber)
+        listPane = buildListPane()
+        bodyFrame.addView(dialScroll, FrameLayout.LayoutParams(-1, -1))
+        bodyFrame.addView(listPane, FrameLayout.LayoutParams(-1, -1))
+        root.addView(bodyFrame, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        bottomNav = kit.bottomNav(
+            items = listOf(
+                OeaAppKit.NavItem(TAB_DIAL, "Keypad", R.drawable.oic_dialpad),
+                OeaAppKit.NavItem(TAB_RECENT, "Recents", R.drawable.oic_history),
+                OeaAppKit.NavItem(TAB_CONTACTS, "Contacts", R.drawable.oic_person),
+                OeaAppKit.NavItem(TAB_BLOCKED, "Blocked", R.drawable.oic_block)
+            ),
+            initial = selectedTab
+        ) { id ->
+            selectedTab = id
+            if (id != TAB_CONTACTS && ::searchField.isInitialized) kit.hideKeyboard(searchField.editor)
+            renderActiveTab()
+        }
+        root.addView(bottomNav.root, LinearLayout.LayoutParams(-1, -2))
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = OeaInsets.bars(insets)
+            root.setPadding(bars[0], bars[1], bars[2], 0)
+            bottomNav.root.setPadding(0, 0, 0, bars[3])
+            insets
+        }
+
+        setContentView(root)
+        refreshRoleBanner()
+        renderActiveTab()
+        updateDialAssist()
+    }
+
+    private fun buildDialPane(initialNumber: String): ScrollView {
+        val dialPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            setPadding(kit.dp(18), kit.dp(4), kit.dp(18), kit.dp(14))
+        }
+
+        roleBannerHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        dialPanel.addView(roleBannerHost, LinearLayout.LayoutParams(-1, -2))
+
+        dialPanel.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+
+        // Live contact match chip shown as user enters digits
+        matchChip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(kit.dp(14), kit.dp(8), kit.dp(14), kit.dp(8))
+            background = kit.ripple(kit.rounded(palette.accentSoft, 20, OeaTheme.alpha(palette.accent, 0x44), 1), 20)
+            visibility = View.INVISIBLE
+            isClickable = true
+            isFocusable = true
         }
-        headerRow.addView(smallButton("Back") { finish() }, LinearLayout.LayoutParams(dp(58), dp(36)).apply { rightMargin = dp(8) })
-        headerRow.addView(TextView(this).apply {
-            text = "OEA Phone"
-            textSize = 25f
-            setTextColor(0xFFFFFFFF.toInt())
-            setTypeface(typeface, Typeface.BOLD)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        headerRow.addView(smallButton("Call Blocker") {
-            runCatching {
-                startActivity(Intent(this@OeaPhoneActivity, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java))
-            }.onFailure { toast("Could not open OEA Call Blocker.") }
-        }, LinearLayout.LayoutParams(dp(106), dp(36)))
-        root.addView(headerRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
-
-        status = TextView(this).apply {
-            textSize = 12f
-            setTextColor(0xFF9AA2B1.toInt())
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rounded(0xFF151B26.toInt(), 12)
-            setOnClickListener { requestDefaultDialer() }
+        matchChip.addView(
+            kit.iconView(R.drawable.oic_person, palette.onAccentSoft, 16),
+            LinearLayout.LayoutParams(kit.dp(16), kit.dp(16)).apply { rightMargin = kit.dp(8) }
+        )
+        matchLabel = kit.text("", 13.5f, palette.onAccentSoft, OeaType.medium).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
         }
-        root.addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-
-        tabs = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, dp(2), 0, dp(8))
-        }
-        listOf(
-            TAB_DIAL to "Dial",
-            TAB_RECENT to "Recent",
-            TAB_MISSED to "Missed",
-            TAB_CONTACTS to "Contacts",
-            TAB_BLOCKED to "Blocked"
-        ).forEach { (tab, label) ->
-            tabs.addView(smallButton(label) {
-                selectedTab = tab
-                updateTabs()
-                renderList()
-            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                leftMargin = dp(2)
-                rightMargin = dp(2)
-            })
-        }
-        root.addView(tabs, LinearLayout.LayoutParams(-1, dp(48)))
-
-        dialPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        matchChip.addView(matchLabel, LinearLayout.LayoutParams(-2, -2))
+        dialPanel.addView(matchChip, LinearLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(4), 0, dp(6))
-        }
+            bottomMargin = kit.dp(6)
+        })
 
-        val numberCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = rounded(0xFF151B26.toInt(), 20)
-        }
+        // Dialed number readout
         number = EditText(this).apply {
-            hint = "Phone number or USSD code"
+            hint = "Enter number or *code#"
+            setText(initialNumber)
+            setSelection(initialNumber.length)
             setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_PHONE
+            inputType = InputType.TYPE_CLASS_PHONE
             filters = emptyArray()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                showSoftInputOnFocus = false
-            }
-            textSize = 26f
-            setTypeface(typeface, Typeface.BOLD)
+            showSoftInputOnFocus = false
+            textSize = 30f
+            typeface = OeaType.medium
+            fontFeatureSettings = "tnum"
+            letterSpacing = 0.02f
             gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFF6E7889.toInt())
+            setTextColor(palette.text)
+            setHintTextColor(palette.textTertiary)
             background = ColorDrawable(Color.TRANSPARENT)
             contentDescription = "Phone number or USSD code"
-            setPadding(dp(8), dp(6), dp(8), dp(6))
+            setPadding(kit.dp(8), kit.dp(6), kit.dp(8), kit.dp(8))
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    val len = s?.length ?: 0
+                    textSize = when {
+                        len > 15 -> 22f
+                        len > 11 -> 26f
+                        else -> 30f
+                    }
+                    updateDialAssist()
+                }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
         }
-        numberCard.addView(number, LinearLayout.LayoutParams(-1, dp(56)))
-        dialPanel.addView(numberCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        dialPanel.addView(number, LinearLayout.LayoutParams(-1, kit.dp(56)).apply { bottomMargin = kit.dp(8) })
 
+        // 3x4 tactile keypad
         val keypad = GridLayout(this).apply {
             columnCount = 3
             useDefaultMargins = false
-            setPadding(dp(2), dp(2), dp(2), dp(2))
         }
         val keyDefs = listOf(
-            "1" to "VOICEMAIL",
+            "1" to "OO",
             "2" to "ABC",
             "3" to "DEF",
             "4" to "GHI",
@@ -209,137 +280,299 @@ class OeaPhoneActivity : Activity() {
             "7" to "PQRS",
             "8" to "TUV",
             "9" to "WXYZ",
-            "*" to "STAR",
+            "*" to "",
             "0" to "+",
             "#" to "USSD"
         )
         keyDefs.forEachIndexed { index, (digit, sub) ->
-            keypad.addView(Button(this).apply {
-                text = "$digit\n$sub"
-                textSize = 16f
-                isAllCaps = false
-                setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, dp(4), 0, dp(4))
-                minHeight = 0
-                minimumHeight = 0
-                includeFontPadding = false
-                contentDescription = "Dial $digit"
-                setTextColor(0xFFFFFFFF.toInt())
-                background = rounded(0xFF1B2230.toInt(), 18)
-                setOnClickListener { insertDigit(digit) }
+            val key = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = kit.ripple(kit.rounded(palette.card, 26, palette.stroke, 1), 26)
+                isClickable = true
+                isFocusable = true
+                contentDescription = when (digit) {
+                    "*" -> "Dial star"
+                    "#" -> "Dial pound or USSD"
+                    "0" -> "Dial 0, hold for plus"
+                    else -> if (sub.isNotEmpty() && sub != "OO") "Dial $digit, $sub" else "Dial $digit"
+                }
+                addView(kit.text(digit, 25f, palette.text, OeaType.medium).apply {
+                    gravity = Gravity.CENTER
+                    includeFontPadding = false
+                    fontFeatureSettings = "tnum"
+                })
+                if (sub.isNotEmpty()) {
+                    addView(kit.text(sub, 10f, palette.textSecondary, OeaType.medium).apply {
+                        gravity = Gravity.CENTER
+                        includeFontPadding = false
+                        letterSpacing = 0.12f
+                    })
+                }
+                setOnClickListener { view ->
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    insertDigit(digit)
+                }
                 if (digit == "0") {
-                    setOnLongClickListener {
+                    setOnLongClickListener { view ->
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                         insertDigit("+")
                         true
                     }
                 }
-            }, GridLayout.LayoutParams().apply {
+            }
+            keypad.addView(key, GridLayout.LayoutParams().apply {
                 width = 0
-                height = dp(58)
+                height = kit.dp(62)
                 columnSpec = GridLayout.spec(index % 3, 1, 1f)
                 rowSpec = GridLayout.spec(index / 3)
-                setMargins(dp(5), dp(4), dp(5), dp(4))
+                setMargins(kit.dp(5), kit.dp(4), kit.dp(5), kit.dp(4))
             })
         }
-        dialPanel.addView(keypad, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        dialPanel.addView(keypad, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(14) })
 
-        val callActions = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
+        // Bottom call bar: [Paste]  ( CALL )  [Backspace]
+        val callRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        callActions.addView(
-            actionButton("Call", true) { placeCall() },
-            LinearLayout.LayoutParams(0, dp(54), 1f).apply { rightMargin = dp(8) }
-        )
-        callActions.addView(
-            actionButton("⌫ Delete", false) { deleteDigit() }.apply {
-                setOnLongClickListener {
-                    number.setText("")
-                    true
-                }
-            },
-            LinearLayout.LayoutParams(dp(112), dp(54))
-        )
-        dialPanel.addView(callActions, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
-
-        val toolsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+        val pasteBtn = FrameLayout(this).apply {
+            background = kit.ripple(kit.oval(palette.card, palette.stroke, 1), 26)
+            contentDescription = "Paste number"
+            isClickable = true
+            isFocusable = true
+            addView(
+                kit.iconView(R.drawable.oic_file_copy, palette.textSecondary, 20),
+                FrameLayout.LayoutParams(kit.dp(20), kit.dp(20), Gravity.CENTER)
+            )
+            setOnClickListener { pasteFromClipboard() }
         }
-        toolsRow.addView(
-            smallButton("Default phone") { requestDefaultDialer() },
-            LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(4) }
-        )
-        toolsRow.addView(
-            smallButton("Call display") { showCallOptions() },
-            LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(4); rightMargin = dp(4) }
-        )
-        toolsRow.addView(
-            smallButton("Incoming-call flash alert") { showFlashOptions() },
-            LinearLayout.LayoutParams(0, dp(40), 1.3f).apply { leftMargin = dp(4) }
-        )
-        dialPanel.addView(toolsRow, LinearLayout.LayoutParams(-1, -2))
+        val leftSlot = FrameLayout(this).apply {
+            addView(pasteBtn, FrameLayout.LayoutParams(kit.dp(50), kit.dp(50), Gravity.CENTER))
+        }
 
-        dialScroll = ScrollView(this).apply {
+        val callColor = palette.success
+        val callBtn = FrameLayout(this).apply {
+            background = kit.ripple(kit.oval(callColor), 34)
+            elevation = kit.dpf(3f)
+            contentDescription = "Place call"
+            isClickable = true
+            isFocusable = true
+            addView(
+                kit.iconView(R.drawable.oic_call, OeaTheme.onColor(callColor), 28),
+                FrameLayout.LayoutParams(kit.dp(28), kit.dp(28), Gravity.CENTER)
+            )
+            setOnClickListener { view ->
+                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                placeCall()
+            }
+        }
+        val centerSlot = FrameLayout(this).apply {
+            addView(callBtn, FrameLayout.LayoutParams(kit.dp(68), kit.dp(68), Gravity.CENTER))
+        }
+
+        backspaceBtn = FrameLayout(this).apply {
+            background = kit.ripple(kit.oval(palette.card, palette.stroke, 1), 26)
+            contentDescription = "Delete digit, hold to clear"
+            isClickable = true
+            isFocusable = true
+            visibility = if (initialNumber.isEmpty()) View.INVISIBLE else View.VISIBLE
+            addView(
+                kit.iconView(R.drawable.oic_backspace, palette.text, 21),
+                FrameLayout.LayoutParams(kit.dp(21), kit.dp(21), Gravity.CENTER)
+            )
+            setOnClickListener { view ->
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                deleteDigit()
+            }
+            setOnLongClickListener { view ->
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                number.setText("")
+                true
+            }
+        }
+        val rightSlot = FrameLayout(this).apply {
+            addView(backspaceBtn, FrameLayout.LayoutParams(kit.dp(50), kit.dp(50), Gravity.CENTER))
+        }
+
+        callRow.addView(leftSlot, LinearLayout.LayoutParams(0, kit.dp(72), 1f))
+        callRow.addView(centerSlot, LinearLayout.LayoutParams(0, kit.dp(72), 1f))
+        callRow.addView(rightSlot, LinearLayout.LayoutParams(0, kit.dp(72), 1f))
+        dialPanel.addView(callRow, LinearLayout.LayoutParams(-1, -2))
+
+        return ScrollView(this).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = false
-            addView(dialPanel, android.widget.FrameLayout.LayoutParams(-1, -2))
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(dialPanel, FrameLayout.LayoutParams(-1, -2))
         }
-        root.addView(dialScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+    }
 
-        search = EditText(this).apply {
-            hint = "Search contacts by name or number"
-            setSingleLine(true)
-            textSize = 15f
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFF9AA2B1.toInt())
-            setPadding(dp(14), dp(4), dp(14), dp(4))
-            background = rounded(0xFF1E2431.toInt(), 14)
+    private fun buildListPane(): LinearLayout {
+        val pane = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             visibility = View.GONE
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (selectedTab == TAB_CONTACTS) renderContacts()
-                }
-                override fun afterTextChanged(s: Editable?) = Unit
-            })
         }
-        root.addView(search, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(8) })
+        recentsFilterHost = FrameLayout(this).apply {
+            setPadding(kit.dp(16), kit.dp(2), kit.dp(16), kit.dp(6))
+            visibility = View.GONE
+        }
+        pane.addView(recentsFilterHost, LinearLayout.LayoutParams(-1, -2))
+
+        searchField = kit.searchField("Search contacts or numbers", contactQuery, onQuery = { q ->
+            contactQuery = q
+            if (selectedTab == TAB_CONTACTS) renderContacts()
+        })
+        searchField.root.visibility = View.GONE
+        pane.addView(searchField.root, LinearLayout.LayoutParams(-1, -2).apply {
+            leftMargin = kit.dp(16)
+            rightMargin = kit.dp(16)
+            topMargin = kit.dp(2)
+            bottomMargin = kit.dp(8)
+        })
 
         list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(2), 0, dp(8))
+            setPadding(kit.dp(16), kit.dp(4), kit.dp(16), kit.dp(20))
         }
         listScroll = ScrollView(this).apply {
-            isFillViewport = true
+            isFillViewport = false
             isVerticalScrollBarEnabled = false
-            visibility = View.GONE
-            addView(list, android.widget.FrameLayout.LayoutParams(-1, -2))
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            addView(list, FrameLayout.LayoutParams(-1, -2))
         }
-        root.addView(listScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-
-        setContentView(root)
-        updateTabs()
-        renderList()
+        pane.addView(listScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        return pane
     }
 
-    private fun renderList() {
+    private fun refreshRoleBanner() {
+        if (!::roleBannerHost.isInitialized) return
+        roleBannerHost.removeAllViews()
+        if (!isDefaultDialer()) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(kit.dp(14), kit.dp(10), kit.dp(12), kit.dp(10))
+                background = kit.ripple(
+                    kit.rounded(
+                        OeaTheme.blend(palette.card, palette.accent, if (palette.dark) 0.14f else 0.08f),
+                        18,
+                        OeaTheme.alpha(palette.accent, 0x3A),
+                        1
+                    ),
+                    18
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { requestDefaultDialer() }
+            }
+            row.addView(
+                kit.iconView(R.drawable.oic_call, palette.accent, 18),
+                LinearLayout.LayoutParams(kit.dp(18), kit.dp(18)).apply { rightMargin = kit.dp(10) }
+            )
+            row.addView(
+                kit.text("Set as default Phone app", 13f, palette.text, OeaType.medium),
+                LinearLayout.LayoutParams(0, -2, 1f)
+            )
+            row.addView(kit.text("Enable", 13f, palette.accent, OeaType.medium))
+            roleBannerHost.addView(row, LinearLayout.LayoutParams(-1, -2))
+        }
+    }
+
+    private fun renderActiveTab() {
         if (!::list.isInitialized) return
+        bottomNav.select(selectedTab, notify = false)
         val onDial = selectedTab == TAB_DIAL
         dialScroll.visibility = if (onDial) View.VISIBLE else View.GONE
-        listScroll.visibility = if (onDial) View.GONE else View.VISIBLE
-        search.visibility = if (selectedTab == TAB_CONTACTS) View.VISIBLE else View.GONE
+        listPane.visibility = if (onDial) View.GONE else View.VISIBLE
+        recentsFilterHost.visibility = if (selectedTab == TAB_RECENT) View.VISIBLE else View.GONE
+        searchField.root.visibility = if (selectedTab == TAB_CONTACTS) View.VISIBLE else View.GONE
+
+        appBar.title.text = when (selectedTab) {
+            TAB_RECENT -> "Recents"
+            TAB_CONTACTS -> "Contacts"
+            TAB_BLOCKED -> "Blocked"
+            else -> "Phone"
+        }
+        appBar.setSubtitle(
+            when (selectedTab) {
+                TAB_DIAL -> if (isDefaultDialer()) "Default phone · USSD ready" else null
+                TAB_RECENT -> if (missedOnly) "Missed calls" else "All recent calls"
+                TAB_CONTACTS -> null
+                TAB_BLOCKED -> "Screened & rejected calls"
+                else -> null
+            }
+        )
+
         list.removeAllViews()
         when (selectedTab) {
-            TAB_DIAL -> Unit
-            TAB_RECENT -> loadCallLog()
-            TAB_MISSED -> loadCallLog(missedOnly = true)
+            TAB_DIAL -> ensureContactsLoadedQuietly()
+            TAB_RECENT -> {
+                recentsFilterHost.removeAllViews()
+                recentsFilterHost.addView(
+                    kit.chipBar(
+                        listOf("all" to "All calls", "missed" to "Missed"),
+                        if (missedOnly) "missed" else "all"
+                    ) { key ->
+                        missedOnly = key == "missed"
+                        renderActiveTab()
+                    },
+                    FrameLayout.LayoutParams(-1, -2)
+                )
+                loadCallLog(missedOnly)
+            }
             TAB_CONTACTS -> {
                 loadContacts()
                 renderContacts()
             }
             TAB_BLOCKED -> loadBlockedHistory()
         }
+    }
+
+    private fun ensureContactsLoadedQuietly() {
+        if (contactsLoaded) return
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return
+        loadContacts()
+    }
+
+    private fun updateDialAssist() {
+        if (!::number.isInitialized || !::backspaceBtn.isInitialized) return
+        val raw = number.text?.toString().orEmpty()
+        backspaceBtn.visibility = if (raw.isEmpty()) View.INVISIBLE else View.VISIBLE
+        val digits = raw.filter(Char::isDigit)
+        if (digits.length < 2 || raw.contains('*') || raw.contains('#')) {
+            matchChip.visibility = View.INVISIBLE
+            matchChip.setOnClickListener(null)
+            return
+        }
+        ensureContactsLoadedQuietly()
+        val match = contactRows.firstOrNull { row ->
+            row.digits.contains(digits) || (digits.length >= 3 && row.t9.startsWith(digits))
+        }
+        if (match == null) {
+            matchChip.visibility = View.INVISIBLE
+            matchChip.setOnClickListener(null)
+        } else {
+            matchLabel.text = "${match.name} · ${match.phone}"
+            matchChip.visibility = View.VISIBLE
+            matchChip.setOnClickListener {
+                number.setText(match.phone)
+                number.setSelection(number.text.length)
+            }
+        }
+    }
+
+    private fun pasteFromClipboard() {
+        val clip = getSystemService(ClipboardManager::class.java)?.primaryClip
+        val text = clip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty().trim()
+        val cleaned = text.filter { it.isDigit() || it in "+*#;, ()-" }.trim()
+        if (cleaned.isEmpty()) {
+            toast("No phone number on clipboard")
+            return
+        }
+        number.setText(cleaned)
+        number.setSelection(number.text.length)
     }
 
     private fun insertDigit(digit: String) {
@@ -369,20 +602,15 @@ class OeaPhoneActivity : Activity() {
         }
     }
 
-    /**
-     * Builds a tel: URI that preserves '#' as '%23' in the encoded scheme-specific part.
-     * Previously, Uri.encode(raw, "*#") left '#' unencoded, causing Uri.parse("tel:*323#")
-     * to strip '#' as a URI fragment delimiter so only '*323' was sent to Android Telecom.
-     */
+    /** Builds a tel: URI preserving '#' as '%23' so USSD codes (*323#, *312#, etc.) reach Telecom intact. */
     private fun buildTelUri(raw: String): Uri = Uri.fromParts("tel", raw, null)
 
     private fun placeCall(value: String = number.text.toString().trim()) {
         val raw = value.trim()
         if (raw.isEmpty()) {
-            toast("Enter a phone number or USSD code first.")
+            toast("Enter a phone number or USSD code")
             selectedTab = TAB_DIAL
-            updateTabs()
-            renderList()
+            renderActiveTab()
             return
         }
         val uri = buildTelUri(raw)
@@ -391,8 +619,7 @@ class OeaPhoneActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.CALL_PHONE), REQUEST_CALL_PHONE)
             return
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-            checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
             pendingCallNumber = raw
             requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE), REQUEST_PHONE_STATE)
             return
@@ -408,100 +635,76 @@ class OeaPhoneActivity : Activity() {
             startCallWithAccount(raw, accounts.first())
             return
         }
-        showPolishedSimDialog(raw, uri, telecom, accounts)
+        showSimSheet(raw, uri, telecom, accounts)
     }
 
-    private fun showPolishedSimDialog(
+    private fun showSimSheet(
         raw: String,
         uri: Uri,
         telecom: TelecomManager?,
         accounts: List<PhoneAccountHandle>
     ) {
         val savedId = phonePrefs.getString("preferred_phone_account", null)
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(14))
-            background = rounded(0xFF131924.toInt(), 22)
-        }
-        container.addView(TextView(this).apply {
-            text = "Choose SIM for this call"
-            textSize = 19f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        val subtitle = if (raw.endsWith("#")) "USSD / MMI code · $raw" else "Calling $raw"
+        kit.sheet("Choose SIM for this call", subtitle) { panel, dialog ->
+            accounts.forEachIndexed { index, handle ->
+                val account = runCatching { telecom?.getPhoneAccount(handle) }.getOrNull()
+                val label = account?.label?.toString().orEmpty().ifBlank { "SIM ${index + 1}" }
+                val address = account?.shortDescription?.toString().orEmpty()
+                val isPreferred = handle.id == savedId
+                val simCard = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    minimumHeight = kit.dp(60)
+                    setPadding(kit.dp(14), kit.dp(12), kit.dp(14), kit.dp(12))
+                    background = kit.ripple(
+                        kit.rounded(
+                            if (isPreferred) palette.accentSoft else palette.card,
+                            20,
+                            if (isPreferred) palette.accent else palette.stroke,
+                            1
+                        ),
+                        20
+                    )
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        phonePrefs.edit().putString("preferred_phone_account", handle.id).apply()
+                        dialog.dismiss()
+                        startCallWithAccount(raw, handle)
+                    }
+                }
+                val badge = FrameLayout(this).apply {
+                    background = kit.rounded(palette.accent, 13)
+                    addView(kit.text("${index + 1}", 15f, palette.onAccent, OeaType.medium).apply {
+                        gravity = Gravity.CENTER
+                    }, FrameLayout.LayoutParams(-1, -1))
+                }
+                simCard.addView(badge, LinearLayout.LayoutParams(kit.dp(36), kit.dp(36)).apply { rightMargin = kit.dp(12) })
 
-        container.addView(TextView(this).apply {
-            text = if (raw.endsWith("#")) "USSD / MMI code • $raw" else "Dialing $raw"
-            textSize = 13f
-            setTextColor(0xFF7BE0B1.toInt())
-            setPadding(0, 0, 0, dp(12))
-        }, LinearLayout.LayoutParams(-1, -2))
-
-        val dialog = AlertDialog.Builder(this).setView(container).create()
-        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-
-        accounts.forEachIndexed { index, handle ->
-            val account = runCatching { telecom?.getPhoneAccount(handle) }.getOrNull()
-            val label = account?.label?.toString().orEmpty().ifBlank { "SIM ${index + 1}" }
-            val address = account?.shortDescription?.toString().orEmpty()
-            val isPreferred = handle.id == savedId
-            val simCard = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(14), dp(12), dp(14), dp(12))
-                background = rounded(if (isPreferred) 0xFF1F3834.toInt() else 0xFF1C2433.toInt(), 16)
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    phonePrefs.edit().putString("preferred_phone_account", handle.id).apply()
+                val fg = if (isPreferred) palette.onAccentSoft else palette.text
+                val subFg = if (isPreferred) OeaTheme.alpha(palette.onAccentSoft, 0xCC) else palette.textSecondary
+                val textCol = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(kit.text(if (isPreferred) "$label · Last used" else label, 15.5f, fg, OeaType.medium))
+                    if (address.isNotBlank() && address != label) {
+                        addView(kit.text(address, 12.5f, subFg))
+                    }
+                }
+                simCard.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
+                simCard.addView(kit.iconView(R.drawable.oic_call, if (isPreferred) palette.onAccentSoft else palette.accent, 20),
+                    LinearLayout.LayoutParams(kit.dp(20), kit.dp(20)))
+                panel.addView(simCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+            }
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Cancel") { dialog.dismiss() },
+                kit.tonalButton("System default") {
                     dialog.dismiss()
-                    startCallWithAccount(raw, handle)
+                    runCatching { telecom?.placeCall(uri, Bundle()) ?: openDialer(uri) }
+                        .onFailure { openDialer(uri) }
                 }
-            }
-            simCard.addView(TextView(this).apply {
-                text = "${index + 1}"
-                textSize = 15f
-                setTypeface(typeface, Typeface.BOLD)
-                gravity = Gravity.CENTER
-                setTextColor(0xFFFFFFFF.toInt())
-                background = rounded(0xFF2D8C74.toInt(), 12)
-            }, LinearLayout.LayoutParams(dp(34), dp(34)).apply { rightMargin = dp(12) })
-
-            val textCol = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(TextView(this@OeaPhoneActivity).apply {
-                    text = label + if (isPreferred) "  • Last used" else ""
-                    textSize = 15f
-                    setTypeface(typeface, Typeface.BOLD)
-                    setTextColor(0xFFFFFFFF.toInt())
-                })
-                if (address.isNotBlank() && address != label) {
-                    addView(TextView(this@OeaPhoneActivity).apply {
-                        text = address
-                        textSize = 12f
-                        setTextColor(0xFF9AA2B1.toInt())
-                    })
-                }
-            }
-            simCard.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
-            container.addView(simCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+            ))
         }
-
-        val footer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
-            setPadding(0, dp(4), 0, 0)
-        }
-        footer.addView(smallButton("Use Android's choice") {
-            dialog.dismiss()
-            runCatching { telecom?.placeCall(uri, Bundle()) ?: openDialer(uri) }
-                .onFailure { openDialer(uri) }
-        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(8) })
-        footer.addView(smallButton("Cancel") {
-            dialog.dismiss()
-        }, LinearLayout.LayoutParams(dp(96), dp(40)))
-        container.addView(footer, LinearLayout.LayoutParams(-1, -2))
-        dialog.show()
     }
 
     private fun startCallWithAccount(raw: String, handle: PhoneAccountHandle) {
@@ -512,61 +715,93 @@ class OeaPhoneActivity : Activity() {
             }
             getSystemService(TelecomManager::class.java).placeCall(uri, extras)
         }.onFailure {
-            toast("Could not start the call through the selected SIM. Opening Android's dialer.")
+            toast("Could not start call on selected SIM; opening system dialer")
             openDialer(uri)
         }
     }
 
+    private fun showPhoneSettingsSheet() {
+        val modeKey = phonePrefs.getString("call_ui_mode", "fullscreen") ?: "fullscreen"
+        val modeLabel = when (modeKey) {
+            "popup" -> "Popup window"
+            "compact" -> "Compact floating card"
+            else -> "Full screen"
+        }
+        val flashOn = phonePrefs.getBoolean("flash_alert", false)
+        kit.actions("Phone settings", null, listOf(
+            OeaAppKit.Action(
+                R.drawable.oic_call,
+                "Default phone app",
+                if (isDefaultDialer()) "OEA is active as your default dialer" else "Tap to set OEA as default phone app"
+            ) { requestDefaultDialer() },
+            OeaAppKit.Action(
+                R.drawable.oic_open_in_full,
+                "Call display style",
+                modeLabel
+            ) { showCallOptions() },
+            OeaAppKit.Action(
+                R.drawable.oic_flash_on,
+                "Incoming-call flash alert",
+                if (flashOn) "Enabled — camera flash blinks while ringing" else "Off — tap to turn on"
+            ) { showFlashOptions() },
+            OeaAppKit.Action(
+                R.drawable.oic_shield,
+                "Call Blocker",
+                "Manage blocked numbers, prefixes and allow-list"
+            ) { openCallBlocker() }
+        ))
+    }
+
     private fun showCallOptions() {
-        val modes = arrayOf("Full screen", "Popup window", "Compact floating card")
-        val details = arrayOf(
-            "Full screen • over your wallpaper",
-            "Popup window • a card over the app you're using",
-            "Compact floating card • a small card at the top; keep using your phone"
-)
-        val keys = arrayOf("fullscreen", "popup", "compact")
+        val modes = listOf("Full screen", "Popup window", "Compact floating card")
+        val details = listOf(
+            "Over your wallpaper (always used when phone is locked)",
+            "A floating card over the app you're using",
+            "Minimal banner at the top so you can keep working"
+        )
+        val keys = listOf("fullscreen", "popup", "compact")
         val current = phonePrefs.getString("call_ui_mode", "fullscreen") ?: "fullscreen"
-        AlertDialog.Builder(this)
-            .setTitle("Incoming and active call display")
-            .setSingleChoiceItems(details, keys.indexOf(current).coerceAtLeast(0)) { dialog, which ->
-                phonePrefs.edit().putString("call_ui_mode", keys[which]).apply()
-                dialog.dismiss()
-                toast("${modes[which]} selected. Locked phones always show calls full screen; you can switch during a call.")
-            }
-            .setNegativeButton("Close", null)
-            .show()
+        kit.choose("Call display style", "You can also switch views during a call", modes, keys.indexOf(current).coerceAtLeast(0), details) { which ->
+            phonePrefs.edit().putString("call_ui_mode", keys[which]).apply()
+            toast("${modes[which]} selected")
+        }
     }
 
     private fun showFlashOptions() {
-        AlertDialog.Builder(this)
-            .setTitle("Incoming-call flash alert")
-            .setMessage("Blink the camera flash while an incoming call is ringing. This needs Camera permission and may be unavailable while another app uses the camera.")
-            .setPositiveButton(if (phonePrefs.getBoolean("flash_alert", false)) "Turn off" else "Turn on") { _, _ ->
-                if (phonePrefs.getBoolean("flash_alert", false)) {
-                    phonePrefs.edit().putBoolean("flash_alert", false).apply()
-                    toast("Call flash alert disabled.")
-                } else if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                    phonePrefs.edit().putBoolean("flash_alert", true).apply()
-                    toast("Call flash alert enabled.")
-                } else {
-                    requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
-                }
+        val currentlyOn = phonePrefs.getBoolean("flash_alert", false)
+        kit.confirm(
+            "Incoming-call flash alert",
+            "Blink the camera flash while an incoming call rings. Needs Camera permission and pauses while another app uses the camera.",
+            if (currentlyOn) "Turn off" else "Turn on"
+        ) {
+            if (currentlyOn) {
+                phonePrefs.edit().putBoolean("flash_alert", false).apply()
+                toast("Call flash alert turned off")
+            } else if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                phonePrefs.edit().putBoolean("flash_alert", true).apply()
+                toast("Call flash alert enabled")
+            } else {
+                requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+    }
+
+    private fun openCallBlocker() {
+        runCatching { startActivity(Intent(this, OeaCallBlockerActivity::class.java)) }
+            .onFailure { toast("Could not open Call Blocker") }
     }
 
     private fun openDialer(uri: Uri) {
         runCatching { startActivity(Intent(Intent.ACTION_DIAL, uri)) }
-            .onFailure { toast("Unable to open Android's dialer for this number.") }
+            .onFailure { toast("Unable to open dialer for this number") }
     }
 
     private fun requestDefaultDialer() {
         if (isDefaultDialer()) {
-            toast("OEA is already the default phone app.")
+            toast("OEA is already your default phone app")
             return
         }
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val roles = getSystemService(RoleManager::class.java)
             if (roles?.isRoleAvailable(RoleManager.ROLE_DIALER) == true) {
                 runCatching { startActivityForResult(roles.createRequestRoleIntent(RoleManager.ROLE_DIALER), REQUEST_DIALER_ROLE) }
@@ -581,7 +816,7 @@ class OeaPhoneActivity : Activity() {
     }
 
     private fun isDefaultDialer(): Boolean = runCatching {
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_DIALER) == true
         } else {
             getSystemService(TelecomManager::class.java)?.defaultDialerPackage == packageName
@@ -589,7 +824,7 @@ class OeaPhoneActivity : Activity() {
     }.getOrDefault(false)
 
     private fun hasCallScreeningAccess(): Boolean = runCatching {
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true || isDefaultDialer()
         } else {
             isDefaultDialer()
@@ -607,23 +842,29 @@ class OeaPhoneActivity : Activity() {
     private fun callBlockStatus(number: String): String? {
         if (!hasConfiguredBlockRule(number)) return null
         return when {
-            !OeaCallBlockRules.enabled(this) -> "Block rule • protection off"
-            !hasCallScreeningAccess() -> "Block rule • Android screening access needed"
+            !OeaCallBlockRules.enabled(this) -> "Rule paused"
+            !hasCallScreeningAccess() -> "Screening setup needed"
             OeaCallBlockRules.shouldBlock(this, number) -> "Blocked"
-            else -> "Rule matches, but an allow-list/contact exception applies"
+            else -> "Allowed by exception"
         }
     }
 
     private fun openDefaultAppsSettings() {
-        runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
-            .onFailure { toast("Open Android Settings and choose OEA as the default phone app.") }
+        runCatching { startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+            .onFailure { toast("Open Settings › Default apps › Phone") }
     }
 
-    private fun loadCallLog(missedOnly: Boolean = false) {
+    private fun loadCallLog(onlyMissed: Boolean = false) {
         if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
-            addEmptyState("Call history permission is needed to show recent calls.", "Grant permission") {
-                requestPermissions(arrayOf(Manifest.permission.READ_CALL_LOG), REQUEST_CALL_LOG)
-            }
+            list.addView(
+                kit.emptyState(
+                    R.drawable.oic_history,
+                    "See your call history",
+                    "Grant call-log permission to browse recent and missed calls.",
+                    "Grant access"
+                ) { requestPermissions(arrayOf(Manifest.permission.READ_CALL_LOG), REQUEST_CALL_LOG) },
+                LinearLayout.LayoutParams(-1, -2)
+            )
             return
         }
         val projection = arrayOf(
@@ -633,39 +874,70 @@ class OeaPhoneActivity : Activity() {
             CallLog.Calls.DATE,
             CallLog.Calls.DURATION,
             CallLog.Calls.CACHED_NAME
-)
-        var count = 0
+        )
+        val rows = mutableListOf<CallLogRow>()
         runCatching {
             contentResolver.query(CallLog.Calls.CONTENT_URI, projection, null, null, CallLog.Calls.DATE + " DESC")?.use { cursor ->
-                while (cursor.moveToNext() && count < 100) {
+                while (cursor.moveToNext() && rows.size < 100) {
                     val callType = cursor.getInt(2)
-                    if (missedOnly && callType != CallLog.Calls.MISSED_TYPE) continue
-                    count++
+                    if (onlyMissed && callType != CallLog.Calls.MISSED_TYPE) continue
                     val phone = cursor.getString(1).orEmpty().ifBlank { "Unknown number" }
                     val dateMillis = cursor.getLong(3)
                     val duration = cursor.getLong(4).coerceAtLeast(0L)
                     val name = cursor.getString(5).orEmpty().ifBlank { phone }
-                    val entry = CallLogRow(cursor.getLong(0), name, phone, callType, dateMillis, duration)
-                    val callTypeText = callTypeLabel(callType)
-                    val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(dateMillis))
-                    val blockStatus = callBlockStatus(phone)
-                    val subtitle = "$phone • $callTypeText • ${durationLabel(duration)} • $date" +
-                        (blockStatus?.let { " • $it" } ?: "")
-                    addEntry(
-                        name,
-                        subtitle,
-                        "Call",
-                        action = { placeCall(phone) },
-                        rowClick = { showCallDetails(entry) }
-)
+                    rows += CallLogRow(cursor.getLong(0), name, phone, callType, dateMillis, duration)
                 }
             }
-        }.onFailure { addEmptyState("Could not read call history on this device.") }
-        if (count == 0 && list.childCount == 0) addEmptyState(if (missedOnly) "No missed calls found." else "No recent calls found.")
-        addSectionAction("Open dial pad") {
-            selectedTab = TAB_DIAL
-            updateTabs()
-            renderList()
+        }.onFailure {
+            list.addView(kit.emptyState(R.drawable.oic_warning_fill, "Could not read call history", "Try again or check Phone permissions."))
+            return
+        }
+
+        if (rows.isEmpty()) {
+            list.addView(
+                kit.emptyState(
+                    R.drawable.oic_history,
+                    if (onlyMissed) "No missed calls" else "No recent calls",
+                    if (onlyMissed) "You're all caught up." else "Calls you make and receive appear here.",
+                    "Open keypad"
+                ) {
+                    selectedTab = TAB_DIAL
+                    renderActiveTab()
+                },
+                LinearLayout.LayoutParams(-1, -2)
+            )
+            return
+        }
+
+        val group = kit.group(list)
+        rows.forEachIndexed { idx, entry ->
+            val isMissed = entry.type == CallLog.Calls.MISSED_TYPE
+            val isRejected = entry.type == CallLog.Calls.REJECTED_TYPE
+            val badgeColor = when {
+                isMissed -> palette.danger
+                isRejected -> palette.warning
+                entry.type == CallLog.Calls.INCOMING_TYPE -> palette.success
+                else -> palette.accent
+            }
+            val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.date))
+            val blockStatus = callBlockStatus(entry.number)
+            val meta = buildString {
+                append(callTypeLabel(entry.type))
+                if (entry.durationSeconds > 0L) append(" · ").append(durationLabel(entry.durationSeconds))
+                append(" · ").append(date)
+                blockStatus?.let { append(" · ").append(it) }
+            }
+            addCallRow(
+                parent = group,
+                showDivider = idx > 0,
+                iconRes = if (isMissed || isRejected) R.drawable.oic_call_end else R.drawable.oic_call,
+                badgeTone = badgeColor,
+                title = entry.name,
+                titleColor = if (isMissed) palette.danger else palette.text,
+                subtitle = if (entry.name != entry.number) "${entry.number} · $meta" else meta,
+                onRowClick = { showCallDetails(entry) },
+                onCallClick = if (entry.number != "Unknown number") ({ placeCall(entry.number) }) else null
+            )
         }
     }
 
@@ -674,53 +946,60 @@ class OeaPhoneActivity : Activity() {
         CallLog.Calls.OUTGOING_TYPE -> "Outgoing"
         CallLog.Calls.MISSED_TYPE -> "Missed"
         CallLog.Calls.REJECTED_TYPE -> "Rejected"
+        CallLog.Calls.BLOCKED_TYPE -> "Blocked"
         else -> "Call"
     }
 
     private fun durationLabel(seconds: Long): String = when {
-        seconds <= 0L -> "No duration"
+        seconds <= 0L -> "0s"
         seconds < 60L -> "${seconds}s"
         else -> "${seconds / 60L}m ${seconds % 60L}s"
     }
 
     private fun showCallDetails(entry: CallLogRow) {
-        val date = DateFormat.getDateTimeInstance(DateFormat.FULL, DateFormat.MEDIUM).format(Date(entry.date))
-        val number = entry.number
+        val date = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(entry.date))
+        val target = entry.number
+        val canDial = target.isNotBlank() && target != "Unknown number"
         val defaultDialer = isDefaultDialer()
-        val exactBlocked = OeaCallBlockRules.numberVariants(number)
-            .any { it in OeaCallBlockRules.getExact(this) }
-        val blocked = hasConfiguredBlockRule(number)
-        val blockStatus = callBlockStatus(number)
-        val blockAction = when {
-            exactBlocked -> "Unblock"
-            blocked -> "Edit block rules"
-            else -> "Block"
+        val exactBlocked = OeaCallBlockRules.numberVariants(target).any { it in OeaCallBlockRules.getExact(this) }
+        val blocked = hasConfiguredBlockRule(target)
+        val blockStatus = callBlockStatus(target)
+        val subtitle = buildString {
+            append(callTypeLabel(entry.type))
+            if (entry.durationSeconds > 0L) append(" · ").append(durationLabel(entry.durationSeconds))
+            append(" · ").append(date)
+            if (entry.name != target) append("\n").append(target)
+            blockStatus?.let { append(" · ").append(it) }
         }
-        val message = buildString {
-            append(callTypeLabel(entry.type)).append(" call\n")
-            append(number).append("\n")
-            append(date).append("\n")
-            append("Duration: ").append(durationLabel(entry.durationSeconds)).append("\n\n")
-            append("Call recording is not provided by OEA. Recording availability depends on Android, the dialer and local rules.")
-            blockStatus?.let { append("\n\nCall protection: ").append(it) }
-            if (!defaultDialer) append("\n\nAndroid only allows call-log deletion to the default phone app when it also grants write access.")
+        val items = mutableListOf<OeaAppKit.Action>()
+        if (canDial) {
+            items += OeaAppKit.Action(R.drawable.oic_call, "Call", target) { placeCall(target) }
+            items += OeaAppKit.Action(R.drawable.oic_send, "Send message", "Open SMS conversation") { sendSms(target) }
+            items += OeaAppKit.Action(R.drawable.oic_dialpad, "Edit in keypad", "Modify before calling") { fillNumber(target) }
+            items += OeaAppKit.Action(R.drawable.oic_file_copy, "Copy number") { copyNumber(target) }
+            items += OeaAppKit.Action(
+                R.drawable.oic_block,
+                when {
+                    exactBlocked -> "Unblock number"
+                    blocked -> "Manage block rules"
+                    else -> "Block number"
+                },
+                blockStatus ?: "Reject future calls from this number"
+            ) { toggleCallBlock(target) }
         }
-        AlertDialog.Builder(this)
-            .setTitle(entry.name)
-            .setMessage(message)
-            .setPositiveButton("Call") { _, _ -> placeCall(number) }
-            .setNeutralButton(blockAction) { _, _ -> toggleCallBlock(number) }
-            .setNegativeButton(if (defaultDialer) "Delete entry" else "Close") { _, _ ->
-                if (defaultDialer) deleteCallHistoryEntry(entry.id)
+        if (defaultDialer) {
+            items += OeaAppKit.Action(R.drawable.oic_delete, "Delete call entry", "Remove from call history", destructive = true) {
+                deleteCallHistoryEntry(entry.id)
             }
-            .show()
+        }
+        kit.actions(entry.name, subtitle, items)
     }
 
-    private fun toggleCallBlock(number: String) {
-        val normalized = OeaCallBlockRules.normalizeNumber(number)
-        val variants = OeaCallBlockRules.numberVariants(number)
+    private fun toggleCallBlock(target: String) {
+        val normalized = OeaCallBlockRules.normalizeNumber(target)
+        val variants = OeaCallBlockRules.numberVariants(target)
         if (normalized.isBlank() || variants.isEmpty()) {
-            toast("This number can't be added to the block list.")
+            toast("This number can't be added to the block list")
             return
         }
         val exact = OeaCallBlockRules.getExact(this).toMutableSet()
@@ -728,31 +1007,29 @@ class OeaPhoneActivity : Activity() {
         if (hasExactRule) {
             exact.removeAll(variants.toSet())
             OeaCallBlockRules.setRules(this, exact, OeaCallBlockRules.getPrefix(this), OeaCallBlockRules.getSuffix(this))
-            val stillMatches = hasConfiguredBlockRule(number)
-            toast(if (stillMatches) "Exact block removed; $number still matches another rule." else "Removed the exact block rule for $number.")
-        } else if (hasConfiguredBlockRule(number)) {
-            runCatching {
-                startActivity(Intent(this, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java))
-            }.onFailure { toast("Could not open Call Blocker rules.") }
+            val stillMatches = hasConfiguredBlockRule(target)
+            toast(if (stillMatches) "Exact block removed; $target still matches a pattern rule" else "Unblocked $target")
+        } else if (hasConfiguredBlockRule(target)) {
+            openCallBlocker()
             return
         } else {
             exact.add(normalized)
             OeaCallBlockRules.setRules(this, exact, OeaCallBlockRules.getPrefix(this), OeaCallBlockRules.getSuffix(this))
             OeaCallBlockRules.setEnabled(this, true)
             if (hasCallScreeningAccess()) {
-                toast("Call block rule added for $number.")
+                toast("Blocked $target")
             } else {
-                toast("Rule saved. Enable OEA call screening before it can reject calls.")
-                runCatching { startActivity(Intent(this, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java)) }
-                    .onFailure { android.util.Log.w("OeaPhoneActivity", "Could not open Call Blocker rules", it) }
+                toast("Rule saved. Enable Call Screening to start filtering calls.")
+                runCatching { startActivity(Intent(this, OeaCallBlockerActivity::class.java)) }
+                    .onFailure { Log.w("OeaPhoneActivity", "Could not open Call Blocker rules", it) }
             }
         }
-        renderList()
+        renderActiveTab()
     }
 
     private fun deleteCallHistoryEntry(id: Long) {
         if (!isDefaultDialer()) {
-            toast("Android requires OEA to be the default phone app before it can request call-history write access.")
+            toast("Set OEA as your default Phone app to delete call-log entries")
             return
         }
         if (checkSelfPermission(Manifest.permission.WRITE_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
@@ -760,41 +1037,143 @@ class OeaPhoneActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.WRITE_CALL_LOG), REQUEST_WRITE_CALL_LOG)
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle("Delete call history entry?")
-            .setMessage("This removes this entry from Android's call log. It does not delete the contact or change call-blocking rules.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Delete") { _, _ ->
-                val deleted = runCatching {
-                    contentResolver.delete(Uri.withAppendedPath(CallLog.Calls.CONTENT_URI, id.toString()), null, null) > 0
-                }.getOrDefault(false)
-                toast(if (deleted) "Call history entry deleted." else "Android did not allow deleting this entry.")
-                renderList()
-            }
-            .show()
+        kit.confirm(
+            "Delete call entry?",
+            "Removes this call from your history. Saved contacts and block rules stay unchanged.",
+            "Delete",
+            destructive = true
+        ) {
+            val deleted = runCatching {
+                contentResolver.delete(Uri.withAppendedPath(CallLog.Calls.CONTENT_URI, id.toString()), null, null) > 0
+            }.getOrDefault(false)
+            toast(if (deleted) "Call entry deleted" else "Could not delete this entry")
+            renderActiveTab()
+        }
     }
 
     private fun loadContacts() {
         if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-            addEmptyState("Contacts permission is needed to show contacts.", "Grant permission") {
-                requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS)
-            }
             contactRows = emptyList()
+            contactsLoaded = false
             return
         }
         val rows = mutableListOf<ContactRow>()
         runCatching {
             contentResolver.query(
                 ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
-                null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
-)?.use { cursor ->
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                null,
+                null,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
+            )?.use { cursor ->
                 while (cursor.moveToNext() && rows.size < 500) {
-                    rows += ContactRow(cursor.getLong(0), cursor.getString(1).orEmpty().ifBlank { "Unknown contact" }, cursor.getString(2).orEmpty())
+                    val name = cursor.getString(1).orEmpty().ifBlank { "Unnamed contact" }
+                    val phone = cursor.getString(2).orEmpty().trim()
+                    if (phone.isNotEmpty()) {
+                        rows += ContactRow(cursor.getLong(0), name, phone, phone.filter(Char::isDigit), toT9(name))
+                    }
                 }
             }
-        }.onFailure { addEmptyState("Could not read contacts on this device.") }
-        contactRows = rows.distinctBy { it.name.lowercase(Locale.ROOT) + "|" + it.phone }
+        }
+        contactRows = rows.distinctBy { it.name.lowercase(Locale.ROOT) + "|" + it.digits.ifEmpty { it.phone } }
+        contactsLoaded = true
+    }
+
+    private fun renderContacts() {
+        if (!::list.isInitialized || selectedTab != TAB_CONTACTS) return
+        list.removeAllViews()
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            list.addView(
+                kit.emptyState(
+                    R.drawable.oic_person,
+                    "Browse your contacts",
+                    "Grant contacts permission to search and call saved numbers.",
+                    "Grant access"
+                ) { requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS) },
+                LinearLayout.LayoutParams(-1, -2)
+            )
+            return
+        }
+        val query = contactQuery.trim().lowercase(Locale.ROOT)
+        val numericQuery = query.filter(Char::isDigit)
+        val filtered = contactRows.filter {
+            query.isEmpty() ||
+                it.name.lowercase(Locale.ROOT).contains(query) ||
+                (numericQuery.isNotEmpty() && it.digits.contains(numericQuery))
+        }
+        appBar.setSubtitle(
+            if (query.isEmpty()) "${contactRows.size} ${if (contactRows.size == 1) "contact" else "contacts"}"
+            else "${filtered.size} matching"
+        )
+        if (filtered.isEmpty()) {
+            list.addView(
+                kit.emptyState(
+                    R.drawable.oic_person,
+                    if (query.isEmpty()) "No contacts found" else "No matches for \"$contactQuery\"",
+                    if (query.isEmpty()) "Saved phone contacts appear here." else "Try a different name or dial directly.",
+                    if (numericQuery.isNotEmpty()) "Dial $numericQuery" else null
+                ) { fillNumber(numericQuery) },
+                LinearLayout.LayoutParams(-1, -2)
+            )
+            return
+        }
+        val group = kit.group(list)
+        filtered.forEachIndexed { idx, contact ->
+            addContactRow(
+                group,
+                idx > 0,
+                contact,
+                action = { placeCall(contact.phone) },
+                rowClick = { showContactDetails(contact) }
+            )
+        }
+    }
+
+    private fun addContactRow(
+        parent: LinearLayout,
+        showDivider: Boolean,
+        contact: ContactRow,
+        action: () -> Unit,
+        rowClick: (() -> Unit)? = null
+    ) {
+        if (showDivider) parent.addView(kit.divider(64))
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = kit.dp(62)
+            setPadding(kit.dp(14), kit.dp(10), kit.dp(10), kit.dp(10))
+            background = kit.ripple(ColorDrawable(Color.TRANSPARENT), 18)
+            isClickable = rowClick != null
+            isFocusable = rowClick != null
+            setOnClickListener { rowClick?.invoke() }
+        }
+        val initial = contact.name.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "#"
+        val avatar = FrameLayout(this).apply {
+            background = kit.oval(palette.accentSoft)
+            addView(kit.text(initial, 15f, palette.onAccentSoft, OeaType.medium).apply {
+                gravity = Gravity.CENTER
+            }, FrameLayout.LayoutParams(-1, -1))
+        }
+        row.addView(avatar, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(12) })
+
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(kit.text(contact.name, 15.5f, palette.text, OeaType.medium).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            addView(kit.text(contact.phone, 12.5f, palette.textSecondary).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            })
+        }
+        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(callIconButton("Call ${contact.name}", action), LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)))
+        parent.addView(row)
     }
 
     private fun showContactDetails(contact: ContactRow) {
@@ -808,214 +1187,202 @@ class OeaPhoneActivity : Activity() {
                     null,
                     null,
                     CallLog.Calls.DATE + " DESC"
-)?.use { cursor ->
+                )?.use { cursor ->
                     buildList {
-                        while (cursor.moveToNext() && size < 5) {
+                        while (cursor.moveToNext() && size < 3) {
                             val type = callTypeLabel(cursor.getInt(0))
                             val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(cursor.getLong(1)))
-                            val duration = durationLabel(cursor.getLong(2))
-                            add("$type • $duration • $date")
+                            val dur = cursor.getLong(2)
+                            add(if (dur > 0L) "$type · ${durationLabel(dur)} · $date" else "$type · $date")
                         }
                     }
                 }.orEmpty()
             }.getOrDefault(emptyList())
         } else emptyList()
-        val details = buildString {
-            append(contact.phone)
-            append("\n\nRecent calls\n")
-            if (!canReadCallLog) {
-                append("Grant call-history access to see calls with this contact.")
-            } else if (recentCalls.isEmpty()) {
-                append("No recent calls found for this number.")
-            } else {
-                append(recentCalls.joinToString("\n"))
+
+        val subtitle = if (recentCalls.isEmpty()) contact.phone else contact.phone + "\nLatest: " + recentCalls.first()
+        val items = mutableListOf(
+            OeaAppKit.Action(R.drawable.oic_call, "Call", contact.phone) { placeCall(contact.phone) },
+            OeaAppKit.Action(R.drawable.oic_send, "Send text message") { sendSms(contact.phone) },
+            OeaAppKit.Action(R.drawable.oic_dialpad, "Edit in keypad") { fillNumber(contact.phone) },
+            OeaAppKit.Action(R.drawable.oic_file_copy, "Copy number") { copyNumber(contact.phone) },
+            OeaAppKit.Action(R.drawable.oic_open_in_new, "Open in Contacts") {
+                runCatching {
+                    val contactUri = Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_URI, contact.id.toString())
+                    startActivity(Intent(Intent.ACTION_VIEW, contactUri))
+                }.onFailure { toast("Could not open system Contacts") }
             }
-        }
-        val options = arrayOf("Call", "Edit in dial pad", "Send text message", "Open in Contacts")
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(contact.name)
-            .setMessage(details)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> placeCall(contact.phone)
-                    1 -> fillNumber(contact.phone)
-                    2 -> runCatching { startActivity(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", contact.phone, null))) }
-                        .onFailure { toast("No messaging app is available.") }
-                    3 -> runCatching {
-                        val contactUri = Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_URI, contact.id.toString())
-                        startActivity(Intent(Intent.ACTION_VIEW, contactUri))
-                    }.onFailure { toast("Could not open this contact in Android Contacts.") }
-                }
-            }
-            .setNegativeButton("Close", null)
+        )
         if (!canReadCallLog) {
-            dialog.setNeutralButton("Allow call history") { _, _ ->
+            items += OeaAppKit.Action(R.drawable.oic_history, "Show call history", "Grant call-log permission") {
                 pendingContactHistory = contact
                 requestPermissions(arrayOf(Manifest.permission.READ_CALL_LOG), REQUEST_CALL_LOG)
             }
         }
-        dialog.show()
-    }
-
-    private fun renderContacts() {
-        if (!::list.isInitialized || selectedTab != TAB_CONTACTS) return
-        list.removeAllViews()
-        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-            addEmptyState("Grant Contacts permission to search your phone contacts.", "Grant permission") {
-                requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS)
-            }
-            return
-        }
-        val query = search.text.toString().trim().lowercase(Locale.ROOT)
-        val numericQuery = query.filter(Char::isDigit)
-        val filtered = contactRows.filter {
-            query.isEmpty() ||
-                it.name.lowercase(Locale.ROOT).contains(query) ||
-                (numericQuery.isNotEmpty() && it.phone.filter(Char::isDigit).contains(numericQuery))
-        }
-        if (filtered.isEmpty()) addEmptyState(if (query.isEmpty()) "No phone contacts found." else "No contacts match “$query”.")
-        filtered.forEach { contact ->
-            addEntry(contact.name, contact.phone, "Call", action = { placeCall(contact.phone) }, rowClick = { showContactDetails(contact) })
-        }
-        addSectionAction("Open dial pad") {
-            selectedTab = TAB_DIAL
-            updateTabs()
-            renderList()
-        }
+        kit.actions(contact.name, subtitle, items)
     }
 
     private fun loadBlockedHistory() {
-        val history = OeaCallBlockRules.blockedHistory(this)
-        history.forEach { entry ->
-            val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.timestamp))
-            addEntry(entry.number, "Blocked • $date", "Call", action = { placeCall(entry.number) }, rowClick = { fillNumber(entry.number) })
-        }
-        if (history.isEmpty()) addEmptyState("No blocked calls recorded by OEA.")
-        if (history.isNotEmpty()) addSectionAction("Clear OEA blocked-call history") {
-            AlertDialog.Builder(this)
-                .setTitle("Clear blocked-call history?")
-                .setMessage("Only OEA's saved history will be removed. Your blocking rules and Android call log stay unchanged.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear") { _, _ ->
-                    OeaCallBlockRules.clearBlockedHistory(this)
-                    renderList()
-                }
-                .show()
-        }
-        addSectionAction("Open Call Blocker Rules") {
-            runCatching {
-                startActivity(Intent(this@OeaPhoneActivity, com.oea.launcher.callblocker.OeaCallBlockerActivity::class.java))
+        if (!hasCallScreeningAccess() || !OeaCallBlockRules.enabled(this)) {
+            kit.banner(
+                list,
+                R.drawable.oic_shield,
+                if (!hasCallScreeningAccess()) "Call screening needs setup" else "Call blocking is paused",
+                "Open Call Blocker to manage block rules, prefixes and screening permissions.",
+                OeaKit.Tone.WARNING,
+                "Configure"
+            ) { openCallBlocker() }
+        } else {
+            val rulesCount = OeaCallBlockRules.getExact(this).size +
+                OeaCallBlockRules.getPrefix(this).size +
+                OeaCallBlockRules.getSuffix(this).size
+            val topGroup = kit.group(list)
+            kit.row(topGroup, R.drawable.oic_shield_fill, "Call Blocker active", "$rulesCount ${if (rulesCount == 1) "rule" else "rules"} protecting incoming calls", value = "Manage") {
+                openCallBlocker()
             }
         }
+
+        val history = OeaCallBlockRules.blockedHistory(this)
+        if (history.isEmpty()) {
+            list.addView(
+                kit.emptyState(
+                    R.drawable.oic_block,
+                    "No blocked calls yet",
+                    "Calls rejected by OEA Call Blocker appear here.",
+                    "Manage rules"
+                ) { openCallBlocker() },
+                LinearLayout.LayoutParams(-1, -2)
+            )
+            return
+        }
+
+        kit.sectionTitle(list, "Blocked history")
+        val group = kit.group(list)
+        history.forEachIndexed { idx, entry ->
+            val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.timestamp))
+            addCallRow(
+                parent = group,
+                showDivider = idx > 0,
+                iconRes = R.drawable.oic_block,
+                badgeTone = palette.danger,
+                title = entry.number,
+                titleColor = palette.text,
+                subtitle = "Blocked · $date",
+                onRowClick = { fillNumber(entry.number) },
+                onCallClick = { placeCall(entry.number) }
+            )
+        }
+        list.addView(
+            kit.button("Clear blocked history", palette.cardHigh, palette.danger, R.drawable.oic_delete) {
+                kit.confirm(
+                    "Clear blocked-call history?",
+                    "Removes saved blocked-call entries. Your block rules and Android call log stay intact.",
+                    "Clear",
+                    destructive = true
+                ) {
+                    OeaCallBlockRules.clearBlockedHistory(this)
+                    renderActiveTab()
+                }
+            },
+            LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(8) }
+        )
     }
 
-    private fun addEntry(
+    private fun addCallRow(
+        parent: LinearLayout,
+        showDivider: Boolean,
+        iconRes: Int,
+        badgeTone: Int,
         title: String,
+        titleColor: Int,
         subtitle: String,
-        actionLabel: String,
-        action: () -> Unit,
-        rowClick: (() -> Unit)? = null
-) {
-        val card = LinearLayout(this).apply {
+        onRowClick: () -> Unit,
+        onCallClick: (() -> Unit)?
+    ) {
+        if (showDivider) parent.addView(kit.divider(64))
+        val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(10), dp(8), dp(10))
-            background = rounded(0xFF171E29.toInt(), 14)
+            minimumHeight = kit.dp(64)
+            setPadding(kit.dp(14), kit.dp(10), kit.dp(10), kit.dp(10))
+            background = kit.ripple(ColorDrawable(Color.TRANSPARENT), 18)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onRowClick() }
         }
-        val text = LinearLayout(this).apply {
+        val badge = FrameLayout(this).apply {
+            background = kit.oval(OeaTheme.alpha(badgeTone, if (palette.dark) 0x2E else 0x1E))
+            addView(
+                kit.iconView(iconRes, badgeTone, 19),
+                FrameLayout.LayoutParams(kit.dp(19), kit.dp(19), Gravity.CENTER)
+            )
+        }
+        row.addView(badge, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(12) })
+
+        val textCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@OeaPhoneActivity).apply {
-                text = title
-                textSize = 15f
-                setTypeface(typeface, Typeface.BOLD)
-                setTextColor(0xFFFFFFFF.toInt())
+            addView(kit.text(title, 15.5f, titleColor, OeaType.medium).apply {
                 maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
+                ellipsize = TextUtils.TruncateAt.END
             })
-            addView(TextView(this@OeaPhoneActivity).apply {
-                text = subtitle
-                textSize = 12f
-                setTextColor(0xFF9AA2B1.toInt())
+            addView(kit.text(subtitle, 12.5f, palette.textSecondary).apply {
                 maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
             })
-            isClickable = rowClick != null
-            isFocusable = rowClick != null
-            setOnClickListener { rowClick?.invoke() }
         }
-        card.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
-        card.addView(actionButton(actionLabel, true, action), LinearLayout.LayoutParams(dp(78), dp(40)))
-        list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        row.addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
+        if (onCallClick != null) {
+            row.addView(callIconButton("Call $title", onCallClick), LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)))
+        }
+        parent.addView(row)
     }
 
-    private fun addSectionAction(label: String, action: () -> Unit) {
-        list.addView(smallButton(label, action), LinearLayout.LayoutParams(-1, dp(44)).apply {
-            topMargin = dp(6)
-            bottomMargin = dp(6)
-        })
+    private fun callIconButton(description: String, onClick: () -> Unit): FrameLayout = FrameLayout(this).apply {
+        contentDescription = description
+        isClickable = true
+        isFocusable = true
+        val circle = FrameLayout(context).apply {
+            background = kit.ripple(kit.oval(OeaTheme.alpha(palette.success, if (palette.dark) 0x2C else 0x1C)), 20)
+            addView(
+                ImageView(context).apply { setImageDrawable(kit.icon(R.drawable.oic_call, palette.success)) },
+                FrameLayout.LayoutParams(kit.dp(19), kit.dp(19), Gravity.CENTER)
+            )
+        }
+        addView(circle, FrameLayout.LayoutParams(kit.dp(38), kit.dp(38), Gravity.CENTER))
+        setOnClickListener { onClick() }
     }
 
-    private fun addEmptyState(message: String, actionLabel: String? = null, action: (() -> Unit)? = null) {
-        list.addView(TextView(this).apply {
-            text = message + if (actionLabel != null) "\n\n$actionLabel" else ""
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(0xFF9AA2B1.toInt())
-            setPadding(dp(20), dp(24), dp(20), dp(24))
-            background = rounded(0xFF151B26.toInt(), 16)
-            if (action != null) {
-                isClickable = true
-                setOnClickListener { action() }
-            }
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+    private fun sendSms(target: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", target, null))) }
+            .onFailure { toast("No messaging app available") }
+    }
+
+    private fun copyNumber(target: String) {
+        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Phone number", target))
+        toast("Number copied")
     }
 
     private fun fillNumber(value: String) {
         selectedTab = TAB_DIAL
-        updateTabs()
-        renderList()
+        renderActiveTab()
         number.setText(value)
         number.setSelection(number.text.length)
     }
 
-    private fun updateTabs() {
-        if (!::tabs.isInitialized) return
-        for (i in 0 until tabs.childCount) {
-            val button = tabs.getChildAt(i) as? Button ?: continue
-            val tab = listOf(TAB_DIAL, TAB_RECENT, TAB_MISSED, TAB_CONTACTS, TAB_BLOCKED).getOrNull(i)
-            val active = tab == selectedTab
-            button.alpha = 1f
-            button.isSelected = active
-            button.setTextColor(0xFFFFFFFF.toInt())
-            button.background = rounded(if (active) 0xFF2D8C74.toInt() else 0xFF1A212E.toInt(), 14)
+    private fun toT9(name: String): String = buildString(name.length) {
+        for (ch in name.lowercase(Locale.ROOT)) {
+            when (ch) {
+                in 'a'..'c' -> append('2')
+                in 'd'..'f' -> append('3')
+                in 'g'..'i' -> append('4')
+                in 'j'..'l' -> append('5')
+                in 'm'..'o' -> append('6')
+                in 'p'..'s' -> append('7')
+                in 't'..'v' -> append('8')
+                in 'w'..'z' -> append('9')
+                in '0'..'9' -> append(ch)
+            }
         }
-    }
-
-    private fun smallButton(label: String, action: () -> Unit) = Button(this).apply {
-        text = label
-        textSize = 11f
-        isAllCaps = false
-        setPadding(dp(6), 0, dp(6), 0)
-        minHeight = 0
-        minimumHeight = 0
-        setTextColor(0xFFFFFFFF.toInt())
-        background = rounded(0xFF1E2431.toInt(), 14)
-        setOnClickListener { action() }
-    }
-
-    private fun actionButton(label: String, primary: Boolean, action: () -> Unit) = Button(this).apply {
-        text = label
-        textSize = 14f
-        isAllCaps = false
-        setTypeface(typeface, Typeface.BOLD)
-        contentDescription = label
-        setTextColor(0xFFFFFFFF.toInt())
-        background = rounded(if (primary) 0xFF249E78.toInt() else 0xFF222A3A.toInt(), 18)
-        setOnClickListener { action() }
-    }
-
-    private fun rounded(color: Int, radius: Int) = android.graphics.drawable.GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(radius).toFloat()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -1024,18 +1391,22 @@ class OeaPhoneActivity : Activity() {
             REQUEST_CALL_LOG -> {
                 val contact = pendingContactHistory
                 pendingContactHistory = null
-                renderList()
+                renderActiveTab()
                 if (contact != null) {
                     if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) showContactDetails(contact)
-                    else toast("Call-history access was not granted.")
+                    else toast("Call-history access not granted")
                 }
             }
-            REQUEST_CONTACTS -> renderList()
+            REQUEST_CONTACTS -> {
+                contactsLoaded = false
+                renderActiveTab()
+                updateDialAssist()
+            }
             REQUEST_WRITE_CALL_LOG -> {
                 val id = pendingDeleteCallId
                 pendingDeleteCallId = null
                 if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && id != null) deleteCallHistoryEntry(id)
-                else toast("Android did not grant call-history write access.")
+                else toast("Call-history write access not granted")
             }
             REQUEST_CALL_PHONE, REQUEST_PHONE_STATE -> {
                 val raw = pendingCallNumber
@@ -1048,8 +1419,8 @@ class OeaPhoneActivity : Activity() {
             REQUEST_CAMERA -> {
                 if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                     phonePrefs.edit().putBoolean("flash_alert", true).apply()
-                    toast("Call flash alert enabled.")
-                } else toast("Camera permission denied; flash alert remains off.")
+                    toast("Call flash alert enabled")
+                } else toast("Camera permission denied; flash alert remains off")
             }
         }
     }
@@ -1057,18 +1428,13 @@ class OeaPhoneActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_DIALER_ROLE) {
-            val defaultDialer = isDefaultDialer()
-            status.text = if (defaultDialer) {
-                "● Default phone app active • USSD & call protection ready"
-            } else {
-                "○ Default phone role was not granted"
-            }
-            renderList()
+            toast(if (isDefaultDialer()) "OEA is now your default phone app" else "Default phone role not granted")
+            refreshRoleBanner()
+            renderActiveTab()
         }
     }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     companion object {
         private const val TAB_DIAL = "dial"

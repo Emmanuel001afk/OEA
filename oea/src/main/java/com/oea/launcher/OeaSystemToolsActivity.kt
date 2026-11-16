@@ -468,13 +468,42 @@ open class OeaSystemToolsActivity : Activity() {
         val page = page("Mini-apps", "Built into OEA, no download. Turn off the ones you never use.")
         val box = page.content
         val group = kit.group(box)
-        com.oea.launcher.miniapps.OeaMiniApps.all.forEach { app ->
-            kit.switchRow(group, app.icon, app.label, app.blurb, OeaMiniAppSwitches.isOn(this, app.id)) { checked ->
+        com.oea.launcher.miniapps.OeaMiniApps.all.forEachIndexed { idx, app ->
+            if (idx > 0) group.addView(kit.divider(64))
+            val on = OeaMiniAppSwitches.isOn(this, app.id)
+            val toggle = kit.toggle(on) { checked ->
                 if (!OeaMiniAppSwitches.set(this, app.id, checked)) {
                     toast("Android would not change ${app.label}. Try again in a moment.")
                 }
                 rerender()
             }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(64)
+                setPadding(dp(16), dp(11), dp(16), dp(11))
+                background = kit.ripple(ColorDrawable(Color.TRANSPARENT), 18)
+                isClickable = true
+                isFocusable = true
+                contentDescription = app.label
+                setOnClickListener { toggle.toggle(fromUser = true) }
+            }
+            row.addView(ImageView(this).apply {
+                setImageResource(app.icon)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                alpha = if (on) 1f else 0.48f
+            }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { rightMargin = dp(14) })
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(kit.text(app.label, 15.5f, palette.text, OeaType.medium))
+                addView(kit.text(app.blurb, 12.5f, palette.textSecondary).apply {
+                    setPadding(0, dp(2), 0, 0)
+                    setLineSpacing(dp(2).toFloat(), 1f)
+                })
+            }
+            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
+            row.addView(toggle, LinearLayout.LayoutParams(-2, -2))
+            group.addView(row)
         }
         kit.note(box, "A mini-app that is off leaves the app drawer, search, Recents and the Home picker. Its settings and files are kept, and turning it back on brings it back exactly as it was.")
         present(page)
@@ -2188,7 +2217,7 @@ open class OeaSystemToolsActivity : Activity() {
         }
         if (!systemMode && !assistantGranted) {
             // Only when OEA Assistant has genuinely never been switched on.
-            hero.addView(kit.button("Turn on OEA Assistant", ice, if (palette.dark) Color.rgb(6, 22, 34) else Color.WHITE, R.drawable.oic_accessibility_new) {
+            hero.addView(kit.button("Turn on OEA Assistant", ice, OeaTheme.onColor(ice), R.drawable.oic_accessibility_new) {
                 OeaAssistant.openSetup(this)
             }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
             hero.addView(kit.text("Needed once so OEA can also force-stop frozen apps. No root, ADB or computer.", 12f, palette.textTertiary)
@@ -2770,37 +2799,34 @@ open class OeaSystemToolsActivity : Activity() {
             toast("No launchable apps found.")
             return
         }
-        val labels = apps.map { it.loadLabel(packageManager).toString() }.toTypedArray()
-        val packages = apps.map { it.activityInfo.packageName }.toTypedArray()
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Run the experiment with which app?")
-            .setMessage("The app will be started on a private display, measured, and closed again. Nothing is typed or sent inside it. It takes about half a minute; the report appears here and is saved even if something fails.")
-            .setItems(labels) { _, which ->
-                runProjectionDiagnosticsFor(packages[which], labels[which])
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        val labels = apps.map { it.loadLabel(packageManager).toString() }
+        val packages = apps.map { it.activityInfo.packageName }
+        kit.choose(
+            "Run experiment with app",
+            "Starts the app on a private display, measures it (~30s), and closes it without sending input. The report is saved automatically.",
+            labels,
+            -1,
+            packages
+        ) { which ->
+            runProjectionDiagnosticsFor(packages[which], labels[which])
+        }
     }
 
     private fun runProjectionDiagnosticsFor(pkg: String, label: String) {
-        toast("Running the Stage-B experiment with $label… it takes about half a minute. Keep OEA open; the report appears (and is saved) even if a step fails.")
-        // Live progress: the experiment reports each line as it happens, so
-        // the user sees movement instead of a frozen screen, and knows which
-        // stage is running if the phone interrupts the experiment.
-        val progressText = TextView(this).apply {
-            setTextIsSelectable(false)
-            textSize = 11f
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            text = "Starting the Stage-B experiment with $label…\n"
+        toast("Running Stage-B experiment with $label (~30s)…")
+        val progressText = kit.text("Starting the Stage-B experiment with $label…\n", 12f, palette.textSecondary).apply {
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setLineSpacing(dp(2).toFloat(), 1f)
+            background = kit.rounded(palette.card, 18, palette.stroke, 1)
         }
-        val progressScroll = android.widget.ScrollView(this).apply { addView(progressText) }
+        var progressScrollView: android.widget.ScrollView? = null
         val progressDialog = runCatching {
-            android.app.AlertDialog.Builder(this)
-                .setTitle("Stage-B experiment — $label")
-                .setView(progressScroll)
-                .setNegativeButton(android.R.string.cancel) { d, _ -> d.dismiss() }
-                .setCancelable(true)
-                .show()
+            kit.sheet("Stage-B experiment", label) { panel, d ->
+                val bounded = kit.boundedScroll(progressText, 0.45f)
+                progressScrollView = bounded as? android.widget.ScrollView
+                panel.addView(bounded, LinearLayout.LayoutParams(-1, -2))
+                panel.addView(kit.buttonRow(kit.quietButton("Hide") { d.dismiss() }))
+            }
         }.getOrNull()
         Thread {
             // run() catches everything itself and always saves a report; the
@@ -2817,7 +2843,7 @@ open class OeaSystemToolsActivity : Activity() {
                                 val existing = progressText.text.toString()
                                 val kept = if (existing.length > 6000) existing.substring(existing.length - 6000) else existing
                                 progressText.text = kept + line + "\n"
-                                progressScroll.fullScroll(android.view.View.FOCUS_DOWN)
+                                progressScrollView?.fullScroll(android.view.View.FOCUS_DOWN)
                             }
                         }
                     }
@@ -2846,33 +2872,32 @@ open class OeaSystemToolsActivity : Activity() {
      * buttons, so the report never depends on clipboard access alone.
      */
     private fun showStageBReportDialog(title: String, report: String) {
-        val scroll = android.widget.ScrollView(this)
-        val text = TextView(this).apply {
-            setTextIsSelectable(true)
-            textSize = 12f
-            setPadding(dp(16), dp(12), dp(16), dp(16))
-            setText(report)
+        kit.sheet(title, null) { panel, d ->
+            val text = kit.text(report, 12f, palette.text).apply {
+                setTextIsSelectable(true)
+                setLineSpacing(dp(2).toFloat(), 1f)
+                setPadding(dp(14), dp(12), dp(14), dp(14))
+                background = kit.rounded(palette.card, 18, palette.stroke, 1)
+            }
+            panel.addView(kit.boundedScroll(text, 0.55f), LinearLayout.LayoutParams(-1, -2))
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Close") { d.dismiss() },
+                kit.tonalButton("Share") {
+                    d.dismiss()
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, report)
+                    }
+                    runCatching { startActivity(android.content.Intent.createChooser(send, "Share Stage-B report")) }
+                },
+                kit.primaryButton("Copy") {
+                    d.dismiss()
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Stage-B report", report))
+                    toast("Report copied.")
+                }
+            ))
         }
-        scroll.addView(text)
-        android.app.AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(scroll)
-            .setPositiveButton("Copy") { _, _ ->
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                cm?.setPrimaryClip(android.content.ClipData.newPlainText("OEA Stage-B report", report))
-                toast("Report copied.")
-            }
-            .setNeutralButton("Share") { _, _ ->
-                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(android.content.Intent.EXTRA_TEXT, report)
-                }
-                runCatching {
-                    startActivity(android.content.Intent.createChooser(send, "Share Stage-B report"))
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
     }
 
     /**
@@ -2889,16 +2914,11 @@ open class OeaSystemToolsActivity : Activity() {
         val details = sessions.joinToString("\n\n") { s ->
             s.describe() + "\n" + s.evidence().joinToString("\n") { "  $it" }
         }
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Live windows now")
-            .setMessage(details)
-            .setPositiveButton("Stop all") { _, _ ->
-                com.oea.launcher.multitask.projection.OeaLiveWindowManager.stopAll()
-                toast("All live windows closed.")
-                rerender()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        kit.confirm("Live windows now", details, "Stop all", destructive = true) {
+            com.oea.launcher.multitask.projection.OeaLiveWindowManager.stopAll()
+            toast("All live windows closed.")
+            rerender()
+        }
     }
 
     /** OEA Overview: recent-use history, not Android's private task list. */

@@ -268,9 +268,10 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         val bg = if (selected) palette.accent else palette.cardHigh
         val fg = if (selected) palette.onAccent else palette.text
         setTextColor(fg)
+        contentDescription = if (selected) "$label, selected" else label
         minimumHeight = dp(48)
         isFocusable = true
-        background = ripple(rounded(bg, 18), 18)
+        background = ripple(rounded(bg, 18, if (selected) 0 else palette.stroke, if (selected) 0 else 1), 18)
         if (iconRes != 0) {
             icon(iconRes, fg)?.let { d ->
                 d.setBounds(0, 0, dp(16), dp(16))
@@ -391,6 +392,12 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
     }
 
     /** Rounded card that holds rows; rows are separated by hairline dividers. */
+    fun card(paddingDp: Int = 18, radiusDp: Int = 24): LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(paddingDp), dp(paddingDp), dp(paddingDp), dp(paddingDp))
+        background = rounded(palette.card, radiusDp, palette.stroke, 1)
+    }
+
     fun group(parent: ViewGroup): LinearLayout {
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -401,14 +408,16 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         return card
     }
 
-    private fun addToGroup(group: LinearLayout, row: View) {
-        if (group.childCount > 0) {
-            group.addView(View(context).apply { setBackgroundColor(palette.stroke) },
-                LinearLayout.LayoutParams(-1, maxOf(1, dp(1) / 2)).apply {
-                    leftMargin = dp(70)
-                    rightMargin = dp(18)
-                })
+    fun divider(insetStartDp: Int = 70, insetEndDp: Int = 18): View = View(context).apply {
+        setBackgroundColor(palette.stroke)
+        layoutParams = LinearLayout.LayoutParams(-1, maxOf(1, dp(1) / 2)).apply {
+            leftMargin = dp(insetStartDp)
+            rightMargin = dp(insetEndDp)
         }
+    }
+
+    private fun addToGroup(group: LinearLayout, row: View) {
+        if (group.childCount > 0) group.addView(divider())
         group.addView(row, LinearLayout.LayoutParams(-1, -2))
     }
 
@@ -543,7 +552,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             })
         }
         if (actionLabel != null && onAction != null) {
-            val action = button(actionLabel, toneColor, if (OeaTheme.luminance(toneColor) > 0.45f) Color.rgb(16, 20, 28) else Color.WHITE) { onAction() }
+            val action = button(actionLabel, toneColor, OeaTheme.onColor(toneColor)) { onAction() }
             card.addView(action, LinearLayout.LayoutParams(-2, -2).apply {
                 topMargin = dp(12)
                 leftMargin = dp(34)
@@ -682,7 +691,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             panel.addView(buttonRow(
                 quietButton(negative) { dialog.dismiss() },
                 button(positive, if (destructive) palette.danger else palette.accent,
-                    if (destructive) Color.WHITE else palette.onAccent) { dialog.dismiss(); onConfirm() }
+                    if (destructive) OeaTheme.onColor(palette.danger) else palette.onAccent) { dialog.dismiss(); onConfirm() }
 ))
         }
     }
@@ -801,8 +810,14 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
                     val isOn = key in chosen
                     (row.getChildAt(0) as ImageView).setImageDrawable(appIcon(app))
                     val texts = row.getChildAt(1) as LinearLayout
-                    (texts.getChildAt(0) as TextView).text = app.label
-                    (texts.getChildAt(1) as TextView).text = app.packageName
+                    (texts.getChildAt(0) as TextView).apply {
+                        text = app.label
+                        setTextColor(if (isOn) palette.onAccentSoft else palette.text)
+                    }
+                    (texts.getChildAt(1) as TextView).apply {
+                        text = app.packageName
+                        setTextColor(if (isOn) OeaTheme.alpha(palette.onAccentSoft, 0xBB) else palette.textTertiary)
+                    }
                     val mark = row.getChildAt(2) as FrameLayout
                     mark.removeAllViews()
                     mark.background = oval(if (isOn) palette.accent else Color.TRANSPARENT, if (isOn) palette.accent else palette.textTertiary, 2)

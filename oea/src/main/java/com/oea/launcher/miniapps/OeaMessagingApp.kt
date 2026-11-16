@@ -327,9 +327,10 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
 
     private val kit = OeaAppKit(host, palette)
     val root: FrameLayout = kit.overlay()
+    private val indexBack = host.miniIndexBack()
     private val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-    private val bar = kit.appBar("Messages", "Reading your messages…", onBack = { runCatching { host.finish() } })
-    private val searchBox = kit.searchField("Search messages", onQuery = { value ->
+    private val bar = kit.appBar("Messages", "Reading messages…", onBack = indexBack)
+    private val searchBox = kit.searchField("Search messages or contacts", onQuery = { value ->
         query = value.trim()
         scheduleSearch()
     })
@@ -340,11 +341,22 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
     }
     private val setupHost = LinearLayout(host).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(kit.dp(14), 0, kit.dp(14), 0)
+        setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(4))
     }
-    private val tabs = kit.chipBar()
+    private val nav: OeaAppKit.BottomNav = kit.bottomNav(
+        listOf(
+            OeaAppKit.NavItem("all", "Inbox", R.drawable.oic_send),
+            OeaAppKit.NavItem("unread", "Unread", R.drawable.oic_notifications),
+            OeaAppKit.NavItem("pinned", "Pinned", R.drawable.oic_push_pin),
+            OeaAppKit.NavItem("archived", "Archived", R.drawable.oic_folder)
+        ),
+        "all"
+    ) { id ->
+        tab = id
+        applyFilter()
+    }
     private val content = FrameLayout(host)
-    private val listView = kit.list(0).apply { setPadding(kit.dp(8), kit.dp(2), kit.dp(8), kit.dp(116)) }
+    private val listView = kit.list(0).apply { setPadding(kit.dp(8), kit.dp(2), kit.dp(8), kit.dp(88)) }
     private val snack = kit.snack(root)
     private val handler = Handler(Looper.getMainLooper())
 
@@ -387,28 +399,23 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
         column.addView(bar.root, LinearLayout.LayoutParams(-1, -2))
         column.addView(searchRow, LinearLayout.LayoutParams(-1, -2))
         column.addView(setupHost, LinearLayout.LayoutParams(-1, -2))
-        column.addView(kit.hscroll(tabs.root), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(2) })
         column.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        column.addView(nav.root, LinearLayout.LayoutParams(-1, -2))
         content.addView(listView, FrameLayout.LayoutParams(-1, -1))
         listView.adapter = threadsAdapter
         with(kit) {
             bar.addAction(R.drawable.oic_search, "Search messages") { toggleSearch() }
+            bar.addAction(R.drawable.oic_edit, "New message") { composeSms(null) }
             bar.addAction(R.drawable.oic_more_vert, "More options") { showMore() }
         }
-        tabs.onPick = { id ->
-            tab = id
-            applyFilter()
-        }
-        tabs.setOptions(TABS, tab)
         val fab = kit.primaryButton("Start chat", R.drawable.oic_edit) { composeSms(null) }
         fab.elevation = kit.dpf(6f)
-        root.addView(fab, FrameLayout.LayoutParams(-2, kit.dp(56), Gravity.BOTTOM or Gravity.END).apply {
-            setMargins(0, 0, kit.dp(16), kit.dp(20))
+        content.addView(fab, FrameLayout.LayoutParams(-2, kit.dp(52), Gravity.BOTTOM or Gravity.END).apply {
+            setMargins(0, 0, kit.dp(16), kit.dp(16))
         })
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = OeaInsets.bars(insets)
-            column.setPadding(bars[0], 0, bars[2], 0)
-            (fab.layoutParams as? FrameLayout.LayoutParams)?.let { it.bottomMargin = bars[3] + kit.dp(20) }
+            column.setPadding(bars[0], 0, bars[2], bars[3])
             insets
         }
     }
@@ -426,6 +433,14 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
             conversation?.reload()
         }
         host.miniResumeHook = resumeHook
+        val backHook: () -> Boolean = {
+            when {
+                searchRow.visibility == View.VISIBLE -> { toggleSearch(); true }
+                tab == "blocked" || tab == "spam" -> { tab = "all"; applyFilter(); true }
+                else -> false
+            }
+        }
+        host.miniBackHook = backHook
         var disposed = false
         lateinit var cleanup: () -> Unit
         cleanup = {
@@ -439,6 +454,7 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
                 conversation = null
                 if (host.miniResultHook === resultHook) host.miniResultHook = null
                 if (host.miniResumeHook === resumeHook) host.miniResumeHook = null
+                if (host.miniBackHook === backHook) host.miniBackHook = null
                 if (host.miniDestroyHook === cleanup) host.miniDestroyHook = null
             }
         }
@@ -568,6 +584,7 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
         visible = allThreads.filter { thread ->
             val tabMatch = when (tab) {
                 "unread" -> !thread.read && !archived.contains(thread.address) && !blocked.contains(thread.address)
+                "pinned" -> pinned.contains(thread.address) && !blocked.contains(thread.address)
                 "archived" -> archived.contains(thread.address)
                 "blocked" -> blocked.contains(thread.address)
                 "spam" -> thread.isSpam()
@@ -591,25 +608,27 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
             )
         }.sortedWith(compareByDescending<ThreadRow> { it.pinned }.thenByDescending { it.thread.date })
 
-        val unreadThreads = allThreads.count { !it.read }
-        tabs.setOptions(
-            listOf(
-                "all" to "All",
-                "unread" to if (unreadThreads > 0) "Unread • $unreadThreads" else "Unread",
-                "archived" to "Archived",
-                "blocked" to "Blocked",
-                "spam" to "Spam"
-            ),
-            tab
-        )
+        val isSecondaryView = tab == "blocked" || tab == "spam"
+        if (!isSecondaryView) nav.select(tab, notify = false)
+        nav.root.visibility = if (isSecondaryView) View.GONE else View.VISIBLE
+        bar.setBack(if (isSecondaryView) ({ tab = "all"; applyFilter() }) else indexBack)
+        bar.title.text = when (tab) {
+            "unread" -> "Unread"
+            "pinned" -> "Pinned"
+            "archived" -> "Archived"
+            "blocked" -> "Blocked"
+            "spam" -> "Spam"
+            else -> "Messages"
+        }
         val totalUnread = allThreads.sumOf { it.unreadCount }
         bar.setSubtitle(
             when {
-                !OeaMessagingApp.hasReadSmsPermission(host) -> "SMS on this phone, in OEA"
+                !OeaMessagingApp.hasReadSmsPermission(host) -> "Grant SMS access to view conversations"
                 loadFailed -> "Couldn't read message history"
-                query.isNotBlank() -> "${visible.size} matching conversation${if (visible.size == 1) "" else "s"}"
+                query.isNotBlank() -> "${visible.size} matching"
+                isSecondaryView -> "${visible.size} conversation${if (visible.size == 1) "" else "s"}"
                 allThreads.isEmpty() -> "No messages yet"
-                totalUnread > 0 -> "${allThreads.size} conversations • $totalUnread unread"
+                totalUnread > 0 -> "$totalUnread unread · ${allThreads.size} conversations"
                 else -> "${allThreads.size} conversation${if (allThreads.size == 1) "" else "s"}"
             }
         )
@@ -643,8 +662,9 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
                 bodyMatches = emptySet()
                 applyFilter()
             }
-            tab == "unread" -> kit.emptyState(R.drawable.oic_check_circle_fill, "All caught up", "No unread conversations. New messages appear here on their own.")
-            tab == "archived" -> kit.emptyState(R.drawable.oic_folder, "Nothing archived", "Long-press a conversation and choose Archive to tuck it away without deleting it.")
+            tab == "unread" -> kit.emptyState(R.drawable.oic_check_circle_fill, "All caught up", "No unread conversations right now.")
+            tab == "pinned" -> kit.emptyState(R.drawable.oic_push_pin, "No pinned chats", "Hold any conversation to pin it for quick access.")
+            tab == "archived" -> kit.emptyState(R.drawable.oic_folder, "Nothing archived", "Hold a conversation and choose Archive to keep it out of your inbox.")
             tab == "blocked" -> kit.emptyState(R.drawable.oic_block, "Nobody blocked", "Blocked addresses are hidden from All. Blocking here does not stop delivery at carrier level.")
             tab == "spam" -> kit.emptyState(R.drawable.oic_shield, "No spam detected", "OEA flags conversations matching your spam keywords: ${spamKeywords().joinToString()}.")
             else -> kit.emptyState(
@@ -791,20 +811,27 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
 
     private fun showMore() {
         kit.actions(
-            "Messages", bar.subtitle.text?.toString(),
+            "Messages", null,
             listOf(
-                OeaAppKit.Action(R.drawable.oic_edit, "Start chat", "Write to a new number or contact") { composeSms(null) },
-                OeaAppKit.Action(R.drawable.oic_tune, "Setup & permissions", "SMS access, default app, SIM naming") { setupSheet() },
-                OeaAppKit.Action(R.drawable.oic_shield, "Spam keywords", spamKeywords().joinToString()) {
+                OeaAppKit.Action(R.drawable.oic_shield, "Spam folder", "Flagged conversations matching your keywords") {
+                    tab = "spam"
+                    applyFilter()
+                },
+                OeaAppKit.Action(R.drawable.oic_block, "Blocked numbers", "Addresses hidden from your inbox") {
+                    tab = "blocked"
+                    applyFilter()
+                },
+                OeaAppKit.Action(R.drawable.oic_tune, "Setup & permissions", "SMS access, default SMS app and SIM labels") { setupSheet() },
+                OeaAppKit.Action(R.drawable.oic_text_fields, "Spam keywords", spamKeywords().joinToString()) {
                     val current = OeaMessagingApp.prefs(host).getString(OeaMessagingApp.KEY_SPAM_KEYWORDS, "lottery,win,prize,urgent") ?: ""
-                    kit.prompt("Spam keywords", "Comma separated. A conversation matching any of these is flagged as possible spam.", "Keywords", current) { input ->
+                    kit.prompt("Spam keywords", "Comma separated words flagged as spam.", "Keywords", current) { input ->
                         OeaMessagingApp.prefs(host).edit().putString(OeaMessagingApp.KEY_SPAM_KEYWORDS, input).apply()
                         applyFilter()
                         null
                     }
                 },
-                OeaAppKit.Action(R.drawable.oic_refresh, "Reload from Android", "Reads the SMS provider again") { reloadThreads() },
-                OeaAppKit.Action(R.drawable.oic_share_filled, "Export visible list", "Shares the conversations in this view as text") {
+                OeaAppKit.Action(R.drawable.oic_refresh, "Refresh inbox", "Reload conversations from the device") { reloadThreads() },
+                OeaAppKit.Action(R.drawable.oic_share_filled, "Export visible list", "Share conversations in this view as text") {
                     val text = visible.joinToString("\n") { row ->
                         "${row.displayName} (${row.thread.address}): ${row.thread.snippet} @ ${OeaMessageDates.fullLabel(row.thread.date)}"
                     }

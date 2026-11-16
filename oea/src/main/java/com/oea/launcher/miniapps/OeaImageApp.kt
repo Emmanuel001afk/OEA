@@ -81,7 +81,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
     val root: FrameLayout = kit.overlay()
     private val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
     private val content = FrameLayout(host).apply { layoutParams = LinearLayout.LayoutParams(-1, 0, 1f) }
-    private val bar = kit.appBar("EMAGE", "Reading your library…", onBack = { runCatching { host.finish() } })
+    private val bar = kit.appBar("EMAGE", "Reading library…", onBack = host.miniIndexBack())
     private val searchBox = kit.searchField("Pictures, albums, dates", onQuery = { query ->
         this.query = query.trim()
         rebuild()
@@ -92,6 +92,15 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         visibility = View.GONE
     }
     private val tabs = kit.chipBar()
+    private val nav: OeaAppKit.BottomNav = kit.bottomNav(
+        listOf(
+            OeaAppKit.NavItem("photos", "Photos", R.drawable.oic_photo_library),
+            OeaAppKit.NavItem("albums", "Albums", R.drawable.oic_folder),
+            OeaAppKit.NavItem("favourites", "Favourites", R.drawable.oic_star_fill),
+            OeaAppKit.NavItem("oea", "OEA", R.drawable.oic_wallpaper)
+        ),
+        "photos"
+    ) { id -> pickDestination(id) }
     private val status = LinearLayout(host).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(kit.dp(14), kit.dp(2), kit.dp(14), 0)
@@ -121,7 +130,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
     private val oeaHost = ScrollView(host).apply {
         isVerticalScrollBarEnabled = false
         clipToPadding = false
-        setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(90))
+        setPadding(kit.dp(16), kit.dp(4), kit.dp(16), kit.dp(28))
         visibility = View.GONE
     }
     private var stateCard: View? = null
@@ -133,6 +142,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
     private enum class Surface { PHOTOS, ALBUMS, TRASH, OEA }
 
     private var surface = Surface.PHOTOS
+    private var destination = "photos"
     private var tab = "all"
     private var album: String? = null
     private var query = ""
@@ -164,16 +174,16 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         root.addView(column, FrameLayout.LayoutParams(-1, -1))
         column.addView(bar.root, LinearLayout.LayoutParams(-1, -2))
         column.addView(searchRow, LinearLayout.LayoutParams(-1, -2))
+        tabs.row.setPadding(kit.dp(14), kit.dp(2), kit.dp(14), kit.dp(4))
         column.addView(
-            kit.hscroll(tabs.root),
+            tabs.root,
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(2) }
         )
         scope.addView(scopeTitle, LinearLayout.LayoutParams(0, -2, 1f))
         scope.addView(scopeBadge)
         scope.addView(
             kit.circleIconButton(R.drawable.oic_close, "Leave this album", Color.TRANSPARENT, palette.onAccentSoft) {
-                album = null
-                rebuild()
+                leaveAlbum()
             },
             LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { marginStart = kit.dp(6) }
         )
@@ -184,6 +194,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         })
         column.addView(status, LinearLayout.LayoutParams(-1, -2))
         column.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        column.addView(nav.root, LinearLayout.LayoutParams(-1, -2))
         content.addView(photoGrid, FrameLayout.LayoutParams(-1, -1))
         content.addView(albumGrid, FrameLayout.LayoutParams(-1, -1))
         content.addView(trashList, FrameLayout.LayoutParams(-1, -1))
@@ -206,11 +217,15 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         }
         with(kit) {
             bar.addAction(R.drawable.oic_search, "Search pictures") { toggleSearch() }
-            bar.addAction(R.drawable.oic_refresh, "Scan again") { rescan() }
-            bar.addAction(R.drawable.oic_more_vert, "More EMAGE options") { showMore() }
+            bar.addAction(R.drawable.oic_sort_by_alpha, "Sort pictures") { chooseSort() }
+            bar.addAction(R.drawable.oic_more_vert, "Gallery options") { showMore() }
         }
-        tabs.onPick = { id -> pickTab(id) }
-        tabs.setOptions(TABS, tab)
+        tabs.onPick = { id ->
+            tab = id
+            exitSelection()
+            rebuild()
+        }
+        tabs.setOptions(FILTER_TABS, tab)
         kit.onIdle(photoGrid) { prefetchVisible() }
         photoGrid.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (photoGrid.width > 0) {
@@ -243,6 +258,8 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         host.miniResultHook = resultHook
         val permissionHook: () -> Unit = { OeaMediaLibrary.refresh(host, setOf(Kind.IMAGE)) }
         host.miniPermissionHook = permissionHook
+        val backHook: () -> Boolean = { handleBack() }
+        host.miniBackHook = backHook
         var disposed = false
         lateinit var cleanup: () -> Unit
         cleanup = {
@@ -254,6 +271,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 }
                 if (host.miniResultHook === resultHook) host.miniResultHook = null
                 if (host.miniPermissionHook === permissionHook) host.miniPermissionHook = null
+                if (host.miniBackHook === backHook) host.miniBackHook = null
                 if (host.miniDestroyHook === cleanup) host.miniDestroyHook = null
             }
         }
@@ -393,18 +411,95 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         searchBox.focus()
     }
 
-    private fun pickTab(id: String) {
-        tab = id
+    private fun pickDestination(id: String) {
+        destination = id
         album = null
         when (id) {
-            "albums" -> surface = Surface.ALBUMS
-            "trash" -> surface = Surface.TRASH
-            "oea" -> surface = Surface.OEA
-            else -> surface = Surface.PHOTOS
+            "albums" -> {
+                surface = Surface.ALBUMS
+            }
+            "favourites" -> {
+                surface = Surface.PHOTOS
+                tab = "favourites"
+            }
+            "oea" -> {
+                surface = Surface.OEA
+            }
+            "trash" -> {
+                surface = Surface.TRASH
+            }
+            else -> {
+                destination = "photos"
+                surface = Surface.PHOTOS
+                if (tab == "favourites") tab = "all"
+                tabs.select(tab)
+            }
         }
+        if (id != "trash") nav.select(destination, notify = false)
         exitSelection()
         showSurface()
         rebuild()
+    }
+
+    private fun openAlbum(name: String) {
+        album = name
+        destination = "albums"
+        tab = "all"
+        surface = Surface.PHOTOS
+        nav.select("albums", notify = false)
+        exitSelection()
+        showSurface()
+        rebuild()
+    }
+
+    private fun leaveAlbum() {
+        album = null
+        pickDestination("albums")
+    }
+
+    private fun handleBack(): Boolean {
+        if (selecting) {
+            exitSelection()
+            return true
+        }
+        if (searchRow.visibility == View.VISIBLE) {
+            toggleSearch()
+            return true
+        }
+        if (album != null) {
+            leaveAlbum()
+            return true
+        }
+        if (surface == Surface.TRASH) {
+            pickDestination("photos")
+            return true
+        }
+        return false
+    }
+
+    private fun updateBackControl() {
+        val back: (() -> Unit)? = when {
+            album != null -> ({ leaveAlbum() })
+            surface == Surface.TRASH -> ({ pickDestination("photos") })
+            pickerRequest -> ({ runCatching { host.finish() } })
+            else -> host.miniIndexBack()
+        }
+        bar.setBack(back)
+    }
+
+    private fun chooseSort() {
+        val values = listOf(
+            OeaMediaLibrary.Sort.NEWEST,
+            OeaMediaLibrary.Sort.OLDEST,
+            OeaMediaLibrary.Sort.NAME,
+            OeaMediaLibrary.Sort.SIZE
+        )
+        val sortNames = values.map { it.label() }
+        kit.choose("Sort pictures", null, sortNames, values.indexOf(sort).coerceAtLeast(0)) { index ->
+            sort = values[index]
+            OeaMediaLibrary.setSort(host, Kind.IMAGE, sort)
+            rebuild()
+        }
     }
 
     private fun showSurface() {
@@ -418,7 +513,10 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 FrameLayout.LayoutParams(-1, -2)
             )
         }
-        tabs.root.visibility = if (surface == Surface.OEA) View.GONE else View.VISIBLE
+        val showFilters = surface == Surface.PHOTOS && destination == "photos" && album == null
+        tabs.root.visibility = if (showFilters) View.VISIBLE else View.GONE
+        nav.root.visibility = if (selecting || surface == Surface.TRASH) View.GONE else View.VISIBLE
+        updateBackControl()
     }
 
     private fun showProgress(label: String?) {
@@ -519,34 +617,55 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 }
                 tiles.notifyDataSetChanged()
                 if (list.isEmpty()) {
+                    val isFav = destination == "favourites"
                     val noMatch = query.isNotBlank() || album != null || tab != "all"
                     showState(
-                        R.drawable.oic_photo_library,
-                        if (noMatch) "No pictures in this view" else "Your photo library is empty",
-                        if (noMatch) "Nothing matches this filter. Clear the search or choose All to return to the complete library."
-                        else "Take a picture with OEA Camera or another camera and EMAGE will show it here. Your files stay on this device.",
-                        if (noMatch) "Show all" else "Scan again"
+                        if (isFav && query.isBlank()) R.drawable.oic_star_fill else R.drawable.oic_photo_library,
+                        when {
+                            isFav && query.isBlank() -> "No favourites yet"
+                            noMatch -> "No matching pictures"
+                            else -> "No pictures yet"
+                        },
+                        when {
+                            isFav && query.isBlank() -> "Star a picture in the viewer or hold a tile to keep it here."
+                            noMatch -> "Clear the search or switch back to All to see your full library."
+                            else -> "Photos you take or save on this phone appear here automatically."
+                        },
+                        when {
+                            isFav && query.isBlank() -> "Browse photos"
+                            noMatch -> "Show all"
+                            else -> "Rescan"
+                        }
                     ) {
                         query = ""
                         searchBox.setText("")
                         album = null
-                        tab = "all"
-                        tabs.select("all")
-                        rescan()
+                        if (isFav || noMatch) {
+                            tab = "all"
+                            pickDestination("photos")
+                        } else {
+                            rescan()
+                        }
                     }
                 }
                 if (album != null) {
-                    scopeTitle.text = "Album  •  $album"
+                    scopeTitle.text = album
                     scopeBadge.text = list.size.toString()
                 }
-                bar.title.text = if (pickerRequest) "Choose a picture" else "EMAGE"
+                bar.title.text = when {
+                    pickerRequest -> "Choose a picture"
+                    album != null -> album.orEmpty()
+                    destination == "favourites" -> "Favourites"
+                    else -> "EMAGE"
+                }
                 bar.setSubtitle(
                     when {
-                        pickerRequest && allowMultiple -> "Select one or more pictures, then tap Use selected"
-                        pickerRequest -> "Tap a picture to return it to the calling app"
+                        pickerRequest && allowMultiple -> "Select pictures, then tap Use selected"
+                        pickerRequest -> "Tap a picture to pick it"
                         query.isNotBlank() -> "${list.size} matching ${if (list.size == 1) "picture" else "pictures"}"
-                        album != null -> "$album • ${list.size} • ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}"
-                        else -> "${list.size} pictures • ${built.imageAlbums.size} albums • ${OeaMediaLibrary.formatSize(built.images.sumOf { it.size })}"
+                        album != null -> "${list.size} ${if (list.size == 1) "picture" else "pictures"} · ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}"
+                        destination == "favourites" -> "${list.size} starred"
+                        else -> "${list.size} pictures · ${built.imageAlbums.size} albums"
                     }
                 )
             }
@@ -555,12 +674,12 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 albums.notifyDataSetChanged()
                 val total = built.images.size
                 bar.title.text = "Albums"
-                bar.setSubtitle("${built.imageAlbums.size} albums • $total pictures")
+                bar.setSubtitle("${built.imageAlbums.size} albums · $total pictures")
                 if (built.imageAlbums.isEmpty()) {
                     showState(
                         R.drawable.oic_folder,
                         "No albums yet",
-                        "An album is a folder with pictures in it. Take a photo, or allow photo access, and they appear here by themselves.",
+                        "Folders containing pictures appear here automatically once photo access is enabled.",
                         "Allow access"
                     ) { askPermission() }
                 }
@@ -570,25 +689,25 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 val records = OeaMediaLibrary.trashRecords(host)
                 trashAdapter.notifyDataSetChanged()
                 bar.title.text = "Recently deleted"
-                bar.setSubtitle("${records.size} remembered")
+                bar.setSubtitle("${records.size} ${if (records.size == 1) "item" else "items"}")
                 if (records.isEmpty()) {
                     showState(
                         R.drawable.oic_delete,
                         "Nothing in Recently deleted",
-                        "OEA-owned pictures can be restored here after you delete them. MediaStore files follow Android's own delete history.",
-                        "Back to pictures"
+                        "Deleted OEA pictures stay here so you can restore them.",
+                        "Back to Photos"
                     ) {
-                        pickTab("all")
-                        tabs.select("all")
+                        pickDestination("photos")
                     }
                 }
             }
 
             Surface.OEA -> {
-                bar.title.text = "OEA pictures"
-                bar.setSubtitle("Wallpapers, live scenes and what OEA's camera saved")
+                bar.title.text = "OEA Studio"
+                bar.setSubtitle("Wallpapers, live scenes and camera shots")
             }
         }
+        updateBackControl()
         if (selecting) updateSelectionBar()
     }
 
@@ -753,6 +872,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
     }
 
     private fun updateSelectionBar() {
+        nav.root.visibility = if (selecting || surface == Surface.TRASH) View.GONE else View.VISIBLE
         selection.setCount(selected.size, itemsForViewer.size)
         if (pickerRequest) {
             selection.setAction(0, R.drawable.oic_check, "Use selected") { finishPick(selectedItems()) }
@@ -780,6 +900,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         selecting = false
         selected.clear()
         selection.setCount(0, 0)
+        nav.root.visibility = if (surface == Surface.TRASH) View.GONE else View.VISIBLE
         tiles.notifyDataSetChanged()
     }
 
@@ -878,61 +999,73 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
 
     private fun showMore() {
         val built = snapshot
-        kit.sheet("EMAGE", "How this gallery looks and what it hides") { panel, _ ->
+        kit.sheet("Gallery options", "Layout, sorting and library tools") { panel, dialog ->
             val grid = kit.group(panel)
-            kit.row(grid, R.drawable.oic_grid_view, "Columns", "How many tiles fit across the screen", value = "$columns", chevron = false)
+            kit.row(grid, R.drawable.oic_grid_view, "Grid columns", "Tiles across the screen", value = "$columns", chevron = false)
             val columnsRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            listOf(2, 3, 4, 5).forEach { count ->
-                columnsRow.addView(
-                    kit.chip("$count", count == columns) {
-                        columns = count
-                        kit.setSpan(photoGrid, count)
-                        rebuild()
-                    },
-                    LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { marginEnd = kit.dp(6) }
-                )
+            fun paintCols() {
+                columnsRow.removeAllViews()
+                listOf(2, 3, 4, 5).forEachIndexed { idx, count ->
+                    columnsRow.addView(
+                        kit.chip("$count", count == columns) {
+                            columns = count
+                            kit.setSpan(photoGrid, count)
+                            paintCols()
+                            rebuild()
+                        },
+                        LinearLayout.LayoutParams(0, kit.dp(44), 1f).apply { if (idx > 0) leftMargin = kit.dp(6) }
+                    )
+                }
             }
+            paintCols()
             columnsRow.setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12))
             grid.addView(columnsRow, LinearLayout.LayoutParams(-1, -2))
-            kit.row(grid, R.drawable.oic_layers, "Tile shape", if (tileShape == 1f) "Square" else if (tileShape > 1f) "Tall (3:4)" else "Wide (4:3)", chevron = false)
+            kit.row(grid, R.drawable.oic_layers, "Tile shape", if (tileShape == 1f) "Square" else if (tileShape < 1f) "Portrait (3:4)" else "Landscape (4:3)", chevron = false)
             val shapes = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-            listOf(1f to "Square", 3f / 4f to "Tall", 4f / 3f to "Wide").forEach { (ratio, label) ->
-                shapes.addView(
-                    kit.chip(label, tileShape == ratio) {
-                        tileShape = ratio
-                        rebuild()
-                    },
-                    LinearLayout.LayoutParams(0, kit.dp(48), 1f).apply { marginEnd = kit.dp(6) }
-                )
+            fun paintShapes() {
+                shapes.removeAllViews()
+                listOf(1f to "Square", 3f / 4f to "Portrait", 4f / 3f to "Wide").forEachIndexed { idx, (ratio, label) ->
+                    shapes.addView(
+                        kit.chip(label, tileShape == ratio) {
+                            tileShape = ratio
+                            paintShapes()
+                            rebuild()
+                        },
+                        LinearLayout.LayoutParams(0, kit.dp(44), 1f).apply { if (idx > 0) leftMargin = kit.dp(6) }
+                    )
+                }
             }
+            paintShapes()
             shapes.setPadding(kit.dp(14), 0, kit.dp(14), kit.dp(12))
             grid.addView(shapes, LinearLayout.LayoutParams(-1, -2))
-            val sortNames = OeaMediaLibrary.Sort.values().map { it.label() }
-            kit.row(grid, R.drawable.oic_sort_by_alpha, "Order", sort.label(), chevron = true) {
-                kit.choose("Order the library by", null, sortNames, OeaMediaLibrary.Sort.values().indexOf(sort)) { index ->
-                    sort = OeaMediaLibrary.Sort.values()[index]
-                    OeaMediaLibrary.setSort(host, Kind.IMAGE, sort)
-                    rebuild()
+            kit.row(grid, R.drawable.oic_sort_by_alpha, "Sort order", sort.label(), chevron = true) {
+                dialog.dismiss()
+                chooseSort()
+            }
+            if (!pickerRequest) {
+                kit.row(grid, R.drawable.oic_play_arrow, "Slideshow", "Play the current view full-screen", chevron = true) {
+                    dialog.dismiss()
+                    val list = currentList()
+                    if (list.isNotEmpty()) OeaEmageViewer.slideshow(host, list)
+                    else snack.show("No pictures to play right now")
                 }
             }
             kit.row(grid, R.drawable.oic_visibility_off, "Hidden albums", hiddenSummary(built), chevron = true) {
+                dialog.dismiss()
                 manageHiddenAlbums(built)
             }
-            kit.row(grid, R.drawable.oic_delete, "Recently deleted", "${OeaMediaLibrary.trashRecords(host).size} remembered", chevron = true) {
-                pickTab("trash")
-                tabs.select("trash")
+            kit.row(grid, R.drawable.oic_delete, "Recently deleted", "${OeaMediaLibrary.trashRecords(host).size} items", chevron = true) {
+                dialog.dismiss()
+                pickDestination("trash")
             }
-            kit.row(grid, R.drawable.oic_photo_library, "OEA pictures", "Wallpapers, live scenes and OEA camera shots", chevron = true) {
-                pickTab("oea")
-                tabs.select("oea")
-            }
-            kit.row(grid, R.drawable.oic_open_in_new, "Choose with Android Photos", "Pick one picture without granting EMAGE the whole library", chevron = true) {
+            kit.row(grid, R.drawable.oic_open_in_new, "Open from system picker", "Pick one picture without changing access", chevron = true) {
+                dialog.dismiss()
                 openSystemPicker()
             }
-            kit.row(grid, R.drawable.oic_refresh, "Rescan now", "Asks Android to index OEA's camera output again") {
+            kit.row(grid, R.drawable.oic_refresh, "Rescan library", "Refresh pictures on this device") {
+                dialog.dismiss()
                 rescan()
             }
-            kit.note(panel, "EMAGE reads the whole MediaStore collection every time it opens, groups it into days and albums, and never uploads any of it.")
         }
     }
 
@@ -1144,12 +1277,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             card.root.contentDescription = "Album ${albumData.name}, ${albumData.count} ${if (albumData.count == 1) "picture" else "pictures"}. Double tap to open."
             card.cover.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             card.root.setOnClickListener {
-                album = albumData.name
-                tab = "all"
-                surface = Surface.PHOTOS
-                tabs.select("all")
-                showSurface()
-                rebuild()
+                openAlbum(albumData.name)
             }
             card.root.setOnLongClickListener {
                 albumActions(albumData)
@@ -1169,12 +1297,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
             "${data.count} pictures • ${OeaMediaLibrary.formatSize(data.size)}${if (data.path.isNotBlank()) " • ${data.path}" else ""}",
             listOf(
                 OeaAppKit.Action(R.drawable.oic_photo_library, "Open", "Show these pictures in the grid") {
-                    album = data.name
-                    tab = "all"
-                    surface = Surface.PHOTOS
-                    tabs.select("all")
-                    showSurface()
-                    rebuild()
+                    openAlbum(data.name)
                 },
                 OeaAppKit.Action(R.drawable.oic_play_arrow, "Slideshow", "Play this album full-screen") {
                     val list = snapshot?.inAlbum(data.name, Kind.IMAGE) ?: emptyList()
@@ -1275,16 +1398,12 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         private const val REQUEST_DELETE = 4310
         private const val REQUEST_PICKER = 4312
         const val EXTRA_HANDLED = "oea.emage.view_handled"
-        private val TABS = listOf(
+        private val FILTER_TABS = listOf(
             "all" to "All",
-            "albums" to "Albums",
-            "favourites" to "Favourites",
             "recent" to "Last 7 days",
             "screenshots" to "Screenshots",
             "downloads" to "Downloads",
-            "large" to "Large",
-            "oea" to "OEA",
-            "trash" to "Recently deleted"
+            "large" to "Large"
         )
     }
 }

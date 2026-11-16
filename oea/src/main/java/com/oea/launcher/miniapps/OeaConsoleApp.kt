@@ -22,6 +22,7 @@ import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.fault.OeaFaultLog
 import com.oea.launcher.fault.OeaFaultRecord
 import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaType
@@ -66,87 +67,195 @@ object OeaConsoleApp {
     private val io = Executors.newFixedThreadPool(2) { Thread(it, "OeaConsole").apply { isDaemon = true } }
 
     fun build(host: Activity, palette: OeaPalette): View {
-        val kit = OeaKit(host, palette)
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("Console", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(kit.iconBadge(R.drawable.oic_developer_mode, palette.accentSoft, palette.onAccentSoft, 40))
-        column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
-        kit.note(column, "Advanced device utilities: diagnostics, device info, security checks, storage tools, performance and our own ADB-inspired command system. Everything here uses supported Android APIs and explains its limits honestly. No laptop, no Shizuku, no helper app — OEA's own privileged service layer.")
-
-        // Quick stats
-        val statsCard = LinearLayout(host).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(kit.dp(16), kit.dp(14), kit.dp(16), kit.dp(14))
-            background = kit.rounded(palette.card, 22, palette.stroke, 1)
-        }
-        val battery = com.oea.launcher.power.OeaBatteryState.read(host)
-        val lowModeActive = com.oea.launcher.perf.OeaLowMode.active(host)
-        val deviceUltraSaving = isDeviceInUltraPowerSaving(host)
-        val statsText = kit.text("Battery ${battery.text} • ${memoryInfo(host)}", 13f, palette.textSecondary)
-        statsCard.addView(statsText)
-        com.oea.launcher.power.OeaBatteryState.observe(statsCard) { state ->
-            statsText.text = "Battery ${state.text} • ${memoryInfo(host)}"
-        }
-        statsCard.addView(kit.text(deviceSummary(host) + if (lowModeActive) " • LOW (Ultra Power Saving) ON" else " • LOW OFF" + if (deviceUltraSaving) " • Device Ultra Saving ON" else "", 12f, palette.textTertiary).apply { setPadding(0, kit.dp(4), 0, 0) })
-        if (deviceUltraSaving) {
-            statsCard.addView(kit.text("Device Ultra Power Saving is ON — OEM may block mini-apps, alarms, background work. OEA Console explains how to whitelist.", 12f, palette.danger).apply { setPadding(0, kit.dp(6), 0, 0) })
-        }
-        column.addView(statsCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
-
-        // Sections
-        val sections = listOf(
-            "diagnostics" to "Diagnostics • ${OeaFaultLog.count()} recorded",
-            "device" to "Device Info • Hardware & software",
-            "security" to "Security • App permissions & protections",
-            "storage" to "Storage • Cleanup & maintenance",
-            "performance" to "Performance • Memory, battery, temperature, ultra saving",
-            "sound" to "Sound Amplifier • Room sound to the earphones",
-            "adb" to "Command System • Our own ADB-inspired build (comprehensive)",
-            "privileges" to "Privileges • Overlay, suspension, multitasking",
-            "lowmode" to "LOW Mode • Ultra Power Saving (launcher's own)"
+        val kit = OeaAppKit(host, palette)
+        var currentTab = "system"
+        var renderTab: () -> Unit = {}
+        val navItems = listOf(
+            OeaAppKit.NavItem("system", "System", R.drawable.oic_phone_android),
+            OeaAppKit.NavItem("security", "Security", R.drawable.oic_shield_fill),
+            OeaAppKit.NavItem("commands", "Commands", R.drawable.oic_developer_mode),
+            OeaAppKit.NavItem("tools", "Tools", R.drawable.oic_tune)
         )
+        val shell = kit.appShell(
+            title = "Console",
+            subtitle = deviceSummary(host),
+            navItems = navItems,
+            initialNav = currentTab,
+            onBack = host.miniIndexBack()
+        ) { id ->
+            currentTab = id
+            renderTab()
+        }
+        val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        shell.body.addView(content)
 
-        val group = kit.group(column)
-        sections.forEach { (id, label) ->
-            val icon = when (id) {
-                "diagnostics" -> R.drawable.oic_shield_fill
-                "device" -> R.drawable.oic_phone_android
-                "security" -> R.drawable.oic_shield
-                "storage" -> R.drawable.oic_cleaning_services
-                "performance" -> R.drawable.oic_memory
-                "sound" -> R.drawable.oic_volume_up
-                "adb" -> R.drawable.oic_developer_mode
-                "privileges" -> R.drawable.oic_accessibility_new
-                "lowmode" -> R.drawable.oic_battery_charging_full
-                else -> R.drawable.oic_settings
+        shell.bar.addAction(R.drawable.oic_developer_mode, "Command terminal") {
+            showCommandSystem(host, kit)
+        }
+        shell.bar.addAction(R.drawable.oic_more_vert, "Console options") {
+            val latest = OeaFaultLog.history().firstOrNull()
+            kit.actions("Console", null, listOf(
+                OeaAppKit.Action(R.drawable.oic_shield_fill, "Diagnostic history", "${OeaFaultLog.count()} recorded incidents") {
+                    showDiagnostics(host, kit)
+                },
+                OeaAppKit.Action(R.drawable.oic_share_filled, "Share latest incident", if (latest != null) latest.title() else "No incidents recorded", disabled = latest == null) {
+                    if (latest != null) shareIncident(host, latest)
+                },
+                OeaAppKit.Action(R.drawable.oic_refresh, "Refresh status", "Re-read memory, battery and permissions") {
+                    renderTab()
+                }
+            ))
+        }
+
+        renderTab = {
+            shell.nav?.select(currentTab, notify = false)
+            shell.bar.title.text = when (currentTab) {
+                "security" -> "Security"
+                "commands" -> "Commands"
+                "tools" -> "Tools"
+                else -> "Console"
             }
-            kit.row(group, icon, label.substringBefore(" • "), label.substringAfter(" • ")) {
-                when (id) {
-                    "diagnostics" -> showDiagnostics(host, kit)
-                    "device" -> showDeviceInfo(host, kit)
-                    "security" -> showSecurity(host, kit)
-                    "storage" -> showStorage(host, kit)
-                    "performance" -> showPerformance(host, kit)
-                    "sound" -> showSoundAmplifier(host, kit)
-                    "adb" -> showCommandSystem(host, kit)
-                    "privileges" -> showPrivileges(host, kit)
-                    "lowmode" -> showLowMode(host, kit)
+            content.removeAllViews()
+            when (currentTab) {
+                "system" -> {
+                    val battery = com.oea.launcher.power.OeaBatteryState.read(host)
+                    val lowModeActive = com.oea.launcher.perf.OeaLowMode.active(host)
+                    val deviceUltraSaving = isDeviceInUltraPowerSaving(host)
+                    val incidents = OeaFaultLog.count()
+
+                    val statsRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+                    val battTile = kit.statTile("Battery", battery.text.substringBefore(' '), palette.text)
+                    val lowTile = kit.statTile("Power mode", if (lowModeActive) "LOW" else "Normal", if (lowModeActive) palette.warning else palette.text)
+                    val logTile = kit.statTile("Incidents", incidents.toString(), if (incidents > 0) palette.warning else palette.success)
+                    statsRow.addView(battTile, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+                    statsRow.addView(lowTile, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+                    statsRow.addView(logTile, LinearLayout.LayoutParams(0, -2, 1f))
+                    content.addView(statsRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+                    val memCard = LinearLayout(host).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(kit.dp(16), kit.dp(12), kit.dp(16), kit.dp(12))
+                        background = kit.rounded(palette.card, 18, palette.stroke, 1)
+                    }
+                    val memLabel = kit.text("Battery ${battery.text} · ${memoryInfo(host)}", 13f, palette.textSecondary)
+                    memCard.addView(memLabel)
+                    com.oea.launcher.power.OeaBatteryState.observe(memCard) { state ->
+                        memLabel.text = "Battery ${state.text} · ${memoryInfo(host)}"
+                    }
+                    content.addView(memCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+                    if (deviceUltraSaving) {
+                        kit.banner(
+                            content,
+                            R.drawable.oic_warning_fill,
+                            "System Ultra Power Saving active",
+                            "Background tasks and alarms may be paused until OEA is exempted in battery settings.",
+                            OeaKit.Tone.WARNING,
+                            "Details"
+                        ) { showPerformance(host, kit) }
+                    }
+
+                    kit.sectionTitle(content, "Device & health")
+                    val group = kit.group(content)
+                    kit.row(group, R.drawable.oic_phone_android, "Device information", "Model, display, CPU and Android build", chevron = true) {
+                        showDeviceInfo(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_memory, "Performance & battery", "Memory pressure, thermals and power state", chevron = true) {
+                        showPerformance(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_cleaning_services, "Storage & maintenance", "Disk usage and cache cleanup", chevron = true) {
+                        showStorage(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_battery_charging_full, "LOW power mode", "Ultra power saving for OEA", value = if (lowModeActive) "On" else "Off", chevron = true) {
+                        showLowMode(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_history, "Diagnostics", "$incidents recorded ${if (incidents == 1) "incident" else "incidents"}", chevron = true) {
+                        showDiagnostics(host, kit)
+                    }
+                }
+
+                "security" -> {
+                    kit.sectionTitle(content, "Access & protections")
+                    val group = kit.group(content)
+                    kit.row(group, R.drawable.oic_shield, "App security review", "High-risk permissions, sideloaded apps and platform protections", chevron = true) {
+                        showSecurity(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_accessibility_new, "Privileges & special access", "Overlay, notification access, app suspension and split-screen", chevron = true) {
+                        showPrivileges(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_ac_unit_fill, "App Freezer", "Pause unused apps so they stop running in the background", chevron = true) {
+                        runCatching {
+                            host.startActivity(Intent(host, com.oea.launcher.freezer.OeaFreezerActivity::class.java))
+                        }
+                    }
+                    kit.row(group, R.drawable.oic_shield_fill, "Full permission scan", "Open OEA's standalone Security Scan inspector", chevron = true) {
+                        runCatching {
+                            host.startActivity(Intent(host, com.oea.launcher.security.OeaSecurityScanActivity::class.java))
+                        }
+                    }
+                }
+
+                "commands" -> {
+                    val hero = LinearLayout(host).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(kit.dp(18), kit.dp(18), kit.dp(18), kit.dp(18))
+                        background = kit.rounded(palette.card, 22, palette.stroke, 1)
+                    }
+                    hero.addView(kit.mono(kit.text(">_ oea console", 17f, palette.accent, OeaType.medium)))
+                    hero.addView(kit.text(
+                        "Inspect packages, verify privileges, toggle modes, freeze apps and run device diagnostics directly on-device.",
+                        13.5f,
+                        palette.textSecondary
+                    ).apply { setPadding(0, kit.dp(6), 0, kit.dp(14)); setLineSpacing(kit.dpf(2f), 1f) })
+                    hero.addView(
+                        kit.primaryButton("Open command prompt", R.drawable.oic_developer_mode) {
+                            showCommandSystem(host, kit)
+                        },
+                        LinearLayout.LayoutParams(-1, kit.dp(48))
+                    )
+                    content.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+                    kit.sectionTitle(content, "Related modules")
+                    val group = kit.group(content)
+                    kit.row(group, R.drawable.oic_accessibility_new, "Privilege doctor", "Verify overlay, root, device-owner and assistant live", chevron = true) {
+                        showPrivileges(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_history, "Crash & fault log", "${OeaFaultLog.count()} recorded incidents", chevron = true) {
+                        showDiagnostics(host, kit)
+                    }
+                }
+
+                "tools" -> {
+                    kit.sectionTitle(content, "Utilities")
+                    val group = kit.group(content)
+                    kit.row(group, R.drawable.oic_headset, "Sound amplifier", "Route room audio to wired or Bluetooth earphones with gain control", chevron = true) {
+                        showSoundAmplifier(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_cleaning_services, "Storage cleanup", "Inspect storage and trim OEA caches", chevron = true) {
+                        showStorage(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_battery_charging_full, "LOW power mode", "Trim animations and background work when battery is low", chevron = true) {
+                        showLowMode(host, kit)
+                    }
+                    val latest = OeaFaultLog.history().firstOrNull()
+                    kit.row(
+                        group,
+                        R.drawable.oic_share_filled,
+                        "Export latest incident",
+                        latest?.title() ?: "No incidents on record",
+                        chevron = latest != null
+                    ) {
+                        if (latest == null) {
+                            android.widget.Toast.makeText(host, "No incidents recorded", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            shareIncident(host, latest)
+                        }
+                    }
                 }
             }
         }
-
-        column.addView(kit.primaryButton("Send latest incident to developer", R.drawable.oic_public) {
-            val latest = OeaFaultLog.history().firstOrNull()
-            if (latest == null) {
-                android.widget.Toast.makeText(host, "No incidents recorded", android.widget.Toast.LENGTH_SHORT).show()
-            } else {
-                shareIncident(host, latest)
-            }
-        }, LinearLayout.LayoutParams(-1, kit.dp(50)).apply { topMargin = kit.dp(14) })
-
-        return column
+        renderTab()
+        return shell.root
     }
 
     // ------------------------------------------------------------------ diagnostics
