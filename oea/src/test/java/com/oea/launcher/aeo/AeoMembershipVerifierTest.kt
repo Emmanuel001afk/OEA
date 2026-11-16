@@ -156,4 +156,56 @@ class AeoMembershipVerifierTest {
             registration, listOf(key), { _, _, _ -> false }, now, apiLevel = 33
         ) is AeoMembershipVerifier.Result.Failure)
     }
+
+    @Test fun verifiesSharedAeoCrossPlatformConformanceVector() {
+        val vector = JSONObject(
+            javaClass.classLoader!!.getResource("aeo-conformance-vectors-v1.json")!!.readText()
+        )
+        val expected = vector.getJSONObject("expected")
+        val root = vector.getJSONArray("pinnedRootKeys").getJSONObject(0)
+        val pinnedRoot = AeoMembershipVerifier.PinnedRootKey(
+            root.getString("kid"),
+            Base64.getUrlDecoder().decode(root.getString("publicKey")),
+            root.getLong("notBefore"),
+            root.getLong("notAfter")
+        )
+        val nowSeconds = vector.getLong("nowSeconds")
+        val bundleResult = AeoMembershipVerifier.verifyTrustBundle(
+            vector.getString("trustBundle"),
+            listOf(pinnedRoot),
+            minimumVersion = expected.getLong("trustBundleVersion"),
+            nowSeconds = nowSeconds,
+            apiLevel = 33
+        )
+        assertTrue(bundleResult is AeoMembershipVerifier.Result.Success<*>)
+        val bundle = (bundleResult as AeoMembershipVerifier.Result.Success<*>).value
+            as AeoMembershipVerifier.VerifiedTrustBundle
+        assertEquals(expected.getString("issuerKeyId"), bundle.trustedKeys.single().kid)
+
+        val revoked = { _: String, credentialId: String, _: String ->
+            credentialId in bundle.revokedCredentialIds
+        }
+        val membershipResult = AeoMembershipVerifier.verify(
+            vector.getString("membershipCredential"),
+            bundle.trustedKeys,
+            revoked,
+            nowSeconds,
+            apiLevel = 33
+        )
+        assertTrue(membershipResult is AeoMembershipVerifier.Result.Success<*>)
+        val membership = (membershipResult as AeoMembershipVerifier.Result.Success<*>).value
+            as AeoMembershipVerifier.Membership
+        assertEquals(expected.getString("membershipPlatformId"), membership.platformId)
+        assertEquals(expected.getString("membershipPlatformName"), membership.platformName)
+
+        val registrationResult = AeoMembershipVerifier.verifyRegistration(
+            vector.getJSONObject("registration"),
+            bundle.trustedKeys,
+            revoked,
+            nowSeconds,
+            apiLevel = 33
+        )
+        assertTrue(registrationResult is AeoMembershipVerifier.Result.Success<*>)
+    }
+
 }
