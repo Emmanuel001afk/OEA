@@ -184,7 +184,8 @@
             android:roundIcon="@drawable/ic_oea_game_boost"
             android:taskAffinity="com.oea.launcher.gameboost"
             android:launchMode="singleTask"
-            android:theme="@style/OeaGameBoostTheme">
+            android:theme="@style/OeaGameBoostTheme"
+            android:allowEmbedded="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -255,7 +256,8 @@
             android:taskAffinity="com.oea.launcher.app.clock"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -399,7 +401,8 @@
             android:taskAffinity="com.oea.launcher.app.weather"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -532,7 +535,8 @@
             android:taskAffinity="com.oea.launcher.app.voice"
             android:launchMode="singleTask"
             android:theme="@style/OeaBrandedPanelTheme"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:allowEmbedded="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -560,7 +564,8 @@
             android:launchMode="singleTask"
             android:theme="@style/OeaGameTheme"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:allowEmbedded="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -611,7 +616,8 @@
             android:theme="@style/OeaGameTheme"
             android:screenOrientation="unspecified"
             android:hardwareAccelerated="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density" />
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:allowEmbedded="true" />
         <!-- "Add to Home screen" requests (pinned shortcuts and widgets). -->
         <activity
             android:name=".OeaPinRequestActivity"
@@ -781,7 +787,8 @@
             android:icon="@drawable/ic_oea_call_blocker"
             android:roundIcon="@drawable/ic_oea_call_blocker"
             android:taskAffinity="com.oea.launcher.callblocker"
-            android:theme="@style/OeaPanelTheme">
+            android:theme="@style/OeaPanelTheme"
+            android:allowEmbedded="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -192,6 +192,28 @@ jobs:
           grep -Fq "Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT" $SRC/split/OeaSplitLauncher.kt
           ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" $SRC/split/OeaSplitLauncher.kt
           grep -Fq "toggleSplitScreen" $SRC/split/OeaSplitLauncher.kt
+          # Live windows: the projection must be able to SEE the private
+          # display. AccessibilityService.getWindows() returns the phone
+          # screen's windows only (verified in AccessibilityInteractionClient
+          # on Android 13/14/15), so a window-verified launch, watchdog and
+          # node input all have to read getWindowsOnAllDisplays().
+          grep -Fq "fun canSeePrivateDisplays" $SRC/multitask/projection/OeaProjectionController.kt
+          grep -Fq "getWindowsOnAllDisplays()" $SRC/multitask/projection/OeaProjectionController.kt
+          # A package filter that also accepts OEA's own package is not a
+          # package filter: it let any OEA window stand in for the target.
+          grep -Fq "includeOwnWindows" $SRC/multitask/projection/OeaProjectionController.kt
+          ! grep -Fq "OEA_SELF_PACKAGE_FALLBACK) {" $SRC/multitask/projection/OeaProjectionController.kt
+          # Android's precondition, checked before a display is ever created.
+          grep -Fq "object OeaProjectionPolicy" $SRC/multitask/projection/OeaProjectionPolicy.kt
+          grep -Fq "fun check(context: Context, packageName: String, className: String?)" $SRC/multitask/projection/OeaProjectionPolicy.kt
+          grep -Fq "FLAG_ALLOW_EMBEDDED = 0x80000000" $SRC/multitask/projection/OeaProjectionPolicy.kt
+          grep -Fq "OeaProjectionPolicy.check(service, packageName, activityName)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "OeaProjectionPolicy.check(service, packageName, activityName)" $SRC/multitask/projection/OeaProjectionLaunch.kt
+          # No live window may claim to be live without a picture in it.
+          grep -Fq "awaitNewFrameSince" $SRC/multitask/projection/OeaLiveWindowSession.kt
+          grep -Fq "startReaderDrain()" $SRC/multitask/projection/OeaLiveWindowSession.kt
+          # OEA's own apps must declare allowEmbedded to be projectable.
+          grep -Fq 'android:allowEmbedded="true"' oea/src/main/AndroidManifest.xml
           grep -Fq "Search apps or package names" "$TOOLS"
           grep -Fq "Overview" "$TOOLS"
           grep -Fq "UsageStatsManager" "$TOOLS"

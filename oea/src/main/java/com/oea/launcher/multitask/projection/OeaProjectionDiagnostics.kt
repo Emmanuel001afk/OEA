@@ -345,28 +345,21 @@ object OeaProjectionDiagnostics {
         rec.line("  2. the caller holds the signature permission ACTIVITY_EMBEDDING (system apps only) OR the caller's uid already has an activity record on that display (a Presentation window does NOT count);")
         rec.line("  3. the display's owner or the platform otherwise permits it — an app-created display is never TRUSTED, and some manufacturers (this is what the first XOS run showed) turn Android's silent 'fall back to the phone' into a thrown SecurityException mentioning launchDisplayId.")
         rec.line("Consequence: a third-party app, which never declares allowEmbedded, cannot be placed on an app-created display by any ordinary app on stock Android 13–15 — and OEA's own apps can, once one OEA activity record is on the display. The ladder below measures exactly that, route by route.")
-        val launchIntent = pm.getLaunchIntentForPackage(targetPackage)
-        val activityName = launchIntent?.component?.className
-        val targetAllowsEmbedded = if (activityName == null) null else try {
-            val cn = android.content.ComponentName(targetPackage, activityName)
-            val aInfo = if (Build.VERSION.SDK_INT >= 33) {
-                pm.getActivityInfo(cn, PackageManager.ComponentInfoFlags.of(0))
-            } else {
-                @Suppress("DEPRECATION")
-                pm.getActivityInfo(cn, 0)
-            }
-            // ActivityInfo.FLAG_ALLOW_EMBEDDED == 0x80000000 (hidden constant; value from AOSP).
-            (aInfo.flags and 0x80000000.toInt()) != 0
-        } catch (_: Throwable) {
-            null
-        }
+        // The same check the ladder and the live-window manager make, so the
+        // report, the feature and the refusal can never disagree.
+        val policy = OeaProjectionPolicy.check(context, targetPackage, null)
+        val activityName = policy.className
         rec.line(
-            "Target declares android:allowEmbedded: " + when (targetAllowsEmbedded) {
-                true -> "yes — the target is allowed on an app-created display as far as this rule goes"
-                false -> "NO — Android itself will never place it on an app-created display (this is a platform rule, not an OEA defect)"
-                null -> "unknown (could not read the target's manifest flags)"
+            "Target declares android:allowEmbedded: " + when (policy.verdict) {
+                OeaProjectionPolicy.Verdict.PROJECTABLE ->
+                    "yes — the target is allowed on an app-created display as far as this rule goes"
+                OeaProjectionPolicy.Verdict.BLOCKED ->
+                    "NO — Android itself will never place it on an app-created display (this is a platform rule, not an OEA defect)"
+                OeaProjectionPolicy.Verdict.UNKNOWN ->
+                    "unknown (could not read the target's manifest flags)"
             }
         )
+        rec.line("  ${policy.detail}")
         rec.saveNow()
 
         // ---------------------------------------------------------------- launch

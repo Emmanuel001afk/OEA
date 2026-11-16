@@ -114,6 +114,16 @@ object OeaLiveWindowManager {
         val activityName = launchIntent.component?.className
             ?: return "$appLabel has no launchable activity."
 
+        // Android's own precondition, checked before a display is created and
+        // before anything is launched. Without this the phone spent up to a
+        // minute building a private display and running every legal launch
+        // route, only to end with an empty window — for an app the platform
+        // had ruled out from the start.
+        val policy = OeaProjectionPolicy.check(service, packageName, activityName)
+        if (policy.verdict == OeaProjectionPolicy.Verdict.BLOCKED) {
+            return OeaProjectionPolicy.blockedMessage(appLabel, policy)
+        }
+
         val metrics = service.resources.displayMetrics
         val index = count()
         val startX = ((metrics.widthPixels * 0.06f) + index * dp(service, 18)).toInt()

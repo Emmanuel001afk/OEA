@@ -42,33 +42,102 @@ class OeaProjectionController(private val serviceProvider: () -> AccessibilitySe
     fun displayAware(): Boolean = Build.VERSION.SDK_INT >= 30
 
     /**
-     * All accessibility windows the service can see on [displayId], newest
-     * first. Package filter is advisory: a null package accepts anything.
+     * The accessibility windows the service can see on [displayId], newest
+     * first.
+     *
+     * Two things here are load-bearing and were both wrong before:
+     *
+     * 1. **`AccessibilityService.getWindows()` returns the phone screen's
+     *    windows only.** Verified in `AccessibilityInteractionClient` on
+     *    Android 13, 14 and 15: it is
+     *    `getWindowsOnDisplay(connectionId, Display.DEFAULT_DISPLAY)`. Every
+     *    window it hands back therefore has display 0, so filtering that list
+     *    by a virtual display id produced an empty list *always* — which is
+     *    why the launch ladder could never confirm a target, the watchdog
+     *    could never see one, and no tap ever found a node. The only way to
+     *    see a private display is `getWindowsOnAllDisplays()` (public since
+     *    Android 12) indexed by display id.
+     * 2. **A package filter that also accepts OEA's own package is not a
+     *    package filter.** It used to let any OEA window — the floating
+     *    overlay itself, which is always on the phone screen — satisfy a
+     *    query for any other app, which is how a window with nothing in it
+     *    was reported as the target being live.
+     *
+     * [includeOwnWindows] exists for the one legitimate case where OEA wants
+     * to see *its own* windows on a display (the trampoline, the occupancy
+     * presentation) rather than the target's.
      */
-    fun windowsOnDisplay(displayId: Int, packageName: String? = null): List<AccessibilityWindowInfo> {
-        val service = serviceProvider() ?: return emptyList()
-        val windows = try {
-            service.windows
-        } catch (_: Throwable) {
-            return emptyList()
-        } ?: return emptyList()
+    fun windowsOnDisplay(
+        displayId: Int,
+        packageName: String? = null,
+        includeOwnWindows: Boolean = false
+    ): List<AccessibilityWindowInfo> {
+        val windows = rawWindows(displayId)
+        if (windows.isEmpty()) return emptyList()
         val out = ArrayList<AccessibilityWindowInfo>(4)
         for (window in windows) {
-            if (windowDisplayId(window) != displayId) continue
-            if (packageName != null) {
-                val root = try {
-                    window.root
-                } catch (_: Throwable) {
-                    null
-                }
-                val rootPkg = root?.packageName?.toString()
-                if (rootPkg != null && rootPkg != packageName && rootPkg != OEA_SELF_PACKAGE_FALLBACK) {
-                    continue
-                }
+            if (packageName.isNullOrBlank()) {
+                out.add(window)
+                continue
             }
+            val root = try {
+                window.root
+            } catch (_: Throwable) {
+                null
+            }
+            val rootPkg = root?.packageName?.toString()
+            val matches = when {
+                // A window OEA cannot attribute is not evidence of anything.
+                rootPkg == null -> false
+                rootPkg == packageName -> true
+                else -> includeOwnWindows && rootPkg == OEA_SELF_PACKAGE_FALLBACK
+            }
+            if (!matches) continue
+            // A window with nothing in it is not an app being shown.
+            //
+            // OEA's own trampoline has to sit on the private display for the
+            // target to be allowed there at all, and it never calls
+            // setContentView - so its window matches OEA's package and would
+            // otherwise satisfy a query for any OEA app (Notes, Calculator,
+            // Messages...) before that app had even started. An empty window
+            // is exactly the case where OEA must not say "it's here". The
+            // launch ladder polls for seconds, so an app still building its
+            // first screen simply takes one more poll to count.
+            val children = try {
+                root?.childCount ?: 0
+            } catch (_: Throwable) {
+                0
+            }
+            if (children <= 0) continue
             out.add(window)
         }
         return out
+    }
+
+    /** Windows on [displayId] straight from the platform, unfiltered. */
+    private fun rawWindows(displayId: Int): List<AccessibilityWindowInfo> {
+        val service = serviceProvider() ?: return emptyList()
+        if (displayId == android.view.Display.DEFAULT_DISPLAY) {
+            // getWindows() is the cheap, always-available path for the phone
+            // screen; it only ever returns this display anyway.
+            return try {
+                service.windows ?: emptyList()
+            } catch (_: Throwable) {
+                emptyList()
+            }
+        }
+        // A private display is invisible to getWindows(). getWindowsOnAllDisplays()
+        // is public from Android 12; on anything older the method is simply not
+        // there (NoSuchMethodError), and the honest answer is "no windows".
+        return runCatching {
+            service.getWindowsOnAllDisplays().get(displayId, emptyList())
+        }.getOrDefault(emptyList())
+    }
+
+    /** Can this service see windows on displays other than the phone screen at all? */
+    fun canSeePrivateDisplays(): Boolean {
+        val service = serviceProvider() ?: return false
+        return runCatching { service.getWindowsOnAllDisplays() != null }.getOrDefault(false)
     }
 
     /** True when the given package has a window on the given display. */
@@ -77,12 +146,8 @@ class OeaProjectionController(private val serviceProvider: () -> AccessibilitySe
 
     /** Package of the active (focused) window on a display, or null. */
     fun activePackageOnDisplay(displayId: Int): String? {
-        val service = serviceProvider() ?: return null
-        val windows = try {
-            service.windows
-        } catch (_: Throwable) {
-            null
-        } ?: return null
+        val windows = rawWindows(displayId)
+        if (windows.isEmpty()) return null
         var active: AccessibilityWindowInfo? = null
         var fallback: AccessibilityWindowInfo? = null
         for (window in windows) {
