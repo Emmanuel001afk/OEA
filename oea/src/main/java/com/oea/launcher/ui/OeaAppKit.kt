@@ -143,9 +143,39 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         private val leadSlot: FrameLayout? = null,
         private val titleBox: LinearLayout? = null
     ) {
-        fun setSubtitle(value: String) {
-            subtitle.text = value
-            subtitle.visibility = if (value.isBlank()) View.GONE else View.VISIBLE
+        fun setSubtitle(value: String?) {
+            val clean = value.orEmpty()
+            subtitle.text = clean
+            subtitle.visibility = if (clean.isBlank()) View.GONE else View.VISIBLE
+        }
+
+        /** Adds a round action to this app bar, in order. */
+        fun addAction(
+            iconRes: Int,
+            description: String,
+            active: Boolean = false,
+            onToggle: ((Boolean) -> Unit)? = null,
+            onClick: () -> Unit
+        ): View {
+            if (onToggle != null) {
+                val toggle = OeaIconToggle(context).apply {
+                    circleSizeDp = 48
+                    icon = icon(iconRes, if (active) palette.onAccent else palette.text)
+                    selectedBg = palette.accent
+                    selectedTint = palette.onAccent
+                    idleBg = palette.card
+                    tint = palette.text
+                    this.selected = active
+                    contentDescription = description
+                    isEnabled = true
+                    onChanged = { onToggle(selected) }
+                }
+                actions.addView(toggle, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
+                return toggle
+            }
+            val button = circleIconButton(iconRes, description, palette.card, palette.text) { onClick() }
+            actions.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
+            return button
         }
 
         /** Shows a back button only when the user has drilled into a sub-view. */
@@ -542,29 +572,6 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
                 )
             )
         }
-    }
-
-    /** Adds a round action to an app bar, in order. */
-    fun AppBar.addAction(iconRes: Int, description: String, active: Boolean = false, onToggle: ((Boolean) -> Unit)? = null, onClick: () -> Unit): View {
-        if (onToggle != null) {
-            val toggle = OeaIconToggle(context).apply {
-                circleSizeDp = 48
-                icon = icon(iconRes, if (active) palette.onAccent else palette.text)
-                selectedBg = palette.accent
-                selectedTint = palette.onAccent
-                idleBg = palette.card
-                tint = palette.text
-                this.selected = active
-                contentDescription = description
-                isEnabled = true
-                onChanged = { onToggle(selected) }
-            }
-            actions.addView(toggle, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
-            return toggle
-        }
-        val button = circleIconButton(iconRes, description, palette.card, palette.text) { onClick() }
-        actions.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) })
-        return button
     }
 
     /** Swaps an app-bar button's icon without rebuilding the bar (a view model of one). */

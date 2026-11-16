@@ -205,24 +205,27 @@ internal object OeaEmageEditor {
             addView(saveButton, LinearLayout.LayoutParams(-2, dp(42)))
         }
 
-        private fun pillButton(label: String, active: Boolean, onClick: () -> Unit): TextView = TextView(host).apply {
-            text = label
-            contentDescription = if (active && label in filters) "$label filter, selected" else label
-            setTextColor(if (active) onAccentColor else ink)
-            textSize = 13f
-            typeface = Typeface.create("sans-serif-medium", if (active) Typeface.BOLD else Typeface.NORMAL)
-            gravity = Gravity.CENTER
-            isClickable = true
-            isFocusable = true
-            minimumHeight = dp(40)
-            minWidth = dp(48)
-            setPadding(dp(15), dp(8), dp(15), dp(8))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(if (active) accentColor else buttonColor)
-                cornerRadius = dp(20).toFloat()
-                if (!active) setStroke(max(1, dp(1)), strokeColor)
+        private fun pillButton(label: String, active: Boolean, onClick: () -> Unit): TextView {
+            val isFilter = filters.contains(label)
+            return TextView(host).apply {
+                text = label
+                contentDescription = if (active && isFilter) "$label filter, selected" else label
+                setTextColor(if (active) onAccentColor else ink)
+                textSize = 13f
+                typeface = Typeface.create("sans-serif-medium", if (active) Typeface.BOLD else Typeface.NORMAL)
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                minimumHeight = dp(40)
+                minWidth = dp(48)
+                setPadding(dp(15), dp(8), dp(15), dp(8))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(if (active) accentColor else buttonColor)
+                    cornerRadius = dp(20).toFloat()
+                    if (!active) setStroke(max(1, dp(1)), strokeColor)
+                }
+                setOnClickListener { onClick() }
             }
-            setOnClickListener { onClick() }
         }
 
         private fun paintFilters() {
