@@ -214,6 +214,17 @@ jobs:
           grep -Fq "startReaderDrain()" $SRC/multitask/projection/OeaLiveWindowSession.kt
           # OEA's own apps must declare allowEmbedded to be projectable.
           grep -Fq 'android:allowEmbedded="true"' oea/src/main/AndroidManifest.xml
+          # Picture-in-picture on a phone Android gave none. FEATURE_PICTURE_IN_PICTURE
+          # is a device feature: without it no app can enter the system PiP task, so
+          # VIP must fall back to OEA's own floating window.
+          grep -Fq "class OeaPipWindow" $SRC/multitask/pip/OeaPipWindow.kt
+          grep -Fq "TYPE_ACCESSIBILITY_OVERLAY" $SRC/multitask/pip/OeaPipWindow.kt
+          grep -Fq "object OeaVipPip" $SRC/miniapps/OeaVipPip.kt
+          grep -Fq "fun blocked(context: Context)" $SRC/miniapps/OeaVipPip.kt
+          grep -Fq "private fun platformPipAvailable()" $SRC/miniapps/OeaVipPlayerActivity.kt
+          grep -Fq "OeaVipPip.blocked(this)" $SRC/miniapps/OeaVipPlayerActivity.kt
+          grep -Fq "OeaVipPip.start(applicationContext, handoff, at)" $SRC/miniapps/OeaVipPlayerActivity.kt
+          grep -Fq "if (OeaVipPip.showing()) OeaVipPip.stop()" $SRC/miniapps/OeaVipPlayerActivity.kt
           grep -Fq "Search apps or package names" "$TOOLS"
           grep -Fq "Overview" "$TOOLS"
           grep -Fq "UsageStatsManager" "$TOOLS"

@@ -212,6 +212,9 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // One player at a time. Opening VIP while a picture-in-picture window
+        // is up hands playback back to the full screen.
+        if (OeaVipPip.showing()) OeaVipPip.stop()
         audio = getSystemService(AUDIO_SERVICE) as AudioManager
         window.setStatusBarColor(Color.TRANSPARENT)
         window.setNavigationBarColor(Color.TRANSPARENT)
@@ -1286,12 +1289,60 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             toast("A picture-in-picture window needs a video")
             return
         }
-        if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
-            toast("This phone has no picture-in-picture")
+        if (platformPipAvailable()) {
+            runCatching { enterPictureInPictureMode(pipParams()) }
+                .onFailure { oeaPip() }
             return
         }
-        runCatching { enterPictureInPictureMode(pipParams()) }
-            .onFailure { toast("Picture-in-picture is not available right now") }
+        oeaPip()
+    }
+
+    /** Android's own PiP: a system task this phone may simply not have. */
+    private fun platformPipAvailable(): Boolean =
+        runCatching {
+            packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+        }.getOrDefault(false)
+
+    /**
+     * OEA's own picture-in-picture.
+     *
+     * Android's PiP is a device feature, not an app setting: without
+     * FEATURE_PICTURE_IN_PICTURE there is no PiP task for any app to enter.
+     * OEA cannot create that task, so it draws its own floating window from
+     * the multitasking family instead — the video is VIP's own decoder, so it
+     * goes straight into that window's surface with no virtual display and no
+     * launch ladder in between.
+     *
+     * The player hands the clip over and finishes; the window owns playback
+     * from here until the user expands it again or closes it.
+     */
+    private fun oeaPip() {
+        if (isAudio) {
+            toast("A picture-in-picture window needs a video")
+            return
+        }
+        val blocked = OeaVipPip.blocked(this)
+        if (blocked != null) {
+            toast(blocked)
+            return
+        }
+        val at = runCatching { player?.currentPosition?.toLong() }.getOrNull() ?: positionMs
+        saveProgress()
+        val handoff = Intent(intent).apply {
+            // The queue and index already describe the list; only the position
+            // moves, because the window starts a fresh decoder.
+            putExtra(EXTRA_START_AT, at)
+        }
+        val error = OeaVipPip.start(applicationContext, handoff, at)
+        if (error != null) {
+            toast(error)
+            return
+        }
+        // Playback now belongs to the window. Finishing also stops this
+        // activity's decoder, which is exactly what must happen: two decoders
+        // on one file would fight over the audio focus.
+        runCatching { player?.stop() }
+        finish()
     }
 
     private fun pipParams(): PictureInPictureParams {
@@ -1337,8 +1388,12 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (!isAudio && !locked && runCatching { player?.isPlaying == true }.getOrDefault(false)) {
-            runCatching { enterPictureInPictureMode(pipParams()) }
+        if (isAudio || locked) return
+        if (!runCatching { player?.isPlaying == true }.getOrDefault(false)) return
+        if (platformPipAvailable()) {
+            runCatching { enterPictureInPictureMode(pipParams()) }.onFailure { oeaPip() }
+        } else {
+            oeaPip()
         }
     }
 
