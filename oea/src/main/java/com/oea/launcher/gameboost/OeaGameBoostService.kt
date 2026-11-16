@@ -245,8 +245,6 @@ class OeaGameBoostService : Service() {
     private var wakeOverlay: View? = null
     private var lastWakeTapAt: Long = 0L
     private var activeGame: String? = null
-    // Save the user's exact DND state once per continuous game session.
-    private var originalDndFilter: Int? = null
     private var foregroundActivityClass: String? = null
     // UsageEvents reports lifecycle transitions, not continuous foreground state.
     // Keep the last resumed package so a long-running game does not look like
@@ -396,6 +394,12 @@ class OeaGameBoostService : Service() {
                 return@guard
             }
             registerScreenReceiver()
+            // A fresh service means no game is in front of it yet. An open
+            // record here can only be a debt a previous session left behind —
+            // killed before it could put the phone back. Settle it now, so the
+            // session that is about to start records a true baseline instead of
+            // inheriting the silence of a game the user already left.
+            OeaGameBoostSessionState.restoreIfOrphaned(this, sessionRunning = false)
             diagnostic(
                 android.util.Log.INFO,
                 "service ready overlay=${com.oea.launcher.privilege.OeaPrivileges.canOverlay(this)} enabled=${OeaGameBoostStore.enabled(this)}"
@@ -415,6 +419,8 @@ class OeaGameBoostService : Service() {
             }
             // A Usage Access return watcher can remain idle with a visible notification.
             if (activeGame == null && !waitingForGame) {
+                // Nothing is playing, so nothing may stay changed for a game.
+                OeaGameBoostSessionState.restoreIfOrphaned(this, sessionRunning = false)
                 stopForegroundCompat()
                 stopSelf()
             }
@@ -429,6 +435,9 @@ class OeaGameBoostService : Service() {
             idleWorker.shutdownNow()
             activeGame?.let(::deactivate)
             activeGame = null
+            // Last line of defence: this service must never die holding the
+            // phone's Do Not Disturb for a game that is no longer running.
+            OeaGameBoostSessionState.restoreIfOrphaned(this, sessionRunning = false)
             removeWakeOverlay()
             removeOverlay()
             if (screenReceiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
@@ -452,13 +461,22 @@ class OeaGameBoostService : Service() {
         handler.removeCallbacks(watchForReturn)
         cancelLeave()
         if (previous == game) {
+            // The same game reported again. The phone's own state drifts while a
+            // session runs — Do Not Disturb flipped back on by hand, a panel
+            // switch changed from Game Boost — so the panel's choices are put
+            // back on the phone before anything is repainted. Re-entering the
+            // game you just left must behave exactly like entering a new one.
+            applyGameDndPreference()
             ensureOverlayForActiveGame()
             updateOverlay()
             return
         }
-        if (previous == null) beginDndSession() else {
-            // Switching straight from one game to another keeps the DND session
-            // but rebuilds the overlay for the new game.
+        // Opens once per continuous session: switching games must not overwrite
+        // the pre-game baseline with a value Game Boost itself set.
+        OeaGameBoostSessionState.open(this, game)
+        if (previous != null) {
+            // Switching straight from one game to another keeps the session
+            // record (and so the same baseline) but rebuilds the overlay.
             setKeepScreenOn(false)
             removeWakeOverlay()
             removeOverlay()
@@ -514,6 +532,10 @@ class OeaGameBoostService : Service() {
     internal fun refreshSession() {
         restartPaletteAnimation()
         activeGame?.let {
+            // A switch moved in the panel while a game is running takes effect
+            // now, not the next time the game is opened: turning Do Not Disturb
+            // off mid-match has to unsilence the phone immediately.
+            applyGameDndPreference()
             ensureOverlayForActiveGame()
             updateOverlay()
         }
@@ -712,7 +734,12 @@ class OeaGameBoostService : Service() {
     }
     private fun deactivate(@Suppress("UNUSED_PARAMETER") packageName: String) {
         diagnostic(android.util.Log.WARN, "deactivate called for=$packageName activeGame=$activeGame overlayAttached=${overlay?.parent != null} panelExists=${panelView != null}")
-        restoreDnd()
+        // A recording still running when the game closes is stopped here, not
+        // left going: it is part of the session, and the file is saved.
+        OeaGameBoostSessionState.noteRecording(this, OeaGameBoostStore.prefs(this).getBoolean("recording", false))
+        OeaGameBoostSessionState.restore(this)
+        // Idempotent: covers a session that ended without ever opening a record.
+        OeaGameBoostSessionState.stopRecording(this)
         setKeepScreenOn(false)
         removeWakeOverlay()
         removeOverlay()
@@ -1927,44 +1954,12 @@ class OeaGameBoostService : Service() {
         return Pair(usedKb / 1024.0, totalKb / 1024.0)
     }
 
-    private fun applyGameDndPreference() {
-        val nm = getSystemService(NotificationManager::class.java)
-        if (!nm.isNotificationPolicyAccessGranted) {
-            diagnostic(android.util.Log.WARN, "game-session DND cannot be applied: notification policy access is not granted")
-            return
-        }
-        val shouldEnable = activeGame != null &&
-            OeaGameBoostStore.prefs(this).getBoolean("dnd", true)
-        val targetFilter = if (shouldEnable) {
-            NotificationManager.INTERRUPTION_FILTER_PRIORITY
-        } else {
-            NotificationManager.INTERRUPTION_FILTER_ALL
-        }
-        if (nm.currentInterruptionFilter != targetFilter) {
-            runCatching { nm.setInterruptionFilter(targetFilter) }
-                .onFailure { diagnostic(android.util.Log.ERROR, "game-session DND apply failed enabled=$shouldEnable error=${it.javaClass.simpleName}:${it.message}") }
-        }
-    }
-
-    private fun beginDndSession() {
-        val nm = getSystemService(NotificationManager::class.java)
-        originalDndFilter = if (nm.isNotificationPolicyAccessGranted) {
-            nm.currentInterruptionFilter
-        } else {
-            null
-        }
-    }
-
-    private fun restoreDnd() {
-        val nm = getSystemService(NotificationManager::class.java)
-        val original = originalDndFilter
-        originalDndFilter = null
-        if (original != null && nm.isNotificationPolicyAccessGranted &&
-            nm.currentInterruptionFilter != original) {
-            runCatching { nm.setInterruptionFilter(original) }
-                .onFailure { diagnostic(android.util.Log.ERROR, "game-session DND restore failed error=${it.javaClass.simpleName}:${it.message}") }
-        }
-    }
+    /**
+     * Puts the panel's choices on the phone, and records what it changed so the
+     * session can give it back. See [OeaGameBoostSessionState] for why the
+     * record has to outlive this process.
+     */
+    private fun applyGameDndPreference() = OeaGameBoostSessionState.applyWhileGaming(this)
 
     private fun removeOverlay() {
         stopRainbowAnimation()

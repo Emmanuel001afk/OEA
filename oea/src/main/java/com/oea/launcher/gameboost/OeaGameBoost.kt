@@ -123,10 +123,19 @@ object OeaGameBoost {
     }
 
     /** OEA Home came to the front: any running game session has ended. */
-    fun onHomeResumed() {
+    fun onHomeResumed(context: Context? = null) {
         main.removeCallbacks(probeRunnable)
         probeContext = null
-        service?.onHomeShown()
+        val running = service
+        running?.onHomeShown()
+        // Home is in front, so no game is. Nothing may stay changed on the
+        // phone for one — including a session whose process was killed before
+        // it could put Do Not Disturb back, which is how a phone used to stay
+        // silent long after the game was closed.
+        val app = (context ?: running)?.applicationContext
+        if (app != null) {
+            OeaGameBoostSessionState.restoreIfOrphaned(app, sessionRunning = running?.currentGame() != null)
+        }
     }
 
     /**
@@ -186,10 +195,15 @@ object OeaGameBoost {
 
     /** Ends the running session, e.g. when Game Boost is switched off. */
     fun endSession(context: Context) {
+        val app = context.applicationContext
         val running = service
         if (running != null) running.endSession("ended by the user") else {
-            context.applicationContext.stopService(Intent(context.applicationContext, OeaGameBoostService::class.java))
+            runCatching { app.stopService(Intent(app, OeaGameBoostService::class.java)) }
+                .onFailure { Log.w(TAG, "Game Boost service did not stop", it) }
         }
+        // Nothing is playing now, so nothing may stay changed for a game —
+        // including a session whose process was killed before it could restore.
+        OeaGameBoostSessionState.restoreIfOrphaned(app, sessionRunning = false)
     }
 
     private fun startSession(context: Context, packageName: String) {

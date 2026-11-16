@@ -143,8 +143,14 @@ jobs:
           set -euo pipefail
           SRC=oea/src/main/java/com/oea/launcher
           TOOLS=$SRC/OeaSystemToolsActivity.kt
-          grep -Fq "originalDndFilter" $SRC/gameboost/OeaGameBoostService.kt
-          grep -Fq "beginDndSession" $SRC/gameboost/OeaGameBoostService.kt
+          # Game Boost must record what a session changed and give it back, and
+          # the record has to outlive the process (a killed service used to
+          # leave Do Not Disturb switched on for good).
+          grep -Fq "OeaGameBoostSessionState.open(this, game)" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "OeaGameBoostSessionState.restore(this)" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "restoreIfOrphaned(this, sessionRunning = false)" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "fun restoreTarget" $SRC/gameboost/OeaGameBoostSessionState.kt
+          grep -Fq "fun restoreIfOrphaned" $SRC/gameboost/OeaGameBoostSessionState.kt
           grep -Fq "class OeaGameBoostActivity" $SRC/gameboost/OeaGameBoostActivity.kt
           grep -Fq "OeaGameBoostService.ACTION_REFRESH" $SRC/gameboost/OeaGameBoostActivity.kt
           grep -Fq "calculateLaunchBounds" $SRC/multitask/OeaMultitaskLauncher.kt

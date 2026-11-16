@@ -194,7 +194,7 @@ class OeaLauncherActivity : Activity() {
         } else {
             buildHome()
         }
-        OeaFaultShield.guard("home:boost-resume") { OeaGameBoost.onHomeResumed() }
+        OeaFaultShield.guard("home:boost-resume") { OeaGameBoost.onHomeResumed(this) }
         OeaFaultShield.guard("home:island-resume") { OeaDynamicIslandOverlayService.ensureRunning(this) }
         OeaFaultShield.guard("home:wake-resume") {
             com.oea.launcher.power.OeaPower.restoreIfNeeded(this)
