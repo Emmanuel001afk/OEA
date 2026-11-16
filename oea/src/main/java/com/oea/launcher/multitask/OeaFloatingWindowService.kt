@@ -495,8 +495,10 @@ class OeaFloatingWindowService : AccessibilityService() {
             row.setOnClickListener {
                 val label = info.loadLabel(packageManager).toString()
                 if (OeaLiveWindows.enabled(this)) {
+                    // Pass the component this row is showing. Package alone
+                    // collapsed every OEA tool into "OEA Home".
                     val message = OeaLiveWindowManager.start(
-                        this, info.activityInfo.packageName, label
+                        this, info.activityInfo.packageName, label, info.activityInfo.name
                     )
                     android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
                 } else {
@@ -941,6 +943,22 @@ class OeaFloatingWindowService : AccessibilityService() {
     fun expand() {
         removeBall(animate = false)
         showWindow(animate = true)
+    }
+
+    /**
+     * Opens [app] from the workspace, using the only method OEA's own overlay
+     * can really deliver: a live projection window.
+     *
+     * "Float" on an app used to expand the workspace and forget which app was
+     * asked for, so the user had to find it again in the list. Returns false
+     * when live windows are off — the caller then leaves the workspace open
+     * rather than silently switching to Android freeform, which is a
+     * different method the user did not choose.
+     */
+    fun openApp(app: OeaAppInfo): String? {
+        if (!OeaLiveWindows.enabled(this)) return null
+        if (!OeaLiveWindowManager.canStart() && OeaLiveWindowManager.find(app.packageName, app.className) == null) return null
+        return OeaLiveWindowManager.start(this, app.packageName, app.label, app.className)
     }
 
     /**

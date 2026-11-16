@@ -2064,14 +2064,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (members.size < 2) return
         val (a, b) = members[0] to members[1]
         fun go() {
-            val first = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName(a.packageName, a.className))
-            val second = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName(b.packageName, b.className))
-            val result = OeaSplitLauncher.launchPair(context, first, second)
+            // The app-entry form resolves each side to the component OEA holds
+            // (and records the launch), so a pair of OEA tools no longer opens
+            // Home twice and a renamed activity still splits.
+            val result = OeaSplitLauncher.launchPair(context, a, b)
             if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
-            if (result.success) {
-                store.recordLaunch(a.packageName, a.className)
-                store.recordLaunch(b.packageName, b.className)
-            }
         }
         val lockedApp = members.take(2).firstOrNull { OeaAppLockStore.isLocked(context, appKey(it)) }
         if (lockedApp != null) menus.showUnlockPrompt(lockedApp) { go() } else go()

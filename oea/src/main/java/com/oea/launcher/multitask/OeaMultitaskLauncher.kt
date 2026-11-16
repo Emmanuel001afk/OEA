@@ -49,9 +49,11 @@ object OeaMultitaskLauncher {
             return Result(false, "Floating tasks require Android 7.0 or newer.")
         }
 
-        val pm = context.packageManager
-        val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
-            ?: return Result(false, "This app has no launchable activity.")
+        // Resolve the component OEA is actually holding, not the package's
+        // default entry: floating an OEA tool used to open OEA Home, because
+        // every OEA app shares one package.
+        val launchIntent = OeaMultitaskIntents.resolve(context, app)
+            ?: return Result(false, "${app.label} has no activity OEA is allowed to open.")
 
         val freeformAdvertised = nativeFreeformSupported(context)
         val freeformEnabled = freeformAdvertised || freeformDeveloperOverrideEnabled(context)
@@ -77,6 +79,9 @@ object OeaMultitaskLauncher {
             // launch bounds unless the task itself asks for freeform windowing.
             bundle.putInt(KEY_LAUNCH_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
             context.startActivity(launchIntent, bundle)
+            // An app opened in a floating window is still an app the user
+            // opened, so Overview and the drawer's recent list must show it.
+            OeaMultitaskIntents.record(context, app)
             val sizeLabel = OeaDataStore.get(context).floatingWindowSize()
             val supportNote = if (freeformAdvertised) {
                 "Android reports native freeform support, but app/OEM policy can still refuse the request."

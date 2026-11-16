@@ -163,6 +163,32 @@ jobs:
           grep -Fq '"large" -> 520 to 700' $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.software.freeform_window_management" $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.activity.windowingMode" $SRC/multitask/OeaMultitaskLauncher.kt
+          # One resolver decides what "this app" means for every multitasking
+          # surface. A package-level answer opened OEA Home for every OEA tool,
+          # because they all share one package, and gave up when an update
+          # renamed or disabled the activity OEA was holding.
+          grep -Fq "object OeaMultitaskIntents" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "fun resolve(context: Context, packageName: String, className: String?)" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "fun record(context: Context, packageName: String, className: String?)" $SRC/multitask/OeaMultitaskIntents.kt
+          # OEA Home is itself a launcher activity, so a package-level fallback
+          # has to prefer the activities that are not home screens.
+          grep -Fq "Intent.CATEGORY_HOME" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "private fun ranked(context: Context, packageName: String)" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "OeaMultitaskIntents.resolve(context, app)" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "OeaMultitaskIntents.record(context, app)" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "OeaMultitaskIntents.resolve(service, packageName, className)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "OeaMultitaskIntents.record(service, packageName, activityName)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "OeaMultitaskIntents.resolve(context, first)" $SRC/split/OeaSplitLauncher.kt
+          # No multitasking surface may ask the package instead of the component.
+          ! grep -Fq "getLaunchIntentForPackage" $SRC/multitask/OeaMultitaskLauncher.kt
+          ! grep -Fq "getLaunchIntentForPackage" $SRC/split/OeaSplitLauncher.kt
+          ! grep -Fq "getLaunchIntentForPackage" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          # The OEA floating workspace must remember which app was asked for.
+          grep -Fq "service.openApp(app)" $SRC/multitask/OeaFloatingWindows.kt
+          grep -Fq "fun openApp(app: OeaAppInfo)" $SRC/multitask/OeaFloatingWindowService.kt
+          # Pairing and live windows are per component, not per package.
+          grep -Fq "fun find(pkg: String, className: String?)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "first.packageName == second.packageName && first.className == second.className" $SRC/split/OeaSplitLauncher.kt
           grep -Fq "Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT" $SRC/split/OeaSplitLauncher.kt
           ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" $SRC/split/OeaSplitLauncher.kt
           grep -Fq "toggleSplitScreen" $SRC/split/OeaSplitLauncher.kt

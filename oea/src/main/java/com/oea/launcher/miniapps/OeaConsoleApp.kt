@@ -1219,13 +1219,13 @@ Examples:
                 if (parts.size < 2) return "Usage: launch <package> — opens the app's main launcher activity"
                 val pkg = parts[1]
                 try {
-                    val pm = ctx.packageManager
-                    val intent = pm.getLaunchIntentForPackage(pkg)
-                    if (intent == null) "No launchable activity for $pkg (may be frozen, hidden, or a service-only package). Try 'package list' to verify it is installed."
+                    val intent = com.oea.launcher.multitask.OeaMultitaskIntents.resolve(ctx, pkg, null)
+                    if (intent == null) "No startable activity for $pkg (may be frozen, hidden, disabled, or a service-only package). Try 'package list' to verify it is installed."
                     else {
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         ctx.startActivity(intent)
-                        "Launching $pkg — startActivity succeeded. Confirm: switch to the app; if it bounces back, check freezer ('package list frozen')."
+                        com.oea.launcher.multitask.OeaMultitaskIntents.record(ctx, pkg, intent.component?.className)
+                        "Launching ${intent.component?.flattenToString() ?: pkg} — startActivity succeeded. Confirm: switch to the app; if it bounces back, check freezer ('package list frozen')."
                     }
                 } catch (e: Throwable) { "Launch failed: ${e.message}" }
             }

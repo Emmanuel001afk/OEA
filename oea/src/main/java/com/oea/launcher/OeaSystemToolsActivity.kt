@@ -3010,22 +3010,29 @@ open class OeaSystemToolsActivity : Activity() {
 
         fun launchApp(app: OeaAppInfo) {
             protectedLaunch(app) {
-                val launch = packageManager.getLaunchIntentForPackage(app.packageName)
+                // Same resolver the floating/split/live paths use: the package's
+                // default entry point is OEA Home for every OEA tool, so asking
+                // the package instead of the component opened the wrong app.
+                val launch = com.oea.launcher.multitask.OeaMultitaskIntents.resolve(this, app)
                 if (launch == null) toast("This app has no launchable activity.")
                 else runCatching {
                     startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    com.oea.launcher.multitask.OeaMultitaskIntents.record(this, app)
                     com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(this, app.packageName)
                 }.onFailure { toast("Android could not open ${app.label}.") }
             }
         }
 
         fun splitWith(current: OeaAppInfo) {
-            val others = choices.filter { it.packageName != current.packageName }
-            kit.pickApps("Split ${current.label} with…", null, others, emptySet(), { it.packageName }, multi = false) { chosen ->
-                val other = others.firstOrNull { it.packageName in chosen } ?: return@pickApps
+            // Keyed by component, not package: OEA's own apps all share one
+            // package, so a package key made them indistinguishable here.
+            val keyOf = { app: OeaAppInfo -> app.packageName + "/" + app.className }
+            val others = choices.filter { keyOf(it) != keyOf(current) }
+            kit.pickApps("Split ${current.label} with…", null, others, emptySet(), keyOf, multi = false) { chosen ->
+                val other = others.firstOrNull { keyOf(it) in chosen } ?: return@pickApps
                 protectedLaunch(current) {
                     protectedLaunch(other) {
-                        val result = OeaSplitLauncher.launchPair(this, current.packageName, other.packageName)
+                        val result = OeaSplitLauncher.launchPair(this, current, other)
                         if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
                     }
                 }
@@ -3197,7 +3204,7 @@ open class OeaSystemToolsActivity : Activity() {
                 kit.row(group, R.drawable.oic_splitscreen, pair.title.ifBlank { members.joinToString(" | ") { it.label } }, members.joinToString(" + ") { it.label }) {
                     protectedLaunch(members[0]) {
                         protectedLaunch(members[1]) {
-                            val result = OeaSplitLauncher.launchPair(this, members[0].packageName, members[1].packageName)
+                            val result = OeaSplitLauncher.launchPair(this, members[0], members[1])
                             if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
                         }
                     }
@@ -3230,7 +3237,7 @@ open class OeaSystemToolsActivity : Activity() {
                         dialog.dismiss()
                         protectedLaunch(first) {
                             protectedLaunch(second) {
-                                val result = OeaSplitLauncher.launchPair(this, first.packageName, second.packageName)
+                                val result = OeaSplitLauncher.launchPair(this, first, second)
                                 if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
                             }
                         }

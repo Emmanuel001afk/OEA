@@ -771,7 +771,10 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
 
     private fun splitWith(app: OeaAppInfo) {
         val k = activityKit() ?: return
-        val others = w.drawerApps().filter { it.packageName != app.packageName }
+        // Compare components, not packages: every OEA tool shares one package,
+        // so a package filter left each OEA app with none of the others to pair
+        // with (and hid the rest of OEA from the picker entirely).
+        val others = w.drawerApps().filter { w.appKey(it) != w.appKey(app) }
         k.pickApps("Split ${app.label} with…", "Pick the app for the other half of the screen.", others, emptySet(), { w.appKey(it) }, multi = false) { chosen ->
             val other = others.firstOrNull { w.appKey(it) in chosen } ?: return@pickApps
             k.sheet("${app.label} + ${other.label}", "Open both apps in split screen. Save the pair to open them together with one tap.") { panel, dialog ->
