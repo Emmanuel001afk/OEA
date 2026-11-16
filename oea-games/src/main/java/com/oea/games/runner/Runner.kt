@@ -41,6 +41,10 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
     /** Brief immunity to side bumps right after a stumble, while sliding back to the old lane. */
     private var sideGrace = 0f
     private var rollOnLand = false
+    private var jumpBuffer = 0f
+    var coinStreak = 0
+        private set
+    private var streakTime = 0f
     /** Animation state. */
     var phase = 0f
     var lean = 0f
@@ -58,7 +62,8 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
         z = 0f; x = RunnerWorld.laneX(1); y = 0f; vy = 0f; lane = 1; prevLane = 1; speed = START_SPEED
         rollTime = 0f; grounded = true; crashed = false; runTime = 0f; lastStumble = -100f; sideGrace = 0f
         score = 0L; coins = 0; scoreCarry = 0f; powers.fill(0f); invulnerable = 0f; rollOnLand = false
-        phase = 0f; lean = 0f; skyCoins.clear(); stumbleFlash = 0f
+        phase = 0f; lean = 0f; skyCoins.clear(); skyCoinTimer = 0f; stumbleFlash = 0f
+        jumpBuffer = 0f; coinStreak = 0; streakTime = 0f
     }
 
     // ---------------------------------------------------------------- controls
@@ -68,16 +73,19 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
 
     fun jump(events: RunnerEvents) {
         if (crashed || has(PowerType.JETPACK)) return
-        if (grounded) {
-            vy = if (has(PowerType.SNEAKERS)) 13.2f else 10.2f
-            grounded = false
-            rollTime = 0f
-            events.onJump(this)
-        }
+        if (grounded) takeOff(events) else jumpBuffer = JUMP_BUFFER
+    }
+
+    private fun takeOff(events: RunnerEvents) {
+        vy = if (has(PowerType.SNEAKERS)) 14.5f else 11.8f
+        grounded = false
+        rollTime = 0f; rollOnLand = false; jumpBuffer = 0f
+        events.onJump(this)
     }
 
     fun roll(events: RunnerEvents) {
         if (crashed || has(PowerType.JETPACK)) return
+        jumpBuffer = 0f
         if (grounded) { rollTime = 0.72f; events.onRoll(this) }
         else { vy = -24f; rollOnLand = true }
     }
@@ -87,6 +95,8 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
     fun step(world: RunnerWorld, dt: Float, events: RunnerEvents) {
         if (crashed) return
         runTime += dt
+        if (jumpBuffer > 0f) jumpBuffer = max(0f, jumpBuffer - dt)
+        if (streakTime > 0f) { streakTime -= dt; if (streakTime <= 0f) coinStreak = 0 }
         for (i in powers.indices) if (powers[i] > 0f) powers[i] = max(0f, powers[i] - dt)
         if (invulnerable > 0f) invulnerable -= dt
         if (sideGrace > 0f) sideGrace -= dt
@@ -105,17 +115,21 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
             vy = 0f; grounded = false
             jetCoins(dt, events)
         } else {
-            val ground = world.groundAt(laneNow, z)
+            val surface = world.groundAt(laneNow, z)
+            // A roof is only a landing surface if approached from above. Otherwise
+            // its front is a solid obstacle, not a lift onto the roof.
+            val ground = if (surface > y + 0.75f) 0f else surface
             if (!grounded) {
                 vy += GRAVITY * dt
                 y += vy * dt
                 if (y <= ground && vy <= 0f) {
                     y = ground; vy = 0f; grounded = true
                     events.onLand(this)
+                    if (jumpBuffer > 0f) takeOff(events)
                     if (rollOnLand) { rollOnLand = false; rollTime = 0.72f; events.onRoll(this) }
                 }
             } else {
-                if (ground > y) y = ground                 // climbing a ramp
+                if (ground > y) y = ground // climbing a ramp
                 else if (ground < y - 0.05f) { grounded = false; vy = 0f } // ran off a train
             }
         }
@@ -127,7 +141,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
         val whole = scoreCarry.toLong()
         score += whole
         scoreCarry -= whole
-        phase += dt * speed * 0.55f
+        phase += dt * speed * 0.85f
     }
 
     fun nearestLane(): Int = when {
@@ -169,6 +183,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
         val back = prevLane
         prevLane = lane
         lane = back
+        coinStreak = 0; streakTime = 0f
         stumbleFlash = 0.5f
         sideGrace = 0.45f
         if (runTime - lastStumble < 4f) { hit(events); return }
@@ -193,8 +208,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
                 val ddx = px - x; val ddy = py - (y + 0.9f)
                 if (ddx * ddx + ddy * ddy + dz * dz < 1.3f) {
                     coin.taken = true
-                    coins++
-                    score += 10L * multiplier
+                    awardCoin()
                     events.onCoin(this, px, py, coin.z)
                 }
             }
@@ -213,6 +227,14 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
         }
     }
 
+    /** Keep a coin line going for a small, capped flow bonus. */
+    private fun awardCoin() {
+        coins++
+        coinStreak++
+        streakTime = 2.5f
+        score += (10L + minOf(coinStreak / 5, 4) * 5L) * multiplier
+    }
+
     /** Coins in the sky while flying the jetpack. */
     private fun jetCoins(dt: Float, events: RunnerEvents) {
         skyCoinTimer -= dt
@@ -229,8 +251,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
             val dx = c[0] - x; val dy = c[1] - (y + 0.9f)
             if (dz < 2f && sqrt(dx * dx + dy * dy + dz * dz) < 1.6f) {
                 it.remove()
-                coins++
-                score += 10L * multiplier
+                awardCoin()
                 events.onCoin(this, c[0], c[1], c[2])
             }
         }
@@ -242,6 +263,7 @@ internal class Runner(val id: Int, var name: String, var color: Int) {
         const val MAX_SPEED = 26f
         const val LANE_SPEED = 15f
         const val GRAVITY = -30f
+        const val JUMP_BUFFER = 0.16f
         const val JET_HEIGHT = 7.5f
         const val HALF_W = 0.4f
         const val HALF_D = 0.35f

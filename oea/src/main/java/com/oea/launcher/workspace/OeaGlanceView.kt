@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.AppOpsManager
 import android.app.Notification
 import android.app.usage.UsageStatsManager
+import android.app.usage.UsageEvents
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -38,7 +39,7 @@ import java.util.concurrent.Executors
 
 /**
  * OEA At a Glance: a large clock and date over the wallpaper, followed by live
- * chips for the next alarm, battery, today's screen time and what is playing.
+ * chips for the next alarm, battery, today's screen-on time and what is playing.
  * Every chip is tappable and opens the matching app.
  */
 class OeaGlanceView(context: Context) : LinearLayout(context) {
@@ -53,19 +54,22 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
     private val chips = LinearLayout(context)
     private var palette: OeaPalette = OeaTheme.resolve(context)
     private var registered = false
-    private var batteryLevel = -1
-    private var charging = false
+    private var battery = com.oea.launcher.power.OeaBatteryState.read(context)
     private var screenTimeMillis = -1L
     private var lastScreenTimeQuery = 0L
+    private var screenTimeDay = 0L
+    private var screenTimeGeneration = 0
 
     var onOpenOverview: (() -> Unit)? = null
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_BATTERY_CHANGED -> readBattery(intent)
+                Intent.ACTION_BATTERY_CHANGED -> battery = com.oea.launcher.power.OeaBatteryState.from(intent)
+                Intent.ACTION_POWER_CONNECTED, Intent.ACTION_POWER_DISCONNECTED -> battery = com.oea.launcher.power.OeaBatteryState.read(context)
+                Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> { screenTimeDay = 0L; lastScreenTimeQuery = 0L; screenTimeGeneration++ }
             }
-            refresh()
+            refresh(readBattery = false)
         }
     }
     private val mediaListener: () -> Unit = { refreshChips() }
@@ -146,7 +150,7 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
             if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
             else context.registerReceiver(receiver, filter)
         }.getOrNull()
-        sticky?.let { if (it.action == Intent.ACTION_BATTERY_CHANGED) readBattery(it) }
+        sticky?.let { if (it.action == Intent.ACTION_BATTERY_CHANGED) battery = com.oea.launcher.power.OeaBatteryState.from(it) }
         OeaNotificationState.addListener(mediaListener)
         refresh()
     }
@@ -154,54 +158,50 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
     fun stop() {
         if (!registered) return
         registered = false
+        screenTimeGeneration++
+        lastScreenTimeQuery = 0L
         runCatching { context.unregisterReceiver(receiver) }
         OeaNotificationState.removeListener(mediaListener)
     }
 
     /** Called on every Home resume. */
-    fun refresh() {
+    fun refresh(readBattery: Boolean = true) {
         if (visibility == GONE) return
+        if (readBattery) battery = com.oea.launcher.power.OeaBatteryState.read(context)
         val now = Date()
         clock.text = DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH:mm" else "h:mm", now)
         val large = store.glanceStyle() == "large"
         date.text = DateFormat.format(if (large) "EEEE, MMMM d" else "EEE, MMM d", now)
-        refreshChips()
         maybeQueryScreenTime()
-    }
-
-    private fun readBattery(intent: Intent) {
-        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-        batteryLevel = if (level >= 0) level * 100 / scale else -1
-        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-        charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        refreshChips()
     }
 
     private fun refreshChips() {
         chips.removeAllViews()
-        nextAlarm()?.let { (label, intent) -> addChip(R.drawable.oic_alarm, label) { start(intent) } }
-        // Battery is always on the home screen (the data is the system's own
-        // ACTION_BATTERY_CHANGED level; showing it only while charging or low
-        // left the phone without a readable percentage most of the time).
-        if (batteryLevel >= 0) {
-            val label = if (charging) "$batteryLevel% • Charging" else "$batteryLevel% battery"
-            addChip(if (charging) R.drawable.oic_battery_charging_full else R.drawable.oic_battery_full, label) {
+        nextAlarm()?.let { (label, pending) -> addChip(R.drawable.oic_alarm, label) {
+            if (pending == null || !OeaPendingIntents.send(context, pending)) start(Intent(AlarmClock.ACTION_SHOW_ALARMS))
+        } }
+        battery.level?.let { level ->
+            val label = if (battery.status == BatteryManager.BATTERY_STATUS_DISCHARGING && !battery.plugged) "$level% battery" else "$level% · ${battery.description}"
+            addChip(if (battery.isCharging) R.drawable.oic_battery_charging_full else R.drawable.oic_battery_full, label) {
                 start(Intent(Intent.ACTION_POWER_USAGE_SUMMARY))
             }
         }
         mediaChip()
         if (screenTimeMillis >= 60_000L) {
-            addChip(R.drawable.oic_timer, "Screen time ${formatDuration(screenTimeMillis)}") { onOpenOverview?.invoke() }
+            addChip(R.drawable.oic_timer, "Screen on ${formatDuration(screenTimeMillis)}") { onOpenOverview?.invoke() }
         }
         chipsScroll.visibility = if (chips.childCount == 0) GONE else VISIBLE
     }
 
-    private fun nextAlarm(): Pair<String, Intent>? {
+    private fun nextAlarm(): Pair<String, android.app.PendingIntent?>? {
         val alarm = runCatching { context.getSystemService(AlarmManager::class.java)?.nextAlarmClock }.getOrNull() ?: return null
-        val inDay = alarm.triggerTime - System.currentTimeMillis()
-        if (inDay <= 0 || inDay > 24L * 60 * 60 * 1000) return null
+        if (alarm.triggerTime <= System.currentTimeMillis()) return null
         val time = DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH:mm" else "h:mm a", alarm.triggerTime).toString()
-        return time to Intent(AlarmClock.ACTION_SHOW_ALARMS)
+        val today = Calendar.getInstance()
+        val alarmDay = Calendar.getInstance().apply { timeInMillis = alarm.triggerTime }
+        val day = if (today.get(Calendar.YEAR) == alarmDay.get(Calendar.YEAR) && today.get(Calendar.DAY_OF_YEAR) == alarmDay.get(Calendar.DAY_OF_YEAR)) "" else DateFormat.format("EEE, MMM d ", alarm.triggerTime).toString()
+        return "$day$time" to alarm.showIntent
     }
 
     private fun mediaChip() {
@@ -271,30 +271,40 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
     }
 
     private fun maybeQueryScreenTime() {
-        val now = System.currentTimeMillis()
-        if (now - lastScreenTimeQuery < 60_000L) return
-        lastScreenTimeQuery = now
-        if (!hasUsageAccess()) {
-            screenTimeMillis = -1L
+        val start = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        if (screenTimeDay != start) {
+            screenTimeDay = start; screenTimeMillis = -1L; lastScreenTimeQuery = 0L; screenTimeGeneration++
+        }
+        if (Build.VERSION.SDK_INT < 28 || !hasUsageAccess()) {
+            screenTimeMillis = -1L; lastScreenTimeQuery = 0L; screenTimeGeneration++
             return
         }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastScreenTimeQuery != 0L && now - lastScreenTimeQuery < 60_000L) return
+        lastScreenTimeQuery = now
+        val generation = ++screenTimeGeneration
         io.execute {
-            val start = Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
-            // Screen time = the phone's foreground usage since local midnight.
-            // The launcher's own time IS screen time — excluding it made the
-            // figure systematically lower than the phone's real screen-on
-            // time. Only System UI stays out, because that is lock screen and
-            // the shade, not app usage.
+            val end = System.currentTimeMillis()
             val total = runCatching {
-                val usm = context.getSystemService(UsageStatsManager::class.java)
-                usm.queryAndAggregateUsageStats(start, System.currentTimeMillis()).values
-                    .filterNot { it.packageName.startsWith("com.android.systemui") }
-                    .sumOf { it.totalTimeInForeground }
-            }.getOrDefault(-1L)
+                val usm = context.getSystemService(UsageStatsManager::class.java) ?: return@runCatching null
+                // Look behind midnight to establish whether the screen was on then.
+                val events = usm.queryEvents(start - 36L * 60 * 60 * 1000, end) ?: return@runCatching null
+                val event = UsageEvents.Event()
+                val transitions = ArrayList<ScreenTransition>()
+                while (events.hasNextEvent()) {
+                    events.getNextEvent(event)
+                    when (event.eventType) {
+                        UsageEvents.Event.SCREEN_INTERACTIVE -> transitions += ScreenTransition(event.timeStamp, true)
+                        UsageEvents.Event.SCREEN_NON_INTERACTIVE -> transitions += ScreenTransition(event.timeStamp, false)
+                    }
+                }
+                screenOnTime(start, end, transitions)
+            }.getOrNull()
             main.post {
-                screenTimeMillis = total
+                if (generation != screenTimeGeneration || screenTimeDay != start || !registered) return@post
+                screenTimeMillis = total ?: -1L
                 refreshChips()
             }
         }

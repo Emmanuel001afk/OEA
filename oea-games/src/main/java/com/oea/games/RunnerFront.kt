@@ -156,15 +156,29 @@ class RunnerFront(host: GameFrontHost) : GameFront(host) {
         section(content, "The deck")
         val deck = panel(content)
         deck.addView(swipeGlyph("◀ ▶", "Swipe left or right", "Change lane"), LinearLayout.LayoutParams(-1, -2))
-        deck.addView(swipeGlyph("▲", "Swipe up", "Jump hurdles and gaps"), LinearLayout.LayoutParams(-1, -2))
+        deck.addView(swipeGlyph("▲", "Swipe up", "Jump low hurdles; swipe just before landing to jump again"), LinearLayout.LayoutParams(-1, -2))
         deck.addView(swipeGlyph("▼", "Swipe down", "Roll under barriers"), LinearLayout.LayoutParams(-1, -2))
         deck.addView(swipeGlyph("⇅", "Ride a ramp", "Land on a train roof — a whole clear line"), LinearLayout.LayoutParams(-1, -2))
         deck.addView(
-            kit.text("Arrow keys, WASD or a gamepad stick also work — the same three lanes, the same swipe timing.", 11.5f, palette.textTertiary)
+            kit.text("Arrow keys, WASD or gamepad buttons also work — the same three lanes, the same swipe timing.", 11.5f, palette.textTertiary)
                 .apply { setPadding(kit.dp(2), kit.dp(8), kit.dp(2), 0) },
             LinearLayout.LayoutParams(-1, -2)
         )
         deck.addView(kit.buttonRow(kit.quietButton("Full control guide") { host.frontControls() }), LinearLayout.LayoutParams(-1, -2))
+
+        section(content, "Run setup")
+        val setup = panel(content)
+        setup.addView(kit.text("SWIPE SENSITIVITY", 11f, palette.textSecondary, GameType.medium))
+        kit.segmented(setup, listOf("Responsive", "Deliberate"), if (value("swipes") == "deliberate") 1 else 0) { pick ->
+            host.frontSetOption("swipes", if (pick == 1) "deliberate" else "responsive")
+            host.frontRebuild()
+        }
+        setup.addView(kit.text("YARD MUSIC", 11f, palette.textSecondary, GameType.medium).apply { setPadding(0, kit.dp(14), 0, 0) })
+        kit.chipRow(setup, listOf("Night drive", "Sunrise", "Off"), listOf("night", "sunrise", "off").indexOf(value("track")).coerceAtLeast(0), { pick ->
+            host.frontSetOption("track", listOf("night", "sunrise", "off")[pick])
+            host.frontRebuild()
+        })
+        setup.addView(kit.text("Collect coins in a quick streak to build FLOW and earn more points per coin. A stumble breaks it.", 12f, palette.textSecondary).apply { setPadding(0, kit.dp(10), 0, 0) })
 
         // ------------------------------------------------------------ runner
         section(content, "Your runner")

@@ -749,13 +749,10 @@ class OeaAssistantService : AccessibilityService() {
     private fun applyEventMask(active: Boolean) {
         val info = serviceInfo ?: return
         val pairing = com.oea.launcher.privilege.OeaWirelessPairing.isWatching()
-        // When Usage Access is available, Game Boost detects a game with one
-        // bounded query after Home leaves; it does not need global accessibility
-        // events for every app launch. Keep global events only when that fallback
-        // is unavailable, or when OEA Freeze has apps to guard.
+        // Keep window-change events while Game Boost is enabled. A one-shot
+        // Usage Access query after Home cannot see a later return from another app.
         val gameBoostWatching = com.oea.launcher.gameboost.OeaGameBoostStore.enabled(this) &&
-            com.oea.launcher.gameboost.OeaGameBoostStore.activeGameCount(this) > 0 &&
-            !com.oea.launcher.gameboost.OeaGameBoost.usageAccess(this)
+            com.oea.launcher.gameboost.OeaGameBoostStore.activeGameCount(this) > 0
         val freezerWatching = runCatching {
             com.oea.launcher.applock.OeaAppFreezer.hibernatedPackages(this).isNotEmpty()
         }.getOrDefault(false)

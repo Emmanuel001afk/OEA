@@ -596,7 +596,19 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, basePadding + OeaInsets.bars(insets)[3])
             insets
         }
-        dialog.setContentView(panel)
+        // Dialogs are measured against the available window height. A plain
+        // LinearLayout squeezes or clips its final rows when the sheet is taller
+        // than the screen (or the keyboard opens). Keep the same panel API but
+        // let the whole sheet scroll, including controls added later by callers.
+        val sheetScroll = ScrollView(activity).apply {
+            isFillViewport = false
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            isFocusable = false
+            addView(panel, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        dialog.setContentView(sheetScroll)
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -605,9 +617,9 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             setDimAmount(0.48f)
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
-        panel.translationY = activity.resources.displayMetrics.heightPixels.toFloat()
+        sheetScroll.translationY = activity.resources.displayMetrics.heightPixels.toFloat()
         dialog.setOnShowListener {
-            panel.animate().translationY(0f).setDuration(260L).setInterpolator(DecelerateInterpolator(1.8f)).start()
+            sheetScroll.animate().translationY(0f).setDuration(260L).setInterpolator(DecelerateInterpolator(1.8f)).start()
         }
         dialog.show()
         return dialog

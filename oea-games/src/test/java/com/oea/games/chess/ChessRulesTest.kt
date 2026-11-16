@@ -1,5 +1,6 @@
 package com.oea.games.chess
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -26,6 +27,27 @@ class ChessRulesTest {
         assertEquals(GameResult.BLACK_WINS, g.result)
         assertEquals(EndReason.CHECKMATE, g.reason)
         assertEquals("Qh4#", g.sanMoves.last())
+    }
+
+    @Test fun bothSidesWinAndGameStops() {
+        val games = listOf(
+            listOf("f3", "e5", "g4", "Qh4#") to Piece.BLACK,
+            listOf("e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#") to Piece.WHITE,
+        )
+        for ((moves, winner) in games) {
+            val g = ChessGame()
+            for (move in moves) assertTrue(g.play(g.board.parseMove(move)!!))
+            assertTrue(g.isOver)
+            assertEquals(EndReason.CHECKMATE, g.reason)
+            assertEquals(winner, g.result.winnerColor())
+            assertEquals("You win!", g.result.displayTitle(winner, "White", "Black"))
+            assertEquals("You lose", g.result.displayTitle(winner xor 1, "White", "Black"))
+            assertEquals(if (winner == Piece.WHITE) "White wins" else "Black wins", g.result.displayTitle(null, "White", "Black"))
+            val fen = g.board.fen()
+            assertFalse(g.play(Move.of(0, 1)))
+            assertEquals(fen, g.board.fen())
+        }
+        assertEquals("Draw", GameResult.DRAW.displayTitle(Piece.WHITE, "White", "Black"))
     }
 
     @Test fun stalemate() {

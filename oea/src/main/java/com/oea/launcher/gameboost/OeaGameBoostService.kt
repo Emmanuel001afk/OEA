@@ -258,7 +258,8 @@ class OeaGameBoostService : Service() {
     private var rainbowHue = 0f
     private var lastPaintedHue = -1f
     private val argb = android.animation.ArgbEvaluator()
-    private val networkQualityReader by lazy { OeaNetworkQualityReader(this) }
+    private val networkReaderLazy = lazy { OeaNetworkQualityReader(this) }
+    private val networkQualityReader by networkReaderLazy
 
     /** The app that looked like it replaced the game; confirmed after a short delay. */
     private var leaveCandidate: String? = null
@@ -271,6 +272,31 @@ class OeaGameBoostService : Service() {
     private var usageAccessCached = false
 
     private val confirmLeave = Runnable { confirmLeaving() }
+    private var waitingForGame = false
+    private val idleWorker = java.util.concurrent.Executors.newSingleThreadExecutor { task -> Thread(task, "oea-game-return").apply { isDaemon = true } }
+    private val idleQueryRunning = AtomicBoolean(false)
+    private val watchForReturn = object : Runnable {
+        override fun run() {
+            if (!waitingForGame || !screenInteractive) return
+            if (!OeaGameBoostStore.enabled(this@OeaGameBoostService) || !OeaGameBoost.usageAccess(this@OeaGameBoostService)) {
+                endSession("detection disabled")
+                return
+            }
+            if (OeaAssistant.isConnected()) { endSession("Assistant handles game detection"); return }
+            if (idleQueryRunning.compareAndSet(false, true)) {
+                idleWorker.execute {
+                    val front = runCatching { OeaGameBoost.lastResumedPackage(this@OeaGameBoostService, 30_000L) }.getOrNull()
+                    handler.post {
+                        idleQueryRunning.set(false)
+                        val pkg = front?.first
+                        if (waitingForGame && screenInteractive && pkg != null && pkg != packageName && OeaGameBoostStore.isGame(this@OeaGameBoostService, pkg)) beginSession(pkg)
+                    }
+                }
+            }
+            handler.postDelayed(this, 2_000L)
+        }
+    }
+
 
     /**
      * Session monitor. It runs only while a game session is active and the
@@ -317,6 +343,7 @@ class OeaGameBoostService : Service() {
                     // its overlay) simply waits for the user to come back.
                     screenInteractive = false
                     handler.removeCallbacks(tick)
+                    handler.removeCallbacks(watchForReturn)
                     handler.removeCallbacks(confirmLeave)
                     leaveCandidate = null
                 }
@@ -324,6 +351,7 @@ class OeaGameBoostService : Service() {
                     screenInteractive = true
                     handler.removeCallbacks(tick)
                     if (activeGame != null) handler.postDelayed(tick, 800L)
+                    else if (waitingForGame) handler.postDelayed(watchForReturn, 800L)
                 }
             }
         }
@@ -385,8 +413,8 @@ class OeaGameBoostService : Service() {
                 OeaGameBoost.ACTION_END_SESSION -> endSession("ended from the notification")
                 ACTION_REFRESH -> refreshSession()
             }
-            // Never idle in the foreground: without a game there is nothing to do.
-            if (activeGame == null) {
+            // A Usage Access return watcher can remain idle with a visible notification.
+            if (activeGame == null && !waitingForGame) {
                 stopForegroundCompat()
                 stopSelf()
             }
@@ -396,13 +424,16 @@ class OeaGameBoostService : Service() {
     override fun onDestroy() {
         OeaFaultShield.guard("game-boost:destroy") {
             diagnostic(android.util.Log.INFO, "service onDestroy activeGame=$activeGame")
+            waitingForGame = false
             handler.removeCallbacksAndMessages(null)
+            idleWorker.shutdownNow()
             activeGame?.let(::deactivate)
             activeGame = null
             removeWakeOverlay()
             removeOverlay()
             if (screenReceiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
             screenReceiverRegistered = false
+            if (networkReaderLazy.isInitialized()) networkQualityReader.close()
             OeaGameBoost.detach(this)
         }
         @Suppress("DEPRECATION")
@@ -417,6 +448,8 @@ class OeaGameBoostService : Service() {
     internal fun beginSession(game: String) {
         if (!OeaGameBoostStore.enabled(this)) return
         val previous = activeGame
+        waitingForGame = false
+        handler.removeCallbacks(watchForReturn)
         cancelLeave()
         if (previous == game) {
             ensureOverlayForActiveGame()
@@ -447,8 +480,8 @@ class OeaGameBoostService : Service() {
         if (screenInteractive) handler.postDelayed(tick, FIRST_TICK_DELAY_MS)
     }
 
-    /** Ends the session, removes every overlay, restores DND and stops the service. */
-    internal fun endSession(reason: String) {
+    /** Ends the session and restores DND; optionally keep a visible return watcher. */
+    internal fun endSession(reason: String, watchForReturn: Boolean = false) {
         val ending = activeGame
         diagnostic(android.util.Log.INFO, "session end game=$ending reason=$reason")
         handler.removeCallbacks(tick)
@@ -457,6 +490,15 @@ class OeaGameBoostService : Service() {
         ending?.let(::deactivate)
         removeWakeOverlay()
         removeOverlay()
+        val shouldWatch = watchForReturn && ending != null && !OeaGameBoostStore.isOeaGameKey(ending) &&
+            OeaGameBoostStore.enabled(this) && !OeaAssistant.isConnected() && OeaGameBoost.usageAccess(this)
+        waitingForGame = shouldWatch
+        handler.removeCallbacks(this.watchForReturn)
+        if (shouldWatch) {
+            updateSessionNotification()
+            if (screenInteractive) handler.postDelayed(this.watchForReturn, 2_000L)
+            return
+        }
         stopForegroundCompat()
         stopSelf()
     }
@@ -465,7 +507,7 @@ class OeaGameBoostService : Service() {
     internal fun onHomeShown() {
         if (activeGame == null) return
         if (OeaGameBoostStore.prefs(this).getBoolean("capture_active", false)) return
-        endSession("OEA Home resumed")
+        endSession("OEA Home resumed", watchForReturn = true)
     }
 
     /** Settings changed in Game Boost: refresh the running overlay (never starts a session). */
@@ -568,7 +610,7 @@ class OeaGameBoostService : Service() {
             front == null || front == active -> Unit
             polledEvidenceAt in 1 until sessionStartedWall -> Unit
             front == candidate || (fresh && !isTransientForegroundPackage(front) && front != packageName &&
-                !OeaGameBoostStore.isGame(this, front)) -> endSession("left for $front")
+                !OeaGameBoostStore.isGame(this, front)) -> endSession("left for $front", watchForReturn = true)
         }
     }
 
@@ -615,7 +657,7 @@ class OeaGameBoostService : Service() {
             .getOrDefault(game.substringAfterLast('.'))
     }
 
-    /** Shown only while a session runs; it disappears with the session. */
+    /** Clearly distinguishes an active game from the Usage Access return watcher. */
     private fun sessionNotification(game: String?): android.app.Notification {
         val open = android.app.PendingIntent.getActivity(
             this, 0, Intent(this, OeaGameBoostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -631,11 +673,11 @@ class OeaGameBoostService : Service() {
         return builder
             .setSmallIcon(com.oea.launcher.R.drawable.ic_oea_launcher_monochrome)
             .setContentTitle("Game Boost")
-            .setContentText(if (game == null) "Starting game session" else "Session active for ${gameLabel(game)}")
+            .setContentText(if (game == null) { if (waitingForGame) "Waiting for a game · Usage access" else "Starting game session" } else "Session active for ${gameLabel(game)}")
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(open)
-            .addAction(android.app.Notification.Action.Builder(null, "End session", end).build())
+            .addAction(android.app.Notification.Action.Builder(null, if (waitingForGame) "Stop watching" else "End session", end).build())
             .build()
     }
 
@@ -1349,10 +1391,11 @@ class OeaGameBoostService : Service() {
         val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val charging = runCatching { battery.isCharging }.getOrDefault(false)
         device.update(
-            networkQualityReader.read(),
+            networkQualityReader.read(activeGame),
             if (level in 0..100) "$level%" else "—",
             charging,
-            OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true)
+            OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true),
+            OeaGameBoostStore.prefs(this).getString("network_display_mode", "status") ?: "status"
 )
         gameName.text = activeGame?.substringAfterLast('.') ?: "Game"
         updateDndButton(dnd)

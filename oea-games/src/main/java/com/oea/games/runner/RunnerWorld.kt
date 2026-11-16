@@ -106,6 +106,7 @@ internal class RunnerWorld(var seed: Long) {
         if (index < 2) {
             // A calm start: coins only.
             coinLine(c, 1, c.z0 + 8f, 10, 2f)
+            if (index == 1) c.powerUps += PowerUp(PowerType.SHIELD, 1, c.z0 + 25f, 1.1f)
             return c
         }
         // The chunk before this one is already generated (chunks are built in order):

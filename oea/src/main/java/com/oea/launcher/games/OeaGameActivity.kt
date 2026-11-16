@@ -210,7 +210,10 @@ class OeaGameActivity : Activity(), HostUi {
 
     override fun onResume() {
         super.onResume()
-        OeaFaultShield.guard("game:resume") { host?.onResume() }
+        OeaFaultShield.guard("game:resume") {
+            host?.onResume()
+            if (host != null && surfaceShown && !failed) com.oea.launcher.gameboost.OeaGameBoost.onOeaGameOpened(applicationContext, gameId)
+        }
         OeaFaultShield.guard("game:island-resume") {
             cardIsland?.refresh()
             cameraIsland?.refresh()

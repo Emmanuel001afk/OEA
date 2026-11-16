@@ -500,14 +500,70 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
         header.addView(kit.circleIconButton(R.drawable.oic_edit, "Rename folder", palette.cardHigh, palette.text) { renameFolder(folder) },
             LinearLayout.LayoutParams(dp(38), dp(38)))
         panel.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-        val members = folder.members.mapNotNull(w::findApp)
+        val members = folder.members.mapNotNull(w::findApp).let { apps ->
+            if (w.ws.folderAlphabetical(folder.id)) {
+                val collator = java.text.Collator.getInstance()
+                apps.sortedWith { a, b -> collator.compare(a.label, b.label).let { if (it != 0) it else w.appKey(a).compareTo(w.appKey(b)) } }
+            } else apps
+        }
         val cols = 4
         val rows = ceil(members.size / cols.toFloat()).toInt().coerceAtLeast(1)
         val grid = OeaCellLayout(context).apply {
             this.cols = cols
             this.rows = rows
         }
-        val listener = w.folderMemberListener(folder)
+        val outsideListener = w.folderMemberListener(folder)
+        var draggedKey: String? = null
+        var outside = false
+        val listener = object : OeaTileView.Listener {
+            override fun onTileClick(tile: OeaTileView) = outsideListener.onTileClick(tile)
+            override fun onTileLongPress(tile: OeaTileView) = outsideListener.onTileLongPress(tile)
+            override fun onTileDragStart(tile: OeaTileView, rawX: Float, rawY: Float) {
+                if (w.store.homeLayoutLocked()) {
+                    w.toast("Home layout is locked. Unlock it to rearrange apps.")
+                    return
+                }
+                dismissPopups()
+                draggedKey = (tile.payload as? OeaWorkspace.TileRef)?.app?.let(w::appKey)
+                outside = false
+                tile.dragging = true
+                tile.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            override fun onTileDragMove(tile: OeaTileView, rawX: Float, rawY: Float) {
+                if (draggedKey == null) return
+                val rect = Rect()
+                panel.getGlobalVisibleRect(rect)
+                if (!outside && !rect.contains(rawX.toInt(), rawY.toInt())) {
+                    outside = true
+                    tile.dragging = false
+                    outsideListener.onTileDragStart(tile, rawX, rawY)
+                }
+                if (outside) outsideListener.onTileDragMove(tile, rawX, rawY)
+            }
+            override fun onTileDragEnd(tile: OeaTileView, rawX: Float, rawY: Float, cancelled: Boolean) {
+                val key = draggedKey ?: return
+                draggedKey = null
+                tile.dragging = false
+                tile.parent?.requestDisallowInterceptTouchEvent(false)
+                if (outside) {
+                    outsideListener.onTileDragEnd(tile, rawX, rawY, cancelled)
+                    return
+                }
+                if (cancelled) return
+                val target = (0 until grid.childCount).firstOrNull { index ->
+                    val rect = Rect()
+                    grid.getChildAt(index).getGlobalVisibleRect(rect) && rect.contains(rawX.toInt(), rawY.toInt())
+                } ?: return
+                val order = members.map(w::appKey).toMutableList()
+                val from = order.indexOf(key)
+                if (from < 0 || from == target) return
+                order.add(target, order.removeAt(from))
+                // Preserve members temporarily unavailable in the app list.
+                order.addAll(folder.members.filterNot { it in order })
+                w.ws.setFolderAlphabetical(folder.id, false)
+                w.updateFolder(folder.copy(members = order))
+            }
+        }
         members.forEachIndexed { i, app ->
             val tile = OeaTileView(context)
             w.bindTile(tile, app, OeaWorkspace.TileStyle.FOLDER)
@@ -529,6 +585,11 @@ internal class OeaWorkspaceMenus(private val w: OeaWorkspace) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END
         }
+        footer.addView(kit.tonalButton(if (w.ws.folderAlphabetical(folder.id)) "A–Z" else "Sort A–Z", R.drawable.oic_edit) {
+            w.ws.setFolderAlphabetical(folder.id, true)
+            renderFolder(folder)
+            w.toast("Alphabetical order on; drag an app for custom order")
+        }, LinearLayout.LayoutParams(-2, dp(44)).apply { marginEnd = dp(8) })
         footer.addView(kit.tonalButton("Add apps", R.drawable.oic_add) { editFolderApps(folder) }, LinearLayout.LayoutParams(-2, dp(44)))
         panel.addView(footer, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
     }
