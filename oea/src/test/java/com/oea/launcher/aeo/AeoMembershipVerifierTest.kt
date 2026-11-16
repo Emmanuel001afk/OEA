@@ -145,7 +145,7 @@ class AeoMembershipVerifierTest {
             .put("ecosystem", "AEO")
             .put("protocol", AeoMembershipVerifier.PROTOCOL)
             .put("platformId", "com.oea.launcher")
-            .put("displayName", "EMA")
+            .put("displayName", "OEA")
             .put("membershipCredential", token)
         assertTrue(AeoMembershipVerifier.verifyRegistration(
             registration, listOf(key), { _, _, _ -> false }, now, apiLevel = 33
