@@ -65,8 +65,8 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     val root: FrameLayout = kit.overlay()
     private val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
     private val content = FrameLayout(host).apply { layoutParams = LinearLayout.LayoutParams(-1, 0, 1f) }
-    private val bar = kit.appBar("VIP", "Reading your videos…", onBack = { runCatching { host.finish() } })
-    private val searchBox = kit.searchField("Videos, audio, albums", onQuery = { value ->
+    private val bar = kit.appBar("VIP", "Reading library…", onBack = host.miniIndexBack())
+    private val searchBox = kit.searchField("Videos, audio, folders", onQuery = { value ->
         query = value.trim()
         rebuild()
     })
@@ -76,6 +76,24 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         visibility = View.GONE
     }
     private val tabs = kit.chipBar()
+    private val nav: OeaAppKit.BottomNav = kit.bottomNav(
+        listOf(
+            OeaAppKit.NavItem("videos", "Videos", R.drawable.oic_play_arrow),
+            OeaAppKit.NavItem("albums", "Folders", R.drawable.oic_folder),
+            OeaAppKit.NavItem("audio", "Audio", R.drawable.oic_music_note),
+            OeaAppKit.NavItem("playlists", "Playlists", R.drawable.oic_playlist)
+        ),
+        "videos"
+    ) { id -> pickDestination(id) }
+    private val scope = LinearLayout(host).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(kit.dp(16), kit.dp(6), kit.dp(12), kit.dp(6))
+        background = kit.rounded(palette.accentSoft, 16)
+        visibility = View.GONE
+    }
+    private val scopeTitle = kit.text("", 13.5f, palette.onAccentSoft, OeaType.medium)
+    private val scopeBadge = kit.badge("0", palette.withAlpha(palette.accent, 0x33), palette.onAccentSoft)
     private val status = LinearLayout(host).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(kit.dp(14), kit.dp(2), kit.dp(14), 0)
@@ -85,7 +103,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     private val albumGrid = kit.grid(2, kit.dp(8), kit.dp(10))
     private val playlistList = kit.list(kit.dp(8))
     private val audioList = kit.list(kit.dp(6))
-    private val continueList = kit.rail(kit.dp(10))
+    private val continueList = kit.grid(2, kit.dp(8), kit.dp(10))
     private var stateCard: View? = null
     private var progressRow: View? = null
     private var accessRow: View? = null
@@ -94,6 +112,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     private enum class Surface { VIDEOS, ALBUMS, PLAYLISTS, AUDIO, CONTINUE }
 
     private var surface = Surface.VIDEOS
+    private var destination = "videos"
     private var tab = "all"
     private var album: String? = null
     private var playlist: String? = null
@@ -115,16 +134,24 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         root.addView(column, FrameLayout.LayoutParams(-1, -1))
         column.addView(bar.root, LinearLayout.LayoutParams(-1, -2))
         column.addView(searchRow, LinearLayout.LayoutParams(-1, -2))
-        column.addView(kit.hscroll(tabs.root), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(2) })
-        column.addView(status, LinearLayout.LayoutParams(-1, -2))
-        column.addView(
-            kit.listHeader("Album", null).apply {
-                visibility = View.GONE
-                id = View.generateViewId()
+        tabs.row.setPadding(kit.dp(14), kit.dp(2), kit.dp(14), kit.dp(4))
+        column.addView(tabs.root, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(2) })
+        scope.addView(scopeTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        scope.addView(scopeBadge)
+        scope.addView(
+            kit.circleIconButton(R.drawable.oic_close, "Leave collection", android.graphics.Color.TRANSPARENT, palette.onAccentSoft) {
+                leaveCollection()
             },
-            LinearLayout.LayoutParams(-1, -2)
+            LinearLayout.LayoutParams(kit.dp(48), kit.dp(48)).apply { marginStart = kit.dp(6) }
         )
+        column.addView(scope, LinearLayout.LayoutParams(-1, -2).apply {
+            leftMargin = kit.dp(14)
+            rightMargin = kit.dp(14)
+            bottomMargin = kit.dp(6)
+        })
+        column.addView(status, LinearLayout.LayoutParams(-1, -2))
         column.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        column.addView(nav.root, LinearLayout.LayoutParams(-1, -2))
         content.addView(videoGrid, FrameLayout.LayoutParams(-1, -1))
         content.addView(albumGrid, FrameLayout.LayoutParams(-1, -1))
         content.addView(playlistList, FrameLayout.LayoutParams(-1, -1))
@@ -142,12 +169,17 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         }
         with(kit) {
             bar.addAction(R.drawable.oic_search, "Search") { toggleSearch() }
-            bar.addAction(R.drawable.oic_play_arrow, "Play this list in order") { playAll() }
-            bar.addAction(R.drawable.oic_refresh, "Scan again") { OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO)) }
-            bar.addAction(R.drawable.oic_more_vert, "More VIP options") { showMore() }
+            bar.addAction(R.drawable.oic_play_arrow, "Play all") { playCurrentSurface() }
+            bar.addAction(R.drawable.oic_more_vert, "Player options") { showMore() }
         }
-        tabs.onPick = { id -> pickTab(id) }
-        tabs.setOptions(TABS, tab)
+        tabs.onPick = { id ->
+            tab = id
+            surface = if (id == "continue") Surface.CONTINUE else Surface.VIDEOS
+            exitSelection()
+            showSurface()
+            rebuild()
+        }
+        tabs.setOptions(FILTER_TABS, tab)
         showSurface()
     }
 
@@ -169,6 +201,8 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         host.miniResultHook = resultHook
         val permissionHook: () -> Unit = { OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO)) }
         host.miniPermissionHook = permissionHook
+        val backHook: () -> Boolean = { handleBack() }
+        host.miniBackHook = backHook
         var disposed = false
         lateinit var cleanup: () -> Unit
         cleanup = {
@@ -180,6 +214,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 }
                 if (host.miniResultHook === resultHook) host.miniResultHook = null
                 if (host.miniPermissionHook === permissionHook) host.miniPermissionHook = null
+                if (host.miniBackHook === backHook) host.miniBackHook = null
                 if (host.miniDestroyHook === cleanup) host.miniDestroyHook = null
             }
         }
@@ -251,20 +286,75 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         searchBox.focus()
     }
 
-    private fun pickTab(id: String) {
-        tab = id
+    private fun pickDestination(id: String) {
+        destination = id
         album = null
         playlist = null
         surface = when (id) {
             "albums" -> Surface.ALBUMS
             "playlists" -> Surface.PLAYLISTS
             "audio" -> Surface.AUDIO
-            "continue" -> Surface.CONTINUE
-            else -> Surface.VIDEOS
+            else -> {
+                destination = "videos"
+                if (tab == "continue") Surface.CONTINUE else Surface.VIDEOS
+            }
         }
+        nav.select(destination, notify = false)
         exitSelection()
         showSurface()
         rebuild()
+    }
+
+    private fun openAlbum(name: String) {
+        album = name
+        playlist = null
+        destination = "albums"
+        surface = Surface.VIDEOS
+        nav.select("albums", notify = false)
+        exitSelection()
+        showSurface()
+        rebuild()
+    }
+
+    private fun openPlaylist(name: String) {
+        playlist = name
+        album = null
+        destination = "playlists"
+        surface = Surface.VIDEOS
+        nav.select("playlists", notify = false)
+        exitSelection()
+        showSurface()
+        rebuild()
+    }
+
+    private fun leaveCollection() {
+        val wasPlaylist = playlist != null
+        album = null
+        playlist = null
+        pickDestination(if (wasPlaylist) "playlists" else "albums")
+    }
+
+    private fun handleBack(): Boolean {
+        if (selecting) {
+            exitSelection()
+            return true
+        }
+        if (searchRow.visibility == View.VISIBLE) {
+            toggleSearch()
+            return true
+        }
+        if (album != null || playlist != null) {
+            leaveCollection()
+            return true
+        }
+        return false
+    }
+
+    private fun updateBackControl() {
+        bar.setBack(
+            if (album != null || playlist != null) ({ leaveCollection() })
+            else host.miniIndexBack()
+        )
     }
 
     private fun showSurface() {
@@ -273,6 +363,12 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         playlistList.visibility = if (surface == Surface.PLAYLISTS) View.VISIBLE else View.GONE
         audioList.visibility = if (surface == Surface.AUDIO) View.VISIBLE else View.GONE
         continueList.visibility = if (surface == Surface.CONTINUE) View.VISIBLE else View.GONE
+        val showFilters = destination == "videos" && album == null && playlist == null &&
+            (surface == Surface.VIDEOS || surface == Surface.CONTINUE)
+        tabs.root.visibility = if (showFilters) View.VISIBLE else View.GONE
+        scope.visibility = if (album != null || playlist != null) View.VISIBLE else View.GONE
+        nav.root.visibility = if (selecting) View.GONE else View.VISIBLE
+        updateBackControl()
     }
 
     private fun showProgress(label: String?) {
@@ -302,7 +398,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         val partial = access == OeaMediaLibrary.Access.PARTIAL
         accessRow = kit.banner(
             status,
-            if (isAudioSurface) R.drawable.oic_music_note else R.drawable.ic_oea_video,
+            if (isAudioSurface) R.drawable.oic_music_note else R.drawable.oic_play_arrow,
             if (partial) "Limited ${if (isAudioSurface) "audio" else "video"} access" else "${if (isAudioSurface) "Audio" else "Video"} access is off",
             if (partial) "VIP is showing only the ${if (isAudioSurface) "audio tracks" else "videos"} you selected in Android. Expand access to see the rest."
             else "Only OEA-owned media can be shown until Android grants ${if (isAudioSurface) "audio" else "video"} access.",
@@ -347,12 +443,17 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 rows.clear()
                 rows.addAll(list)
                 videos.notifyDataSetChanged()
-                bar.title.text = if (album != null) album!! else "Videos"
+                val scopedName = playlist ?: album
+                if (scopedName != null) {
+                    scopeTitle.text = scopedName
+                    scopeBadge.text = list.size.toString()
+                }
+                bar.title.text = scopedName ?: "VIP"
                 bar.setSubtitle(
                     when {
                         query.isNotBlank() -> "${list.size} matching"
-                        album != null -> "$album • ${list.size} • ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}"
-                        else -> "${list.size} clips • ${built.videoAlbums.size} albums • ${OeaMediaLibrary.formatSize(built.videos.sumOf { it.size })}"
+                        scopedName != null -> "${list.size} ${if (list.size == 1) "clip" else "clips"} · ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}"
+                        else -> "${list.size} clips · ${built.videoAlbums.size} folders"
                     }
                 )
                 if (list.isEmpty()) emptyVideos(built)
@@ -360,10 +461,10 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
 
             Surface.ALBUMS -> {
                 albums.notifyDataSetChanged()
-                bar.title.text = "Albums"
-                bar.setSubtitle("${built.videoAlbums.size} folders • ${built.videos.size} clips")
+                bar.title.text = "Folders"
+                bar.setSubtitle("${built.videoAlbums.size} folders · ${built.videos.size} clips")
                 if (built.videoAlbums.isEmpty()) {
-                    showState(R.drawable.oic_folder, "No video folders yet", "A screen recording, a download or a clip from another app appears here on its own. Nothing is uploaded to make that happen.", "Scan again") {
+                    showState(R.drawable.oic_folder, "No video folders yet", "Videos, recordings and downloads appear here automatically.", "Rescan") {
                         OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO))
                     }
                 }
@@ -371,10 +472,11 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
 
             Surface.PLAYLISTS -> {
                 playlists.notifyDataSetChanged()
+                val count = OeaVipStore.playlists(host).size
                 bar.title.text = "Playlists"
-                bar.setSubtitle("${OeaVipStore.playlists(host).size} built by you")
-                if (OeaVipStore.playlists(host).isEmpty()) {
-                    showState(R.drawable.oic_layers, "No playlists yet", "Long-press a clip and choose Add to playlist, or make one here and fill it while you watch.", "New playlist") { createPlaylist() }
+                bar.setSubtitle("$count ${if (count == 1) "playlist" else "playlists"}")
+                if (count == 0) {
+                    showState(R.drawable.oic_playlist, "No playlists yet", "Create a playlist here or hold any clip to add it.", "New playlist") { createPlaylist() }
                 }
             }
 
@@ -382,21 +484,21 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                 val list = currentAudioList()
                 audio.notifyDataSetChanged()
                 bar.title.text = "Audio"
-                bar.setSubtitle("${list.size} tracks • ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}")
+                bar.setSubtitle("${list.size} tracks · ${OeaMediaLibrary.formatSize(list.sumOf { it.size })}")
                 if (list.isEmpty()) {
                     clearAccessNotice()
                     if (query.isNotBlank() && built.audio.isNotEmpty()) {
-                        showState(R.drawable.oic_music_note, "No audio matches", "Nothing matches this search. Clear the search to see all music and recordings.", "Clear search") {
+                        showState(R.drawable.oic_music_note, "No matching audio", "Clear the search to return to your music and recordings.", "Clear search") {
                             query = ""
                             searchBox.setText("")
                             rebuild()
                         }
                     } else if (built.audioAccess != OeaMediaLibrary.Access.FULL) {
-                        showState(R.drawable.oic_music_note, "VIP cannot see audio yet", "Allow audio access and music or recordings on this phone will appear here.", "Manage access") {
+                        showState(R.drawable.oic_music_note, "Audio access needed", "Allow audio access to browse and play music or recordings on this device.", "Manage access") {
                             askPermission()
                         }
                     } else {
-                        showState(R.drawable.oic_music_note, "No music or recordings", "VIP plays audio with the same controls: seek, speed, background play, sleep timer.", "Scan again") {
+                        showState(R.drawable.oic_music_note, "No audio tracks", "Music and voice recordings saved on this device appear here.", "Rescan") {
                             OeaMediaLibrary.refresh(host, setOf(Kind.AUDIO))
                         }
                     }
@@ -405,35 +507,37 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
 
             Surface.CONTINUE -> {
                 continuing.notifyDataSetChanged()
-                bar.title.text = "Continue watching"
+                bar.title.text = "VIP"
                 val list = OeaVipStore.continueWatching(host, built.videos)
-                bar.setSubtitle("${list.size} clips part-way through")
+                bar.setSubtitle("${list.size} in progress")
                 if (list.isEmpty()) {
-                    showState(R.drawable.oic_history, "Nothing part-way through", "Stop a video anywhere past the start and it waits for you here, at the second you left it.")
+                    showState(R.drawable.oic_history, "Nothing in progress", "Videos you pause mid-way appear here ready to resume.")
                 }
             }
         }
+        updateBackControl()
         if (selecting) updateSelectionBar()
     }
 
     private fun emptyVideos(built: OeaMediaLibrary.Snapshot) {
         clearAccessNotice()
         if (built.videoAccess == OeaMediaLibrary.Access.DENIED) {
-            showState(R.drawable.ic_oea_video, "VIP cannot see your videos yet", "Allow video access and every folder on this phone shows up — Camera, Screen recordings, Downloads and the folders other apps write into.", "Allow access") {
+            showState(R.drawable.oic_play_arrow, "Video access needed", "Allow video access to browse clips, recordings and downloads on this device.", "Allow access") {
                 askPermission()
             }
         } else if (built.videoAccess == OeaMediaLibrary.Access.PARTIAL) {
-            showState(R.drawable.ic_oea_video, "No selected videos", "Android has given VIP limited video access, but none of the selected videos are in this view. Choose more videos or allow full access.", "Manage access") {
+            showState(R.drawable.oic_play_arrow, "No selected videos", "Expand video access or select more clips in Android settings.", "Manage access") {
                 askPermission()
             }
         } else {
-            showState(R.drawable.ic_oea_video, "No video in this view", "Nothing matches the current filter. Try another tab, or clear the search.", "Show all videos") {
+            showState(R.drawable.oic_play_arrow, "No clips in this view", "Clear the search or switch back to All to see your full video library.", "Show all") {
                 tab = "all"
                 album = null
+                playlist = null
                 query = ""
                 searchBox.setText("")
                 tabs.select("all")
-                rebuild()
+                pickDestination("videos")
             }
         }
     }
@@ -521,6 +625,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     private fun hideState() {
         stateCard?.let { content.removeView(it) }
         stateCard = null
+        showSurface()
     }
 
     // ------------------------------------------------------------ playback & ops
@@ -561,8 +666,12 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         exitSelection()
     }
 
-    private fun playAll() {
-        val list = currentList()
+    private fun playCurrentSurface() {
+        val list = when (surface) {
+            Surface.AUDIO -> currentAudioList()
+            Surface.CONTINUE -> snapshot?.let { OeaVipStore.continueWatching(host, it.videos).map { p -> p.first } } ?: emptyList()
+            else -> currentList()
+        }
         if (list.isEmpty()) {
             snack.show("Nothing in this list to play")
             return
@@ -644,27 +753,20 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             if (!OeaVipStore.createPlaylist(host, name)) return@prompt "That name is taken"
             if (forItem != null) OeaVipStore.addToPlaylist(host, name.trim(), forItem.uri)
             snack.show("Playlist created", OeaKit.Tone.SUCCESS)
-            surface = Surface.PLAYLISTS
-            tab = "playlists"
-            tabs.select("playlists")
-            showSurface()
-            rebuild()
+            pickDestination("playlists")
             null
         }
     }
 
     private fun playlistActions(data: OeaVipStore.Playlist) {
         kit.actions(data.name, "${data.size} clips", listOf(
-            OeaAppKit.Action(R.drawable.oic_play_arrow, "Play the playlist") {
+            OeaAppKit.Action(R.drawable.oic_play_arrow, "Play playlist") {
                 val built = snapshot ?: return@Action
                 val list = OeaVipStore.itemsOf(host, data.name, built.videos)
                 if (list.isEmpty()) snack.show("The clips in it are gone") else play(list, 0)
             },
-            OeaAppKit.Action(R.drawable.oic_view_list, "Open in VIP", "Shows these clips in the grid") {
-                playlist = data.name
-                surface = Surface.VIDEOS
-                showSurface()
-                rebuild()
+            OeaAppKit.Action(R.drawable.oic_view_list, "Open playlist", "Show these clips in the grid") {
+                openPlaylist(data.name)
             },
             OeaAppKit.Action(R.drawable.oic_edit, "Rename") {
                 kit.prompt("Rename the playlist", data.name, "Name") { name ->
@@ -723,6 +825,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         selecting = false
         selected.clear()
         selection.setCount(0, 0)
+        nav.root.visibility = View.VISIBLE
         videos.notifyDataSetChanged()
     }
 
@@ -733,6 +836,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     private fun selectedItems(): List<Item> = rows.filter { selected.contains(it.key) }
 
     private fun updateSelectionBar() {
+        nav.root.visibility = if (selecting) View.GONE else View.VISIBLE
         selection.setCount(selected.size, rows.size)
         selection.setAction(0, R.drawable.oic_play_arrow, "Queue") {
             val items = selectedItems()
@@ -775,31 +879,34 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     }
 
     private fun showMore() {
-        val built = snapshot
-        kit.sheet("VIP", "How the player behaves") { panel, _ ->
+        kit.sheet("Player options", "Sorting, playback and playlists") { panel, dialog ->
             val group = kit.group(panel)
             val sortNames = OeaMediaLibrary.Sort.values().map { it.label() }
-            kit.row(group, R.drawable.oic_sort_by_alpha, "Order", sort.label(), chevron = true) {
-                kit.choose("Order the library by", null, sortNames, OeaMediaLibrary.Sort.values().indexOf(sort)) { index ->
+            kit.row(group, R.drawable.oic_sort_by_alpha, "Sort order", sort.label(), chevron = true) {
+                dialog.dismiss()
+                kit.choose("Sort videos", null, sortNames, OeaMediaLibrary.Sort.values().indexOf(sort)) { index ->
                     sort = OeaMediaLibrary.Sort.values()[index]
                     OeaMediaLibrary.setSort(host, Kind.VIDEO, sort)
                     rebuild()
                 }
             }
-            kit.row(group, R.drawable.oic_visibility_off, "Clips in this view", "${rows.size} shown of ${built?.videos?.size ?: 0}", chevron = false)
-            kit.switchRow(group, R.drawable.oic_play_arrow, "Play the next clip", "When one finishes, VIP starts the next in the queue",
+            kit.row(group, R.drawable.oic_add, "New playlist", "Create a custom video playlist", chevron = true) {
+                dialog.dismiss()
+                createPlaylist()
+            }
+            kit.switchRow(group, R.drawable.oic_play_arrow, "Autoplay next", "Play the next clip in the queue automatically",
                 OeaVipStore.autoNext(host)) { value ->
                 OeaVipStore.setAutoNext(host, value)
             }
-            kit.switchRow(group, R.drawable.oic_music_note, "Audio keeps playing", "Music and recordings continue when you leave the player",
+            kit.switchRow(group, R.drawable.oic_music_note, "Background audio", "Keep music and recordings playing when you leave",
                 OeaVipStore.backgroundAudio(host)) { value ->
                 OeaVipStore.setBackgroundAudio(host, value)
             }
-            kit.row(group, R.drawable.oic_timer, "Sleep timer", "Set it inside the player, in its more sheet", chevron = false)
-            kit.row(group, R.drawable.oic_refresh, "Scan again", "Asks Android to index OEA's own recordings too") {
+            kit.row(group, R.drawable.oic_refresh, "Rescan media", "Refresh videos and audio on this device") {
+                dialog.dismiss()
+                snack.show("Scanning media…")
                 OeaMediaLibrary.refresh(host, setOf(Kind.VIDEO, Kind.AUDIO))
             }
-            kit.note(panel, "VIP plays with Android's own media stack, so what a phone can decode is what VIP can play; the details sheet reads the file's track table instead of guessing.")
         }
     }
 
@@ -874,22 +981,16 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             holder.card.root.contentDescription = "Album ${data.name}, ${data.count} ${if (data.count == 1) "clip" else "clips"}. Double tap to open."
             holder.card.cover.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             holder.card.root.setOnClickListener {
-                album = data.name
-                surface = Surface.VIDEOS
-                showSurface()
-                rebuild()
+                openAlbum(data.name)
             }
             holder.card.root.setOnLongClickListener {
                 kit.actions(data.name, "${data.count} clips in ${data.path.ifBlank { "this folder" }}", listOf(
-                    OeaAppKit.Action(R.drawable.oic_play_arrow, "Play the album") {
+                    OeaAppKit.Action(R.drawable.oic_play_arrow, "Play folder") {
                         val list = snapshot?.inAlbum(data.name, Kind.VIDEO) ?: return@Action
                         if (list.isNotEmpty()) play(list, 0)
                     },
-                    OeaAppKit.Action(R.drawable.oic_view_list, "Open in VIP") {
-                        album = data.name
-                        surface = Surface.VIDEOS
-                        showSurface()
-                        rebuild()
+                    OeaAppKit.Action(R.drawable.oic_view_list, "Open folder") {
+                        openAlbum(data.name)
                     }
                 ))
                 true
@@ -1042,16 +1143,13 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
     companion object {
         private const val REQUEST_DELETE = 4320
         const val EXTRA_HANDLED = "oea.vip.view_handled"
-        private val TABS = listOf(
+        private val FILTER_TABS = listOf(
             "all" to "All",
             "continue" to "Continue",
-            "albums" to "Albums",
-            "playlists" to "Playlists",
             "favourites" to "Favourites",
             "recordings" to "Recordings",
             "downloads" to "Downloads",
-            "large" to "Large",
-            "audio" to "Audio"
+            "large" to "Large"
         )
     }
 }

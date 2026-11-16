@@ -68,6 +68,12 @@ open class OeaMiniAppActivity : Activity() {
     /** Releases app-owned listeners, players and callbacks when this Activity is destroyed. */
     var destroyHook: (() -> Unit)? = null
 
+    /** Handles in-app back navigation (selection, album, search, thread) before closing the window. */
+    var backHook: (() -> Boolean)? = null
+
+    /** True when the current screen was opened from the Mini-apps index and should offer a Back control. */
+    internal val showsIndexBack: Boolean get() = screenId != null && isIndexHost
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val created = OeaFaultShield.guard(faultOwner("create")) {
@@ -221,6 +227,7 @@ open class OeaMiniAppActivity : Activity() {
             pauseHook = null
             resultHook = null
             permissionHook = null
+            backHook = null
             currentScroll = null
             currentRoot?.animate()?.cancel()
             currentRoot = null
@@ -246,6 +253,7 @@ open class OeaMiniAppActivity : Activity() {
     private fun render(keepScroll: Boolean) {
         if (keepScroll) currentScroll?.let { lastScrollY = it.scrollY } else lastScrollY = 0
         currentScroll = null
+        backHook = null
         OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
         val app = OeaMiniApps.byId(screenId)
         if (app != null && app.style == OeaMiniApps.Style.FullBleed) {
@@ -343,6 +351,8 @@ open class OeaMiniAppActivity : Activity() {
     }
 
     override fun onBackPressed() {
+        val handledByScreen = runCatching { backHook?.invoke() == true }.getOrDefault(false)
+        if (handledByScreen) return
         // Inside the index host, Back from a mini-app returns to the index.
         // In a dedicated mini-app window, Back behaves like any other app's.
         if (screenId != null && isIndexHost) {

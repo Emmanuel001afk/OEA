@@ -41,6 +41,7 @@ import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.model.OeaAppModel
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
@@ -61,9 +62,12 @@ class OeaGameBoostActivity : Activity() {
         Thread(task, "OeaGameBoostApps").apply { isDaemon = true }
     }
     private lateinit var palette: OeaPalette
-    private lateinit var kit: OeaKit
-    private lateinit var scroll: ScrollView
+    private lateinit var kit: OeaAppKit
+    private lateinit var rootHost: FrameLayout
+    private var scroll: ScrollView? = null
     private lateinit var content: LinearLayout
+    private var activeTab = "boost"
+    private val tabScrollY = HashMap<String, Int>()
     private var installedApps: List<OeaAppInfo> = emptyList()
     private var detected: Set<String> = emptySet()
     private var loaded = false
@@ -83,27 +87,20 @@ class OeaGameBoostActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
+            activeTab = savedInstanceState?.getString("boost_tab") ?: "boost"
             OeaInsets.edgeToEdge(window, lightBars = false)
-            val root = FrameLayout(this)
-            scroll = ScrollView(this).apply {
-                isFillViewport = true
-                isVerticalScrollBarEnabled = false
-                clipToPadding = false
-            }
-            content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            scroll.addView(content, FrameLayout.LayoutParams(-1, -2))
-            root.addView(scroll, FrameLayout.LayoutParams(-1, -1))
-            root.setOnApplyWindowInsetsListener { _, insets ->
-                val bars = OeaInsets.bars(insets)
-                scroll.setPadding(bars[0], bars[1], bars[2], bars[3])
-                insets
-            }
-            setContentView(root)
+            rootHost = FrameLayout(this)
+            setContentView(rootHost)
             render()
             loadApps()
         } catch (error: Exception) {
             OeaScreenFailure.show(this, "Game Boost", error)
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("boost_tab", activeTab)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -166,12 +163,13 @@ class OeaGameBoostActivity : Activity() {
         val accent = accentFor(prefs().getString("ram_color_mode", "blue") ?: "blue")
         val background = Color.rgb(7, 9, 15)
         val card = Color.rgb(17, 22, 34)
+        val accentSoft = OeaTheme.blend(card, accent, 0.24f)
         return OeaPalette(
             dark = true,
             accent = accent,
-            onAccent = Color.rgb(6, 10, 18),
-            accentSoft = OeaTheme.blend(card, accent, 0.22f),
-            onAccentSoft = OeaTheme.blend(Color.WHITE, accent, 0.25f),
+            onAccent = OeaTheme.onColor(accent),
+            accentSoft = accentSoft,
+            onAccentSoft = OeaTheme.onColor(accentSoft),
             background = background,
             drawer = background,
             card = card,
@@ -208,22 +206,109 @@ class OeaGameBoostActivity : Activity() {
     }
 
     private fun renderContent() {
-        val y = scroll.scrollY
+        scroll?.let { tabScrollY[activeTab] = it.scrollY }
+        if (activeTab !in setOf("boost", "games", "controls")) activeTab = "boost"
         palette = gamePalette()
-        kit = OeaKit(this, palette)
+        kit = OeaAppKit(this, palette)
+        OeaInsets.edgeToEdge(window, lightBars = false)
         runCatching { window.decorView.setBackgroundColor(palette.background) }
-        content.removeAllViews()
-        content.setPadding(dp(16), dp(10), dp(16), dp(28))
-        hero()
-        statsRow()
-        gamesSection()
-        detectionSection()
-        overlaySection()
-        sessionSection()
-        permissionsSection()
-        kit.note(content, "Game Boost shows its control only over games and restores Do Not Disturb when you leave. With Usage access but without OEA Assistant, it keeps a visible notification and checks the foreground while waiting for you to return; stop it from the notification or turn Game Boost off. Android does not let OEA raise another app's CPU or GPU priority.")
-        scroll.post { scroll.scrollTo(0, y) }
-        updateStats()
+        ramValue = null
+        ramCaption = null
+        ramBar = null
+        batteryValue = null
+        batteryCaption = null
+
+        val games = selectedGames()
+        val (title, subtitle) = when (activeTab) {
+            "games" -> "Games" to if (!loaded) "Scanning installed games…" else "${games.size} ready to boost"
+            "controls" -> "HUD & Controls" to "Floating overlay, colour and permissions"
+            else -> "Game Boost" to if (OeaGameBoostStore.enabled(this)) "Console engine active" else "Tap the power ring to arm"
+        }
+        val shell = kit.appShell(
+            title = title,
+            subtitle = subtitle,
+            navItems = listOf(
+                OeaAppKit.NavItem("boost", "Boost", R.drawable.oic_stadia_controller_fill),
+                OeaAppKit.NavItem("games", "Games", R.drawable.oic_grid_view),
+                OeaAppKit.NavItem("controls", "Controls", R.drawable.oic_tune)
+            ),
+            initialNav = activeTab
+        ) { next ->
+            scroll?.let { tabScrollY[activeTab] = it.scrollY }
+            activeTab = next
+            render()
+        }
+        if (activeTab == "games") {
+            shell.bar.addAction(R.drawable.oic_add, "Add games") { chooseGames() }
+        } else if (activeTab == "boost") {
+            shell.bar.addAction(R.drawable.oic_add, "Add games") { chooseGames() }
+        }
+
+        content = shell.body
+        when (activeTab) {
+            "games" -> {
+                gamesSection()
+                detectionSection()
+            }
+            "controls" -> {
+                overlaySection()
+                sessionSection()
+                permissionsSection()
+                kit.note(content, "Game Boost shows its control only over games and restores Do Not Disturb when you leave. Android does not allow raising another app's CPU or GPU priority.")
+            }
+            else -> {
+                hero()
+                statsRow()
+                quickLaunchSection(games)
+                sessionSection()
+                val overlayOk = OeaPrivileges.canOverlay(this)
+                if (!overlayOk) {
+                    kit.banner(
+                        content,
+                        R.drawable.oic_layers,
+                        "Enable floating HUD",
+                        "Allow Display over other apps so the in-game RAM & network control appears over your games.",
+                        OeaKit.Tone.WARNING,
+                        "Allow"
+                    ) {
+                        OeaPrivileges.grant(this, Privilege.OVERLAY) { outcome ->
+                            toast(outcome.message)
+                            handler.postDelayed({ if (loaded) render() }, 700L)
+                        }
+                    }
+                }
+            }
+        }
+
+        rootHost.removeAllViews()
+        rootHost.addView(shell.root, FrameLayout.LayoutParams(-1, -1))
+        scroll = shell.scroll
+        val y = tabScrollY[activeTab] ?: 0
+        if (y > 0) shell.scroll.post { shell.scroll.scrollTo(0, y) }
+        if (activeTab == "boost") updateStats()
+    }
+
+    private fun quickLaunchSection(games: List<OeaAppInfo>) {
+        kit.sectionTitle(content, "Quick launch")
+        val grid = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(12), dp(8), dp(12))
+            background = kit.rounded(palette.card, 26, palette.stroke, 1)
+        }
+        val cells = games.take(7).map { gameCell(it) } + addCell()
+        cells.chunked(4).forEach { chunk ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            chunk.forEach { row.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
+            repeat(4 - chunk.size) { row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f)) }
+            grid.addView(row, LinearLayout.LayoutParams(-1, -2))
+        }
+        if (!loaded) {
+            grid.addView(kit.text("Finding your games…", 13f, palette.textSecondary).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(8), 0, dp(4))
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+        content.addView(grid, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
     }
 
     private fun usageGranted(): Boolean = runCatching {
@@ -278,15 +363,23 @@ class OeaGameBoostActivity : Activity() {
         top.addView(kit.iconBadge(R.drawable.oic_stadia_controller_fill, OeaTheme.alpha(palette.accent, 0x33), palette.accent, 44),
             LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(12) })
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(kit.text("Game Boost", 26f, palette.text, OeaType.medium))
         val canFollow = OeaGameBoost.canFollowSessions(this)
         val running = OeaGameBoost.activeGame
+        titles.addView(kit.text(
+            when {
+                running != null -> runningGameLabel(running)
+                enabled && canFollow -> "Engine armed"
+                enabled -> "Setup needed"
+                else -> "Standby"
+            },
+            21f, palette.text, OeaType.medium
+        ))
         val status = when {
-            !enabled -> "Off • tap the power button to turn on"
-            !canFollow -> "Needs OEA Assistant or Usage access"
-            running != null -> "Boosting ${runningGameLabel(running)} now"
-            count == 0 -> "On • add games to boost"
-            else -> "On • starts with your $count game" + (if (count == 1) "" else "s") + ", idle otherwise"
+            !enabled -> "Tap the power ring to enable Game Boost"
+            !canFollow -> "Enable OEA Assistant or Usage access"
+            running != null -> "Session boosting now"
+            count == 0 -> "Ready · add games to boost"
+            else -> "Starts automatically for $count game" + (if (count == 1) "" else "s")
         }
         titles.addView(kit.text(status, 13.5f, if (enabled && canFollow) palette.accent else palette.textSecondary, OeaType.medium))
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))

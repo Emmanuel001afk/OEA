@@ -6,6 +6,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import com.oea.launcher.R
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaType
@@ -86,44 +87,71 @@ object OeaWeatherApp {
     data class Air(val aqi: Int, val pm25: Double, val pm10: Double)
 
     fun build(host: Activity, palette: OeaPalette): View {
-        val kit = OeaKit(host, palette)
-        val column = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-
-        val header = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(kit.text("Weather", 22f, palette.text, OeaType.medium), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(kit.circleIconButton(R.drawable.oic_search, "Search location", palette.cardHigh, palette.text) {
-            searchLocation(host, kit) { _, _, _ -> fetch(host, kit, column, force = true) }
-        }, LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)).apply { rightMargin = kit.dp(8) })
-        header.addView(kit.circleIconButton(R.drawable.oic_refresh, "Refresh now", palette.cardHigh, palette.text) {
-            fetch(host, kit, column, force = true)
-        })
-        column.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-
-        val unitRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val isCelsius = prefs(host).getBoolean(KEY_UNIT_C, true)
-        unitRow.addView(
-            kit.chip(if (isCelsius) "°C · km/h · mm" else "°F · mph · in", true, R.drawable.oic_thermostat) {
-                prefs(host).edit().putBoolean(KEY_UNIT_C, !isCelsius).apply()
-                (host as? OeaMiniAppActivity)?.refresh()
-            },
-            LinearLayout.LayoutParams(-2, kit.dp(36))
+        val kit = OeaAppKit(host, palette)
+        val shell = kit.appShell(
+            title = "Weather",
+            onBack = host.miniIndexBack()
         )
-        val savedCity = prefs(host).getString(KEY_LOCATION, null)
-        if (savedCity != null) {
-            unitRow.addView(
-                kit.quietButton("Use my phone's place", R.drawable.oic_location_on) {
-                    prefs(host).edit().remove(KEY_LOCATION).remove(KEY_LAT).remove(KEY_LON).apply()
-                    (host as? OeaMiniAppActivity)?.refresh()
-                },
-                LinearLayout.LayoutParams(-2, kit.dp(36)).apply { leftMargin = kit.dp(6) }
-            )
-        }
-        column.addView(unitRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-        column.addView(content)
-        fetch(host, kit, content, force = false)
-        return column
+        shell.body.addView(content)
+        var lastNow: Now? = null
+
+        fun reload(force: Boolean) {
+            fetch(host, kit, content, force) { now, fetchedAt ->
+                lastNow = now
+                val stamp = if (fetchedAt > 0L) " · Updated ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(fetchedAt))}" else ""
+                shell.bar.setSubtitle(now.city + stamp)
+            }
+        }
+
+        shell.bar.addAction(R.drawable.oic_search, "Search city") {
+            searchLocation(host, kit) { _, _, _ -> reload(force = true) }
+        }
+        shell.bar.addAction(R.drawable.oic_refresh, "Refresh forecast") {
+            reload(force = true)
+        }
+        shell.bar.addAction(R.drawable.oic_more_vert, "Weather options") {
+            val isCelsius = prefs(host).getBoolean(KEY_UNIT_C, true)
+            val savedCity = prefs(host).getString(KEY_LOCATION, null)
+            val actions = ArrayList<OeaAppKit.Action>()
+            actions += OeaAppKit.Action(
+                R.drawable.oic_thermostat,
+                "Units",
+                if (isCelsius) "Metric (°C, km/h, mm) · Tap for °F" else "Imperial (°F, mph, in) · Tap for °C"
+            ) {
+                prefs(host).edit().putBoolean(KEY_UNIT_C, !isCelsius).apply()
+                reload(force = false)
+            }
+            actions += OeaAppKit.Action(
+                R.drawable.oic_location_on,
+                "Use device location",
+                if (savedCity != null) "Switch back from $savedCity" else "Use GPS or network location"
+            ) {
+                prefs(host).edit().remove(KEY_LOCATION).remove(KEY_LAT).remove(KEY_LON).apply()
+                if (host.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    runCatching { host.requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 2105) }
+                }
+                reload(force = true)
+            }
+            lastNow?.let { now ->
+                actions += OeaAppKit.Action(R.drawable.oic_map, "Open in Maps", now.city) {
+                    runCatching {
+                        host.startActivity(
+                            android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("geo:${now.lat},${now.lon}?q=${now.lat},${now.lon}(${encode(now.city)})")
+                            )
+                        )
+                    }
+                }
+            }
+            kit.actions("Weather options", null, actions)
+        }
+
+        reload(force = false)
+        return shell.root
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -198,12 +226,15 @@ object OeaWeatherApp {
 
     // ------------------------------------------------------------------ fetch
 
-    private fun fetch(host: Activity, kit: OeaKit, content: LinearLayout, force: Boolean) {
+    private fun fetch(
+        host: Activity,
+        kit: OeaAppKit,
+        content: LinearLayout,
+        force: Boolean,
+        onLoaded: (Now, Long) -> Unit = { _, _ -> }
+    ) {
         content.removeAllViews()
-        content.addView(
-            kit.text("Asking Open-Meteo…", 13f, kit.palette.textSecondary)
-                .apply { setPadding(kit.dp(6), kit.dp(12), kit.dp(6), kit.dp(6)) }
-        )
+        content.addView(kit.progressRow("Updating forecast…"))
         io.execute {
             try {
                 val p = prefs(host)
@@ -230,7 +261,7 @@ object OeaWeatherApp {
                         // header lets you put your own city in one tap.
                         lat = 6.5244
                         lon = 3.3792
-                        city = "Lagos (not your city? search, top right)"
+                        city = "Lagos"
                     }
                 }
 
@@ -337,21 +368,22 @@ object OeaWeatherApp {
 
                 host.runOnUiThread {
                     if (host.isDestroyed) return@runOnUiThread
+                    onLoaded(now, fetchedAt)
                     render(host, kit, content, now, hours, days, air, fetchedAt)
                 }
             } catch (e: Throwable) {
                 host.runOnUiThread {
                     if (host.isDestroyed) return@runOnUiThread
                     content.removeAllViews()
-                    kit.banner(
-                        content,
-                        R.drawable.oic_warning_fill,
-                        "No weather",
-                        "Open-Meteo did not answer (${e.message}). Weather needs a connection; whatever was cached before is kept.",
-                        OeaKit.Tone.WARNING,
-                        "Try again"
-                    ) { fetch(host, kit, content, true) }
-                    kit.note(content, "If you are somewhere the internet is throttled, OEA will not make up a forecast — it shows the last real reading instead and says when it was taken.")
+                    content.addView(
+                        kit.emptyState(
+                            R.drawable.oic_warning_fill,
+                            "Forecast unavailable",
+                            "Connect to the internet and tap Retry to load live conditions.",
+                            "Retry"
+                        ) { fetch(host, kit, content, true, onLoaded) },
+                        LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(12) }
+                    )
                 }
             }
         }
@@ -383,7 +415,7 @@ object OeaWeatherApp {
 
     private fun render(
         host: Activity,
-        kit: OeaKit,
+        kit: OeaAppKit,
         content: LinearLayout,
         now: Now,
         hours: List<Hour>,
@@ -394,102 +426,104 @@ object OeaWeatherApp {
         val palette = kit.palette
         content.removeAllViews()
         val celsius = prefs(host).getBoolean(KEY_UNIT_C, true)
+        val unitLabel = if (celsius) "°C" else "°F"
 
         val card = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(kit.dp(18), kit.dp(18), kit.dp(18), kit.dp(18))
-            background = kit.rounded(palette.card, 24, palette.stroke, 1)
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(kit.dp(20), kit.dp(22), kit.dp(20), kit.dp(20))
+            background = kit.rounded(palette.card, 26, palette.stroke, 1)
         }
-        card.addView(kit.text(now.city, 15f, palette.textSecondary, OeaType.medium))
+        card.addView(kit.text(now.city, 16f, palette.text, OeaType.medium).apply { gravity = Gravity.CENTER })
         card.addView(
-            kit.text("${shown(if (celsius) now.temp else toF(now.temp))}°", 52f, palette.text, OeaType.light)
-                .apply { setPadding(0, kit.dp(2), 0, 0) }
+            kit.text("${shown(if (celsius) now.temp else toF(now.temp))}°", 60f, palette.text, OeaType.light)
+                .apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(2), 0, 0) }
         )
+        card.addView(
+            kit.text(weatherDesc(now.code), 16f, palette.text, OeaType.medium)
+                .apply { gravity = Gravity.CENTER }
+        )
+        val todayRange = days.firstOrNull()?.let { d ->
+            val hi = shown(if (celsius) d.max else toF(d.max))
+            val lo = shown(if (celsius) d.min else toF(d.min))
+            "H:$hi°  L:$lo°  ·  "
+        }.orEmpty()
         card.addView(
             kit.text(
-                "${weatherDesc(now.code)} · feels ${shown(if (celsius) now.feelsLike else toF(now.feelsLike))}° · ${now.cloud}% cloud",
-                14.5f,
-                palette.accent,
-                OeaType.medium
-            ).apply { setPadding(0, kit.dp(2), 0, kit.dp(10)) }
+                "${todayRange}Feels like ${shown(if (celsius) now.feelsLike else toF(now.feelsLike))}$unitLabel",
+                13.5f,
+                palette.textSecondary
+            ).apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(4), 0, 0) }
         )
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
         val speed = if (celsius) "${now.wind.toInt()} km/h" else "%.0f mph".format(now.wind * 0.621371)
-        val gust = if (celsius) "${now.gust.toInt()} km/h" else "%.0f mph".format(now.gust * 0.621371)
-        val rain = if (celsius) "${now.precip} mm" else "%.2f in".format(now.precip / 25.4)
-        card.addView(kit.text("Wind $speed, gusting $gust · Humidity ${now.humidity}% · ${now.pressure.toInt()} hPa · rain now $rain/h", 13f, palette.textSecondary))
-        card.addView(
-            kit.text(
-                "Sunrise ${formatTime(now.sunrise)} · sunset ${formatTime(now.sunset)} · UV ${now.uvPeak.toInt()} at its worst today",
-                12f,
-                palette.textTertiary
-            ).apply { setPadding(0, kit.dp(4), 0, 0) }
-        )
-        card.addView(
-            kit.tonalButton("Open this place on a map", R.drawable.oic_location_on) {
-                runCatching {
-                    host.startActivity(
-                        android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("geo:${now.lat},${now.lon}?q=${now.lat},${now.lon}(${encode(now.city)})")
-                        )
-                    )
-                }
-            },
-            LinearLayout.LayoutParams(-1, kit.dp(44)).apply { topMargin = kit.dp(12) }
-        )
-        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+        val statsTop = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+        statsTop.addView(kit.statTile("Wind", speed, palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+        statsTop.addView(kit.statTile("Humidity", "${now.humidity}%", palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+        statsTop.addView(kit.statTile("UV peak", "${now.uvPeak.toInt()}", palette.text), LinearLayout.LayoutParams(0, -2, 1f))
+        content.addView(statsTop, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+
+        val statsBottom = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+        statsBottom.addView(kit.statTile("Sunrise", formatTime(now.sunrise), palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+        statsBottom.addView(kit.statTile("Sunset", formatTime(now.sunset), palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+        statsBottom.addView(kit.statTile("Pressure", "${now.pressure.toInt()} hPa", palette.text), LinearLayout.LayoutParams(0, -2, 1f))
+        content.addView(statsBottom, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
 
         val advisories = advisories(now, days)
         if (advisories.isNotEmpty()) {
-            kit.sectionTitle(content, "OEA's reading of these numbers")
+            kit.sectionTitle(content, "Advisories")
             advisories.forEach { advice ->
                 kit.banner(content, advice.icon, advice.title, advice.body, advice.tone, null, null)
             }
-            kit.note(content, "These lines are computed on this phone from the forecast above — they are not official warnings from any weather service, and no weather service's feed is being read.")
         }
 
         if (hours.isNotEmpty()) {
-            kit.sectionTitle(content, "The next ${hours.size} hours")
+            kit.sectionTitle(content, "Next 24 hours")
             val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-            hours.forEach { hour ->
+            hours.forEachIndexed { idx, hour ->
                 val col = LinearLayout(host).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
-                    setPadding(kit.dp(8), kit.dp(8), kit.dp(8), kit.dp(8))
-                    background = kit.rounded(palette.card, 14, palette.stroke, 1)
+                    setPadding(kit.dp(10), kit.dp(10), kit.dp(10), kit.dp(10))
+                    background = kit.rounded(if (idx == 0) palette.accentSoft else palette.card, 16, palette.stroke, 1)
                 }
-                col.addView(kit.text(formatTime(hour.time), 11f, palette.textTertiary).apply { gravity = Gravity.CENTER })
+                val primaryFg = if (idx == 0) palette.onAccentSoft else palette.text
+                val secondaryFg = if (idx == 0) palette.onAccentSoft else palette.textSecondary
+                col.addView(kit.text(if (idx == 0) "Now" else formatTime(hour.time), 11.5f, secondaryFg, OeaType.medium).apply { gravity = Gravity.CENTER })
                 col.addView(
-                    kit.text("${shown(if (celsius) hour.temp else toF(hour.temp))}°", 16f, palette.text, OeaType.medium)
-                        .apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(4), 0, kit.dp(2)) }
+                    kit.text("${shown(if (celsius) hour.temp else toF(hour.temp))}°", 18f, primaryFg, OeaType.medium)
+                        .apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(5), 0, kit.dp(3)) }
                 )
-                col.addView(kit.text(weatherDesc(hour.code), 9.5f, palette.textSecondary).apply { gravity = Gravity.CENTER; maxLines = 2 })
-                val drop = View(host).apply {
-                    background = kit.rounded(palette.accentSoft, 3)
-                    layoutParams = LinearLayout.LayoutParams(kit.dp(34), kit.dp(4)).apply { topMargin = kit.dp(5) }
+                col.addView(kit.text(weatherDesc(hour.code), 10.5f, secondaryFg).apply { gravity = Gravity.CENTER; maxLines = 1 })
+                if (hour.rainChance > 0) {
+                    col.addView(kit.text("${hour.rainChance}%", 10.5f, if (idx == 0) primaryFg else palette.accent, OeaType.medium).apply {
+                        gravity = Gravity.CENTER
+                        setPadding(0, kit.dp(3), 0, 0)
+                    })
                 }
-                drop.scaleX = (hour.rainChance / 100f).coerceIn(0.04f, 1f)
-                col.addView(drop)
-                col.addView(kit.text("${hour.rainChance}% rain", 9f, palette.textTertiary).apply { gravity = Gravity.CENTER })
-                row.addView(col, LinearLayout.LayoutParams(kit.dp(84), -2).apply { rightMargin = kit.dp(8) })
+                row.addView(col, LinearLayout.LayoutParams(kit.dp(82), -2).apply { rightMargin = kit.dp(8) })
             }
-            content.addView(kit.hscroll(row), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(12) })
+            content.addView(kit.hscroll(row), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
         }
 
         if (days.isNotEmpty()) {
-            kit.sectionTitle(content, "Seven days")
+            kit.sectionTitle(content, "7-day forecast")
             val group = kit.group(content)
             days.forEachIndexed { index, day ->
-                val maxT = if (celsius) day.max else toF(day.max)
-                val minT = if (celsius) day.min else toF(day.min)
-                val rain = if (celsius) "${day.rainMm} mm" else "%.2f in".format(day.rainMm / 25.4)
+                val maxT = shown(if (celsius) day.max else toF(day.max))
+                val minT = shown(if (celsius) day.min else toF(day.min))
+                val sub = buildString {
+                    append(weatherDesc(day.code))
+                    if (day.rainChance > 0) append(" · ${day.rainChance}% rain")
+                }
                 kit.row(
                     group,
                     if (index == 0) R.drawable.oic_star_fill else R.drawable.oic_thermostat,
-                    dayLabel(day.date),
-                    "${weatherDesc(day.code)} · $minT° to $maxT° · $rain at ${day.rainChance}% · gusts ${if (celsius) "${day.gust.toInt()} km/h" else "%.0f mph".format(day.gust * 0.621371)}",
-                    value = "UV ${day.uvPeak.toInt()}",
-                    chevron = false
+                    if (index == 0) "Today" else dayLabel(day.date),
+                    sub,
+                    value = "$maxT° / $minT°",
+                    chevron = true
                 ) {
                     showDay(host, kit, day, celsius)
                 }
@@ -497,7 +531,7 @@ object OeaWeatherApp {
         }
 
         if (air != null) {
-            kit.sectionTitle(content, "Air")
+            kit.sectionTitle(content, "Air quality")
             val group = kit.group(content)
             kit.row(
                 group,
@@ -507,15 +541,13 @@ object OeaWeatherApp {
                 value = "PM2.5 ${"%.1f".format(air.pm25)}",
                 chevron = false
             )
-            kit.row(group, R.drawable.oic_visibility_off, "PM10 ${"%.1f".format(air.pm10)} µg/m³", "Open-Meteo's air-quality model, the same source as the forecast", chevron = false)
-            kit.note(content, "Modelled air quality, not a monitoring station. It is a good guide to whether to go running; it is not a legal or medical measurement.")
+            kit.row(group, R.drawable.oic_info, "PM10", "Estimated particulate density", value = "${"%.1f".format(air.pm10)} µg/m³", chevron = false)
         }
 
-        val when1 = if (fetchedAt <= 0L) "no fetch yet" else SimpleDateFormat("HH:mm 'on' d MMM", Locale.getDefault()).format(Date(fetchedAt))
-        kit.note(
-            content,
-            "Open-Meteo · reading taken $when1 · kept for 30 minutes and reused when the network is not there. The home-screen weather widget shows this same cache. OEA does not repaint your theme from the weather; if you want a grey day, that part is yours."
-        )
+        if (fetchedAt > 0L) {
+            val stamp = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(fetchedAt))
+            kit.note(content, "Source: Open-Meteo · Updated $stamp")
+        }
     }
 
     private fun showDay(host: Activity, kit: OeaKit, day: ForecastDay, celsius: Boolean) {

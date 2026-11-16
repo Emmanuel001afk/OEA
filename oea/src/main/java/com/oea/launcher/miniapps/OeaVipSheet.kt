@@ -19,6 +19,7 @@ import com.oea.launcher.R
 import com.oea.launcher.ui.OeaIconToggle
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaSlider
+import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaToggle
 import com.oea.launcher.ui.OeaType
 
@@ -38,6 +39,13 @@ internal class OeaVipSheet private constructor(
 ) {
 
     private val density = activity.resources.displayMetrics.density
+
+    /** Accent guaranteed legible against the dark player sheet even under light user themes. */
+    private val sheetAccent: Int = if (OeaTheme.contrast(palette.accent, 0xFF16181E.toInt()) < 3.6f) {
+        OeaTheme.blend(palette.accent, Color.WHITE, 0.45f)
+    } else {
+        palette.accent
+    }
 
     fun dp(value: Int): Int = (value * density + 0.5f).toInt()
 
@@ -112,7 +120,7 @@ internal class OeaVipSheet private constructor(
             row.addView(
                 ImageView(activity).apply {
                     setImageResource(iconRes)
-                    setColorFilter(if (selected) palette.accent else if (destructive) 0xFFFF8A80.toInt() else 0xCCFFFFFF.toInt())
+                    setColorFilter(if (selected) sheetAccent else if (destructive) 0xFFFF8A80.toInt() else 0xCCFFFFFF.toInt())
                 },
                 LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(14) }
             )
@@ -143,7 +151,7 @@ internal class OeaVipSheet private constructor(
             row.addView(
                 TextView(activity).apply {
                     text = value
-                    setTextColor(palette.accent)
+                    setTextColor(sheetAccent)
                     textSize = 13f
                     typeface = OeaType.medium
                     setPadding(dp(10), 0, 0, 0)
@@ -257,7 +265,7 @@ internal class OeaVipSheet private constructor(
         }
         val readout = TextView(activity).apply {
             text = format(value)
-            setTextColor(palette.accent)
+            setTextColor(sheetAccent)
             textSize = 13f
             typeface = OeaType.medium
         }
@@ -320,13 +328,17 @@ internal class OeaVipSheet private constructor(
             setPadding(dp(4), dp(6), dp(4), dp(6))
         }
         val toggle = OeaIconToggle(activity).apply {
-            icon = activity.getDrawable(iconRes)?.mutate()?.apply { setTint(if (selected) palette.onAccent else Color.WHITE) }
+            val iconDrawable = activity.getDrawable(iconRes)?.mutate()
+            iconDrawable?.setTint(if (selected) palette.onAccent else Color.WHITE)
+            icon = iconDrawable
             selectedBg = palette.accent
             idleBg = 0x1FFFFFFF
             this.selected = selected
             circleSizeDp = 48
             contentDescription = "$label, ${if (selected) "on" else "off"}"
             onChanged = {
+                iconDrawable?.setTint(if (this.selected) palette.onAccent else Color.WHITE)
+                invalidate()
                 contentDescription = "$label, ${if (this.selected) "on" else "off"}"
                 onToggle(this.selected)
             }
@@ -353,7 +365,7 @@ internal class OeaVipSheet private constructor(
                     gravity = Gravity.CENTER
                     textSize = 14.5f
                     typeface = OeaType.medium
-                    setTextColor(if (index == entries.lastIndex) palette.accent else Color.WHITE)
+                    setTextColor(if (index == entries.lastIndex) sheetAccent else Color.WHITE)
                     background = ripple(rounded(0x14FFFFFF, 16))
                     isClickable = true
                     setOnClickListener {

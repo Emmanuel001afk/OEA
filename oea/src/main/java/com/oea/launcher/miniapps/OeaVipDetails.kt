@@ -145,7 +145,7 @@ internal object OeaVipDetails {
     }
 
     private fun iconFor(kind: String): Int = when (kind) {
-        "video" -> R.drawable.ic_oea_video
+        "video" -> R.drawable.oic_play_arrow
         "audio" -> R.drawable.oic_music_note
         "text" -> R.drawable.oic_subtitles
         else -> R.drawable.oic_layers

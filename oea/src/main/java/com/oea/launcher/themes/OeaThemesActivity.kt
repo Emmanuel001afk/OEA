@@ -22,6 +22,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.oea.launcher.R
 import com.oea.launcher.data.OeaDataStore
+import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaInsets
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
@@ -42,9 +43,11 @@ class OeaThemesActivity : Activity() {
     private val io = Executors.newSingleThreadExecutor { task -> Thread(task, "OeaThemesIo").apply { isDaemon = true } }
     private val main = Handler(Looper.getMainLooper())
     private lateinit var palette: OeaPalette
-    private lateinit var kit: OeaKit
+    private lateinit var kit: OeaAppKit
     private val stack = ArrayDeque<String>()
     private var current = SCREEN_HOME
+    private var homeTab = "themes"
+    private var wallpaperFilter = "home"
     private var currentScroll: android.widget.ScrollView? = null
     private val scrollPositions = HashMap<String, Int>()
     private var overlay: View? = null
@@ -83,8 +86,13 @@ class OeaThemesActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState != null) {
+            current = savedInstanceState.getString("state_screen") ?: SCREEN_HOME
+            homeTab = savedInstanceState.getString("state_home_tab") ?: "themes"
+            wallpaperFilter = savedInstanceState.getString("state_wall_filter") ?: "home"
+        }
         val incomingUri = intent?.data
-        if (incomingUri != null && (intent.action == Intent.ACTION_ATTACH_DATA || intent.action == Intent.ACTION_SET_WALLPAPER)) {
+        if (incomingUri != null && savedInstanceState == null && (intent.action == Intent.ACTION_ATTACH_DATA || intent.action == Intent.ACTION_SET_WALLPAPER)) {
             // A picture sent from EMAGE or another gallery: add it to the library
             // and open its page, where Home, lock screen or both are one tap away.
             current = SCREEN_HOME
@@ -92,8 +100,17 @@ class OeaThemesActivity : Activity() {
             importIncomingPicture(incomingUri)
             return
         }
-        intent?.getStringExtra(EXTRA_SCREEN)?.let { if (it.isNotBlank()) current = it }
+        if (savedInstanceState == null) {
+            intent?.getStringExtra(EXTRA_SCREEN)?.let { if (it.isNotBlank()) current = it }
+        }
         show(current)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("state_screen", current)
+        outState.putString("state_home_tab", homeTab)
+        outState.putString("state_wall_filter", wallpaperFilter)
+        super.onSaveInstanceState(outState)
     }
 
     private fun importIncomingPicture(uri: Uri) {
@@ -139,8 +156,11 @@ class OeaThemesActivity : Activity() {
         }
     }
 
+    private fun scrollKey(screen: String = current): String =
+        if (screen == SCREEN_HOME) "$SCREEN_HOME:$homeTab" else screen
+
     private fun navigate(screen: String) {
-        currentScroll?.let { scrollPositions[current] = it.scrollY }
+        currentScroll?.let { scrollPositions[scrollKey()] = it.scrollY }
         stack.addLast(current)
         current = screen
         show(screen)
@@ -152,7 +172,7 @@ class OeaThemesActivity : Activity() {
     }
 
     private fun rerender() {
-        currentScroll?.let { scrollPositions[current] = it.scrollY }
+        currentScroll?.let { scrollPositions[scrollKey()] = it.scrollY }
         show(current)
     }
 
@@ -160,12 +180,17 @@ class OeaThemesActivity : Activity() {
         try {
             overlay = null
             palette = OeaTheme.resolve(this)
-            kit = OeaKit(this, palette)
+            kit = OeaAppKit(this, palette)
             OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
             runCatching { window.decorView.setBackgroundColor(palette.background) }
             when {
                 screen.startsWith("theme:") -> showTheme(screen.removePrefix("theme:"))
                 screen.startsWith("wallpaper:") -> showWallpaper(screen.removePrefix("wallpaper:"))
+                screen.startsWith("lockscene:") -> {
+                    val id = screen.removePrefix("lockscene:")
+                    val scene = com.oea.launcher.wallpaper.OeaWallpaper.lockSet.firstOrNull { it.id == id }
+                    if (scene != null) renderLockScene(scene) else showHome()
+                }
                 screen == SCREEN_EDITOR -> showEditor()
                 else -> showHome()
             }
@@ -176,19 +201,13 @@ class OeaThemesActivity : Activity() {
 
     private fun page(title: String, subtitle: String?): OeaKit.Page {
         val root = stack.isEmpty()
-        val brand = ImageView(this).apply {
-            setImageResource(R.drawable.oea_logo)
-            contentDescription = "OEA"
-        }
-        return kit.page(title, subtitle, onBack = if (root) null else ({ back() }), trailing = if (root) brand else null).also {
-            if (root) brand.layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
-        }
+        return kit.page(title, subtitle, onBack = if (root) null else ({ back() }))
     }
 
     private fun present(page: OeaKit.Page) {
         setContentView(page.root)
         currentScroll = page.scroll
-        val y = scrollPositions[current] ?: 0
+        val y = scrollPositions[scrollKey()] ?: 0
         if (y > 0) page.scroll.post { page.scroll.scrollTo(0, y) }
     }
 
@@ -198,71 +217,172 @@ class OeaThemesActivity : Activity() {
     // ===================================================================== home
 
     private fun showHome() {
-        val page = page("Themes", "Coordinated Home and lock screen looks, your own themes and wallpapers")
-        val box = page.content
+        if (homeTab !in setOf("themes", "mine", "wallpapers", "scenes")) homeTab = "themes"
         val applied = store.find(store.lastAppliedId())
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            background = kit.rounded(OeaTheme.blend(palette.card, palette.accent, 0.12f), 24, OeaTheme.alpha(palette.accent, 0x40), 1)
+        val mine = store.customThemes()
+        val (title, subtitle) = when (homeTab) {
+            "mine" -> "My Themes" to if (mine.isEmpty()) "Design your own or import a shared theme" else "${mine.size} custom ${if (mine.size == 1) "theme" else "themes"}"
+            "wallpapers" -> "Wallpapers" to "Home, lock screen and your own pictures"
+            "scenes" -> "Scenes" to "Live and still artwork drawn by OEA"
+            else -> "Themes" to (applied?.let { "Using ${it.name}" } ?: "Coordinated Home and lock screen looks")
         }
-        card.addView(kit.iconBadge(R.drawable.oic_palette, OeaTheme.alpha(palette.accent, 0x33), palette.accent, 44), LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(12) })
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(kit.text(if (applied != null) "Using ${applied.name}" else "Using your device wallpaper colours", 16f, palette.text, OeaType.medium))
-        texts.addView(kit.text("Themes change wallpapers, colours, icon shape and motion. Your apps, folders, widgets and layout always stay as they are.", 12.5f, palette.textSecondary).apply {
-            setPadding(0, dp(3), 0, 0)
-            setLineSpacing(dp(2).toFloat(), 1f)
-        })
-        card.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        box.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+        val shell = kit.appShell(
+            title = title,
+            subtitle = subtitle,
+            navItems = listOf(
+                OeaAppKit.NavItem("themes", "Themes", R.drawable.oic_palette),
+                OeaAppKit.NavItem("mine", "My Themes", R.drawable.oic_auto_awesome),
+                OeaAppKit.NavItem("wallpapers", "Wallpapers", R.drawable.oic_wallpaper),
+                OeaAppKit.NavItem("scenes", "Scenes", R.drawable.oic_animation)
+            ),
+            initialNav = homeTab
+        ) { nextTab ->
+            currentScroll?.let { scrollPositions[scrollKey()] = it.scrollY }
+            homeTab = nextTab
+            showHome()
+        }
+        shell.bar.addAction(R.drawable.oic_add, if (homeTab == "wallpapers") "Add picture" else "Create theme") {
+            if (homeTab == "wallpapers") pickImage("library") else startEditor(null, null)
+        }
+        shell.bar.addAction(R.drawable.oic_more_vert, "Themes options") {
+            showHomeOptions(applied)
+        }
+
+        val box = shell.body
+        when (homeTab) {
+            "themes" -> {
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), dp(14), dp(16), dp(14))
+                    background = kit.rounded(
+                        OeaTheme.blend(palette.card, palette.accent, if (palette.dark) 0.14f else 0.09f),
+                        24,
+                        OeaTheme.alpha(palette.accent, 0x40),
+                        1
+                    )
+                }
+                card.addView(
+                    kit.iconBadge(R.drawable.oic_palette, OeaTheme.alpha(palette.accent, 0x2E), palette.accent, 42),
+                    LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(12) }
+                )
+                val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                texts.addView(kit.text(if (applied != null) "Active · ${applied.name}" else "Device wallpaper colours", 15.5f, palette.text, OeaType.medium))
+                texts.addView(kit.text("Your apps, folders, widgets and Home grid always stay intact.", 12.5f, palette.textSecondary).apply {
+                    setPadding(0, dp(2), 0, 0)
+                })
+                card.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+                if (applied != null || data.accentMode() == "theme") {
+                    card.addView(kit.text("Reset", 13f, palette.accent, OeaType.medium).apply {
+                        setPadding(dp(10), dp(8), dp(4), dp(8))
+                        isClickable = true
+                        setOnClickListener {
+                            OeaThemeApplier.useDeviceColors(this@OeaThemesActivity)
+                            toast("OEA follows your wallpaper's colours again.")
+                            rerender()
+                        }
+                    })
+                }
+                box.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+
+                val quotes = OeaThemeCatalog.builtIns.filter { it.id.startsWith("quote_") }
+                if (quotes.isNotEmpty()) {
+                    kit.sectionTitle(box, "Life in Words")
+                    addThemeGrid(box, quotes, applied?.id, withCreate = false)
+                }
+                kit.sectionTitle(box, "Built-in themes")
+                addThemeGrid(box, OeaThemeCatalog.builtIns.filterNot { it.id.startsWith("quote_") }, applied?.id, withCreate = false)
+            }
+            "mine" -> {
+                if (mine.isEmpty()) {
+                    kit.note(box, "Build a theme from your own pictures — one artwork for both screens or a paired Home and lock look — or import a shared .oea-theme.json file.")
+                }
+                addThemeGrid(box, mine, applied?.id, withCreate = true)
+                kit.sectionTitle(box, "Manage")
+                val manage = kit.group(box)
+                kit.row(manage, R.drawable.oic_add, "Create a new theme", "Pick pictures, colours, icon shape and motion") {
+                    startEditor(null, null)
+                }
+                kit.row(manage, R.drawable.oic_folder, "Import a theme file", "Open a .oea-theme.json from Downloads or cloud storage") {
+                    importThemeFile()
+                }
+            }
+            "wallpapers" -> {
+                if (wallpaperFilter !in setOf("home", "lock", "yours")) wallpaperFilter = "home"
+                box.addView(
+                    kit.chipBar(
+                        listOf("home" to "Home", "lock" to "Lock screen", "yours" to "Your pictures"),
+                        wallpaperFilter
+                    ) { key ->
+                        wallpaperFilter = key
+                        showHome()
+                    },
+                    LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) }
+                )
+                when (wallpaperFilter) {
+                    "lock" -> {
+                        kit.note(box, "Composed with a calm centre for your lock-screen clock and notifications, kept separate from Home.")
+                        addWallpaperSetGrid(box, com.oea.launcher.wallpaper.OeaWallpaper.lockSet, lockOnly = true)
+                    }
+                    "yours" -> {
+                        val group = kit.group(box)
+                        kit.row(group, R.drawable.oic_photo_library, "Add a picture", "Copy a photo into OEA's wallpaper library") { pickImage("library") }
+                        kit.row(group, R.drawable.oic_wallpaper, "Android wallpaper picker", "System and live wallpapers") {
+                            runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) }
+                                .onFailure { toast("No wallpaper picker is available.") }
+                        }
+                        val yours = store.libraryImages().filterIsInstance<OeaImageRef.Imported>()
+                        if (yours.isEmpty()) {
+                            box.addView(
+                                kit.emptyState(
+                                    R.drawable.oic_photo_library,
+                                    "No personal wallpapers yet",
+                                    "Add pictures from your phone to apply on Home, lock screen, or inside your own themes.",
+                                    "Add picture"
+                                ) { pickImage("library") },
+                                LinearLayout.LayoutParams(-1, -2)
+                            )
+                        } else {
+                            kit.sectionTitle(box, "Library")
+                            addImageGrid(box, yours)
+                        }
+                    }
+                    else -> {
+                        kit.note(box, "Artwork tailored for your Home screen — tap any wallpaper to preview or apply.")
+                        addWallpaperSetGrid(box, com.oea.launcher.wallpaper.OeaWallpaper.homeSet, lockOnly = false)
+                    }
+                }
+            }
+            "scenes" -> {
+                kit.note(box, "Live scenes are drawn directly by OEA Home so they move smoothly across pages while keeping your lock screen untouched.")
+                addSceneGrid(box)
+            }
+        }
+
+        setContentView(shell.root)
+        currentScroll = shell.scroll
+        val y = scrollPositions[scrollKey()] ?: 0
+        if (y > 0) shell.scroll.post { shell.scroll.scrollTo(0, y) }
+    }
+
+    private fun showHomeOptions(applied: OeaThemeSpec?) {
+        val actions = mutableListOf(
+            OeaAppKit.Action(R.drawable.oic_add, "Create a theme", "Match colours and style to your own photos") { startEditor(null, null) },
+            OeaAppKit.Action(R.drawable.oic_folder, "Import theme file", "Load a shared .oea-theme.json") { importThemeFile() },
+            OeaAppKit.Action(R.drawable.oic_photo_library, "Add picture to library", "Use on Home, lock screen or in a theme") { pickImage("library") },
+            OeaAppKit.Action(R.drawable.oic_wallpaper, "System wallpaper picker", "Live and manufacturer wallpapers") {
+                runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) }
+                    .onFailure { toast("No wallpaper picker is available.") }
+            }
+        )
         if (applied != null || data.accentMode() == "theme") {
-            box.addView(kit.quietButton("Use device colours instead", R.drawable.oic_wallpaper) {
+            actions += OeaAppKit.Action(R.drawable.oic_refresh, "Use device wallpaper colours", "Stop overriding accent colours") {
                 OeaThemeApplier.useDeviceColors(this)
                 toast("OEA follows your wallpaper's colours again.")
                 rerender()
-            }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6); bottomMargin = dp(4) })
+            }
         }
-
-        kit.sectionTitle(box, "Life in Words · quote themes")
-        kit.note(box, "New life-quote themes pair illustrated artwork with matching colours, icons and dock styling. Their pictures are also available in the wallpaper library; Home and lock screen share each quote artwork. Other themes offer coordinated pairs.")
-        addThemeGrid(box, OeaThemeCatalog.builtIns.filter { it.id.startsWith("quote_") }, applied?.id, withCreate = false)
-        kit.sectionTitle(box, "More built-in themes")
-        addThemeGrid(box, OeaThemeCatalog.builtIns.filterNot { it.id.startsWith("quote_") }, applied?.id, withCreate = false)
-
-        kit.sectionTitle(box, "My themes")
-        val mine = store.customThemes()
-        if (mine.isEmpty()) kit.note(box, "Make a theme from your own pictures: the same picture for Home and lock, or a different one for each. You can also import a theme file someone shared.")
-        addThemeGrid(box, mine, applied?.id, withCreate = true)
-        kit.row(kit.group(box), R.drawable.oic_palette, "Import a theme file",
-            "Open a .oea-theme.json from a friend, a backup or the cloud") { importThemeFile() }
-
-        kit.sectionTitle(box, "OEA scenes")
-        kit.note(box, "OEA's own live artwork. A live scene is drawn by Home itself, so Android's wallpaper — and your lock screen — stay exactly as they are.")
-        addSceneGrid(box)
-
-        kit.sectionTitle(box, "Wallpapers")
-        kit.note(box, "Pictures drawn for Home: apply one on its own, or freeze a live scene into it. The lock screen has its own set below.")
-        addWallpaperSetGrid(box, com.oea.launcher.wallpaper.OeaWallpaper.homeSet, lockOnly = false)
-
-        kit.sectionTitle(box, "Lock screen wallpapers")
-        kit.note(box, "A set of its own, drawn so the middle of the screen stays calm for the clock and your notifications. These pictures are never used on Home, so locking and unlocking shows something different.")
-        addWallpaperSetGrid(box, com.oea.launcher.wallpaper.OeaWallpaper.lockSet, lockOnly = true)
-
-        kit.sectionTitle(box, "Your pictures")
-        val group = kit.group(box)
-        kit.row(group, R.drawable.oic_photo_library, "Add a picture", "Copies it into OEA's wallpaper library") { pickImage("library") }
-        val yours = store.libraryImages().filterIsInstance<OeaImageRef.Imported>()
-        if (yours.isEmpty()) {
-            kit.note(box, "Pictures you add appear here and can be used on Home, on the lock screen, or in a theme of your own.")
-        } else {
-            addImageGrid(box, yours)
-        }
-        kit.row(group, R.drawable.oic_wallpaper, "Android wallpaper picker", "Live wallpapers and your phone maker's own wallpapers") {
-            runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) }
-                .onFailure { toast("No wallpaper picker is available.") }
-        }
-        present(page)
+        kit.actions("Themes", null, actions)
     }
 
     /**
@@ -331,7 +451,7 @@ class OeaThemesActivity : Activity() {
         }
         frame.addView(image, FrameLayout.LayoutParams(-1, dp(132)))
         if (inUse) {
-            frame.addView(kit.text("In use", 10.5f, Color.WHITE, OeaType.medium).apply {
+            frame.addView(kit.text("In use", 10.5f, OeaTheme.onColor(accent), OeaType.medium).apply {
                 setPadding(dp(7), dp(2), dp(7), dp(2))
                 background = kit.rounded(OeaTheme.alpha(accent, 0xE6), 10)
             }, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), dp(6), 0) })
@@ -353,41 +473,33 @@ class OeaThemesActivity : Activity() {
      * they leave the phone in genuinely different states.
      */
     private fun sceneSheet(title: String, subtitle: String, scene: com.oea.launcher.wallpaper.OeaWallpaper?, liveId: String?) {
-        // The strip below is built inside a LinearLayout receiver, where "this" is
-        // the layout: the Activity is captured first so the buttons still act on it.
-        val host = this
-        kit.sheet(title, subtitle) { panel, dialog ->
-            val scroll = kit.hscroll(LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                addView(kit.primaryButton("Draw on Home", R.drawable.oic_wallpaper) {
-                    dialog.dismiss()
-                    val chosen = liveId ?: scene?.id
-                    if (chosen != null) com.oea.launcher.wallpaper.OeaHomeScene.setLive(host, chosen)
-                    host.toast("$title is drawn by Home; Android's wallpaper is untouched")
-                    host.rerender()
-                }, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
-                if (scene != null) {
-                    com.oea.launcher.wallpaper.OeaWallpaperStore.Target.entries.forEach { target ->
-                        addView(kit.tonalButton("Apply to ${target.label}", R.drawable.oic_wallpaper) {
-                            dialog.dismiss()
-                            host.applyScene(scene, target)
-                        }, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
-                    }
-                } else if (liveId != null) {
-                    com.oea.launcher.wallpaper.OeaWallpaperStore.Target.entries.forEach { target ->
-                        addView(kit.tonalButton("Freeze to ${target.label}", R.drawable.oic_refresh) {
-                            dialog.dismiss()
-                            host.freezeScene(liveId, target)
-                        }, LinearLayout.LayoutParams(-2, dp(48)).apply { rightMargin = dp(8) })
-                    }
+        val actions = mutableListOf(
+            OeaAppKit.Action(
+                R.drawable.oic_animation,
+                "Draw live on OEA Home",
+                if (liveId != null) "Moves across your Home pages; lock screen stays untouched"
+                else "Sits under Home icons without changing Android's wallpaper"
+            ) {
+                val chosen = liveId ?: scene?.id
+                if (chosen != null) com.oea.launcher.wallpaper.OeaHomeScene.setLive(this, chosen)
+                toast("$title is drawn by Home; Android's wallpaper is untouched")
+                rerender()
+            }
+        )
+        if (scene != null) {
+            com.oea.launcher.wallpaper.OeaWallpaperStore.Target.entries.forEach { target ->
+                actions += OeaAppKit.Action(R.drawable.oic_wallpaper, "Apply to ${target.label}", "Set as system wallpaper") {
+                    applyScene(scene, target)
                 }
-            })
-            panel.addView(scroll)
-            kit.note(panel, if (liveId != null)
-                "Drawn by Home, the scene keeps moving and follows your pages. Frozen, one frame is handed to Android, so it also shows on the lock screen."
-            else
-                "Drawn by Home, the scene sits under your icons and Android's wallpaper is left alone. Applied to Android, it becomes the real wallpaper of the place you choose.")
+            }
+        } else if (liveId != null) {
+            com.oea.launcher.wallpaper.OeaWallpaperStore.Target.entries.forEach { target ->
+                actions += OeaAppKit.Action(R.drawable.oic_wallpaper, "Freeze to ${target.label}", "Save a still frame as system wallpaper") {
+                    freezeScene(liveId, target)
+                }
+            }
         }
+        kit.actions(title, subtitle, actions)
     }
 
     /**
@@ -399,6 +511,10 @@ class OeaThemesActivity : Activity() {
      * place. A preview of the lock screen is shown above the buttons.
      */
     private fun lockSceneSheet(scene: com.oea.launcher.wallpaper.OeaWallpaper) {
+        navigate("lockscene:${scene.id}")
+    }
+
+    private fun renderLockScene(scene: com.oea.launcher.wallpaper.OeaWallpaper) {
         val host = this
         val page = page(scene.label, "A lock-screen picture: shown before you unlock, never behind your Home icons")
         val box = page.content
@@ -783,7 +899,13 @@ class OeaThemesActivity : Activity() {
         controls.addView(toggle, LinearLayout.LayoutParams(dp(180), -2))
         controls.addView(kit.circleIconButton(R.drawable.oic_close, "Close preview", OeaTheme.alpha(Color.WHITE, 0x22), Color.WHITE) { closeOverlay() },
             LinearLayout.LayoutParams(dp(44), dp(44)).apply { leftMargin = dp(10) })
-        layer.addView(controls, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(36) })
+        val controlsLp = FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(28) }
+        layer.addView(controls, controlsLp)
+        layer.setOnApplyWindowInsetsListener { _, insets ->
+            controlsLp.bottomMargin = dp(20) + OeaInsets.bars(insets)[3]
+            controls.layoutParams = controlsLp
+            insets
+        }
         layer.alpha = 0f
         root.addView(layer, FrameLayout.LayoutParams(-1, -1))
         layer.animate().alpha(1f).setDuration(180L).start()
@@ -1176,7 +1298,13 @@ class OeaThemesActivity : Activity() {
                     "home", "lock" -> setDraftPicture(slot, imported)
                     else -> {
                         toast("Added to your wallpapers.")
-                        if (current == SCREEN_HOME) rerender() else navigate("wallpaper:${imported.key}")
+                        if (current == SCREEN_HOME) {
+                            homeTab = "wallpapers"
+                            wallpaperFilter = "yours"
+                            rerender()
+                        } else {
+                            navigate("wallpaper:${imported.key}")
+                        }
                     }
                 }
             }

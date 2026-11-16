@@ -45,3 +45,16 @@ internal var Activity.miniDestroyHook: (() -> Unit)?
     set(value) {
         (this as? OeaMiniAppActivity)?.let { it.destroyHook = value }
     }
+
+/** Called before the host finishes on Back; return true when the mini-app handled it. */
+internal var Activity.miniBackHook: (() -> Boolean)?
+    get() = (this as? OeaMiniAppActivity)?.backHook
+    set(value) {
+        (this as? OeaMiniAppActivity)?.let { it.backHook = value }
+    }
+
+/** Back callback when opened inside the Mini-apps index, or null for standalone apps. */
+internal fun Activity.miniIndexBack(): (() -> Unit)? {
+    val host = this as? OeaMiniAppActivity ?: return null
+    return if (host.showsIndexBack) ({ host.show(null) }) else null
+}

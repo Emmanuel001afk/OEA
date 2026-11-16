@@ -75,22 +75,59 @@ internal object OeaEmageEditor {
         private var saving = false
         private lateinit var brightnessSeek: SeekBar
         private lateinit var contrastSeek: SeekBar
+        private lateinit var brightnessValue: TextView
+        private lateinit var contrastValue: TextView
+        private lateinit var filterRow: LinearLayout
+        private lateinit var saveButton: TextView
         private val filters = listOf("Original", "Mono", "Warm", "Cool", "Vintage", "Bright", "Vivid", "Soft")
-        private val ink = Color.WHITE
-        private val buttonColor = Color.rgb(37, 45, 58)
+        private val ink = Color.rgb(245, 247, 252)
+        private val muted = Color.rgb(168, 176, 194)
+        private val surfaceColor = Color.rgb(20, 23, 30)
+        private val buttonColor = Color.rgb(34, 39, 50)
+        private val strokeColor = Color.rgb(58, 66, 84)
+        private val accentColor = Color.rgb(92, 168, 255)
+        private val onAccentColor = Color.rgb(12, 18, 28)
 
         fun show() {
             stage.addView(editorView, FrameLayout.LayoutParams(-1, -1))
-            root.addView(toolbar(listOf("Cancel" to { if (!saving) dialog.dismiss() else status("Please wait for the copy to finish.", announce = true) }, "↶" to { rotate(-90f) }, "↷" to { rotate(90f) }, "Mirror" to { mirror() }, "Reset crop" to { resetCrop() })))
+            root.addView(topBar(), LinearLayout.LayoutParams(-1, -2))
             root.addView(stage)
             // On a short or landscape display the controls can be taller than
             // the space below the preview. Scroll them instead of crushing the
             // Save action or pushing it off-screen.
-            val controls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            val controls = LinearLayout(host).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(surfaceColor)
+                setPadding(0, dp(6), 0, dp(8))
+            }
+            controls.addView(
+                View(host).apply { setBackgroundColor(strokeColor) },
+                LinearLayout.LayoutParams(-1, max(1, dp(1)))
+            )
             controls.addView(message, LinearLayout.LayoutParams(-1, -2))
-            controls.addView(adjustmentRow("Brightness", -50, 50, 50) { brightness = (it - 50).toFloat(); refreshPreview() })
+            filterRow = LinearLayout(host).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(2), dp(12), dp(6))
+            }
+            paintFilters()
+            controls.addView(
+                android.widget.HorizontalScrollView(host).apply {
+                    isHorizontalScrollBarEnabled = false
+                    overScrollMode = View.OVER_SCROLL_NEVER
+                    addView(filterRow)
+                },
+                LinearLayout.LayoutParams(-1, -2)
+            )
+            controls.addView(adjustmentRow("Brightness", -50, 50, 0) { brightness = it.toFloat(); refreshPreview() })
             controls.addView(adjustmentRow("Contrast", 50, 150, 100) { contrast = it / 100f; refreshPreview() })
-            controls.addView(toolbar(listOf("Filter: ${filters[filterIndex]}" to { nextFilter() }, "Reset adjustments" to { resetAdjustments() }, "Save copy" to { save() })))
+            controls.addView(toolbar(listOf(
+                "Rotate left" to { rotate(-90f) },
+                "Rotate right" to { rotate(90f) },
+                "Mirror" to { mirror() },
+                "Reset crop" to { resetCrop() },
+                "Reset tone" to { resetAdjustments() }
+            )))
             val controlScroll = object : android.widget.ScrollView(host) {
                 override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
                     val limit = (resources.displayMetrics.heightPixels * 0.45f).toInt()
@@ -99,7 +136,7 @@ internal object OeaEmageEditor {
                         else minOf(limit, View.MeasureSpec.getSize(heightMeasureSpec))
                     super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST))
                 }
-            }.apply { isVerticalScrollBarEnabled = true; addView(controls) }
+            }.apply { isVerticalScrollBarEnabled = false; addView(controls) }
             root.addView(controlScroll, LinearLayout.LayoutParams(-1, -2))
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setContentView(root)
@@ -149,39 +186,75 @@ internal object OeaEmageEditor {
             }
         }
 
+        private fun topBar(): LinearLayout = LinearLayout(host).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(surfaceColor)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            addView(pillButton("Cancel", active = false) {
+                if (!saving) dialog.dismiss() else status("Saving copy, please wait…", announce = true)
+            }, LinearLayout.LayoutParams(-2, dp(42)))
+            addView(TextView(host).apply {
+                text = "Edit photo"
+                setTextColor(ink)
+                textSize = 16f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            saveButton = pillButton("Save copy", active = true) { save() }
+            addView(saveButton, LinearLayout.LayoutParams(-2, dp(42)))
+        }
+
+        private fun pillButton(label: String, active: Boolean, onClick: () -> Unit): TextView = TextView(host).apply {
+            text = label
+            contentDescription = if (active && label in filters) "$label filter, selected" else label
+            setTextColor(if (active) onAccentColor else ink)
+            textSize = 13f
+            typeface = Typeface.create("sans-serif-medium", if (active) Typeface.BOLD else Typeface.NORMAL)
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            minimumHeight = dp(40)
+            minWidth = dp(48)
+            setPadding(dp(15), dp(8), dp(15), dp(8))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(if (active) accentColor else buttonColor)
+                cornerRadius = dp(20).toFloat()
+                if (!active) setStroke(max(1, dp(1)), strokeColor)
+            }
+            setOnClickListener { onClick() }
+        }
+
+        private fun paintFilters() {
+            filterRow.removeAllViews()
+            filters.forEachIndexed { idx, name ->
+                filterRow.addView(
+                    pillButton(name, idx == filterIndex) {
+                        if (saving) return@pillButton
+                        filterIndex = idx
+                        paintFilters()
+                        refreshPreview()
+                    },
+                    LinearLayout.LayoutParams(-2, dp(40)).apply {
+                        if (idx > 0) marginStart = dp(6)
+                    }
+                )
+            }
+        }
+
         /** A horizontally scrollable action rail: labels stay legible on small phones. */
         private fun toolbar(actions: List<Pair<String, () -> Unit>>): View =
             android.widget.HorizontalScrollView(host).apply {
                 isHorizontalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 clipToPadding = false
-                setPadding(dp(5), dp(3), dp(5), dp(3))
-                layoutParams = LinearLayout.LayoutParams(-1, dp(62))
+                setPadding(dp(12), dp(4), dp(12), dp(2))
                 addView(LinearLayout(host).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    actions.forEach { (label, callback) ->
-                        val button = TextView(host).apply {
-                            text = label
-                            contentDescription = label
-                            setTextColor(ink)
-                            textSize = 13f
-                            typeface = Typeface.DEFAULT_BOLD
-                            gravity = Gravity.CENTER
-                            isClickable = true
-                            isFocusable = true
-                            minimumHeight = dp(48)
-                            minWidth = dp(48)
-                            setPadding(dp(14), dp(8), dp(14), dp(8))
-                            background = android.graphics.drawable.GradientDrawable().apply {
-                                setColor(buttonColor)
-                                cornerRadius = dp(18).toFloat()
-                            }
-                            setOnClickListener { callback() }
-                        }
-                        addView(button, LinearLayout.LayoutParams(-2, dp(52)).apply {
-                            marginStart = dp(3)
-                            marginEnd = dp(3)
+                    actions.forEachIndexed { idx, (label, callback) ->
+                        addView(pillButton(label, active = false, onClick = callback), LinearLayout.LayoutParams(-2, dp(42)).apply {
+                            if (idx > 0) marginStart = dp(6)
                         })
                     }
                 })
@@ -219,16 +292,27 @@ internal object OeaEmageEditor {
             LinearLayout(host).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), 0, dp(12), 0)
+                setPadding(dp(14), 0, dp(14), 0)
+                val readout = TextView(host).apply {
+                    text = initialValueLabel(label, initial)
+                    setTextColor(ink)
+                    textSize = 12f
+                    typeface = Typeface.create("monospace", Typeface.NORMAL)
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                }
                 val seek = SeekBar(host).apply {
                     id = View.generateViewId()
                     this.max = max - min
                     progress = initial - min
-                    minHeight = dp(48)
+                    minHeight = dp(44)
+                    progressTintList = android.content.res.ColorStateList.valueOf(accentColor)
+                    thumbTintList = android.content.res.ColorStateList.valueOf(accentColor)
+                    progressBackgroundTintList = android.content.res.ColorStateList.valueOf(strokeColor)
                     contentDescription = "$label, ${initialValueLabel(label, initial)}"
                     setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                         override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                             val value = progress + min
+                            readout.text = initialValueLabel(label, value)
                             contentDescription = "$label, ${initialValueLabel(label, value)}"
                             if (!saving) changed(value)
                         }
@@ -238,12 +322,20 @@ internal object OeaEmageEditor {
                 }
                 addView(TextView(host).apply {
                     text = label
-                    setTextColor(Color.LTGRAY)
-                    textSize = 12f
+                    setTextColor(muted)
+                    textSize = 12.5f
+                    gravity = Gravity.CENTER_VERTICAL
                     labelFor = seek.id
-                }, LinearLayout.LayoutParams(dp(86), dp(48)))
-                if (label == "Brightness") brightnessSeek = seek else if (label == "Contrast") contrastSeek = seek
-                addView(seek, LinearLayout.LayoutParams(0, dp(48), 1f))
+                }, LinearLayout.LayoutParams(dp(78), dp(44)))
+                if (label == "Brightness") {
+                    brightnessSeek = seek
+                    brightnessValue = readout
+                } else if (label == "Contrast") {
+                    contrastSeek = seek
+                    contrastValue = readout
+                }
+                addView(seek, LinearLayout.LayoutParams(0, dp(44), 1f))
+                addView(readout, LinearLayout.LayoutParams(dp(44), dp(44)))
             }
 
         private fun initialValueLabel(label: String, value: Int): String = when (label) {
@@ -272,14 +364,11 @@ internal object OeaEmageEditor {
             contrast = 1f
             brightnessSeek.progress = 50
             contrastSeek.progress = 50
+            brightnessValue.text = "0"
+            contrastValue.text = "100%"
+            paintFilters()
             editorView.setFilter(filterIndex, brightness, contrast)
-            status("Adjustments reset. Crop is preserved.", announce = true)
-        }
-
-        private fun nextFilter() {
-            if (saving) return
-            filterIndex = (filterIndex + 1) % filters.size
-            refreshPreview()
+            status("Tone and filter reset. Crop is preserved.", announce = true)
         }
 
         private fun resetCrop() {

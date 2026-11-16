@@ -1,52 +1,56 @@
 package com.oea.launcher.privilege
 
 import android.app.Activity
-import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
-import com.oea.launcher.assistant.OeaAssistant
-import android.view.Gravity
+import android.text.InputFilter
+import android.text.InputType
 import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.oea.launcher.R
+import com.oea.launcher.assistant.OeaAssistant
+import com.oea.launcher.ui.OeaAppKit
+import com.oea.launcher.ui.OeaInsets
+import com.oea.launcher.ui.OeaPalette
+import com.oea.launcher.ui.OeaTheme
+import com.oea.launcher.ui.OeaType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** OEA's first-party UI for pairing its embedded Wireless Debugging bridge. */
 class OeaAuthorityActivity : Activity() {
     private val work = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private lateinit var palette: OeaPalette
+    private lateinit var kit: OeaAppKit
     private lateinit var hostField: EditText
     private lateinit var pairingPortField: EditText
     private lateinit var codeField: EditText
     private lateinit var connectPortField: EditText
     private lateinit var statusText: TextView
-    private lateinit var pairButton: Button
-    private lateinit var reconnectButton: Button
-    private lateinit var forgetButton: Button
+    private lateinit var pairButton: View
+    private lateinit var reconnectButton: View
+    private lateinit var forgetButton: View
     private var autoReadStartedAt = 0L
     private var autoCapturedCode: String? = null
     private var autoPairInFlight = false
     private var lastAutoPairKey: String? = null
     private val pairingListener: () -> Unit = { runOnUiThread { refreshCapturedValues() } }
 
-    private val inkColor = Color.rgb(235, 240, 248)
-    private val mutedColor = Color.rgb(164, 177, 196)
-    private val accentColor = Color.rgb(104, 166, 255)
-    private val panelColor = Color.rgb(28, 37, 52)
-    private val backgroundColor = Color.rgb(14, 20, 30)
+    private val inkColor get() = palette.text
+    private val mutedColor get() = palette.textSecondary
+    private val accentColor get() = palette.accent
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -129,7 +133,7 @@ class OeaAuthorityActivity : Activity() {
         if (pair.host != connection.host) {
             lastAutoPairKey = key
             statusText.text = "Automatic pairing blocked: Android exposed different hosts for the pairing dialog and connection page. Reopen Wireless debugging and capture both endpoints again, or use manual entry."
-            statusText.setTextColor(Color.rgb(255, 180, 110))
+            statusText.setTextColor(palette.warning)
             return
         }
         lastAutoPairKey = key
@@ -165,69 +169,80 @@ class OeaAuthorityActivity : Activity() {
     }
 
     private fun buildUi() {
-        val scroll = ScrollView(this).apply { setBackgroundColor(backgroundColor) }
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(28))
+        palette = OeaTheme.resolve(this)
+        kit = OeaAppKit(this, palette)
+        OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
+
+        val shell = kit.appShell(
+            title = "OEA Authority",
+            subtitle = "Built-in Wireless Debugging bridge",
+            onBack = { finish() }
+        )
+        val root = shell.body
+        setContentView(shell.root)
+
+        val autoCard = kit.card(paddingDp = 16)
+        autoCard.addView(kit.text("One-time authorization", 16.5f, palette.text, OeaType.medium))
+        autoCard.addView(kit.text(
+            "OEA includes its own ADB pairing and shell client — no Shizuku or companion app needed. Enable Wireless Debugging and approve the pairing code once.",
+            13.5f, palette.textSecondary
+        ).apply { setPadding(0, kit.dp(6), 0, kit.dp(14)); setLineSpacing(kit.dpf(2f), 1f) })
+        autoCard.addView(
+            kit.primaryButton("Open Wireless debugging & auto-read", R.drawable.oic_developer_mode) { beginAutoRead() },
+            LinearLayout.LayoutParams(-1, kit.dp(48))
+        )
+        root.addView(autoCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+
+        kit.sectionTitle(root, "Manual pairing & endpoint")
+        val pairCard = kit.card(paddingDp = 16)
+        hostField = authField("Phone local IP address", "Phone IP (e.g. 192.168.1.10)").also { pairCard.addView(it) }
+        pairingPortField = authField("Pairing port (temporary)", "Pairing port (temporary)", numeric = true).also { pairCard.addView(it) }
+        codeField = authField("Six-digit pairing code", "6-digit pairing code", numeric = true, password = true).apply {
+            filters = arrayOf(InputFilter.LengthFilter(6))
+        }.also { pairCard.addView(it) }
+        connectPortField = authField("Wireless Debugging connection port", "Connection port", numeric = true).also { pairCard.addView(it) }
+
+        pairButton = kit.primaryButton("Pair & verify") { pair() }
+        reconnectButton = kit.tonalButton("Reconnect") { reconnect() }
+        pairCard.addView(kit.buttonRow(reconnectButton, pairButton))
+        root.addView(pairCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+
+        kit.sectionTitle(root, "Status")
+        val statusCard = kit.card(paddingDp = 16)
+        statusText = kit.text("Checking saved endpoint…", 13.5f, palette.textSecondary).apply {
+            setLineSpacing(kit.dpf(2f), 1f)
+            setTextIsSelectable(true)
         }
-        scroll.addView(root)
-        setContentView(scroll)
+        statusCard.addView(statusText)
+        root.addView(statusCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
 
-        root.addView(text("OEA Authority", 27, inkColor, true))
-        root.addView(text("Built-in Authority engine + Wireless Debugging", 15, accentColor, true).apply {
-            setPadding(0, dp(4), 0, dp(16))
-        })
-        root.addView(card().apply {
-            addView(text("One-time Android authorization", 17, inkColor, true))
-            addView(text(
-                "OEA contains its own ADB pairing and shell client. No Shizuku or companion app is needed. Android still requires Wireless Debugging to be enabled and the pairing code to be approved by you.",
-                14, mutedColor, false
-            ).apply { setPadding(0, dp(8), 0, dp(14)) })
-            addView(button("Open Wireless debugging & auto-read") { beginAutoRead() })
-        })
-
-        root.addView(card().apply {
-            addView(text("Pair this phone", 18, inkColor, true))
-            addView(text(
-                "Auto-read is preferred: tap the button above, open Wireless debugging, and let OEA capture the pairing dialog and the separate connection port. Manual entry remains available if Android does not expose the values to Accessibility.",
-                14, mutedColor, false
-            ).apply { setPadding(0, dp(8), 0, dp(12)) })
-
-            hostField = field("Phone local IP address", "192.168.1.10").also { addView(it) }
-            pairingPortField = field("Pairing port (temporary)", "").also { addView(it) }
-            codeField = field("Six-digit pairing code", "").apply {
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-                filters = arrayOf(android.text.InputFilter.LengthFilter(6))
-            }.also { addView(it) }
-            connectPortField = field("Wireless Debugging connection port", "").also { addView(it) }
-
-            pairButton = button("Pair and verify connection") { pair() }.also { addView(it) }
-            reconnectButton = button("Reconnect saved endpoint") { reconnect() }.also { addView(it) }
-        })
-
-        root.addView(card().apply {
-            addView(text("Live verification", 17, inkColor, true))
-            statusText = text("Checking saved endpoint…", 14, mutedColor, false).apply {
-                setPadding(0, dp(8), 0, dp(12))
-            }
-            addView(statusText)
-            addView(button("Run complete Access Doctor scan") { runCompleteAccessScan() })
-            addView(button("Scan authority capabilities") { scanAuthorityCapabilities() })
-            addView(button("Test real ADB authority") { testAuthority() })
-            addView(button("Test app suspension + restore") { chooseSuspensionTestApp() })
-            addView(button("Review permission status and repair") { reviewPermissionRepairs() })
-            forgetButton = button("Forget endpoint in OEA") {
+        kit.sectionTitle(root, "Verification & diagnostics")
+        val diagGroup = kit.group(root)
+        kit.row(diagGroup, R.drawable.oic_shield_fill, "Complete Access Doctor scan", "Inspect Android permissions and live shell capabilities") {
+            runCompleteAccessScan()
+        }
+        kit.row(diagGroup, R.drawable.oic_insights, "Scan authority capabilities", "Check supported bridge operations on this device") {
+            scanAuthorityCapabilities()
+        }
+        kit.row(diagGroup, R.drawable.oic_developer_mode, "Test ADB shell identity", "Run a read-only identity check") {
+            testAuthority()
+        }
+        kit.row(diagGroup, R.drawable.oic_ac_unit, "Test app suspension & restore", "Suspend a chosen app and immediately restore it") {
+            chooseSuspensionTestApp()
+        }
+        kit.row(diagGroup, R.drawable.oic_tune, "Permission diagnostics & repair", "Inspect each permission and open its repair step") {
+            reviewPermissionRepairs()
+        }
+        forgetButton = kit.row(diagGroup, R.drawable.oic_delete, "Forget saved endpoint", "Clears OEA's saved host & port", value = "Clear") {
+            kit.confirm("Forget saved endpoint?", "Clears OEA's stored endpoint. To revoke Android trust, open Wireless debugging › Paired devices.", "Forget", destructive = true) {
                 OeaAdbAuthority.forget(this@OeaAuthorityActivity)
                 codeField.setText("")
                 refreshStatus()
-                toast("OEA's saved endpoint was cleared. Android's paired-host list is managed in Developer options.")
-            }.also { addView(it) }
-        })
+                toast("Saved endpoint cleared.")
+            }
+        }
 
-        root.addView(text(
-            "OEA Authority provides a shared, typed API over the embedded Wireless Debugging bridge. It probes supported capabilities and returns real command results; it does not pretend unsupported Android operations succeeded. No free-form shell is exposed. To revoke Android's trust, use Wireless debugging → Paired devices / Revoke authorizations.",
-            13, mutedColor, false
-        ).apply { setPadding(dp(2), dp(4), dp(2), 0) })
+        kit.note(root, "OEA Authority runs typed commands over its local Wireless Debugging bridge with no free-form shell. Revoke trust anytime in Developer options › Wireless debugging.")
     }
 
     private fun pair() {
@@ -298,23 +313,8 @@ class OeaAuthorityActivity : Activity() {
             }
             setBusy(false, if (result.isSuccess) "Complete scan finished. Review the combined report for each permission and capability." else "Complete scan failed: ${result.exceptionOrNull()?.message ?: "unknown error"}")
             result.onSuccess { report ->
-                val reportView = TextView(this@OeaAuthorityActivity).apply {
-                    text = report
-                    textSize = 14f
-                    setTextColor(inkColor)
-                    setPadding(dp(18), dp(12), dp(18), dp(12))
-                    setTextIsSelectable(true)
-                }
-                val reportScroll = ScrollView(this@OeaAuthorityActivity).apply {
-                    addView(reportView)
-                    isFillViewport = true
-                }
-                AlertDialog.Builder(this@OeaAuthorityActivity)
-                    .setTitle("Complete Access Doctor report")
-                    .setView(reportScroll)
-                    .setPositiveButton("Close", null)
-                    .show()
-                refreshStatus("Complete Access Doctor scan finished. Review the combined report.")
+                showReportSheet("Access Doctor report", report)
+                refreshStatus("Complete Access Doctor scan finished.")
             }.onFailure {
                 refreshStatus("Complete scan failed: ${it.message ?: it.javaClass.simpleName}")
             }
@@ -339,12 +339,8 @@ class OeaAuthorityActivity : Activity() {
                         append(capability.detail).append("\n\n")
                     }
                 }
-                AlertDialog.Builder(this@OeaAuthorityActivity)
-                    .setTitle("OEA Authority capability report")
-                    .setMessage(message)
-                    .setPositiveButton("Close", null)
-                    .show()
-                refreshStatus("Capability scan complete. Review the report for actual results.")
+                showReportSheet("Authority capabilities", message)
+                refreshStatus("Capability scan complete.")
             }.onFailure {
                 refreshStatus("Capability scan failed: ${it.message ?: it.javaClass.simpleName}")
             }
@@ -400,45 +396,45 @@ class OeaAuthorityActivity : Activity() {
             refreshStatus("Suspension test unavailable: no launchable user-installed apps were found.")
             return
         }
-        val labels = apps.map { app ->
-            "${pm.getApplicationLabel(app)}  •  ${app.packageName}"
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("Choose a test app")
-            .setMessage("OEA will suspend this app, verify Android's state, then immediately restore it. Choose a non-critical app.")
-            .setItems(labels) { _, which ->
-                val app = apps[which]
-                setBusy(true, "Testing real suspension and restoration for ${app.packageName}…")
-                work.launch {
-                    val outcome = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                        val pkg = app.packageName
-                        val freezeCommand = OeaAdbAuthority.runShell("cmd package suspend --user 0 $pkg")
-                        if (!freezeCommand.first) {
-                            "ADB SUSPEND FAILED/BLOCKED\nApp: $pkg\n${freezeCommand.second}\nNo alternate backend was used; this test specifically checks OEA's Wireless Debugging bridge."
-                        } else {
-                            val freezeState = verifyAdbSuspended(pkg, expected = true)
-                            if (freezeState == true) {
-                                val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
-                                val restoreState = if (restoreCommand.first) verifyAdbSuspended(pkg, expected = false) else null
-                                when {
-                                    restoreCommand.first && restoreState == true ->
-                                        "PASS — OEA's ADB bridge suspended the app and Android's package state confirmed it; restore was also verified.\nApp: $pkg\nSuspend output: ${freezeCommand.second.ifBlank { "(no output)" }}\nRestore output: ${restoreCommand.second.ifBlank { "(no output)" }}"
-                                    else ->
-                                        "RESTORE FAILED — ADB suspension was accepted, but restoration was not verified. Open Android App info for $pkg and restore/unsuspend it now.\nRestore output: ${restoreCommand.second}\nState check: ${restoreState?.toString() ?: "unreadable"}"
-                                }
-                            } else {
-                                val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
-                                val restored = restoreCommand.first && verifyAdbSuspended(pkg, expected = false) == true
-                                "VERIFICATION FAILED — Android did not confirm the suspended state. Immediate restore ${if (restored) "was verified" else "could not be verified"}.\nApp: $pkg\nSuspend output: ${freezeCommand.second}\nRestore output: ${restoreCommand.second}"
+        val names = apps.map { pm.getApplicationLabel(it).toString() }
+        val pkgs = apps.map { it.packageName }
+        kit.choose(
+            "Choose a test app",
+            "OEA will suspend this app, verify Android's state, and immediately restore it. Pick a non-critical app.",
+            names,
+            -1,
+            pkgs
+        ) { which ->
+            val app = apps[which]
+            setBusy(true, "Testing real suspension and restoration for ${app.packageName}…")
+            work.launch {
+                val outcome = withContext(Dispatchers.IO) {
+                    val pkg = app.packageName
+                    val freezeCommand = OeaAdbAuthority.runShell("cmd package suspend --user 0 $pkg")
+                    if (!freezeCommand.first) {
+                        "ADB SUSPEND FAILED/BLOCKED\nApp: $pkg\n${freezeCommand.second}\nNo alternate backend was used; this test specifically checks OEA's Wireless Debugging bridge."
+                    } else {
+                        val freezeState = verifyAdbSuspended(pkg, expected = true)
+                        if (freezeState == true) {
+                            val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
+                            val restoreState = if (restoreCommand.first) verifyAdbSuspended(pkg, expected = false) else null
+                            when {
+                                restoreCommand.first && restoreState == true ->
+                                    "PASS — OEA's ADB bridge suspended the app and Android's package state confirmed it; restore was also verified.\nApp: $pkg\nSuspend output: ${freezeCommand.second.ifBlank { "(no output)" }}\nRestore output: ${restoreCommand.second.ifBlank { "(no output)" }}"
+                                else ->
+                                    "RESTORE FAILED — ADB suspension was accepted, but restoration was not verified. Open Android App info for $pkg and restore/unsuspend it now.\nRestore output: ${restoreCommand.second}\nState check: ${restoreState?.toString() ?: "unreadable"}"
                             }
+                        } else {
+                            val restoreCommand = OeaAdbAuthority.runShell("cmd package unsuspend --user 0 $pkg")
+                            val restored = restoreCommand.first && verifyAdbSuspended(pkg, expected = false) == true
+                            "VERIFICATION FAILED — Android did not confirm the suspended state. Immediate restore ${if (restored) "was verified" else "could not be verified"}.\nApp: $pkg\nSuspend output: ${freezeCommand.second}\nRestore output: ${restoreCommand.second}"
                         }
                     }
-                    setBusy(false, outcome)
-                    refreshStatus(outcome)
                 }
+                setBusy(false, outcome)
+                refreshStatus(outcome)
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
     }
 
     /** null means Android's per-user package state could not be read; otherwise returns whether it matches. */
@@ -458,99 +454,74 @@ class OeaAuthorityActivity : Activity() {
                 OeaAccessDoctor.examine(this@OeaAuthorityActivity)
             }
             setBusy(false, "Permission check complete. Select a finding to run its existing repair flow.")
-            val labels = findings.map { finding ->
-                "${finding.privilege.name.replace('_', ' ')} — ${finding.state.name.replace('_', ' ')}"
-            }.toTypedArray()
-            AlertDialog.Builder(this@OeaAuthorityActivity)
-                .setTitle("OEA permission diagnostics")
-                .setItems(labels) { _, which ->
-                    val finding = findings[which]
-                    AlertDialog.Builder(this@OeaAuthorityActivity)
-                        .setTitle(finding.privilege.name.replace('_', ' '))
-                        .setMessage("${finding.state.name.replace('_', ' ')}\n\nEvidence: ${finding.evidence}\n\nNext step: ${finding.advice}" +
-                            (finding.command?.let { "\n\nSupported repair command: $it" } ?: "\n\nNo shell repair command is available for this permission."))
-                        .setPositiveButton("Run repair / open Settings") { _, _ ->
-                            OeaPrivileges.grant(this@OeaAuthorityActivity, finding.privilege) { result ->
-                                val message = "${finding.privilege.name.replace('_', ' ')}: ${result.kind.name}\n${result.message}"
-                                refreshStatus(message)
-                                toast(message)
-                            }
-                        }
-                        .setNegativeButton("Close", null)
-                        .show()
+            val labels = findings.map { finding -> finding.privilege.name.replace('_', ' ') }
+            val subs = findings.map { finding -> finding.state.name.replace('_', ' ') }
+            kit.choose("Permission diagnostics", "Select any permission to inspect and run its repair flow", labels, -1, subs) { which ->
+                val finding = findings[which]
+                val detail = "${finding.state.name.replace('_', ' ')}\n\nEvidence: ${finding.evidence}\n\nNext step: ${finding.advice}" +
+                    (finding.command?.let { "\n\nRepair command: $it" } ?: "")
+                kit.confirm(finding.privilege.name.replace('_', ' '), detail, "Repair / Settings", negative = "Close") {
+                    OeaPrivileges.grant(this@OeaAuthorityActivity, finding.privilege) { result ->
+                        val message = "${finding.privilege.name.replace('_', ' ')}: ${result.kind.name}\n${result.message}"
+                        refreshStatus(message)
+                        toast(message)
+                    }
                 }
-                .setPositiveButton("Close", null)
-                .show()
+            }
         }
     }
 
     private fun refreshStatus(lastResult: String? = null) {
         val status = OeaAdbAuthority.status(this)
         statusText.text = if (lastResult.isNullOrBlank()) status.note else "$lastResult\n\n${status.note}"
-        statusText.setTextColor(if (status.connected) Color.rgb(113, 220, 165) else if (!lastResult.isNullOrBlank()) inkColor else mutedColor)
+        statusText.setTextColor(if (status.connected) palette.success else if (!lastResult.isNullOrBlank()) palette.text else palette.textSecondary)
         if (status.host != null && hostField.text.isNullOrBlank()) hostField.setText(status.host)
         if (status.port != null && connectPortField.text.isNullOrBlank()) connectPortField.setText(status.port.toString())
         reconnectButton.isEnabled = status.configured
+        reconnectButton.alpha = if (status.configured) 1f else 0.5f
         forgetButton.isEnabled = status.configured
+        forgetButton.alpha = if (status.configured) 1f else 0.5f
     }
 
     private fun setBusy(busy: Boolean, message: String) {
         pairButton.isEnabled = !busy
-        reconnectButton.isEnabled = !busy && OeaAdbAuthority.status(this).configured
+        pairButton.alpha = if (busy) 0.55f else 1f
+        val canReconnect = !busy && OeaAdbAuthority.status(this).configured
+        reconnectButton.isEnabled = canReconnect
+        reconnectButton.alpha = if (canReconnect) 1f else 0.5f
         statusText.text = message
-        statusText.setTextColor(if (busy) accentColor else inkColor)
+        statusText.setTextColor(if (busy) palette.accent else palette.text)
     }
 
-    private fun field(label: String, hint: String): EditText {
-        val input = EditText(this).apply {
-            this.hint = hint
-            setHintTextColor(mutedColor)
-            setTextColor(inkColor)
-            textSize = 15f
-            isSingleLine = true
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rounded(panelColor)
+    private fun authField(label: String, hint: String, numeric: Boolean = false, password: Boolean = false): EditText =
+        kit.field(hint, "", numeric = numeric, password = password).apply {
+            background = kit.rounded(palette.background, 16, palette.stroke, 1)
             contentDescription = label
             setSelectAllOnFocus(false)
-        }
-        input.layoutParams = LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(9) }
-        return input
-    }
-
-    private fun card(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(15), dp(15), dp(15), dp(15))
-        background = rounded(panelColor)
-        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) }
-    }
-
-    private fun button(label: String, action: () -> Unit): Button = Button(this).apply {
-        text = label
-        isAllCaps = false
-        textSize = 14f
-        setTextColor(inkColor)
-        setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(48, 77, 115)))
-        setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(5) }
-    }
-
-    private fun text(value: String, size: Int, color: Int, bold: Boolean): TextView = TextView(this).apply {
-        text = value
-        textSize = size.toFloat()
-        setTextColor(color)
-        if (bold) setTypeface(typeface, Typeface.BOLD)
-        gravity = Gravity.START
-        setLineSpacing(dp(2).toFloat(), 1f)
-    }
-
-    private fun rounded(color: Int): android.graphics.drawable.Drawable =
-        android.graphics.drawable.GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = dp(18).toFloat()
-            setStroke(dp(1), Color.rgb(47, 60, 79))
+            if (!numeric && !password) inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(9) }
         }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun showReportSheet(title: String, report: String) {
+        kit.sheet(title, null) { panel, dialog ->
+            val body = kit.text(report, 12.5f, palette.text).apply {
+                setTextIsSelectable(true)
+                setLineSpacing(kit.dpf(2f), 1f)
+                setPadding(kit.dp(14), kit.dp(12), kit.dp(14), kit.dp(14))
+                background = kit.rounded(palette.card, 18, palette.stroke, 1)
+            }
+            panel.addView(kit.boundedScroll(body, 0.58f), LinearLayout.LayoutParams(-1, -2))
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Close") { dialog.dismiss() },
+                kit.primaryButton("Copy") {
+                    dialog.dismiss()
+                    getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(title, report))
+                    toastShort("Report copied")
+                }
+            ))
+        }
+    }
+
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     private fun toastShort(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 

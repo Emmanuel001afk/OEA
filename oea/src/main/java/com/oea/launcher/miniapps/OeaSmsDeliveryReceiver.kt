@@ -91,7 +91,7 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
         }.getOrNull() ?: return
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, CHANNEL) else Notification.Builder(context)
         val notification = builder
-            .setSmallIcon(R.drawable.ic_oea_messaging)
+            .setSmallIcon(R.drawable.oic_send)
             .setContentTitle(sender.ifBlank { "New message" })
             .setContentText(body.take(120))
             .setStyle(Notification.BigTextStyle().bigText(body))
@@ -100,7 +100,7 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setPublicVersion(
                 (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, CHANNEL) else Notification.Builder(context))
-                    .setSmallIcon(R.drawable.ic_oea_messaging)
+                    .setSmallIcon(R.drawable.oic_send)
                     .setContentTitle("New message")
                     .setContentText("Open OEA to view")
                     .build()
