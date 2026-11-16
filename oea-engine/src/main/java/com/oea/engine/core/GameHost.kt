@@ -93,7 +93,7 @@ class GameHost(
         game.attach(this)
         graphics.hud = Hud(graphics, input)
         val savedOrient = runCatching {
-            activity.getSharedPreferences("oea_game_${descriptor.id}", android.content.Context.MODE_PRIVATE)
+            activity.getSharedPreferences("oea_game_${descriptor.id}", Context.MODE_PRIVATE)
                 .getString("screen_orientation", null)
         }.getOrNull()
         runCatching {
