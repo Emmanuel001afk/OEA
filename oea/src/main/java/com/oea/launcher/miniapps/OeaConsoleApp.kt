@@ -473,7 +473,7 @@ object OeaConsoleApp {
                 requested.forEachIndexed { index, permission ->
                     val label = sensitive[permission] ?: return@forEachIndexed
                     val flags = info.requestedPermissionsFlags?.getOrNull(index) ?: 0
-                    if (permission == "android.permission.SYSTEM_ALERT_WINDOW" || flags and PackageManager.REQUESTED_PERMISSION_GRANTED != 0) granted.add(label)
+                    if (permission == "android.permission.SYSTEM_ALERT_WINDOW" || flags and android.content.pm.PackageInfo.REQUESTED_PERMISSION_GRANTED != 0) granted.add(label)
                 }
                 val accessibility = info.services?.any { it.permission == "android.permission.BIND_ACCESSIBILITY_SERVICE" } == true
                 if (accessibility) granted.add("declares an accessibility service (not necessarily enabled)")
