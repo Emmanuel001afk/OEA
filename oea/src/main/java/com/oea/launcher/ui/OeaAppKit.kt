@@ -365,7 +365,7 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         val body: LinearLayout,
         val nav: BottomNav?
     ) {
-        fun resetScroll() = kit.resetScroll(scroll)
+        fun resetScroll() = this@OeaAppKit.resetScroll(scroll)
     }
 
     fun appShell(
@@ -390,14 +390,14 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             clipToPadding = false
         }
-        val body = kit.scrollSafeColumn(scroll).apply {
+        val body = scrollSafeColumn(scroll).apply {
             setPadding(dp(18), dp(4), dp(18), dp(24))
         }
         scroll.addView(body, FrameLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         val nav = if (navItems.isNotEmpty()) {
             bottomNav(navItems, initialNav) { id ->
-                kit.resetScroll(scroll)
+                this@OeaAppKit.resetScroll(scroll)
                 onNav(id)
             }.also { root.addView(it.root, LinearLayout.LayoutParams(-1, -2)) }
         } else null

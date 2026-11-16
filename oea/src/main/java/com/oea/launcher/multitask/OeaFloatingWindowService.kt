@@ -28,6 +28,7 @@ import com.oea.launcher.R
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.multitask.projection.OeaLiveWindowManager
 import com.oea.launcher.multitask.projection.OeaLiveWindows
+import com.oea.launcher.multitask.projection.OeaProjectionPolicy
 import kotlin.math.abs
 
 /**

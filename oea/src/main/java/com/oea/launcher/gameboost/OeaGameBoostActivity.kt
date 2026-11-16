@@ -214,7 +214,7 @@ class OeaGameBoostActivity : Activity() {
 
     private fun renderContent() {
         scroll?.let {
-            tabScrollY[activeTab] = if (::kit.isInitialized) kit.kit.currentScrollY(it) else it.scrollY
+            tabScrollY[activeTab] = if (::kit.isInitialized) kit.currentScrollY(it) else it.scrollY
         }
         if (activeTab !in setOf("boost", "games", "controls")) activeTab = "boost"
         palette = gamePalette()
@@ -243,7 +243,7 @@ class OeaGameBoostActivity : Activity() {
             ),
             initialNav = activeTab
         ) { next ->
-            scroll?.let { tabScrollY[activeTab] = kit.kit.currentScrollY(it) }
+            scroll?.let { tabScrollY[activeTab] = kit.currentScrollY(it) }
             activeTab = next
             scroll = null
             render()
@@ -295,7 +295,7 @@ class OeaGameBoostActivity : Activity() {
         if (oldCount > 0) rootHost.removeViews(0, oldCount)
         scroll = shell.scroll
         val y = tabScrollY[activeTab] ?: 0
-        if (y > 0) kit.kit.restoreScroll(shell.scroll, y)
+        if (y > 0) kit.restoreScroll(shell.scroll, y)
         if (activeTab == "boost") updateStats()
     }
 

@@ -160,7 +160,7 @@ class OeaThemesActivity : Activity() {
         if (screen == SCREEN_HOME) "$SCREEN_HOME:$homeTab" else screen
 
     private fun navigate(screen: String) {
-        currentScroll?.let { scrollPositions[scrollKey()] = kit.kit.currentScrollY(it) }
+        currentScroll?.let { scrollPositions[scrollKey()] = kit.currentScrollY(it) }
         stack.addLast(current)
         current = screen
         scrollPositions.remove(scrollKey(screen))
@@ -174,7 +174,7 @@ class OeaThemesActivity : Activity() {
     }
 
     private fun rerender() {
-        currentScroll?.let { scrollPositions[scrollKey()] = kit.kit.currentScrollY(it) }
+        currentScroll?.let { scrollPositions[scrollKey()] = kit.currentScrollY(it) }
         show(current)
     }
 
@@ -210,7 +210,7 @@ class OeaThemesActivity : Activity() {
         setContentView(page.root)
         currentScroll = page.scroll
         val y = scrollPositions[scrollKey()] ?: 0
-        if (y > 0) kit.kit.restoreScroll(page.scroll, y)
+        if (y > 0) kit.restoreScroll(page.scroll, y)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
@@ -239,7 +239,7 @@ class OeaThemesActivity : Activity() {
             ),
             initialNav = homeTab
         ) { nextTab ->
-            currentScroll?.let { scrollPositions[scrollKey()] = kit.kit.currentScrollY(it) }
+            currentScroll?.let { scrollPositions[scrollKey()] = kit.currentScrollY(it) }
             homeTab = nextTab
             currentScroll = null
             showHome()
@@ -365,7 +365,7 @@ class OeaThemesActivity : Activity() {
         setContentView(shell.root)
         currentScroll = shell.scroll
         val y = scrollPositions[scrollKey()] ?: 0
-        if (y > 0) kit.kit.restoreScroll(shell.scroll, y)
+        if (y > 0) kit.restoreScroll(shell.scroll, y)
     }
 
     private fun showHomeOptions(applied: OeaThemeSpec?) {

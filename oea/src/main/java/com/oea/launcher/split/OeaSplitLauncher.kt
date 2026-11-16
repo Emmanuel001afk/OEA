@@ -12,6 +12,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.widget.Toast
 import com.oea.launcher.assistant.OeaAssistant
+import com.oea.launcher.multitask.OeaMultitaskIntents
 
 /**
  * Opens two apps side by side using Android's own split screen.

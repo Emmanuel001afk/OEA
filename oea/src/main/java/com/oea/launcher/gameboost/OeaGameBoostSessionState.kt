@@ -2,6 +2,7 @@ package com.oea.launcher.gameboost
 
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 
 /**
  * What a Game Boost session takes from the phone — and what it owes back.

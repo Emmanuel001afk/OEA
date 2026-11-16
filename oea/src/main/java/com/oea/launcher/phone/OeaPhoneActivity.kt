@@ -178,7 +178,7 @@ class OeaPhoneActivity : Activity() {
         ) { id ->
             val changed = selectedTab != id
             selectedTab = id
-            if (changed && ::listScroll.isInitialized) kit.kit.resetScroll(listScroll)
+            if (changed && ::listScroll.isInitialized) kit.resetScroll(listScroll)
             if (id != TAB_CONTACTS && ::searchField.isInitialized) kit.hideKeyboard(searchField.editor)
             renderActiveTab()
         }
@@ -439,7 +439,7 @@ class OeaPhoneActivity : Activity() {
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             clipToPadding = false
         }
-        list = kit.kit.scrollSafeColumn(listScroll).apply {
+        list = kit.scrollSafeColumn(listScroll).apply {
             setPadding(kit.dp(16), kit.dp(4), kit.dp(16), kit.dp(20))
         }
         listScroll.addView(list, FrameLayout.LayoutParams(-1, -2))

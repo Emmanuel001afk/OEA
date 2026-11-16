@@ -909,8 +909,10 @@ object OeaMessagingApp {
                     val sent = ArrayList<android.app.PendingIntent>(parts.size)
                     val delivered = ArrayList<android.app.PendingIntent>(parts.size)
                     repeat(parts.size) {
-                        sent.add(pendingIntent(ctx, sentAction, 200 + it))
-                        delivered.add(pendingIntent(ctx, deliveredAction, 300 + it))
+                        // pendingIntent() yields null when the caller did not ask
+                        // for a report, and it does so for every part or none.
+                        pendingIntent(ctx, sentAction, 200 + it)?.let { sent.add(it) }
+                        pendingIntent(ctx, deliveredAction, 300 + it)?.let { delivered.add(it) }
                     }
                     manager.sendMultipartTextMessage(to, null, parts, sent, delivered)
                 }
@@ -2288,7 +2290,7 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
                 kit.note(results, "No contact or conversation matches “$trimmed”.")
                 return
             }
-            results.addView(kit.listHeader(results, if (trimmed.isBlank()) "Recent" else "Matches"))
+            results.addView(kit.listHeader(if (trimmed.isBlank()) "Recent" else "Matches"))
             list.forEach { (address, title) ->
                 val subtitle = if (title == address) "Number" else address
                 kit.row(results, R.drawable.oic_person, title, subtitle) {

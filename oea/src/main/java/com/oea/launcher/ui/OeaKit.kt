@@ -344,7 +344,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             if (scroll.height <= 0) return false
             val child = scroll.getChildAt(0)
             val contentHeight = child?.height ?: 0
-            if (child != null && child.childCount > 0 && contentHeight <= 0) return false
+            if (child is ViewGroup && child.childCount > 0 && contentHeight <= 0) return false
             val viewport = (scroll.height - scroll.paddingTop - scroll.paddingBottom).coerceAtLeast(0)
             val maxY = (contentHeight - viewport).coerceAtLeast(0)
             scroll.scrollTo(0, wanted.coerceIn(0, maxY))
@@ -399,7 +399,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
                         return true
                     }
                     val child = scroll.getChildAt(0)
-                    if (scroll.width > 0 && (child == null || child.width > 0 || child.childCount == 0)) {
+                    if (scroll.width > 0 && (child == null || child.width > 0 || child !is ViewGroup || child.childCount == 0)) {
                         val viewport = (scroll.width - scroll.paddingLeft - scroll.paddingRight).coerceAtLeast(0)
                         val maxX = ((child?.width ?: 0) - viewport).coerceAtLeast(0)
                         scroll.scrollTo(targetX.coerceIn(0, maxX), 0)
