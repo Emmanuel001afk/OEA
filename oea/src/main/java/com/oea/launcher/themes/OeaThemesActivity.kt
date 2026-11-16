@@ -160,9 +160,11 @@ class OeaThemesActivity : Activity() {
         if (screen == SCREEN_HOME) "$SCREEN_HOME:$homeTab" else screen
 
     private fun navigate(screen: String) {
-        currentScroll?.let { scrollPositions[scrollKey()] = it.scrollY }
+        currentScroll?.let { scrollPositions[scrollKey()] = kit.kit.currentScrollY(it) }
         stack.addLast(current)
         current = screen
+        scrollPositions.remove(scrollKey(screen))
+        currentScroll = null
         show(screen)
     }
 
@@ -172,7 +174,7 @@ class OeaThemesActivity : Activity() {
     }
 
     private fun rerender() {
-        currentScroll?.let { scrollPositions[scrollKey()] = it.scrollY }
+        currentScroll?.let { scrollPositions[scrollKey()] = kit.kit.currentScrollY(it) }
         show(current)
     }
 
@@ -208,7 +210,7 @@ class OeaThemesActivity : Activity() {
         setContentView(page.root)
         currentScroll = page.scroll
         val y = scrollPositions[scrollKey()] ?: 0
-        if (y > 0) page.scroll.post { page.scroll.scrollTo(0, y) }
+        if (y > 0) kit.kit.restoreScroll(page.scroll, y)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
@@ -237,8 +239,9 @@ class OeaThemesActivity : Activity() {
             ),
             initialNav = homeTab
         ) { nextTab ->
-            currentScroll?.let { scrollPositions[scrollKey()] = it.scrollY }
+            currentScroll?.let { scrollPositions[scrollKey()] = kit.kit.currentScrollY(it) }
             homeTab = nextTab
+            currentScroll = null
             showHome()
         }
         shell.bar.addAction(R.drawable.oic_add, if (homeTab == "wallpapers") "Add picture" else "Create theme") {
@@ -362,7 +365,7 @@ class OeaThemesActivity : Activity() {
         setContentView(shell.root)
         currentScroll = shell.scroll
         val y = scrollPositions[scrollKey()] ?: 0
-        if (y > 0) shell.scroll.post { shell.scroll.scrollTo(0, y) }
+        if (y > 0) kit.kit.restoreScroll(shell.scroll, y)
     }
 
     private fun showHomeOptions(applied: OeaThemeSpec?) {

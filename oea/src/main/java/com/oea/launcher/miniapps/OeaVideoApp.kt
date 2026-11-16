@@ -808,16 +808,28 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
 
     // -------------------------------------------------------------- interactions
 
+    private fun refreshVideoSelection(targetKey: String? = null) {
+        if (targetKey != null) {
+            val idx = rows.indexOfFirst { it.key == targetKey }
+            if (idx >= 0) {
+                videos.notifyItemChanged(idx, "selection")
+                return
+            }
+        }
+        if (rows.isNotEmpty()) videos.notifyItemRangeChanged(0, rows.size, "selection")
+    }
+
     private fun beginSelection(item: Item) {
         selecting = true
         selected.add(item.key)
-        videos.notifyDataSetChanged()
+        refreshVideoSelection()
         updateSelectionBar()
     }
 
     private fun toggleSelected(item: Item) {
+        val wasEmpty = selected.isEmpty()
         if (!selected.remove(item.key)) selected.add(item.key)
-        videos.notifyDataSetChanged()
+        if (wasEmpty) refreshVideoSelection() else refreshVideoSelection(item.key)
         updateSelectionBar()
     }
 
@@ -826,7 +838,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         selected.clear()
         selection.setCount(0, 0)
         nav.root.visibility = View.VISIBLE
-        videos.notifyDataSetChanged()
+        refreshVideoSelection()
     }
 
     private val selection: OeaAppKit.SelectionBar by lazy {
@@ -873,7 +885,7 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
         selection.selectAll {
             selected.clear()
             rows.forEach { selected.add(it.key) }
-            videos.notifyDataSetChanged()
+            refreshVideoSelection()
             selection.setCount(selected.size, rows.size)
         }
     }
@@ -927,6 +939,24 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
             Holder(kit.coverTile(kit.dp(102), kit.dp(12)))
 
         override fun getItemCount(): Int = rows.size
+
+        override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
+            if (payloads.isNotEmpty() && payloads.all { it == "selection" }) {
+                val item = rows.getOrNull(position) ?: return
+                val isSelected = selecting && selected.contains(item.key)
+                holder.cover.markSelected(isSelected)
+                holder.cover.showStar(OeaMediaLibrary.isFavourite(host, item))
+                holder.cover.root.contentDescription = buildString {
+                    append(item.name.substringBeforeLast('.'))
+                    append(" • ${OeaMediaLibrary.formatDuration(item.durationMs)}")
+                    if (item.album.isNotBlank()) append(" • ${item.album}")
+                    if (isSelected) append(" • selected")
+                    append(if (selecting) ". Double tap to select." else ". Double tap to play.")
+                }
+                return
+            }
+            onBindViewHolder(holder, position)
+        }
 
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val item = rows.getOrNull(position) ?: return

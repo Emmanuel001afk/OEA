@@ -35,17 +35,19 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
 
     override fun build(): View {
         val deck = kit.deck(padBottomDp = 12)
-        val career = careerBlock()
+        val topBar = headerControls()
+        val career = if (deck.wide) null else careerBlock()
         kit.heroBand(
             deck.top,
-            heightDp = 132,
+            heightDp = if (deck.wide) 82 else 124,
             title = "Send Off",
             eyebrow = "Tactical operations · ${rankName(level())}",
             subtitle = "Level ${level()} · ${xp()} XP · ${prefs.getInt("kills_total", 0)} eliminations",
             art = GameArt.hero("arena", scheme),
-            leftInsetDp = 24,
+            leftInsetDp = 20,
             horizontal = deck.wide,
-            footer = career
+            footer = career,
+            topBar = topBar
         )
 
         // ------------------------------------------------------------- left
@@ -166,6 +168,9 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
         section(right, "Shooter settings")
         val tuning = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
         right.addView(tuning, LinearLayout.LayoutParams(-1, -2))
+        valueRow(tuning, "Screen orientation", orientationLabel(host.frontOrientationMode()), "Play upright, widescreen, or follow phone rotation", true) {
+            orientationSheet()
+        }
         valueRow(tuning, "Look & aim", "${sensitivity()} · ADS ${(settings.adsSensitivity * 100).toInt()}%", "Sensitivity, turn limit, invert-Y") {
             aimSheet()
         }
@@ -237,9 +242,61 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
         val button = kit.button("DEPLOY · ${mode.uppercase()}", palette.signal, palette.onAccent) {
             host.frontPlay(com.oea.engine.core.PlayMode.SOLO)
         }
-        button.textSize = 15f
-        button.letterSpacing = 0.06f
+        button.textSize = 14.5f
+        button.letterSpacing = 0.05f
+        button.maxLines = 1
+        button.ellipsize = android.text.TextUtils.TruncateAt.END
         return button
+    }
+
+    private fun orientationLabel(mode: String): String = when (mode) {
+        "portrait" -> "Portrait"
+        "landscape" -> "Landscape"
+        else -> "Auto"
+    }
+
+    private fun headerControls(): View {
+        val bar = LinearLayout(kit.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val back = kit.text("← Exit", 12.5f, palette.text, GameType.medium).apply {
+            setPadding(kit.dp(12), kit.dp(6), kit.dp(12), kit.dp(6))
+            background = kit.ripple(kit.rounded(GameColors.alpha(palette.card, 0xD8), 14, palette.stroke, 1), 14)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Exit Send Off"
+            setOnClickListener { host.frontExit() }
+        }
+        bar.addView(back, LinearLayout.LayoutParams(-2, -2))
+        bar.addView(View(kit.context), LinearLayout.LayoutParams(0, 1, 1f))
+        val mode = host.frontOrientationMode()
+        val rotate = kit.text("⟳ ${orientationLabel(mode)}", 12f, palette.accent, GameType.medium).apply {
+            setPadding(kit.dp(12), kit.dp(6), kit.dp(12), kit.dp(6))
+            background = kit.ripple(kit.rounded(GameColors.alpha(palette.card, 0xD8), 14, GameColors.alpha(palette.accent, 0x66), 1), 14)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Screen orientation: ${orientationLabel(mode)}"
+            setOnClickListener { orientationSheet() }
+        }
+        bar.addView(rotate, LinearLayout.LayoutParams(-2, -2))
+        return bar
+    }
+
+    private fun orientationSheet() {
+        val modes = listOf("auto", "landscape", "portrait")
+        val labels = listOf("Auto (follow phone)", "Landscape (widescreen)", "Portrait (upright)")
+        val details = listOf(
+            "Stays upright when you hold the phone upright, and rotates sideways when auto-rotate is on.",
+            "Widescreen two-column command deck and full horizontal shooter HUD.",
+            "Upright one-hand/two-thumb portrait command deck and adapted portrait HUD."
+        )
+        val current = modes.indexOf(host.frontOrientationMode()).coerceAtLeast(0)
+        kit.choose("Screen orientation", "Choose how Send Off opens and plays", labels, current, details) { pick ->
+            val next = modes[pick]
+            host.frontSetOrientationMode(next)
+            host.frontToast("Screen orientation: ${orientationLabel(next)}")
+        }
     }
 
     // ---------------------------------------------------------------- loadout
@@ -384,7 +441,7 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
     private fun layoutSheet() {
         kit.sheet("Buttons", "Drag any button in a match to move it. These reset the layout.") { panel, dialog ->
             val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
-            val moved = controlKeys.count { prefs.contains("btn_${it}_x") }
+            val moved = controlKeys.count { prefs.contains("btn_${it}_x") || prefs.contains("btn_p_${it}_x") }
             kit.valueRow(
                 body,
                 "Customised buttons",
@@ -396,6 +453,9 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
                     edit.remove("btn_${key}_x")
                     edit.remove("btn_${key}_y")
                     edit.remove("btn_${key}_r")
+                    edit.remove("btn_p_${key}_x")
+                    edit.remove("btn_p_${key}_y")
+                    edit.remove("btn_p_${key}_r")
                 }
                 edit.apply()
                 dialog.dismiss()

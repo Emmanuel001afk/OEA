@@ -595,56 +595,60 @@ class GameKit(
         leftInsetDp: Int = 20,
         horizontal: Boolean = false,
         footer: View? = null,
-        titleSizeSp: Float = if (horizontal) 30f else 34f
+        titleSizeSp: Float = if (horizontal) 26f else 32f,
+        topBar: View? = null
     ): FrameLayout {
-        val band = FrameLayout(context).apply { clipToOutline = true }
-        band.addView(
-            View(context).apply { background = art },
-            FrameLayout.LayoutParams(-1, -1)
-        )
-        // A scrim from the band's foot upwards, so the art stays visible but
-        // the title, the numbers and the buttons always have contrast to sit on.
-        val shade = FrameLayout(context).apply {
-            background = GameArt.scrim(palette.background, 0xD8)
+        // Composite the artwork and bottom contrast scrim directly on the band
+        // background. Child Views with MATCH_PARENT (-1) inside a WRAP_CONTENT
+        // FrameLayout force Android to expand the band to the entire viewport,
+        // starving the scrolling deck and pushing the bottom action bar off-screen.
+        val band = FrameLayout(context).apply {
+            clipToOutline = true
+            background = android.graphics.drawable.LayerDrawable(
+                arrayOf(art, GameArt.scrim(palette.background, 0xDC))
+            )
         }
-        band.addView(shade, FrameLayout.LayoutParams(-1, -1))
 
+        val vPadTop = dp(if (horizontal) 10 else 14)
+        val vPadBottom = dp(if (horizontal) 10 else 16)
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(leftInsetDp), dp(18), dp(20), dp(18))
+            setPadding(dp(leftInsetDp), vPadTop, dp(20), vPadBottom)
             gravity = Gravity.BOTTOM
+        }
+        if (topBar != null) {
+            column.addView(topBar, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(if (horizontal) 6 else 10)
+            })
         }
         if (!eyebrow.isNullOrBlank()) {
             column.addView(
                 text(eyebrow.uppercase(), 10.5f, palette.accent, GameType.medium).apply {
-                    letterSpacing = 0.22f
+                    letterSpacing = 0.2f
                 }
             )
         }
         column.addView(
             text(title, titleSizeSp, palette.text, paletteTypeface).apply {
                 letterSpacing = -0.02f
-                setPadding(0, dp(4), 0, 0)
+                setPadding(0, dp(if (horizontal) 2 else 4), 0, 0)
             }
         )
         if (!subtitle.isNullOrBlank()) {
             column.addView(
-                text(subtitle, 13f, palette.textSecondary).apply {
-                    setPadding(0, dp(4), 0, 0)
+                text(subtitle, if (horizontal) 12f else 13f, palette.textSecondary).apply {
+                    setPadding(0, dp(if (horizontal) 2 else 4), 0, 0)
                     setLineSpacing(dpf(2f), 1f)
                 }
             )
         }
         if (footer != null) {
-            footer.setPadding(0, dp(12), 0, 0)
+            footer.setPadding(0, dp(if (horizontal) 6 else 10), 0, 0)
             column.addView(footer, LinearLayout.LayoutParams(-1, -2))
         }
-        band.addView(column, FrameLayout.LayoutParams(-1, -1))
-        // The height is a floor, not a cage: the band grows if the footer (a
-        // record strip, a squad line) needs more room, and it never pushes its
-        // own type under the status bar — the page or the deck has already
-        // padded for the bars.
-        band.minimumHeight = dp(heightDp)
+        val minHeightDp = if (horizontal) heightDp.coerceAtMost(96) else heightDp
+        column.minimumHeight = dp(minHeightDp)
+        band.addView(column, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         parent.addView(band, LinearLayout.LayoutParams(-1, -2))
         return band
     }
@@ -912,19 +916,25 @@ class GameKit(
             column.addView(verticalScroll(stack), LinearLayout.LayoutParams(-1, 0, 1f))
         }
 
+        column.addView(
+            View(context).apply { setBackgroundColor(palette.stroke) },
+            LinearLayout.LayoutParams(-1, maxOf(1, dp(1)))
+        )
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(10), dp(16), dp(padBottomDp))
-            setBackgroundColor(GameColors.blend(palette.background, palette.card, 0.85f))
+            setPadding(dp(16), dp(if (wide) 8 else 10), dp(16), dp(if (wide) 8 else padBottomDp))
+            setBackgroundColor(GameColors.blend(palette.background, palette.card, 0.9f))
         }
         column.addView(bar, LinearLayout.LayoutParams(-1, -2))
         root.addView(column, FrameLayout.LayoutParams(-1, -1))
 
         val base = intArrayOf(column.paddingLeft, column.paddingTop, column.paddingRight, column.paddingBottom)
+        val barBottom = bar.paddingBottom
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = GameInsets.bars(insets)
             column.setPadding(base[0] + bars[0], base[1] + bars[1], base[2] + bars[2], base[3])
+            bar.setPadding(bar.paddingLeft, bar.paddingTop, bar.paddingRight, barBottom + bars[3])
             insets
         }
         return Deck(root, top, left, right, bar, wide)

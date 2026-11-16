@@ -152,17 +152,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         )
         kit = null
         front = null
-        // Lock the front screen to the game's own orientation. A shooter's
-        // command deck is a widescreen deck and must not open in portrait and
-        // then flip when the match starts; a runner and a chess board are
-        // portrait apps from the icon in.
-        runCatching {
-            requestedOrientation = when (descriptor.orientation) {
-                com.oea.engine.core.GameOrientation.PORTRAIT -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                com.oea.engine.core.GameOrientation.LANDSCAPE -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                com.oea.engine.core.GameOrientation.ANY -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
-            }
-        }
+        // Apply the player's chosen orientation (defaulting Send Off to full-user
+        // auto so opening from a portrait home screen never slams the phone
+        // sideways uninvited, while one tap locks Landscape or Portrait anytime).
+        applyScreenOrientation(descriptor)
         GameInsets.edgeToEdge(window)
         descriptor.options.forEach { option ->
             chosenOptions[option.id] = OeaEngine.settings.lastOption(descriptor.id, option.id)
@@ -221,8 +214,92 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
      * falls back to the generic console page, which is what a third-party game
      * written against the engine's public API gets by default.
      */
-    private fun showHome() {
+    private var currentFrontView: View? = null
+
+    private fun savedOrientationMode(d: GameDescriptor): String {
+        val raw = runCatching { gamePrefs().getString("screen_orientation", null) }.getOrNull()
+        if (raw == "auto" || raw == "portrait" || raw == "landscape") return raw
+        return when (d.orientation) {
+            com.oea.engine.core.GameOrientation.PORTRAIT -> "portrait"
+            com.oea.engine.core.GameOrientation.LANDSCAPE -> if (d.id == "arena") "auto" else "landscape"
+            com.oea.engine.core.GameOrientation.ANY -> "auto"
+        }
+    }
+
+    private fun applyScreenOrientation(d: GameDescriptor) {
+        val mode = savedOrientationMode(d)
+        runCatching {
+            requestedOrientation = when (mode) {
+                "portrait" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                "landscape" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            }
+        }
+    }
+
+    private fun collectScrollOffsets(root: View?): List<Int> {
+        if (root == null) return emptyList()
+        val collected = ArrayList<Int>(4)
+        fun walk(v: View) {
+            if (v is android.widget.ScrollView) {
+                collected.add(v.scrollY)
+                return
+            }
+            if (v is android.view.ViewGroup) {
+                for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+        }
+        walk(root)
+        return collected
+    }
+
+    private fun restoreScrollOffsets(root: View, offsets: List<Int>) {
+        if (offsets.isEmpty() || offsets.all { it <= 0 }) return
+        val scrolls = ArrayList<android.widget.ScrollView>(offsets.size)
+        fun walk(v: View) {
+            if (v is android.widget.ScrollView) {
+                scrolls.add(v)
+                return
+            }
+            if (v is android.view.ViewGroup) {
+                for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+        }
+        walk(root)
+        if (scrolls.isEmpty()) return
+        val vto = root.viewTreeObserver
+        if (!vto.isAlive) return
+        vto.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            private var attempts = 0
+            override fun onPreDraw(): Boolean {
+                attempts++
+                var ready = true
+                scrolls.forEachIndexed { idx, sv ->
+                    val target = offsets.getOrElse(idx) { 0 }
+                    if (target > 0) {
+                        val child = sv.getChildAt(0)
+                        if (sv.height <= 0 || (child != null && child.height <= 0)) {
+                            ready = false
+                        } else {
+                            val viewport = (sv.height - sv.paddingTop - sv.paddingBottom).coerceAtLeast(0)
+                            val maxY = ((child?.height ?: 0) - viewport).coerceAtLeast(0)
+                            sv.scrollTo(0, target.coerceIn(0, maxY))
+                        }
+                    }
+                }
+                if (ready || attempts >= 6) {
+                    val obs = root.viewTreeObserver
+                    if (obs.isAlive) obs.removeOnPreDrawListener(this)
+                }
+                return true
+            }
+        })
+    }
+
+    private fun showHome(animate: Boolean = true, preserveScroll: Boolean = false) {
         val d = descriptor ?: return
+        applyScreenOrientation(d)
+        val savedScrolls = if (preserveScroll) collectScrollOffsets(currentFrontView) else emptyList()
         val page = try {
             val built = frontFor(d.id)?.build() ?: genericHome(d)
             built
@@ -232,12 +309,21 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
             // dropping the player on a blank window.
             runCatching { genericHome(d) }.getOrElse { throw t }
         }
+        currentFrontView = page
         setContentView(page)
-        if (toolkit().reducedMotion) {
+        if (preserveScroll) restoreScrollOffsets(page, savedScrolls)
+        if (!animate || preserveScroll || toolkit().reducedMotion) {
             page.alpha = 1f
         } else {
             page.alpha = 0f
             page.animate().alpha(1f).setDuration(180L).start()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (host == null && descriptor != null && !isFinishing) {
+            runCatching { showHome(animate = false, preserveScroll = false) }
         }
     }
 
@@ -359,9 +445,30 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
     override fun frontRebuild() {
         if (host != null) return
         try {
-            showHome()
+            showHome(animate = false, preserveScroll = true)
         } catch (_: Throwable) {
             // A rebuild must never take the app down; the previous screen stays.
+        }
+    }
+
+    override fun frontExit() {
+        runCatching { finish() }
+    }
+
+    override fun frontOrientationMode(): String {
+        val d = descriptor ?: return "auto"
+        return savedOrientationMode(d)
+    }
+
+    override fun frontSetOrientationMode(mode: String) {
+        val clean = when (mode) {
+            "portrait", "landscape" -> mode
+            else -> "auto"
+        }
+        runCatching { gamePrefs().edit().putString("screen_orientation", clean).apply() }
+        descriptor?.let { applyScreenOrientation(it) }
+        if (host == null) {
+            runCatching { showHome(animate = false, preserveScroll = false) }
         }
     }
 
@@ -1181,6 +1288,34 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
                             picked = true
                             dialog.dismiss()
                             onPick(items[index].id)
+                        },
+                        LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
+                    )
+                }
+                if (host != null && descriptor?.id == "arena" && items.any { it.id == "resume" }) {
+                    val cur = frontOrientationMode()
+                    val next = when (cur) {
+                        "auto" -> "landscape"
+                        "landscape" -> "portrait"
+                        else -> "auto"
+                    }
+                    val curName = when (cur) {
+                        "landscape" -> "Landscape"
+                        "portrait" -> "Portrait"
+                        else -> "Auto"
+                    }
+                    val nextName = when (next) {
+                        "landscape" -> "Landscape"
+                        "portrait" -> "Portrait"
+                        else -> "Auto"
+                    }
+                    list.addView(
+                        k.optionRow("Screen orientation · $curName", "Tap to switch to $nextName", false) {
+                            picked = true
+                            dialog.dismiss()
+                            frontSetOrientationMode(next)
+                            toast("Screen orientation: $nextName")
+                            onPick("resume")
                         },
                         LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
                     )

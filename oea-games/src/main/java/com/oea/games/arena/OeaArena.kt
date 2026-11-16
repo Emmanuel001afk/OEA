@@ -166,22 +166,77 @@ class OeaArena : OeaGame() {
         "smoke" to 28f, "mount" to 28f, "sprint" to 28f, "prone" to 28f,
     )
 
-    private fun saveButtonLayout() {
+    private val btnPortraitDefaults: Map<String, FloatArray> = mapOf(
+        "fire" to floatArrayOf(0.81f, 0.75f), "fire2" to floatArrayOf(0.14f, 0.56f),
+        "ads" to floatArrayOf(0.64f, 0.65f), "jump" to floatArrayOf(0.89f, 0.61f),
+        "crouch" to floatArrayOf(0.91f, 0.85f), "reload" to floatArrayOf(0.62f, 0.79f),
+        "heal" to floatArrayOf(0.54f, 0.92f), "pickup" to floatArrayOf(0.56f, 0.55f),
+        "stun" to floatArrayOf(0.12f, 0.92f), "frag" to floatArrayOf(0.26f, 0.92f),
+        "smoke" to floatArrayOf(0.40f, 0.92f), "mount" to floatArrayOf(0.14f, 0.45f),
+        "sprint" to floatArrayOf(0.89f, 0.49f), "prone" to floatArrayOf(0.74f, 0.91f),
+    )
+    private val btnPortraitRadius: Map<String, Float> = mapOf(
+        "fire" to 38f, "fire2" to 26f, "ads" to 25f, "jump" to 25f, "crouch" to 22f,
+        "reload" to 22f, "heal" to 22f, "pickup" to 26f, "stun" to 22f, "frag" to 22f,
+        "smoke" to 22f, "mount" to 23f, "sprint" to 23f, "prone" to 22f,
+    )
+    private var appliedPortraitLayout: Boolean? = null
+
+    private fun layoutPrefix(portrait: Boolean = appliedPortraitLayout == true): String =
+        if (portrait) "btn_p_" else "btn_"
+
+    private fun applyOrientationControls(portrait: Boolean) {
+        if (appliedPortraitLayout == portrait) return
+        appliedPortraitLayout = portrait
+        val prefix = layoutPrefix(portrait)
+        val defaults = if (portrait) btnPortraitDefaults else btnDefaults
+        val radii = if (portrait) btnPortraitRadius else btnDefaultRadius
         for ((b, key) in controlButtons) {
-            ctx.storage.putFloat("btn_${key}_x", b.anchorX)
-            ctx.storage.putFloat("btn_${key}_y", b.anchorY)
-            ctx.storage.putFloat("btn_${key}_r", b.radiusDp)
+            val d = defaults[key]
+            val defX = d?.get(0) ?: b.anchorX
+            val defY = d?.get(1) ?: b.anchorY
+            val defR = radii[key] ?: 26f
+            b.anchorX = ctx.storage.getFloat("${prefix}${key}_x", defX)
+            b.anchorY = ctx.storage.getFloat("${prefix}${key}_y", defY)
+            b.radiusDp = ctx.storage.getFloat("${prefix}${key}_r", defR)
+        }
+        if (portrait) {
+            joystick.region = floatArrayOf(0f, 0.52f, 0.48f, 0.89f)
+            joystick.radiusDp = 52f
+            joystick.homeX = 0.21f
+            joystick.homeY = 0.73f
+            look.region = floatArrayOf(0f, 0.10f, 1f, 0.89f)
+            ctrlAds.anchorX = 0.24f; ctrlReset.anchorX = 0.50f; ctrlDone.anchorX = 0.76f
+        } else {
+            joystick.region = floatArrayOf(0f, 0.32f, 0.42f, 1f)
+            joystick.radiusDp = 60f
+            joystick.homeX = 0.13f
+            joystick.homeY = 0.58f
+            look.region = floatArrayOf(0.42f, 0.12f, 1f, 1f)
+            ctrlAds.anchorX = 0.42f; ctrlReset.anchorX = 0.58f; ctrlDone.anchorX = 0.74f
+        }
+    }
+
+    private fun saveButtonLayout() {
+        val prefix = layoutPrefix()
+        for ((b, key) in controlButtons) {
+            ctx.storage.putFloat("${prefix}${key}_x", b.anchorX)
+            ctx.storage.putFloat("${prefix}${key}_y", b.anchorY)
+            ctx.storage.putFloat("${prefix}${key}_r", b.radiusDp)
         }
         ctx.storage.putInt("ads_hold", if (adsHoldMode) 1 else 0)
     }
 
     private fun resetButtonLayout() {
+        val portrait = appliedPortraitLayout == true
+        val defaults = if (portrait) btnPortraitDefaults else btnDefaults
+        val radii = if (portrait) btnPortraitRadius else btnDefaultRadius
         for ((b, key) in controlButtons) {
-            val d = btnDefaults[key]
+            val d = defaults[key]
             if (d != null) {
                 b.anchorX = d[0]; b.anchorY = d[1]
             }
-            b.radiusDp = btnDefaultRadius[key] ?: 28f
+            b.radiusDp = radii[key] ?: 28f
         }
         saveButtonLayout()
     }
@@ -1099,6 +1154,7 @@ class OeaArena : OeaGame() {
     override fun onUpdate(dt: Float) {
         val g = ctx.graphics
         val w = g.width.toFloat(); val h = g.height.toFloat(); val d = g.density
+        if (w > 0f && h > 0f) applyOrientationControls(w < h)
         val me = local
         val alive = me?.alive == true && !matchOver
         val sl = g.safeInsets[0].toFloat(); val sr = g.safeInsets[2].toFloat()
@@ -1198,9 +1254,16 @@ class OeaArena : OeaGame() {
         // All gameplay button state stands down while the controls screen is open —
         // taps there move buttons, not the soldier.
         if (!controlsOpen) {
-            if (adsBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) adsOn = !adsOn
-            if (crouchBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_C) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_B)) crouchOn = !crouchOn
-            if (jumpBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SPACE) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_A)) { jumpLatch = true; crouchOn = false }
+            if (adsHoldMode) {
+                if (adsBtn.justPressed || adsBtn.justReleased) adsOn = adsBtn.pressed
+                if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) adsOn = !adsOn
+            } else if (adsBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SHIFT_LEFT) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_L2)) {
+                adsOn = !adsOn
+            }
+            if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_C) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_B)) {
+                if (proneOn) { proneOn = false; crouchOn = true } else crouchOn = !crouchOn
+            }
+            if (jumpBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_SPACE) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_A)) { jumpLatch = true; crouchOn = false; proneOn = false }
             if (reloadBtn.justPressed || ctx.input.keys.justPressed(KeyEvent.KEYCODE_R) || gp.justPressed(KeyEvent.KEYCODE_BUTTON_X)) reloadLatch = true
             if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_G) && me?.alive == true && !me.skydiving) grenadeLatch = 0
             if (ctx.input.keys.justPressed(KeyEvent.KEYCODE_H) && me?.alive == true && !me.skydiving) grenadeLatch = 1
@@ -1407,7 +1470,8 @@ class OeaArena : OeaGame() {
         // ADS blends the field of view so the zoom glides in instead of popping.
         val wantAds = if (ads) 1f else 0f
         adsBlend = MathX.damp(adsBlend, wantAds, 14f, dt)
-        camera.fovY = (70f / (1f + (zoom - 1f) * adsBlend)) * MathX.DEG_TO_RAD
+        val baseFov = if (ctx.graphics.width in 1 until ctx.graphics.height) 82f else 70f
+        camera.fovY = (baseFov / (1f + (zoom - 1f) * adsBlend)) * MathX.DEG_TO_RAD
         camera.near = 0.1f
         camera.far = 420f * ctx.graphics.quality.detailDistance.coerceAtLeast(0.7f)
         @Suppress("UNUSED_VARIABLE") val unused = alpha + dt

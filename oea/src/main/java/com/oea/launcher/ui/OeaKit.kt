@@ -314,6 +314,157 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
 
     // ------------------------------------------------------------------ pages
 
+    companion object {
+        private val pendingScrollY = java.util.WeakHashMap<ScrollView, Int>()
+        private val resetScrollSet = java.util.Collections.newSetFromMap(java.util.WeakHashMap<ScrollView, Boolean>())
+    }
+
+    /**
+     * Restore a vertical [ScrollView] offset after measure/layout finishes and
+     * before the first frame draws, so settings toggles and in-place rebuilds
+     * never clamp `scrollY` to 0 or flash the top of the page.
+     */
+    fun restoreScroll(scroll: ScrollView, targetY: Int) {
+        if (targetY <= 0) {
+            pendingScrollY.remove(scroll)
+            return
+        }
+        val alreadyQueued = pendingScrollY.containsKey(scroll)
+        pendingScrollY[scroll] = targetY
+        if (alreadyQueued) return
+        val previousFocus = scroll.descendantFocusability
+        scroll.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        fun applyIfReady(): Boolean {
+            val wanted = pendingScrollY[scroll] ?: return true
+            if (!scroll.isAttachedToWindow) {
+                pendingScrollY.remove(scroll)
+                scroll.descendantFocusability = previousFocus
+                return true
+            }
+            if (scroll.height <= 0) return false
+            val child = scroll.getChildAt(0)
+            val contentHeight = child?.height ?: 0
+            if (child != null && child.childCount > 0 && contentHeight <= 0) return false
+            val viewport = (scroll.height - scroll.paddingTop - scroll.paddingBottom).coerceAtLeast(0)
+            val maxY = (contentHeight - viewport).coerceAtLeast(0)
+            scroll.scrollTo(0, wanted.coerceIn(0, maxY))
+            pendingScrollY.remove(scroll)
+            scroll.post {
+                if (!pendingScrollY.containsKey(scroll)) {
+                    scroll.descendantFocusability = previousFocus
+                }
+            }
+            return true
+        }
+        val vto = scroll.viewTreeObserver
+        if (vto.isAlive) {
+            vto.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+                private var attempts = 0
+                override fun onPreDraw(): Boolean {
+                    attempts++
+                    if (applyIfReady() || attempts >= 8) {
+                        val obs = scroll.viewTreeObserver
+                        if (obs.isAlive) obs.removeOnPreDrawListener(this)
+                        if (pendingScrollY.remove(scroll) != null) {
+                            scroll.descendantFocusability = previousFocus
+                        }
+                    }
+                    return true
+                }
+            })
+        } else {
+            scroll.post {
+                applyIfReady()
+                pendingScrollY.remove(scroll)
+                scroll.descendantFocusability = previousFocus
+            }
+        }
+    }
+
+    /** Current vertical scroll offset, preferring any not-yet-applied restore target. */
+    fun currentScrollY(scroll: ScrollView): Int = pendingScrollY[scroll] ?: scroll.scrollY
+
+    /** Restore a [android.widget.HorizontalScrollView] offset without flashing x=0. */
+    fun restoreHorizontalScroll(scroll: android.widget.HorizontalScrollView, targetX: Int) {
+        if (targetX <= 0) return
+        val vto = scroll.viewTreeObserver
+        if (vto.isAlive) {
+            vto.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+                private var attempts = 0
+                override fun onPreDraw(): Boolean {
+                    attempts++
+                    if (!scroll.isAttachedToWindow || attempts >= 8) {
+                        val obs = scroll.viewTreeObserver
+                        if (obs.isAlive) obs.removeOnPreDrawListener(this)
+                        return true
+                    }
+                    val child = scroll.getChildAt(0)
+                    if (scroll.width > 0 && (child == null || child.width > 0 || child.childCount == 0)) {
+                        val viewport = (scroll.width - scroll.paddingLeft - scroll.paddingRight).coerceAtLeast(0)
+                        val maxX = ((child?.width ?: 0) - viewport).coerceAtLeast(0)
+                        scroll.scrollTo(targetX.coerceIn(0, maxX), 0)
+                        val obs = scroll.viewTreeObserver
+                        if (obs.isAlive) obs.removeOnPreDrawListener(this)
+                    }
+                    return true
+                }
+            })
+        } else {
+            scroll.post { scroll.scrollTo(targetX, 0) }
+        }
+    }
+
+    /** Run [mutate] while holding [scroll]'s current vertical offset steady. */
+    inline fun preserveScroll(scroll: ScrollView, mutate: () -> Unit) {
+        val savedY = currentScrollY(scroll)
+        if (scroll.hasFocus()) scroll.clearFocus()
+        mutate()
+        if (savedY > 0) restoreScroll(scroll, savedY)
+    }
+
+    /** Create a vertical container whose `removeAllViews()` preserves [scroll]'s position automatically. */
+    fun scrollSafeColumn(scroll: ScrollView): LinearLayout = object : LinearLayout(context) {
+        override fun removeAllViews() {
+            val resetFlag = resetScrollSet.remove(scroll)
+            val savedY = if (resetFlag) 0 else currentScrollY(scroll)
+            if (hasFocus()) clearFocus()
+            super.removeAllViews()
+            if (savedY > 0) restoreScroll(scroll, savedY)
+        }
+    }.apply {
+        orientation = LinearLayout.VERTICAL
+    }
+
+    /** Create a horizontal container whose `removeAllViews()` preserves [scroll]'s position automatically. */
+    fun scrollSafeRow(scroll: android.widget.HorizontalScrollView): LinearLayout = object : LinearLayout(context) {
+        override fun removeAllViews() {
+            val savedX = scroll.scrollX
+            if (hasFocus()) clearFocus()
+            super.removeAllViews()
+            if (savedX > 0) restoreHorizontalScroll(scroll, savedX)
+        }
+    }.apply {
+        orientation = LinearLayout.HORIZONTAL
+    }
+
+    /** Explicitly scroll [scroll] back to the top (e.g. when changing tabs). */
+    fun resetScroll(scroll: ScrollView) {
+        pendingScrollY.remove(scroll)
+        resetScrollSet.add(scroll)
+        scroll.scrollTo(0, 0)
+        scroll.post { resetScrollSet.remove(scroll) }
+    }
+
+    /** Refresh a [ListView] adapter while holding the exact top visible row and pixel offset. */
+    fun notifyListStable(list: ListView, adapter: BaseAdapter) {
+        val first = list.firstVisiblePosition
+        val top = list.getChildAt(0)?.top ?: list.paddingTop
+        adapter.notifyDataSetChanged()
+        if (adapter.count > 0 && first >= 0) {
+            list.setSelectionFromTop(first.coerceAtMost(adapter.count - 1), top)
+        }
+    }
+
     /** Full-screen page root: scrolls, pads itself with system-bar insets. */
     class Page(val root: FrameLayout, val scroll: ScrollView, val content: LinearLayout, val header: LinearLayout)
 
@@ -325,8 +476,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             clipToPadding = false
         }
-        val content = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
+        val content = scrollSafeColumn(scroll).apply {
             setPadding(dp(18), dp(12), dp(18), dp(28))
         }
         val header = LinearLayout(context).apply {
@@ -566,6 +716,17 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         isHorizontalScrollBarEnabled = false
         overScrollMode = View.OVER_SCROLL_NEVER
         clipToPadding = false
+        if (child is ViewGroup) {
+            child.setOnHierarchyChangeListener(object : ViewGroup.OnHierarchyChangeListener {
+                override fun onChildViewAdded(parent: View?, added: View?) = Unit
+                override fun onChildViewRemoved(parent: View?, removed: View?) {
+                    val x = this@apply.scrollX
+                    if (x > 0 && child.childCount == 0) {
+                        restoreHorizontalScroll(this@apply, x)
+                    }
+                }
+            })
+        }
         addView(child)
     }
 
@@ -848,7 +1009,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
                 else if (chosen.size < max) chosen.add(key)
                 else android.widget.Toast.makeText(context, "You can choose up to $max apps.", android.widget.Toast.LENGTH_SHORT).show()
                 refreshCounter()
-                adapter.notifyDataSetChanged()
+                notifyListStable(list, adapter)
             }
             search.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit

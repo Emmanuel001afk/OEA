@@ -196,8 +196,10 @@ class OeaCallBlockerActivity : Activity() {
             OeaCallBlockRules.blockUnknown(this)
         ) { next ->
             OeaCallBlockRules.setBlockUnknown(this, next)
-            if (next) OeaCallBlockRules.setEnabled(this, true)
-            render()
+            if (next && !OeaCallBlockRules.enabled(this)) {
+                OeaCallBlockRules.setEnabled(this, true)
+                render()
+            }
         }
 
         kit.sectionTitle(content, "Exemptions")
@@ -216,7 +218,6 @@ class OeaCallBlockerActivity : Activity() {
                 requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS)
             } else {
                 OeaCallBlockRules.setAllowContacts(this, next)
-                render()
             }
         }
         kit.switchRow(
@@ -232,7 +233,6 @@ class OeaCallBlockerActivity : Activity() {
                 requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQUEST_CONTACTS)
             } else {
                 OeaCallBlockRules.setAllowStarred(this, next)
-                render()
             }
         }
         if (!contactsPermission) {
