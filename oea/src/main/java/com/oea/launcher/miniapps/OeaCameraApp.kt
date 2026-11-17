@@ -753,11 +753,10 @@ object OeaCameraApp {
         val timerChip = kit.chip(timer.label, timer != TimerMode.OFF, R.drawable.oic_timer) {}
         val gridChip = kit.chip(grid.label, grid != GridMode.OFF, R.drawable.oic_grid_view) {}
         var exposure = exposureSteps(host)
-        val filterChip = kit.chip(filter.label, filter != FilterMode.NONE, R.drawable.oic_palette) {}
-        val exposureChip = kit.chip(exposureLabel(), exposure != 0, R.drawable.oic_contrast) {}
-
         fun exposureLabel(): String =
             if (exposure == 0) "EV 0" else "EV %+d".format(exposure)
+        val filterChip = kit.chip(filter.label, filter != FilterMode.NONE, R.drawable.oic_palette) {}
+        val exposureChip = kit.chip(exposureLabel(), exposure != 0, R.drawable.oic_contrast) {}
 
         fun refreshChips() {
             aspectChip.text = aspect.label
@@ -2220,19 +2219,26 @@ object OeaCameraApp {
                     "What this camera can record — size and frame rate",
                     value = if (current in qualities) current.label else qualities.first().label
                 ) {
-                    kit.actions(
+                    kit.sheet(
                         "Video quality",
-                        "Only what this phone's camera can actually record is listed",
-                        qualities.map { quality ->
-                            OeaAppKit.Action(
+                        "Only what this phone's camera can actually record is listed"
+                    ) { list, dialog ->
+                        val rows = kit.group(list)
+                        qualities.forEach { quality ->
+                            kit.row(
+                                rows,
                                 R.drawable.oic_high_quality,
                                 quality.label,
-                                if (quality == current) "Recording at this now" else null
-                            ) {
-                                setVideoQuality(host, quality)
-                            }
+                                if (quality == current) "Recording at this now" else null,
+                                value = if (quality == current) "on" else null,
+                                onClick = {
+                                    setVideoQuality(host, quality)
+                                    dialog.dismiss()
+                                    showSettings(host, kit, palette, aspect, onAspect, onVisualChange, qualities)
+                                }
+                            )
                         }
-                    )
+                    }
                 }
             }
 
