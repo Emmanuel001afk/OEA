@@ -46,6 +46,11 @@ object OeaNotesApp {
     private const val KEY_NOTES = "notes"
     private const val KEY_PRIVATE = "private_notes"
     private const val KEY_ARCHIVED = "archived_notes"
+    private const val KEY_TRASH = "trash_notes"
+
+    /** How long a deleted note can be brought back. */
+    private const val TRASH_DAYS = 30L
+    private const val DAY_MS = 24L * 60L * 60L * 1000L
     private const val SEP_ROW = "\u001E"
     private const val SEP_FIELD = "\u001F"
 
@@ -62,7 +67,9 @@ object OeaNotesApp {
         val private: Boolean = false,
         val archived: Boolean = false,
         val reminder: Long = 0L,
-        val attachment: String = ""
+        val attachment: String = "",
+        /** When it was put in the trash; 0 while it is not there. */
+        val deletedAt: Long = 0L
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -87,6 +94,11 @@ object OeaNotesApp {
      * never show a stale note.
      */
     private val decoded = HashMap<String, Pair<String, List<Note>>>()
+
+    /** Forgets one parsed list, so the next read sees what was just written. */
+    private fun drop(ctx: Context, key: String) {
+        decoded.remove(key)
+    }
 
     private fun load(ctx: Context, key: String): List<Note> {
         val raw = prefs(ctx).getString(key, "") ?: ""
@@ -116,7 +128,8 @@ object OeaNotesApp {
                     private = p.getOrNull(9) == "1",
                     archived = p.getOrNull(10) == "1",
                     reminder = p.getOrNull(11)?.toLongOrNull() ?: 0L,
-                    attachment = p.getOrNull(12) ?: ""
+                    attachment = p.getOrNull(12) ?: "",
+                    deletedAt = p.getOrNull(13)?.toLongOrNull() ?: 0L
                 )
             } catch (_: Throwable) { null }
         }.sortedWith(compareByDescending<Note> { it.pinned }.thenByDescending { it.updated })
@@ -136,7 +149,8 @@ object OeaNotesApp {
             if (n.private) "1" else "0",
             if (n.archived) "1" else "0",
             n.reminder.toString(),
-            n.attachment
+            n.attachment,
+            n.deletedAt.toString()
         ).joinToString(SEP_FIELD)
     }
 
@@ -223,6 +237,9 @@ object OeaNotesApp {
                 OeaAppKit.Action(R.drawable.oic_alarm, "Reminders", "Notes with a scheduled reminder") {
                     refresh("reminders")
                 },
+                OeaAppKit.Action(R.drawable.oic_delete, "Trash", "Deleted notes, kept for $TRASH_DAYS days") {
+                    refresh("trash")
+                },
                 OeaAppKit.Action(R.drawable.oic_share_filled, "Export notes", "Share or copy your saved notes") {
                     val exportable = load(host, KEY_NOTES) +
                         load(host, KEY_ARCHIVED).map { it.copy(archived = true) }
@@ -244,6 +261,7 @@ object OeaNotesApp {
 
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         column.addView(content)
+        pruneTrash(host)
 
         refresh = refresh@{ filter ->
             currentFilter = filter
@@ -254,6 +272,7 @@ object OeaNotesApp {
                 shell.bar.setBack { refresh("all") }
             }
             shell.bar.title.text = when (filter) {
+                "trash" -> "Trash"
                 "checklist" -> "Lists"
                 "private" -> "Private"
                 "archived" -> "Archived"
@@ -265,17 +284,19 @@ object OeaNotesApp {
 
             val allNotes = load(host, KEY_NOTES) +
                 load(host, KEY_PRIVATE).map { it.copy(private = true) } +
-                load(host, KEY_ARCHIVED).map { it.copy(archived = true) }
+                load(host, KEY_ARCHIVED).map { it.copy(archived = true) } +
+                load(host, KEY_TRASH)
 
             val scopedNotes = allNotes.filter { note ->
                 when (filter) {
-                    "pinned" -> note.pinned && !note.private
-                    "private" -> note.private
-                    "voice" -> note.tag == "voice" && !note.private
-                    "checklist" -> note.checklist && !note.archived && !note.private
-                    "archived" -> note.archived && !note.private
-                    "reminders" -> note.reminder > 0 && !note.private
-                    else -> !note.archived && !note.private
+                    "pinned" -> note.pinned && !note.private && note.deletedAt == 0L
+                    "private" -> note.private && note.deletedAt == 0L
+                    "voice" -> note.tag == "voice" && !note.private && note.deletedAt == 0L
+                    "checklist" -> note.checklist && !note.archived && !note.private && note.deletedAt == 0L
+                    "archived" -> note.archived && !note.private && note.deletedAt == 0L
+                    "reminders" -> note.reminder > 0 && !note.private && note.deletedAt == 0L
+                    "trash" -> note.deletedAt > 0L
+                    else -> !note.archived && !note.private && note.deletedAt == 0L
                 }
             }
 
@@ -300,6 +321,17 @@ object OeaNotesApp {
             }
 
             content.removeAllViews()
+            if (filter == "trash" && scopedNotes.isNotEmpty()) {
+                content.addView(
+                    kit.button("Empty the trash", kit.palette.cardHigh, kit.palette.danger, R.drawable.oic_delete) {
+                        kit.confirm("Empty the trash?", "${scopedNotes.size} ${if (scopedNotes.size == 1) "note" else "notes"} go for good.", "Empty", destructive = true) {
+                            emptyTrash(host)
+                            refresh(filter)
+                        }
+                    },
+                    LinearLayout.LayoutParams(-1, kit.dp(48)).apply { bottomMargin = kit.dp(10) }
+                )
+            }
             val filtered = scopedNotes.filter { note ->
                 val matchesFolder = currentFolder == null || note.folder.ifBlank { "General" } == currentFolder
                 val matchesSearch = searchQuery.isBlank() ||
@@ -325,11 +357,12 @@ object OeaNotesApp {
                     filter == "archived" -> Triple(R.drawable.oic_folder, "Archive is empty", "Notes you archive stay tucked away here without being deleted.")
                     filter == "pinned" -> Triple(R.drawable.oic_push_pin, "No pinned notes", "Pin important notes so they stay at the top.")
                     filter == "reminders" -> Triple(R.drawable.oic_alarm, "No note reminders", "Open any note to attach a reminder time.")
+                    filter == "trash" -> Triple(R.drawable.oic_delete, "The trash is empty", "Notes you delete stay here for $TRASH_DAYS days before they go for good.")
                     else -> Triple(R.drawable.oic_edit, "No notes yet", "Write a note, start a checklist, or dictate by voice.")
                 }
                 val ctaLabel = when {
                     searchQuery.isNotBlank() -> "Clear search"
-                    filter == "archived" || filter == "pinned" || filter == "reminders" -> null
+                    filter == "archived" || filter == "pinned" || filter == "reminders" || filter == "trash" -> null
                     filter == "checklist" -> "New checklist"
                     filter == "private" -> "New private note"
                     else -> "New note"
@@ -376,7 +409,23 @@ object OeaNotesApp {
                     }
                     val colorLabel = note.color.takeIf { it.isNotBlank() && it != "default" }?.replaceFirstChar { it.uppercase() }
                     kit.row(g, icon, heading, subtitle, value = colorLabel, chevron = true) {
-                        if (note.private) {
+                        if (note.deletedAt > 0L) {
+                            val left = TRASH_DAYS - ((System.currentTimeMillis() - note.deletedAt) / DAY_MS)
+                            kit.actions(note.text.lineSequence().firstOrNull()?.take(36) ?: "Note",
+                                if (left > 0L) "$left ${if (left == 1L) "day" else "days"} left in the trash" else "Goes for good on the next clean",
+                                listOf(
+                                    OeaAppKit.Action(R.drawable.oic_history, "Put it back", "Returns to where it was before you deleted it") {
+                                        restoreNote(host, note)
+                                        refresh(filter)
+                                    },
+                                    OeaAppKit.Action(R.drawable.oic_delete, "Delete forever", "Gone now, and not in the trash either", destructive = true) {
+                                        kit.confirm("Delete forever?", "This cannot be undone.", "Delete", destructive = true) {
+                                            deleteForever(host, note)
+                                            refresh(filter)
+                                        }
+                                    }
+                                ))
+                        } else if (note.private) {
                             kit.prompt("Unlock private note", "Enter your App Lock PIN", "PIN", numeric = true, password = true, confirmLabel = "Unlock") { pin ->
                                 if (!OeaAppLockStore.verifyPin(host, pin)) return@prompt "Incorrect PIN"
                                 host.runOnUiThread { showNoteDetail(host, kit, note) { refresh(filter) } }
@@ -484,10 +533,17 @@ object OeaNotesApp {
             private -> KEY_PRIVATE
             else -> KEY_NOTES
         }
-        val existing = decode(p.getString(key, ""))
+        val existing = load(host, key)
         val now = System.currentTimeMillis()
-        val note = Note(now, text, false, tag, folder, color, checklist, now, now, private, false, 0L, "")
+        // Two notes made in the same millisecond used to share an id, and an
+        // edit or a delete finds a note by its id — so one of them answered
+        // for both. Nudge forward until the id is really unused.
+        var id = now
+        val taken = existing.map { it.id }.toHashSet()
+        while (taken.contains(id)) id++
+        val note = Note(id, text, false, tag, folder, color, checklist, now, now, private, false, 0L, "")
         p.edit().putString(key, encode(existing + note)).apply()
+        drop(host, key)
         onDone()
     }
 
@@ -597,11 +653,21 @@ object OeaNotesApp {
                 try { host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, note.text), "Share note")) } catch (_: Throwable) {}
             }
             panel.addView(
-                kit.button("Delete note", kit.palette.cardHigh, kit.palette.danger, R.drawable.oic_delete) {
+                kit.button(
+                    if (note.deletedAt > 0L) "Delete forever" else "Delete note",
+                    kit.palette.cardHigh, kit.palette.danger, R.drawable.oic_delete
+                ) {
                     dialog.dismiss()
-                    kit.confirm("Delete note?", "This permanently removes the note from your device.", "Delete", destructive = true) {
-                        deleteNote(host, note)
-                        onDone()
+                    if (note.deletedAt > 0L) {
+                        kit.confirm("Delete forever?", "This cannot be undone — the note will not be in the trash either.", "Delete", destructive = true) {
+                            deleteForever(host, note)
+                            onDone()
+                        }
+                    } else {
+                        kit.confirm("Move to the trash?", "It stays there for $TRASH_DAYS days before it goes for good.", "Move to trash", destructive = true) {
+                            trashNote(host, note)
+                            onDone()
+                        }
                     }
                 },
                 LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(6) }
@@ -621,8 +687,9 @@ object OeaNotesApp {
             note.archived -> KEY_ARCHIVED
             else -> KEY_NOTES
         }
-        val list = decode(p.getString(key, "")).map { if (it.id == note.id) it.copy(pinned = !it.pinned, updated = System.currentTimeMillis()) else it }
+        val list = load(host, key).map { if (it.id == note.id) it.copy(pinned = !it.pinned, updated = System.currentTimeMillis()) else it }
         p.edit().putString(key, encode(list)).apply()
+        drop(host, key)
     }
 
     private fun toggleArchive(host: Activity, note: Note) {
@@ -633,10 +700,12 @@ object OeaNotesApp {
             else -> KEY_NOTES
         }
         val toKey = if (note.archived) KEY_NOTES else KEY_ARCHIVED
-        val fromList = decode(p.getString(fromKey, "")).filterNot { it.id == note.id }
-        val toList = decode(p.getString(toKey, "")).toMutableList()
+        val fromList = load(host, fromKey).filterNot { it.id == note.id }
+        val toList = load(host, toKey).filterNot { it.id == note.id }.toMutableList()
         toList.add(note.copy(archived = !note.archived, updated = System.currentTimeMillis()))
         p.edit().putString(fromKey, encode(fromList)).putString(toKey, encode(toList)).apply()
+        drop(host, fromKey)
+        drop(host, toKey)
     }
 
     private fun updateNote(host: Activity, note: Note, newText: String) {
@@ -650,19 +719,61 @@ object OeaNotesApp {
             note.archived -> KEY_ARCHIVED
             else -> KEY_NOTES
         }
-        val list = decode(p.getString(key, "")).map { if (it.id == note.id) newNote else it }
+        val list = load(host, key).map { if (it.id == note.id) newNote else it }
         p.edit().putString(key, encode(list)).apply()
+        drop(host, key)
     }
 
-    private fun deleteNote(host: Activity, note: Note) {
+    /** Where a note lives while it is not in the trash. */
+    private fun homeKey(note: Note): String = when {
+        note.deletedAt > 0L -> KEY_TRASH
+        note.private -> KEY_PRIVATE
+        note.archived -> KEY_ARCHIVED
+        else -> KEY_NOTES
+    }
+
+    /**
+     * Deleting used to be the end of a note: one tap and it was gone, with
+     * nothing to undo it and nowhere it went first. Every notes app worth
+     * comparing with keeps deleted notes for a while, so this one does too.
+     */
+    private fun trashNote(host: Activity, note: Note) {
+        move(host, note, KEY_TRASH, note.copy(deletedAt = System.currentTimeMillis()))
+    }
+
+    private fun restoreNote(host: Activity, note: Note) {
+        move(host, note, homeKey(note.copy(deletedAt = 0L)), note.copy(deletedAt = 0L))
+    }
+
+    private fun deleteForever(host: Activity, note: Note) {
         val p = prefs(host)
-        val key = when {
-            note.private -> KEY_PRIVATE
-            note.archived -> KEY_ARCHIVED
-            else -> KEY_NOTES
-        }
-        val list = decode(p.getString(key, "")).filterNot { it.id == note.id }
-        p.edit().putString(key, encode(list)).apply()
+        p.edit().putString(KEY_TRASH, encode(load(host, KEY_TRASH).filterNot { it.id == note.id })).apply()
+        drop(host, KEY_TRASH)
+    }
+
+    private fun emptyTrash(host: Activity) {
+        prefs(host).edit().putString(KEY_TRASH, "").apply()
+        drop(host, KEY_TRASH)
+    }
+
+    /** Quietly drops what has been in the trash longer than [TRASH_DAYS]. */
+    private fun pruneTrash(host: Activity) {
+        val cutoff = System.currentTimeMillis() - TRASH_DAYS * DAY_MS
+        val kept = load(host, KEY_TRASH).filter { it.deletedAt > cutoff }
+        if (kept.size == load(host, KEY_TRASH).size) return
+        prefs(host).edit().putString(KEY_TRASH, encode(kept)).apply()
+        drop(host, KEY_TRASH)
+    }
+
+    private fun move(host: Activity, note: Note, toKey: String, asNote: Note) {
+        val p = prefs(host)
+        val fromKey = homeKey(note)
+        val from = load(host, fromKey).filterNot { it.id == note.id }
+        val to = load(host, toKey).filterNot { it.id == note.id }.toMutableList()
+        to.add(asNote)
+        p.edit().putString(fromKey, encode(from)).putString(toKey, encode(to)).apply()
+        drop(host, fromKey)
+        drop(host, toKey)
     }
 
     private fun startVoiceInput(host: Activity) {
