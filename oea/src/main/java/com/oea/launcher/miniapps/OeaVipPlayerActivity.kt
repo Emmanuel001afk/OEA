@@ -134,6 +134,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private lateinit var errorCard: LinearLayout
     private lateinit var chrome: LinearLayout
     private lateinit var topBar: LinearLayout
+    private lateinit var pillRow: LinearLayout
     private lateinit var bottomBar: LinearLayout
     private lateinit var titleView: TextView
     private lateinit var albumView: TextView
@@ -474,18 +475,23 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
         topBar = buildTopBar()
         bottomBar = buildBottomBar()
-        val topScroll = android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = true
-            isFillViewport = true
-            addView(topBar, android.widget.FrameLayout.LayoutParams(-2, -2))
+        chrome.addView(topBar, LinearLayout.LayoutParams(-1, -2))
+        // The scrub thumbnail used to be a row in the bottom bar, so showing
+        // it pushed the whole bar up the screen while you dragged. Floated
+        // over the picture instead, the bar never moves.
+        val stage = FrameLayout(this).apply {
+            addView(thumbPreview, FrameLayout.LayoutParams(dp(148), dp(84)).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+                bottomMargin = dp(10)
+                marginEnd = dp(14)
+            })
         }
-        chrome.addView(topScroll, LinearLayout.LayoutParams(-1, -2))
-        chrome.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        chrome.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
         chrome.addView(bottomBar, LinearLayout.LayoutParams(-1, -2))
         root.addView(chrome, FrameLayout.LayoutParams(-1, -1))
 
         resumeBar = buildResumeBar()
-        root.addView(resumeBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = dp(150) })
+        root.addView(resumeBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
 
         guard = View(this).apply {
             isClickable = true
@@ -499,7 +505,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         root.addView(guard, FrameLayout.LayoutParams(-1, -1))
 
         setContentView(root)
-        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitVideo() }
+        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            fitVideo()
+            applyChromeHeight()
+        }
         lockPill = buildLockPill()
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = OeaInsets.bars(insets)
@@ -550,7 +559,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             )
             setPadding(dp(4), dp(8), dp(6), dp(12))
         }
-        bar.addView(iconButton(R.drawable.oic_arrow_back, "Close the player") { finish() })
+        bar.addView(iconButton(R.drawable.oic_arrow_back, "Close the player") { finish() }, buttonSize())
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         titleView = text(title, 15.5f, Color.WHITE, OeaType.medium).apply {
             maxLines = 1
@@ -563,16 +572,19 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
         info.addView(titleView)
         info.addView(albumView)
-        bar.addView(info, LinearLayout.LayoutParams(dp(150), -2).apply { marginStart = dp(4); marginEnd = dp(6) })
-        bar.addView(iconButton(R.drawable.oic_skip_previous, "Previous clip") { step(-1) }, buttonSize())
-        bar.addView(iconButton(R.drawable.oic_skip_next, "Next clip") { step(1) }, buttonSize())
-        sleepPill = pill("Sleep", R.drawable.oic_timer, null) { showSleepSheet() }
-        bar.addView(sleepPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(4) })
+        // The name takes the room that is left and gives it back when the
+        // buttons need it — it used to be pinned at 150dp, which is what
+        // pushed eight more controls into a bar that then had to scroll
+        // sideways, with a scrollbar, over a film.
+        bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4); marginEnd = dp(6) })
+        // The sleep pill only takes a place when a timer is actually counting:
+        // a row of controls nobody has touched yet is what made this bar look
+        // like a cockpit.
+        sleepPill = pill("Sleep", R.drawable.oic_timer, null) { showSleepSheet() }.apply {
+            visibility = View.GONE
+        }
+        bar.addView(sleepPill, LinearLayout.LayoutParams(-2, dp(44)))
         if (!isAudio) bar.addView(iconButton(R.drawable.ic_vip_pip, "Picture in picture") { enterPip() }, buttonSize())
-        // Rotation lives up here, not buried in a sheet: tilting the phone
-        // is how people expect a video to turn, and this is the one-tap
-        // answer when it does not.
-        bar.addView(iconButton(R.drawable.ic_vip_rotate, "Screen rotation") { cycleRotation() }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_lock, "Lock the screen controls") { setLocked(true) }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_more_vert, "Everything else") { showMoreSheet() }, buttonSize())
         return bar
@@ -587,7 +599,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 GradientDrawable.Orientation.BOTTOM_TOP,
                 intArrayOf(0xCC000000.toInt(), 0x00000000)
             )
-            setPadding(dp(14), dp(14), dp(14), dp(16))
+            setPadding(dp(14), dp(8), dp(14), dp(12))
         }
         thumbPreview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -597,13 +609,15 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             }
             visibility = View.GONE
         }
-        bar.addView(thumbPreview, LinearLayout.LayoutParams(dp(148), dp(84)).apply { gravity = Gravity.END; bottomMargin = dp(6) })
 
+        // Elapsed and remaining sit either side of the scrubber on one line.
+        // As two rows above it they spent a whole line of a landscape screen
+        // on two numbers.
         val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         elapsed = text("0:00", 12.5f, 0xE6FFFFFF.toInt(), OeaType.medium)
         remaining = text("0:00", 12.5f, 0xB3FFFFFF.toInt(), OeaType.medium).apply { gravity = Gravity.END }
-        timeRow.addView(elapsed, LinearLayout.LayoutParams(0, -2, 1f))
-        timeRow.addView(remaining, LinearLayout.LayoutParams(0, -2, 1f))
+        timeRow.addView(elapsed, LinearLayout.LayoutParams(-2, -2))
+        timeRow.addView(remaining, LinearLayout.LayoutParams(-2, -2))
         bar.addView(timeRow)
 
         scrub = OeaScrubBar(this).apply {
@@ -623,12 +637,17 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 }
             }
         }
-        bar.addView(scrub, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(2) })
+        timeRow.addView(scrub, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+            marginStart = dp(10); marginEnd = dp(10)
+        })
 
         val transport = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        // Previous and next came out of the top bar to sit with play, where
+        // every other player keeps them.
+        transport.addView(iconButton(R.drawable.oic_skip_previous, "Previous clip") { step(-1) }, buttonSize())
         transport.addView(iconButton(R.drawable.oic_fast_rewind, "Back ten seconds") { seekBy(-SEEK_MS) }, buttonSize())
         playToggle = OeaIconToggle(this).apply {
             circleSizeDp = 56
@@ -645,23 +664,25 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             marginStart = dp(14); marginEnd = dp(14)
         })
         transport.addView(iconButton(R.drawable.oic_fast_forward, "Forward ten seconds") { seekBy(SEEK_MS) }, buttonSize())
-        bar.addView(transport, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        transport.addView(iconButton(R.drawable.oic_skip_next, "Next clip") { step(1) }, buttonSize())
+        bar.addView(transport, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
 
-        val pills = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        // Speed, picture, subtitles and the queue keep their own row, but only
+        // where there is height for it: held sideways the picture needs that
+        // row more, and every one of these is in the ⋮ sheet as well.
+        pillRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         speedPill = pill(OeaVipStore.speedLabel(speed), R.drawable.oic_speed, null) { showSpeedSheet() }
         aspectPill = pill(aspect.label, R.drawable.oic_aspect_ratio, null) { cycleAspect() }
         ccPill = pill("Subtitles", R.drawable.oic_subtitles, null) { showSubtitleSheet() }
-        pills.addView(speedPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
-        pills.addView(aspectPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
-        pills.addView(ccPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
         val queue = pill(queueLabel(), R.drawable.oic_queue_music, null) { showQueueSheet() }
         queuePill = queue
-        pills.addView(queue, LinearLayout.LayoutParams(-2, dp(48)))
-        val pillScroll = android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = true
-            addView(pills, android.widget.FrameLayout.LayoutParams(-2, -2))
+        listOf(speedPill, aspectPill, ccPill, queue).forEach { chip ->
+            pillRow.addView(chip, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) })
         }
-        bar.addView(pillScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        bar.addView(pillRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         return bar
     }
 
@@ -1139,6 +1160,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 pauseForSleep("Sleep timer reached")
             } else {
                 sleepPill.text = "${(left / 60_000L) + 1}m"
+                if (sleepPill.visibility != View.VISIBLE) sleepPill.visibility = View.VISIBLE
             }
         }
         if (OeaVipAudioService.running && SystemClock.elapsedRealtime() - lastSavedAt > 4_000L) syncService()
@@ -1149,7 +1171,18 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         onPlayStateChanged()
         setChrome(true)
         flash(reason)
-        sleepPill.text = "Sleep"
+        setSleepPill(null)
+    }
+
+    /** @param label null clears it; the pill only shows while a timer is set. */
+    private fun setSleepPill(label: String?) {
+        if (label == null) {
+            sleepPill.visibility = View.GONE
+            sleepPill.text = "Sleep"
+        } else {
+            sleepPill.text = label
+            sleepPill.visibility = View.VISIBLE
+        }
     }
 
     private fun paintSubtitle() {
@@ -1242,6 +1275,29 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     }
 
     // ------------------------------------------------------------------ chrome
+
+    /**
+     * Held sideways the picture has the least room to spare, so the row of
+     * chips — speed, picture, subtitles, queue — steps aside; every one of them
+     * is in the ⋮ sheet as well. Standing up they are one tap away again.
+     */
+    private fun applyChromeHeight() {
+        if (!::pillRow.isInitialized || !::bottomBar.isInitialized) return
+        val upright = resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        val wanted = if (upright) View.VISIBLE else View.GONE
+        if (pillRow.visibility != wanted) pillRow.visibility = wanted
+        // The "carry on from where you left off" bar sits on top of the
+        // controls, so it has to follow their height instead of a number
+        // guessed once — the bar is shorter sideways now.
+        if (::resumeBar.isInitialized && bottomBar.height > 0) {
+            val margin = bottomBar.height + dp(8)
+            val params = resumeBar.layoutParams as? FrameLayout.LayoutParams ?: return
+            if (params.bottomMargin != margin) {
+                params.bottomMargin = margin
+                resumeBar.layoutParams = params
+            }
+        }
+    }
 
     private fun setChrome(visible: Boolean) {
         if (inPip) return
@@ -1591,7 +1647,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 panel.row(group, R.drawable.oic_timer, "$minutes minutes", "Pause when the time is up", onClick = {
                     sleepDeadline = SystemClock.elapsedRealtime() + minutes * 60_000L
                     sleepAfterClip = false
-                    sleepPill.text = "$minutes m"
+                    setSleepPill("$minutes m")
                     panel.dismiss()
                 })
             }
@@ -1599,13 +1655,13 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 selected = sleepAfterClip, onClick = {
                     sleepAfterClip = !sleepAfterClip
                     sleepDeadline = 0L
-                    sleepPill.text = if (sleepAfterClip) "1 clip" else "Sleep"
+                    setSleepPill(if (sleepAfterClip) "1 clip" else null)
                     panel.dismiss()
                 })
             panel.row(group, R.drawable.oic_close, "Turn it off", selected = false, onClick = {
                 sleepDeadline = 0L
                 sleepAfterClip = false
-                sleepPill.text = "Sleep"
+                setSleepPill(null)
                 panel.dismiss()
             })
         }
