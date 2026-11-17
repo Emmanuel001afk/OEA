@@ -50,6 +50,15 @@ jobs:
             done
             exit 1
           fi
+      - name: AEO membership, registration and trust-bundle tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.aeo.AeoMembershipVerifierTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/aeo-gradle.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/aeo-gradle.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
       - name: Use the stable OEA signing key (optional)
         # Without this, every runner creates a new random debug key, so each
         # APK has a different signature and cannot update the previous one
