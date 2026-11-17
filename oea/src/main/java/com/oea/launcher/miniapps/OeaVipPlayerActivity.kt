@@ -1811,7 +1811,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     detail,
                     selected = true
                 )
-                panel.row(now, R.drawable.oic_delete, "Remove from queue", null, chevron = false) {
+                panel.row(now, R.drawable.oic_delete, "Remove from queue", null) {
                     panel.dismiss()
                     saveProgress()
                     entries = entries.filterIndexed { position, _ -> position != index }
@@ -1837,14 +1837,13 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                         R.drawable.oic_queue_music,
                         entry.title.substringBeforeLast('.'),
                         detail,
-                        chevron = true,
                         onClick = {
                             panel.dismiss()
                             saveProgress()
                             openEntry(position, 0L)
                         }
                     )
-                    panel.row(group, R.drawable.oic_delete, "Remove", null, chevron = false) {
+                    panel.row(group, R.drawable.oic_delete, "Remove", null) {
                         val newIndex = if (position < index) index - 1 else index
                         entries = entries.filterIndexed { p, _ -> p != position }
                         index = newIndex.coerceAtMost(entries.lastIndex)
