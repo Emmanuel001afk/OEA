@@ -1,6 +1,7 @@
 package com.oea.launcher.miniapps
 
 import android.app.Activity
+import android.app.KeyguardManager
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
 import android.content.BroadcastReceiver
@@ -27,6 +28,7 @@ import android.provider.Settings
 import android.util.Rational
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -105,7 +107,17 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private var lastSavedAt = 0L
     private var previewSeq = 0
 
+    // One brightness/volume slide. The value is read ONCE, when the slide
+    // starts, and the finger's displacement from that point is what moves it.
+    // (onScroll reports the movement since its own last call, so feeding the
+    // total distance from the gesture's start into the current value added the
+    // whole drag again on every event: a short flick swept the entire range.)
+    private var slideMode = SLIDE_NONE
+    private var slideStartY = 0f
+    private var slideBase = 0f
+
     private var aspect = OeaVipStore.Aspect.FIT
+    private var rotation = OeaVipStore.Rotation.AUTO
     private var loop = OeaVipStore.Loop.OFF
     private var speed = 1f
     private var subtitlesOn = true
@@ -167,9 +179,26 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
     }
 
+    /**
+     * Automatic rotation stops turning while the screen is locked. Locking a
+     * phone in your hand, or putting it down, must not spin the picture: the
+     * player holds whichever way up it was when the screen went off and lets
+     * go again the moment it is unlocked.
+     */
+    private val lockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF, Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> applyRotation()
+            }
+        }
+    }
+
     private val touch by lazy {
         android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onDown(e: MotionEvent): Boolean {
+                slideMode = SLIDE_NONE
+                return true
+            }
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (locked) {
@@ -200,9 +229,20 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             override fun onScroll(down: MotionEvent?, event: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
                 if (locked || inPip) return false
                 val from = down ?: return false
-                if (Math.abs(event.y - from.y) < Math.abs(event.x - from.x)) return false
-                val delta = (down.y - event.y) / root.height.toFloat()
-                if (down.x < root.width / 2f) adjustBrightness(delta) else adjustVolume(delta)
+                val travelled = from.y - event.y
+                if (slideMode == SLIDE_NONE) {
+                    // Sideways drags are not ours. Vertical ones only start
+                    // after a deliberate movement, so a tap or a wobble never
+                    // moves the brightness by itself.
+                    if (Math.abs(travelled) < Math.abs(event.x - from.x)) return false
+                    if (Math.abs(travelled) < dp(12).toFloat()) return false
+                    slideMode = if (from.x < root.width / 2f) SLIDE_BRIGHTNESS else SLIDE_VOLUME
+                    slideStartY = from.y
+                    slideBase = if (slideMode == SLIDE_BRIGHTNESS) brightnessNow() else volumeNow()
+                }
+                val delta = (slideStartY - event.y) / root.height.toFloat()
+                if (slideMode == SLIDE_BRIGHTNESS) applyBrightness(slideBase + delta * BRIGHTNESS_GAIN)
+                else applyVolume(slideBase + delta * VOLUME_GAIN)
                 return true
             }
         })
@@ -231,6 +271,17 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(pipReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
             else @Suppress("UnspecifiedRegisterReceiverFlag") registerReceiver(pipReceiver, filter)
+        }
+        runCatching {
+            // Screen on/off and unlock are only ever delivered to a receiver
+            // registered from code, never to one declared in the manifest.
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(lockReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else @Suppress("UnspecifiedRegisterReceiverFlag") registerReceiver(lockReceiver, filter)
         }
     }
 
@@ -279,6 +330,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         startAtMs = intent.getLongExtra(EXTRA_START_AT, 0L)
         durationMs = intent.getLongExtra(EXTRA_DURATION, 0L).coerceAtLeast(0L)
         sidecar = intent.getStringExtra(EXTRA_SIDECAR)
+        rotation = OeaVipStore.rotationOf(this)
+        applyRotation()
         aspect = OeaVipStore.aspectOf(this)
         loop = OeaVipStore.loopOf(this)
         speed = OeaVipStore.speedOf(this)
@@ -1126,20 +1179,30 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     // ---------------------------------------------------------------- gestures
 
-    private fun adjustBrightness(delta: Float) {
-        val from = if (brightness < 0f) systemBrightness() else brightness
-        val value = (from + delta * 0.9f).coerceIn(0.01f, 1f)
-        brightness = value
-        window.attributes = window.attributes.apply { screenBrightness = value }
-        showHud("Brightness", (value * 100).roundToInt() / 100f, "${(value * 100).roundToInt()}%")
+    /** The brightness this window is showing, before a slide moves it. */
+    private fun brightnessNow(): Float = if (brightness < 0f) systemBrightness() else brightness
+
+    private fun applyBrightness(value: Float) {
+        val clamped = value.coerceIn(0.01f, 1f)
+        brightness = clamped
+        window.attributes = window.attributes.apply { screenBrightness = clamped }
+        val percent = (clamped * 100).roundToInt()
+        showHud("Brightness", percent / 100f, "$percent%")
     }
 
-    private fun adjustVolume(delta: Float) {
-        val max = runCatching { audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(15).coerceAtLeast(1)
-        val from = runCatching { audio.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0).toFloat() / max
-        val value = (from + delta * 1.1f).coerceIn(0f, 1f)
-        runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, (value * max).roundToInt(), 0) }
-        showHud("Volume", value, "${(value * max).roundToInt()} of $max")
+    /** The media volume as a fraction, before a slide moves it. */
+    private fun volumeNow(): Float =
+        runCatching { audio.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0).toFloat() /
+            volumeSteps().toFloat()
+
+    private fun volumeSteps(): Int =
+        runCatching { audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(15).coerceAtLeast(1)
+
+    private fun applyVolume(value: Float) {
+        val max = volumeSteps()
+        val clamped = value.coerceIn(0f, 1f)
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, (clamped * max).roundToInt(), 0) }
+        showHud("Volume", clamped, "${(clamped * max).roundToInt()} of $max")
     }
 
     private fun systemBrightness(): Float = runCatching {
@@ -1724,7 +1787,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     panel.dismiss()
                     showSleepSheet()
                 })
-            panel.row(primary, R.drawable.ic_vip_rotate, "Rotation", rotationLabel(), onClick = {
+            panel.row(primary, R.drawable.ic_vip_rotate, "Rotation", "${rotation.label} — tap for the next", onClick = {
                 panel.dismiss()
                 cycleRotation()
             })
@@ -1814,24 +1877,56 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         sheet.row(group, R.drawable.oic_folder, "Path", entry.uri.path ?: "hidden inside the media provider")
     }
 
+    /**
+     * Three ways to hold the screen — the three anybody looks for. A fourth
+     * ("upside down") used to sit here too and bought nothing but a picture
+     * the wrong way up while the phone lay flat.
+     */
     private fun cycleRotation() {
-        val modes = listOf(
-            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR to "automatic",
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE to "landscape",
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT to "portrait",
-            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE to "upside down"
-        )
-        val at = modes.indexOfFirst { it.first == requestedOrientation }
-        val next = modes[(at + 1 + modes.size) % modes.size]
-        requestedOrientation = next.first
-        flash("Rotation: ${next.second}")
+        rotation = when (rotation) {
+            OeaVipStore.Rotation.AUTO -> OeaVipStore.Rotation.LANDSCAPE
+            OeaVipStore.Rotation.LANDSCAPE -> OeaVipStore.Rotation.PORTRAIT
+            OeaVipStore.Rotation.PORTRAIT -> OeaVipStore.Rotation.AUTO
+        }
+        OeaVipStore.setRotation(this, rotation)
+        applyRotation()
+        flash("Rotation: ${rotation.label} — ${rotation.blurb}")
     }
 
-    private fun rotationLabel(): String = when (requestedOrientation) {
-        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE -> "landscape"
-        ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT -> "portrait"
-        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE -> "upside down"
-        else -> "automatic"
+    /** Puts the chosen rotation on the window, honouring a locked screen. */
+    private fun applyRotation() {
+        requestedOrientation = when (rotation) {
+            OeaVipStore.Rotation.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            OeaVipStore.Rotation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            OeaVipStore.Rotation.AUTO ->
+                if (screenLocked()) frozenOrientation() else ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        }
+    }
+
+    private fun screenLocked(): Boolean {
+        val keys = runCatching { getSystemService(KEYGUARD_SERVICE) as? KeyguardManager }.getOrNull()
+        return keys?.isKeyguardLocked == true
+    }
+
+    /**
+     * The orientation the screen is showing right now, as a fixed request.
+     * Used to hold the picture still while the screen is locked: automatic
+     * keeps whatever you locked it in, portrait stays portrait and landscape
+     * stays landscape, however the phone is turned afterwards.
+     */
+    private fun frozenOrientation(): Int {
+        val turn = if (Build.VERSION.SDK_INT >= 30) {
+            runCatching { display?.rotation }.getOrNull()
+        } else {
+            @Suppress("DEPRECATION")
+            runCatching { windowManager.defaultDisplay.rotation }.getOrNull()
+        } ?: Surface.ROTATION_0
+        return when (turn) {
+            Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
     }
 
     private fun addToPlaylist() {
@@ -2001,6 +2096,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         handler.removeCallbacksAndMessages(null)
         saveProgress()
         runCatching { unregisterReceiver(pipReceiver) }
+        runCatching { unregisterReceiver(lockReceiver) }
         stopFx()
         runCatching { retriever?.release() }
         retriever = null
@@ -2049,6 +2145,20 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         const val EXTRA_HANDLED = "oea.vip.view_handled"
 
         private const val SEEK_MS = 10_000L
+
+        /** Which side of the screen a slide is driving. */
+        private const val SLIDE_NONE = 0
+        private const val SLIDE_BRIGHTNESS = 1
+        private const val SLIDE_VOLUME = 2
+
+        /**
+         * How much of the range a full-height drag covers. Below 1 a drag has
+         * to travel further than the screen is tall to cross every step, which
+         * is what makes a slide feel like a control instead of a switch.
+         */
+        private const val BRIGHTNESS_GAIN = 0.85f
+        private const val VOLUME_GAIN = 1.0f
+
         private const val REQUEST_SUBTITLE = 4321
         private const val ACTION_PIP_PLAY = "com.oea.launcher.vip.PIP_PLAY"
         private const val ACTION_PIP_PREV = "com.oea.launcher.vip.PIP_PREV"
