@@ -67,6 +67,36 @@ object OeaNotesApp {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /**
+     * Building a SimpleDateFormat is one of the most expensive things a list
+     * can do per row, and Notes used to build two per note on every refresh —
+     * including every letter typed into search. One of each, kept.
+     */
+    private val stampFormat = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault())
+    private val clockFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private val fullStampFormat = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
+    private val reminderStampFormat = SimpleDateFormat("d MMM HH:mm", Locale.getDefault())
+
+    /**
+     * The parsed notes, kept against the exact text they came from.
+     *
+     * Every refresh used to re-read and re-parse all three lists — splitting a
+     * single string holding every note — so the cost of opening Notes, or of
+     * typing one letter into search, grew with the whole collection. The
+     * cached copy is only reused while the stored text is unchanged, so it can
+     * never show a stale note.
+     */
+    private val decoded = HashMap<String, Pair<String, List<Note>>>()
+
+    private fun load(ctx: Context, key: String): List<Note> {
+        val raw = prefs(ctx).getString(key, "") ?: ""
+        val cached = decoded[key]
+        if (cached != null && cached.first == raw) return cached.second
+        val notes = decode(raw)
+        decoded[key] = raw to notes
+        return notes
+    }
+
     private fun decode(raw: String?): List<Note> {
         if (raw.isNullOrBlank()) return emptyList()
         return raw.split(SEP_ROW).mapNotNull { row ->
@@ -194,8 +224,8 @@ object OeaNotesApp {
                     refresh("reminders")
                 },
                 OeaAppKit.Action(R.drawable.oic_share_filled, "Export notes", "Share or copy your saved notes") {
-                    val exportable = decode(prefs(host).getString(KEY_NOTES, "")) +
-                        decode(prefs(host).getString(KEY_ARCHIVED, "")).map { it.copy(archived = true) }
+                    val exportable = load(host, KEY_NOTES) +
+                        load(host, KEY_ARCHIVED).map { it.copy(archived = true) }
                     val raw = exportable.joinToString("\n\n---\n\n") { it.text }
                     if (raw.isBlank()) {
                         android.widget.Toast.makeText(host, "No notes to export yet", android.widget.Toast.LENGTH_SHORT).show()
@@ -233,9 +263,9 @@ object OeaNotesApp {
                 else -> "Notes"
             }
 
-            val allNotes = decode(prefs(host).getString(KEY_NOTES, "")) +
-                decode(prefs(host).getString(KEY_PRIVATE, "")).map { it.copy(private = true) } +
-                decode(prefs(host).getString(KEY_ARCHIVED, "")).map { it.copy(archived = true) }
+            val allNotes = load(host, KEY_NOTES) +
+                load(host, KEY_PRIVATE).map { it.copy(private = true) } +
+                load(host, KEY_ARCHIVED).map { it.copy(archived = true) }
 
             val scopedNotes = allNotes.filter { note ->
                 when (filter) {
@@ -250,12 +280,15 @@ object OeaNotesApp {
             }
 
             folderBar.removeAllViews()
-            val folders = scopedNotes.map { it.folder.ifBlank { "General" } }.distinct().sorted()
+            // One pass for every folder's total: counting each folder on its
+            // own walked the whole list once per folder.
+            val folderCounts = scopedNotes.groupingBy { it.folder.ifBlank { "General" } }.eachCount()
+            val folders = folderCounts.keys.sorted()
             if (folders.size > 1) {
                 folderScroll.visibility = View.VISIBLE
                 folderBar.addView(kit.chip("All", currentFolder == null) { currentFolder = null; refresh(filter) }, LinearLayout.LayoutParams(-2, kit.dp(38)).apply { rightMargin = kit.dp(6) })
                 folders.forEach { folder ->
-                    val count = scopedNotes.count { it.folder.ifBlank { "General" } == folder }
+                    val count = folderCounts[folder] ?: 0
                     folderBar.addView(kit.chip("$folder · $count", folder == currentFolder) {
                         currentFolder = if (currentFolder == folder) null else folder
                         refresh(filter)
@@ -331,8 +364,8 @@ object OeaNotesApp {
                             if (items.isNotEmpty()) append("$done/${items.size} done · ")
                         }
                         if (snippet != null) append("$snippet · ")
-                        append(SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(note.updated)))
-                        if (note.reminder > 0) append(" · ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(note.reminder))}")
+                        append(stampFormat.format(Date(note.updated)))
+                        if (note.reminder > 0) append(" · ${clockFormat.format(Date(note.reminder))}")
                     }
                     val icon = when {
                         note.private -> R.drawable.oic_lock
@@ -464,7 +497,7 @@ object OeaNotesApp {
 
     private fun showNoteDetail(host: Activity, kit: OeaAppKit, initialNote: Note, onDone: () -> Unit) {
         var note = initialNote
-        kit.sheet(note.text.lineSequence().firstOrNull()?.take(36) ?: "Note", SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(note.updated))) { panel, dialog ->
+        kit.sheet(note.text.lineSequence().firstOrNull()?.take(36) ?: "Note", fullStampFormat.format(Date(note.updated))) { panel, dialog ->
             if (!note.checklist) {
                 val textView = kit.text(renderMarkdown(note.text), 15.5f, kit.palette.text).apply {
                     setLineSpacing(kit.dpf(3f), 1f)
@@ -497,7 +530,7 @@ object OeaNotesApp {
             val metaParts = buildList {
                 add(note.folder.ifBlank { "General" })
                 if (note.tag.isNotBlank() && note.tag != "General") add("#${note.tag}")
-                if (note.reminder > 0L) add("Reminder ${SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(Date(note.reminder))}")
+                if (note.reminder > 0L) add("Reminder ${reminderStampFormat.format(Date(note.reminder))}")
             }
             panel.addView(kit.text(metaParts.joinToString(" · "), 12.5f, kit.palette.textSecondary).apply {
                 setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(10))
@@ -530,7 +563,7 @@ object OeaNotesApp {
                 actionsGroup,
                 R.drawable.oic_alarm,
                 "Reminder",
-                if (note.reminder > 0L) SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(note.reminder)) else "None",
+                if (note.reminder > 0L) stampFormat.format(Date(note.reminder)) else "None",
                 value = if (note.reminder > 0L) "Clear" else "Set",
                 chevron = note.reminder <= 0L
             ) {

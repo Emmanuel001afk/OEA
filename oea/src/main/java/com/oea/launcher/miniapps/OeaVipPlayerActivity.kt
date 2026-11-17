@@ -1072,7 +1072,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     private fun step(delta: Int) {
         if (entries.size < 2) {
-            toast(if (delta > 0) "This is the last clip in the queue" else "This is the first clip")
+            toast("There is nothing else in the queue")
             return
         }
         val target = when {
@@ -1727,27 +1727,60 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
     }
 
+    /**
+     * The queue, without building a row for every clip it holds.
+     *
+     * VIP is handed the whole library as a queue, so a phone with a few
+     * thousand videos used to ask the main thread for a few thousand rows —
+     * an ImageView, two TextViews and a ripple each — just to open this
+     * sheet. What anybody opens a queue for is what is playing and what comes
+     * next, so that is all that gets built: one row for now, a bounded window
+     * for up next, and a count of what is behind it.
+     */
     private fun showQueueSheet() {
-        sheet("Queue", "${entries.size} clips • playing ${index + 1}") { panel ->
-            val group = panel.group()
-            entries.forEachIndexed { position, entry ->
+        val total = entries.size
+        sheet("Queue", "$total ${if (total == 1) "clip" else "clips"} • playing ${index + 1}") { panel ->
+            val now = panel.group()
+            current()?.let { entry ->
                 panel.row(
-                    group,
-                    if (position == index) R.drawable.oic_play_arrow else R.drawable.oic_queue_music,
+                    now,
+                    R.drawable.oic_play_arrow,
                     entry.title.substringBeforeLast('.'),
-                    if (position == index) "Now playing" else "Clip ${position + 1}",
-                    selected = position == index,
-                    onClick = {
-                        panel.dismiss()
-                        if (position != index) {
+                    "Now playing",
+                    selected = true
+                )
+            }
+            val upcoming = entries.drop(index + 1).take(QUEUE_WINDOW)
+            if (upcoming.isNotEmpty()) {
+                panel.heading("Up next")
+                val group = panel.group()
+                upcoming.forEachIndexed { offset, entry ->
+                    val position = index + 1 + offset
+                    panel.row(
+                        group,
+                        R.drawable.oic_queue_music,
+                        entry.title.substringBeforeLast('.'),
+                        "Clip ${position + 1}",
+                        onClick = {
+                            panel.dismiss()
                             saveProgress()
                             openEntry(position, 0L)
                         }
-                    }
+                    )
+                }
+            }
+            val before = index
+            val after = (total - index - 1 - upcoming.size).coerceAtLeast(0)
+            val hidden = before + after
+            if (hidden > 0) {
+                panel.note(
+                    "Showing the ${upcoming.size + 1} clips from here. " +
+                        "$hidden ${if (hidden == 1) "is" else "are"} further away — " +
+                        "previous and next walk through them."
                 )
             }
             panel.buttons(
-                if (entries.size > 1) "Take this clip out" to {
+                if (total > 1) "Take this clip out" to {
                     saveProgress()
                     entries = entries.filterIndexed { position, _ -> position != index }
                     index = index.coerceAtMost(entries.lastIndex)
@@ -1756,7 +1789,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     } else {
                         openEntry(index, 0L)
                     }
-                } else "Nothing else in the queue" to { },
+                } else "There is nothing else in the queue" to { },
                 "Close" to { }
             )
         }
@@ -2145,6 +2178,9 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         const val EXTRA_HANDLED = "oea.vip.view_handled"
 
         private const val SEEK_MS = 10_000L
+
+        /** How many clips the queue sheet lists after the one playing. */
+        private const val QUEUE_WINDOW = 20
 
         /** Which side of the screen a slide is driving. */
         private const val SLIDE_NONE = 0
