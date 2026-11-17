@@ -45,7 +45,7 @@ class OeaWeatherWidgetProvider : AppWidgetProvider() {
             val cache = prefs.getString("cache_json", null)
             var temp = "--"
             var desc = "Tap to open"
-            val city = prefs.getString("city", "Weather") ?: "Weather"
+            val city = prefs.getString("location_name", "Weather") ?: "Weather"
             if (cache != null) {
                 try {
                     val obj = org.json.JSONObject(cache)
