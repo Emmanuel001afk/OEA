@@ -12,6 +12,19 @@ internal class OeaTrafficRates {
 
     fun reset() { at = 0L; rx = -1L; tx = -1L; down = "—"; up = "—" }
 
+    /**
+     * Sets a rate that was already measured, for a source that can only be
+     * read as a window (Android's per-UID stats) rather than as a counter
+     * that keeps climbing.
+     */
+    fun report(downBytes: Double, upBytes: Double) {
+        // Stop the counter path from mixing its own delta into a rate measured
+        // another way the next time it runs.
+        at = 0L; rx = -1L; tx = -1L
+        down = format(downBytes)
+        up = format(upBytes)
+    }
+
     fun sample(now: Long, nextRx: Long, nextTx: Long) {
         if (nextRx < 0 || nextTx < 0) { reset(); return }
         if (at != 0L && now - at < 1000L && now >= at) return

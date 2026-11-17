@@ -27,6 +27,7 @@ object OeaVipStore {
     private const val KEY_SUB_ON = "subtitle_enabled"
     private const val KEY_SUBTITLES = "subtitle_files"
     private const val KEY_HIDE_CONTROLS = "hide_controls_ms"
+    private const val KEY_ROTATION = "rotation"
     private const val SEP_ROW = "\u001E"
     private const val SEP_FIELD = "\u001F"
 
@@ -187,6 +188,29 @@ object OeaVipStore {
     fun speedOf(context: Context): Float = prefs(context).getFloat(KEY_SPEED, 1f).coerceIn(0.25f, 4f)
     fun setSpeed(context: Context, value: Float) =
         prefs(context).edit().putFloat(KEY_SPEED, value.coerceIn(0.25f, 4f)).apply()
+
+    /**
+     * How the player holds the screen: "auto", "landscape" or "portrait".
+     *
+     * "auto" is the sensor, with one rule of its own — the picture keeps the
+     * orientation it had when the screen was locked, so a film does not spin
+     * while the phone is in a pocket or face down on a table.
+     */
+    fun rotationOf(context: Context): Rotation =
+        when (prefs(context).getString(KEY_ROTATION, Rotation.AUTO.name)) {
+            Rotation.LANDSCAPE.name -> Rotation.LANDSCAPE
+            Rotation.PORTRAIT.name -> Rotation.PORTRAIT
+            else -> Rotation.AUTO
+        }
+
+    fun setRotation(context: Context, value: Rotation) =
+        prefs(context).edit().putString(KEY_ROTATION, value.name).apply()
+
+    enum class Rotation(val label: String, val blurb: String) {
+        AUTO("automatic", "Turns with the phone, but stays put once the screen is locked"),
+        LANDSCAPE("landscape", "Holds the wide way round, both ways up"),
+        PORTRAIT("portrait", "Holds the tall way round")
+    }
 
     fun aspectOf(context: Context): Aspect = runCatching {
         Aspect.valueOf(prefs(context).getString(KEY_ASPECT, Aspect.FIT.name) ?: Aspect.FIT.name)

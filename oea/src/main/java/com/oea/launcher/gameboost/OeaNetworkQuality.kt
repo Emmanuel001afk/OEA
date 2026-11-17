@@ -9,9 +9,16 @@ import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.TrafficStats
+import android.os.Build
 import android.os.SystemClock
 import android.view.View
 import java.util.Locale
+
+/** How far back per-app traffic is read. Short enough to read as "now". */
+private const val WINDOW_MS = 6_000L
+private const val SCOPE_NONE = 0
+private const val SCOPE_GAME = 1
+private const val SCOPE_DEVICE = 2
 
 /** Link quality is an Android link estimate, not a measurement of a game's server. */
 internal data class OeaNetworkQuality(
@@ -37,8 +44,23 @@ internal class OeaNetworkQualityReader(context: Context) {
     private var trafficGame: String? = null
     private var trafficUid = -1
     private val rates = OeaTrafficRates()
+    private var trafficScopeKey = SCOPE_NONE
 
-    /** Android often blocks other apps' UID counters; never substitute device totals. */
+    /**
+     * Fills in the download and upload numbers, by the most honest source this
+     * phone actually allows.
+     *
+     * Android has refused other apps' UID counters since Android 10 —
+     * [TrafficStats.getUidRxBytes] simply answers UNSUPPORTED (-1) for
+     * anything but the caller, which is why the panel's up and down used to
+     * sit at "—" for every game that is not OEA's own. So:
+     *
+     * 1. per-app, through [NetworkStatsManager.queryDetailsForUid], which is
+     *    allowed when OEA holds Usage Access (the same permission the rest of
+     *    Game Boost already asks for);
+     * 2. otherwise the phone's whole traffic, from the counters that are always
+     *    readable — shown as what it is, never dressed up as the game's own.
+     */
     private fun sampleTraffic(game: String?) {
         if (game != trafficGame) {
             trafficGame = game
@@ -46,10 +68,56 @@ internal class OeaNetworkQualityReader(context: Context) {
             trafficUid = if (pkg == null) -1 else runCatching { appContext.packageManager.getApplicationInfo(pkg, 0).uid }.getOrDefault(-1)
             rates.reset()
         }
-        if (trafficUid < 0) return
-        val rx = runCatching { TrafficStats.getUidRxBytes(trafficUid) }.getOrDefault(-1L)
-        val tx = runCatching { TrafficStats.getUidTxBytes(trafficUid) }.getOrDefault(-1L)
-        rates.sample(SystemClock.elapsedRealtime(), rx, tx)
+        val now = SystemClock.elapsedRealtime()
+        if (trafficUid >= 0) {
+            val perApp = uidRates(trafficUid)
+            if (perApp != null) {
+                rates.report(perApp.first, perApp.second)
+                trafficScopeKey = SCOPE_GAME
+                return
+            }
+        }
+        val rx = runCatching { TrafficStats.getTotalRxBytes() }.getOrDefault(-1L)
+        val tx = runCatching { TrafficStats.getTotalTxBytes() }.getOrDefault(-1L)
+        if (rx >= 0L && tx >= 0L) {
+            rates.sample(now, rx, tx)
+            trafficScopeKey = SCOPE_DEVICE
+        } else {
+            rates.reset()
+            trafficScopeKey = SCOPE_NONE
+        }
+    }
+
+    /**
+     * Bytes per second for one app over the last few seconds, or null when this
+     * phone will not say. [NetworkStatsManager] is only allowed to read another
+     * app's usage when OEA holds Usage Access.
+     */
+    private fun uidRates(uid: Int): Pair<Double, Double>? {
+        if (Build.VERSION.SDK_INT < 24) return null
+        if (uid != android.os.Process.myUid() && !com.oea.launcher.privilege.OeaPrivileges.canReadUsage(appContext)) return null
+        val manager = appContext.getSystemService(android.app.usage.NetworkStatsManager::class.java) ?: return null
+        val end = System.currentTimeMillis()
+        val start = end - WINDOW_MS
+        var rx = 0L
+        var tx = 0L
+        var sawBucket = false
+        for (type in intArrayOf(ConnectivityManager.TYPE_WIFI, ConnectivityManager.TYPE_MOBILE)) {
+            val stats = runCatching { manager.queryDetailsForUid(type, null, start, end, uid) }.getOrNull() ?: continue
+            runCatching {
+                val bucket = android.app.usage.NetworkStats.Bucket()
+                while (stats.hasNextBucket()) {
+                    stats.getNextBucket(bucket)
+                    rx += bucket.rxBytes
+                    tx += bucket.txBytes
+                    sawBucket = true
+                }
+            }.onFailure { stats.close() }
+            runCatching { stats.close() }
+        }
+        if (!sawBucket) return null
+        val seconds = WINDOW_MS / 1000.0
+        return (rx / seconds) to (tx / seconds)
     }
 
     fun close() { executor.shutdownNow() }
@@ -58,8 +126,14 @@ internal class OeaNetworkQualityReader(context: Context) {
     fun read(game: String?): OeaNetworkQuality {
         sampleTraffic(game)
         val quality = readLink()
-        val scope = if (game != null && OeaGameBoostStore.isOeaGameKey(game)) "OEA app traffic (shared by its games)" else "Game app traffic"
-        return quality.copy(down = rates.down, up = rates.up, trafficScope = if (rates.down == "—" || rates.up == "—") "Game traffic unavailable" else scope)
+        val unavailable = rates.down == "—" || rates.up == "—"
+        val scope = when {
+            unavailable -> "Traffic unavailable"
+            trafficScopeKey == SCOPE_GAME -> if (game != null && OeaGameBoostStore.isOeaGameKey(game)) "OEA app traffic" else "Game traffic"
+            trafficScopeKey == SCOPE_DEVICE -> "All traffic on the phone"
+            else -> "Traffic unavailable"
+        }
+        return quality.copy(down = rates.down, up = rates.up, trafficScope = scope)
     }
 
     private fun readLink(): OeaNetworkQuality = runCatching {

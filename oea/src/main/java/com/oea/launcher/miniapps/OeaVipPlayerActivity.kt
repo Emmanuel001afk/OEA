@@ -1,6 +1,7 @@
 package com.oea.launcher.miniapps
 
 import android.app.Activity
+import android.app.KeyguardManager
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
 import android.content.BroadcastReceiver
@@ -27,6 +28,7 @@ import android.provider.Settings
 import android.util.Rational
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -105,7 +107,17 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private var lastSavedAt = 0L
     private var previewSeq = 0
 
+    // One brightness/volume slide. The value is read ONCE, when the slide
+    // starts, and the finger's displacement from that point is what moves it.
+    // (onScroll reports the movement since its own last call, so feeding the
+    // total distance from the gesture's start into the current value added the
+    // whole drag again on every event: a short flick swept the entire range.)
+    private var slideMode = SLIDE_NONE
+    private var slideStartY = 0f
+    private var slideBase = 0f
+
     private var aspect = OeaVipStore.Aspect.FIT
+    private var rotation = OeaVipStore.Rotation.AUTO
     private var loop = OeaVipStore.Loop.OFF
     private var speed = 1f
     private var subtitlesOn = true
@@ -122,6 +134,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private lateinit var errorCard: LinearLayout
     private lateinit var chrome: LinearLayout
     private lateinit var topBar: LinearLayout
+    private lateinit var pillRow: LinearLayout
     private lateinit var bottomBar: LinearLayout
     private lateinit var titleView: TextView
     private lateinit var albumView: TextView
@@ -167,9 +180,26 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
     }
 
+    /**
+     * Automatic rotation stops turning while the screen is locked. Locking a
+     * phone in your hand, or putting it down, must not spin the picture: the
+     * player holds whichever way up it was when the screen went off and lets
+     * go again the moment it is unlocked.
+     */
+    private val lockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF, Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> applyRotation()
+            }
+        }
+    }
+
     private val touch by lazy {
         android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onDown(e: MotionEvent): Boolean {
+                slideMode = SLIDE_NONE
+                return true
+            }
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (locked) {
@@ -200,9 +230,20 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             override fun onScroll(down: MotionEvent?, event: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
                 if (locked || inPip) return false
                 val from = down ?: return false
-                if (Math.abs(event.y - from.y) < Math.abs(event.x - from.x)) return false
-                val delta = (down.y - event.y) / root.height.toFloat()
-                if (down.x < root.width / 2f) adjustBrightness(delta) else adjustVolume(delta)
+                val travelled = from.y - event.y
+                if (slideMode == SLIDE_NONE) {
+                    // Sideways drags are not ours. Vertical ones only start
+                    // after a deliberate movement, so a tap or a wobble never
+                    // moves the brightness by itself.
+                    if (Math.abs(travelled) < Math.abs(event.x - from.x)) return false
+                    if (Math.abs(travelled) < dp(12).toFloat()) return false
+                    slideMode = if (from.x < root.width / 2f) SLIDE_BRIGHTNESS else SLIDE_VOLUME
+                    slideStartY = from.y
+                    slideBase = if (slideMode == SLIDE_BRIGHTNESS) brightnessNow() else volumeNow()
+                }
+                val delta = (slideStartY - event.y) / root.height.toFloat()
+                if (slideMode == SLIDE_BRIGHTNESS) applyBrightness(slideBase + delta * BRIGHTNESS_GAIN)
+                else applyVolume(slideBase + delta * VOLUME_GAIN)
                 return true
             }
         })
@@ -231,6 +272,17 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(pipReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
             else @Suppress("UnspecifiedRegisterReceiverFlag") registerReceiver(pipReceiver, filter)
+        }
+        runCatching {
+            // Screen on/off and unlock are only ever delivered to a receiver
+            // registered from code, never to one declared in the manifest.
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(lockReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else @Suppress("UnspecifiedRegisterReceiverFlag") registerReceiver(lockReceiver, filter)
         }
     }
 
@@ -279,6 +331,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         startAtMs = intent.getLongExtra(EXTRA_START_AT, 0L)
         durationMs = intent.getLongExtra(EXTRA_DURATION, 0L).coerceAtLeast(0L)
         sidecar = intent.getStringExtra(EXTRA_SIDECAR)
+        rotation = OeaVipStore.rotationOf(this)
+        applyRotation()
         aspect = OeaVipStore.aspectOf(this)
         loop = OeaVipStore.loopOf(this)
         speed = OeaVipStore.speedOf(this)
@@ -421,18 +475,23 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
         topBar = buildTopBar()
         bottomBar = buildBottomBar()
-        val topScroll = android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = true
-            isFillViewport = true
-            addView(topBar, android.widget.FrameLayout.LayoutParams(-2, -2))
+        chrome.addView(topBar, LinearLayout.LayoutParams(-1, -2))
+        // The scrub thumbnail used to be a row in the bottom bar, so showing
+        // it pushed the whole bar up the screen while you dragged. Floated
+        // over the picture instead, the bar never moves.
+        val stage = FrameLayout(this).apply {
+            addView(thumbPreview, FrameLayout.LayoutParams(dp(148), dp(84)).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+                bottomMargin = dp(10)
+                marginEnd = dp(14)
+            })
         }
-        chrome.addView(topScroll, LinearLayout.LayoutParams(-1, -2))
-        chrome.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        chrome.addView(stage, LinearLayout.LayoutParams(-1, 0, 1f))
         chrome.addView(bottomBar, LinearLayout.LayoutParams(-1, -2))
         root.addView(chrome, FrameLayout.LayoutParams(-1, -1))
 
         resumeBar = buildResumeBar()
-        root.addView(resumeBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = dp(150) })
+        root.addView(resumeBar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
 
         guard = View(this).apply {
             isClickable = true
@@ -446,7 +505,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         root.addView(guard, FrameLayout.LayoutParams(-1, -1))
 
         setContentView(root)
-        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitVideo() }
+        root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            fitVideo()
+            applyChromeHeight()
+        }
         lockPill = buildLockPill()
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = OeaInsets.bars(insets)
@@ -497,7 +559,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             )
             setPadding(dp(4), dp(8), dp(6), dp(12))
         }
-        bar.addView(iconButton(R.drawable.oic_arrow_back, "Close the player") { finish() })
+        bar.addView(iconButton(R.drawable.oic_arrow_back, "Close the player") { finish() }, buttonSize())
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         titleView = text(title, 15.5f, Color.WHITE, OeaType.medium).apply {
             maxLines = 1
@@ -510,16 +572,19 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
         info.addView(titleView)
         info.addView(albumView)
-        bar.addView(info, LinearLayout.LayoutParams(dp(150), -2).apply { marginStart = dp(4); marginEnd = dp(6) })
-        bar.addView(iconButton(R.drawable.oic_skip_previous, "Previous clip") { step(-1) }, buttonSize())
-        bar.addView(iconButton(R.drawable.oic_skip_next, "Next clip") { step(1) }, buttonSize())
-        sleepPill = pill("Sleep", R.drawable.oic_timer, null) { showSleepSheet() }
-        bar.addView(sleepPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginStart = dp(4) })
+        // The name takes the room that is left and gives it back when the
+        // buttons need it — it used to be pinned at 150dp, which is what
+        // pushed eight more controls into a bar that then had to scroll
+        // sideways, with a scrollbar, over a film.
+        bar.addView(info, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4); marginEnd = dp(6) })
+        // The sleep pill only takes a place when a timer is actually counting:
+        // a row of controls nobody has touched yet is what made this bar look
+        // like a cockpit.
+        sleepPill = pill("Sleep", R.drawable.oic_timer, null) { showSleepSheet() }.apply {
+            visibility = View.GONE
+        }
+        bar.addView(sleepPill, LinearLayout.LayoutParams(-2, dp(44)))
         if (!isAudio) bar.addView(iconButton(R.drawable.ic_vip_pip, "Picture in picture") { enterPip() }, buttonSize())
-        // Rotation lives up here, not buried in a sheet: tilting the phone
-        // is how people expect a video to turn, and this is the one-tap
-        // answer when it does not.
-        bar.addView(iconButton(R.drawable.ic_vip_rotate, "Screen rotation") { cycleRotation() }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_lock, "Lock the screen controls") { setLocked(true) }, buttonSize())
         bar.addView(iconButton(R.drawable.oic_more_vert, "Everything else") { showMoreSheet() }, buttonSize())
         return bar
@@ -534,7 +599,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 GradientDrawable.Orientation.BOTTOM_TOP,
                 intArrayOf(0xCC000000.toInt(), 0x00000000)
             )
-            setPadding(dp(14), dp(14), dp(14), dp(16))
+            setPadding(dp(14), dp(8), dp(14), dp(12))
         }
         thumbPreview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -544,13 +609,15 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             }
             visibility = View.GONE
         }
-        bar.addView(thumbPreview, LinearLayout.LayoutParams(dp(148), dp(84)).apply { gravity = Gravity.END; bottomMargin = dp(6) })
 
+        // Elapsed and remaining sit either side of the scrubber on one line.
+        // As two rows above it they spent a whole line of a landscape screen
+        // on two numbers.
         val timeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         elapsed = text("0:00", 12.5f, 0xE6FFFFFF.toInt(), OeaType.medium)
         remaining = text("0:00", 12.5f, 0xB3FFFFFF.toInt(), OeaType.medium).apply { gravity = Gravity.END }
-        timeRow.addView(elapsed, LinearLayout.LayoutParams(0, -2, 1f))
-        timeRow.addView(remaining, LinearLayout.LayoutParams(0, -2, 1f))
+        timeRow.addView(elapsed, LinearLayout.LayoutParams(-2, -2))
+        timeRow.addView(remaining, LinearLayout.LayoutParams(-2, -2))
         bar.addView(timeRow)
 
         scrub = OeaScrubBar(this).apply {
@@ -570,12 +637,17 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 }
             }
         }
-        bar.addView(scrub, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(2) })
+        timeRow.addView(scrub, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+            marginStart = dp(10); marginEnd = dp(10)
+        })
 
         val transport = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        // Previous and next came out of the top bar to sit with play, where
+        // every other player keeps them.
+        transport.addView(iconButton(R.drawable.oic_skip_previous, "Previous clip") { step(-1) }, buttonSize())
         transport.addView(iconButton(R.drawable.oic_fast_rewind, "Back ten seconds") { seekBy(-SEEK_MS) }, buttonSize())
         playToggle = OeaIconToggle(this).apply {
             circleSizeDp = 56
@@ -592,23 +664,25 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             marginStart = dp(14); marginEnd = dp(14)
         })
         transport.addView(iconButton(R.drawable.oic_fast_forward, "Forward ten seconds") { seekBy(SEEK_MS) }, buttonSize())
-        bar.addView(transport, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        transport.addView(iconButton(R.drawable.oic_skip_next, "Next clip") { step(1) }, buttonSize())
+        bar.addView(transport, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
 
-        val pills = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        // Speed, picture, subtitles and the queue keep their own row, but only
+        // where there is height for it: held sideways the picture needs that
+        // row more, and every one of these is in the ⋮ sheet as well.
+        pillRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         speedPill = pill(OeaVipStore.speedLabel(speed), R.drawable.oic_speed, null) { showSpeedSheet() }
         aspectPill = pill(aspect.label, R.drawable.oic_aspect_ratio, null) { cycleAspect() }
         ccPill = pill("Subtitles", R.drawable.oic_subtitles, null) { showSubtitleSheet() }
-        pills.addView(speedPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
-        pills.addView(aspectPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
-        pills.addView(ccPill, LinearLayout.LayoutParams(-2, dp(48)).apply { marginEnd = dp(7) })
         val queue = pill(queueLabel(), R.drawable.oic_queue_music, null) { showQueueSheet() }
         queuePill = queue
-        pills.addView(queue, LinearLayout.LayoutParams(-2, dp(48)))
-        val pillScroll = android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = true
-            addView(pills, android.widget.FrameLayout.LayoutParams(-2, -2))
+        listOf(speedPill, aspectPill, ccPill, queue).forEach { chip ->
+            pillRow.addView(chip, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) })
         }
-        bar.addView(pillScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        bar.addView(pillRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         return bar
     }
 
@@ -1019,7 +1093,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     private fun step(delta: Int) {
         if (entries.size < 2) {
-            toast(if (delta > 0) "This is the last clip in the queue" else "This is the first clip")
+            toast("There is nothing else in the queue")
             return
         }
         val target = when {
@@ -1086,6 +1160,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 pauseForSleep("Sleep timer reached")
             } else {
                 sleepPill.text = "${(left / 60_000L) + 1}m"
+                if (sleepPill.visibility != View.VISIBLE) sleepPill.visibility = View.VISIBLE
             }
         }
         if (OeaVipAudioService.running && SystemClock.elapsedRealtime() - lastSavedAt > 4_000L) syncService()
@@ -1096,7 +1171,18 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         onPlayStateChanged()
         setChrome(true)
         flash(reason)
-        sleepPill.text = "Sleep"
+        setSleepPill(null)
+    }
+
+    /** @param label null clears it; the pill only shows while a timer is set. */
+    private fun setSleepPill(label: String?) {
+        if (label == null) {
+            sleepPill.visibility = View.GONE
+            sleepPill.text = "Sleep"
+        } else {
+            sleepPill.text = label
+            sleepPill.visibility = View.VISIBLE
+        }
     }
 
     private fun paintSubtitle() {
@@ -1126,20 +1212,30 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     // ---------------------------------------------------------------- gestures
 
-    private fun adjustBrightness(delta: Float) {
-        val from = if (brightness < 0f) systemBrightness() else brightness
-        val value = (from + delta * 0.9f).coerceIn(0.01f, 1f)
-        brightness = value
-        window.attributes = window.attributes.apply { screenBrightness = value }
-        showHud("Brightness", (value * 100).roundToInt() / 100f, "${(value * 100).roundToInt()}%")
+    /** The brightness this window is showing, before a slide moves it. */
+    private fun brightnessNow(): Float = if (brightness < 0f) systemBrightness() else brightness
+
+    private fun applyBrightness(value: Float) {
+        val clamped = value.coerceIn(0.01f, 1f)
+        brightness = clamped
+        window.attributes = window.attributes.apply { screenBrightness = clamped }
+        val percent = (clamped * 100).roundToInt()
+        showHud("Brightness", percent / 100f, "$percent%")
     }
 
-    private fun adjustVolume(delta: Float) {
-        val max = runCatching { audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(15).coerceAtLeast(1)
-        val from = runCatching { audio.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0).toFloat() / max
-        val value = (from + delta * 1.1f).coerceIn(0f, 1f)
-        runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, (value * max).roundToInt(), 0) }
-        showHud("Volume", value, "${(value * max).roundToInt()} of $max")
+    /** The media volume as a fraction, before a slide moves it. */
+    private fun volumeNow(): Float =
+        runCatching { audio.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0).toFloat() /
+            volumeSteps().toFloat()
+
+    private fun volumeSteps(): Int =
+        runCatching { audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(15).coerceAtLeast(1)
+
+    private fun applyVolume(value: Float) {
+        val max = volumeSteps()
+        val clamped = value.coerceIn(0f, 1f)
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, (clamped * max).roundToInt(), 0) }
+        showHud("Volume", clamped, "${(clamped * max).roundToInt()} of $max")
     }
 
     private fun systemBrightness(): Float = runCatching {
@@ -1179,6 +1275,29 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     }
 
     // ------------------------------------------------------------------ chrome
+
+    /**
+     * Held sideways the picture has the least room to spare, so the row of
+     * chips — speed, picture, subtitles, queue — steps aside; every one of them
+     * is in the ⋮ sheet as well. Standing up they are one tap away again.
+     */
+    private fun applyChromeHeight() {
+        if (!::pillRow.isInitialized || !::bottomBar.isInitialized) return
+        val upright = resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        val wanted = if (upright) View.VISIBLE else View.GONE
+        if (pillRow.visibility != wanted) pillRow.visibility = wanted
+        // The "carry on from where you left off" bar sits on top of the
+        // controls, so it has to follow their height instead of a number
+        // guessed once — the bar is shorter sideways now.
+        if (::resumeBar.isInitialized && bottomBar.height > 0) {
+            val margin = bottomBar.height + dp(8)
+            val params = resumeBar.layoutParams as? FrameLayout.LayoutParams ?: return
+            if (params.bottomMargin != margin) {
+                params.bottomMargin = margin
+                resumeBar.layoutParams = params
+            }
+        }
+    }
 
     private fun setChrome(visible: Boolean) {
         if (inPip) return
@@ -1528,7 +1647,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 panel.row(group, R.drawable.oic_timer, "$minutes minutes", "Pause when the time is up", onClick = {
                     sleepDeadline = SystemClock.elapsedRealtime() + minutes * 60_000L
                     sleepAfterClip = false
-                    sleepPill.text = "$minutes m"
+                    setSleepPill("$minutes m")
                     panel.dismiss()
                 })
             }
@@ -1536,13 +1655,13 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 selected = sleepAfterClip, onClick = {
                     sleepAfterClip = !sleepAfterClip
                     sleepDeadline = 0L
-                    sleepPill.text = if (sleepAfterClip) "1 clip" else "Sleep"
+                    setSleepPill(if (sleepAfterClip) "1 clip" else null)
                     panel.dismiss()
                 })
             panel.row(group, R.drawable.oic_close, "Turn it off", selected = false, onClick = {
                 sleepDeadline = 0L
                 sleepAfterClip = false
-                sleepPill.text = "Sleep"
+                setSleepPill(null)
                 panel.dismiss()
             })
         }
@@ -1664,27 +1783,60 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
     }
 
+    /**
+     * The queue, without building a row for every clip it holds.
+     *
+     * VIP is handed the whole library as a queue, so a phone with a few
+     * thousand videos used to ask the main thread for a few thousand rows —
+     * an ImageView, two TextViews and a ripple each — just to open this
+     * sheet. What anybody opens a queue for is what is playing and what comes
+     * next, so that is all that gets built: one row for now, a bounded window
+     * for up next, and a count of what is behind it.
+     */
     private fun showQueueSheet() {
-        sheet("Queue", "${entries.size} clips • playing ${index + 1}") { panel ->
-            val group = panel.group()
-            entries.forEachIndexed { position, entry ->
+        val total = entries.size
+        sheet("Queue", "$total ${if (total == 1) "clip" else "clips"} • playing ${index + 1}") { panel ->
+            val now = panel.group()
+            current()?.let { entry ->
                 panel.row(
-                    group,
-                    if (position == index) R.drawable.oic_play_arrow else R.drawable.oic_queue_music,
+                    now,
+                    R.drawable.oic_play_arrow,
                     entry.title.substringBeforeLast('.'),
-                    if (position == index) "Now playing" else "Clip ${position + 1}",
-                    selected = position == index,
-                    onClick = {
-                        panel.dismiss()
-                        if (position != index) {
+                    "Now playing",
+                    selected = true
+                )
+            }
+            val upcoming = entries.drop(index + 1).take(QUEUE_WINDOW)
+            if (upcoming.isNotEmpty()) {
+                panel.heading("Up next")
+                val group = panel.group()
+                upcoming.forEachIndexed { offset, entry ->
+                    val position = index + 1 + offset
+                    panel.row(
+                        group,
+                        R.drawable.oic_queue_music,
+                        entry.title.substringBeforeLast('.'),
+                        "Clip ${position + 1}",
+                        onClick = {
+                            panel.dismiss()
                             saveProgress()
                             openEntry(position, 0L)
                         }
-                    }
+                    )
+                }
+            }
+            val before = index
+            val after = (total - index - 1 - upcoming.size).coerceAtLeast(0)
+            val hidden = before + after
+            if (hidden > 0) {
+                panel.note(
+                    "Showing the ${upcoming.size + 1} clips from here. " +
+                        "$hidden ${if (hidden == 1) "is" else "are"} further away — " +
+                        "previous and next walk through them."
                 )
             }
             panel.buttons(
-                if (entries.size > 1) "Take this clip out" to {
+                if (total > 1) "Take this clip out" to {
                     saveProgress()
                     entries = entries.filterIndexed { position, _ -> position != index }
                     index = index.coerceAtMost(entries.lastIndex)
@@ -1693,7 +1845,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     } else {
                         openEntry(index, 0L)
                     }
-                } else "Nothing else in the queue" to { },
+                } else "There is nothing else in the queue" to { },
                 "Close" to { }
             )
         }
@@ -1724,7 +1876,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     panel.dismiss()
                     showSleepSheet()
                 })
-            panel.row(primary, R.drawable.ic_vip_rotate, "Rotation", rotationLabel(), onClick = {
+            panel.row(primary, R.drawable.ic_vip_rotate, "Rotation", "${rotation.label} — tap for the next", onClick = {
                 panel.dismiss()
                 cycleRotation()
             })
@@ -1814,24 +1966,56 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         sheet.row(group, R.drawable.oic_folder, "Path", entry.uri.path ?: "hidden inside the media provider")
     }
 
+    /**
+     * Three ways to hold the screen — the three anybody looks for. A fourth
+     * ("upside down") used to sit here too and bought nothing but a picture
+     * the wrong way up while the phone lay flat.
+     */
     private fun cycleRotation() {
-        val modes = listOf(
-            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR to "automatic",
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE to "landscape",
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT to "portrait",
-            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE to "upside down"
-        )
-        val at = modes.indexOfFirst { it.first == requestedOrientation }
-        val next = modes[(at + 1 + modes.size) % modes.size]
-        requestedOrientation = next.first
-        flash("Rotation: ${next.second}")
+        rotation = when (rotation) {
+            OeaVipStore.Rotation.AUTO -> OeaVipStore.Rotation.LANDSCAPE
+            OeaVipStore.Rotation.LANDSCAPE -> OeaVipStore.Rotation.PORTRAIT
+            OeaVipStore.Rotation.PORTRAIT -> OeaVipStore.Rotation.AUTO
+        }
+        OeaVipStore.setRotation(this, rotation)
+        applyRotation()
+        flash("Rotation: ${rotation.label} — ${rotation.blurb}")
     }
 
-    private fun rotationLabel(): String = when (requestedOrientation) {
-        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE -> "landscape"
-        ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT -> "portrait"
-        ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE -> "upside down"
-        else -> "automatic"
+    /** Puts the chosen rotation on the window, honouring a locked screen. */
+    private fun applyRotation() {
+        requestedOrientation = when (rotation) {
+            OeaVipStore.Rotation.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            OeaVipStore.Rotation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            OeaVipStore.Rotation.AUTO ->
+                if (screenLocked()) frozenOrientation() else ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        }
+    }
+
+    private fun screenLocked(): Boolean {
+        val keys = runCatching { getSystemService(KEYGUARD_SERVICE) as? KeyguardManager }.getOrNull()
+        return keys?.isKeyguardLocked == true
+    }
+
+    /**
+     * The orientation the screen is showing right now, as a fixed request.
+     * Used to hold the picture still while the screen is locked: automatic
+     * keeps whatever you locked it in, portrait stays portrait and landscape
+     * stays landscape, however the phone is turned afterwards.
+     */
+    private fun frozenOrientation(): Int {
+        val turn = if (Build.VERSION.SDK_INT >= 30) {
+            runCatching { display?.rotation }.getOrNull()
+        } else {
+            @Suppress("DEPRECATION")
+            runCatching { windowManager.defaultDisplay.rotation }.getOrNull()
+        } ?: Surface.ROTATION_0
+        return when (turn) {
+            Surface.ROTATION_90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            Surface.ROTATION_180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            Surface.ROTATION_270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
     }
 
     private fun addToPlaylist() {
@@ -2001,6 +2185,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         handler.removeCallbacksAndMessages(null)
         saveProgress()
         runCatching { unregisterReceiver(pipReceiver) }
+        runCatching { unregisterReceiver(lockReceiver) }
         stopFx()
         runCatching { retriever?.release() }
         retriever = null
@@ -2049,6 +2234,23 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         const val EXTRA_HANDLED = "oea.vip.view_handled"
 
         private const val SEEK_MS = 10_000L
+
+        /** How many clips the queue sheet lists after the one playing. */
+        private const val QUEUE_WINDOW = 20
+
+        /** Which side of the screen a slide is driving. */
+        private const val SLIDE_NONE = 0
+        private const val SLIDE_BRIGHTNESS = 1
+        private const val SLIDE_VOLUME = 2
+
+        /**
+         * How much of the range a full-height drag covers. Below 1 a drag has
+         * to travel further than the screen is tall to cross every step, which
+         * is what makes a slide feel like a control instead of a switch.
+         */
+        private const val BRIGHTNESS_GAIN = 0.85f
+        private const val VOLUME_GAIN = 1.0f
+
         private const val REQUEST_SUBTITLE = 4321
         private const val ACTION_PIP_PLAY = "com.oea.launcher.vip.PIP_PLAY"
         private const val ACTION_PIP_PREV = "com.oea.launcher.vip.PIP_PREV"

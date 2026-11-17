@@ -76,6 +76,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import java.util.concurrent.Executors
 
 /**
@@ -140,6 +141,8 @@ object OeaCameraApp {
     private const val KEY_PENDING_SYSTEM_CAPTURE = "pending_system_capture"
     private const val KEY_MIRROR_SELFIE = "mirror_selfie"
     private const val KEY_LEVEL = "level"
+    private const val KEY_VIDEO_QUALITY = "video_quality"
+    private const val KEY_EXPOSURE = "exposure_steps"
 
     private const val REQUEST_SYSTEM_PHOTO = 3001
     private const val REQUEST_SYSTEM_VIDEO = 3004
@@ -221,6 +224,46 @@ object OeaCameraApp {
     }
 
     enum class FilterMode(val label: String) { NONE("None"), MONO("Mono"), SEPIA("Sepia"), VIVID("Vivid"), COOL("Cool"), WARM("Warm"), NOIR("Noir") }
+
+    /**
+     * Recording sizes and frame rates OEA will offer.
+     *
+     * Video used to be fixed at one size and 30fps whatever the phone could
+     * do, so a camera that records 4K or 60fps was held to the lowest common
+     * denominator, and a slow one was asked for more than it had.
+     */
+    enum class VideoQuality(val label: String, val width: Int, val height: Int, val fps: Int, val bitRate: Int) {
+        UHD_30("4K · 30 fps", 3840, 2160, 30, 45_000_000),
+        FHD_60("1080p · 60 fps", 1920, 1080, 60, 24_000_000),
+        FHD_30("1080p · 30 fps", 1920, 1080, 30, 16_000_000),
+        HD_60("720p · 60 fps", 1280, 720, 60, 12_000_000),
+        HD_30("720p · 30 fps", 1280, 720, 30, 9_000_000),
+        SD_30("480p · 30 fps", 854, 480, 30, 5_000_000);
+
+        companion object {
+            fun of(name: String?): VideoQuality? = values().firstOrNull { it.name == name }
+        }
+    }
+
+    /** The recording quality to use, falling back to 1080p 30. */
+    fun videoQuality(host: Activity): VideoQuality =
+        VideoQuality.of(prefs(host).getString(KEY_VIDEO_QUALITY, VideoQuality.FHD_30.name))
+            ?: VideoQuality.FHD_30
+
+    fun setVideoQuality(host: Activity, value: VideoQuality) =
+        prefs(host).edit().putString(KEY_VIDEO_QUALITY, value.name).apply()
+
+    /**
+     * Exposure compensation in stops, for every mode — not just Pro.
+     *
+     * Brightening or darkening a picture is the control people reach for
+     * after tapping to focus, and it used to exist only inside Pro's sliders,
+     * so a backlit scene in Photo had no answer but to move.
+     */
+    fun exposureSteps(host: Activity): Int = prefs(host).getInt(KEY_EXPOSURE, 0).coerceIn(-3, 3)
+
+    fun setExposureSteps(host: Activity, steps: Int) =
+        prefs(host).edit().putInt(KEY_EXPOSURE, steps.coerceIn(-3, 3)).apply()
 
     enum class CaptureMode(val label: String, val desc: String) {
         PHOTO("Photo", "Standard capture · the contrast push is in settings"),
@@ -710,7 +753,11 @@ object OeaCameraApp {
         val flashChip = kit.chip(flashLabel(), flash != FlashMode.OFF, R.drawable.oic_flash_on) {}
         val timerChip = kit.chip(timer.label, timer != TimerMode.OFF, R.drawable.oic_timer) {}
         val gridChip = kit.chip(grid.label, grid != GridMode.OFF, R.drawable.oic_grid_view) {}
+        var exposure = exposureSteps(host)
+        fun exposureLabel(): String =
+            if (exposure == 0) "EV 0" else "EV %+d".format(exposure)
         val filterChip = kit.chip(filter.label, filter != FilterMode.NONE, R.drawable.oic_palette) {}
+        val exposureChip = kit.chip(exposureLabel(), exposure != 0, R.drawable.oic_contrast) {}
 
         fun refreshChips() {
             aspectChip.text = aspect.label
@@ -728,6 +775,9 @@ object OeaCameraApp {
             filterChip.text = filter.label
             filterChip.contentDescription = "Filter, ${filter.label}"
             styleChip(filterChip, filter != FilterMode.NONE)
+            exposureChip.text = exposureLabel()
+            exposureChip.contentDescription = "Exposure, ${exposureLabel()}"
+            styleChip(exposureChip, exposure != 0)
         }
         refreshChips()
 
@@ -773,6 +823,18 @@ object OeaCameraApp {
             applyFilterOverlay()
             refreshChips()
         }
+        exposureChip.setOnClickListener {
+            // 0 → +1 → +2 → +3 → −3 → −2 → −1 → 0: brighten first, because
+            // darkening is the direction people undo.
+            exposure = when (exposure) {
+                0 -> 1
+                3 -> -3
+                else -> exposure + 1
+            }
+            setExposureSteps(host, exposure)
+            cameraHelper.refreshExposure()
+            refreshChips()
+        }
         val chipLp = { LinearLayout.LayoutParams(-2, dp(32)).apply { rightMargin = dp(6) } }
         val chips = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
         chips.addView(aspectChip, chipLp())
@@ -780,6 +842,7 @@ object OeaCameraApp {
         chips.addView(timerChip, chipLp())
         chips.addView(gridChip, chipLp())
         chips.addView(filterChip, chipLp())
+        chips.addView(exposureChip, chipLp())
         topBar.addView(kit.hscroll(chips), LinearLayout.LayoutParams(0, -2, 1f))
         topBar.addView(
             kit.circleIconButton(R.drawable.oic_settings, "Camera settings", 0x33FFFFFF, Color.WHITE) {
@@ -796,7 +859,8 @@ object OeaCameraApp {
                         gridOverlay.setAspect(OeaCameraOptics.frameAspect(chosen.ratio, host.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE))
                         refreshChips()
                     },
-                    onVisualChange = { refreshLevelUi(); refreshStudio() }
+                    onVisualChange = { refreshLevelUi(); refreshStudio() },
+                    qualities = cameraHelper.supportedVideoQualities()
                 )
             },
             LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(6) }
@@ -2081,7 +2145,8 @@ object OeaCameraApp {
         palette: OeaPalette,
         aspect: AspectMode,
         onAspect: (AspectMode) -> Unit,
-        onVisualChange: () -> Unit = {}
+        onVisualChange: () -> Unit = {},
+        qualities: List<VideoQuality> = emptyList()
     ) {
         kit.sheet("Camera settings", "OEA's own camera preferences") { panel, _ ->
             val p = prefs(host)
@@ -2146,6 +2211,37 @@ object OeaCameraApp {
                 10,
                 { frames -> if (frames == 1) "1 frame" else "$frames frames" }
             ) { setBurstCount(host, it) }
+            if (qualities.isNotEmpty()) {
+                val current = videoQuality(host)
+                kit.row(
+                    group,
+                    R.drawable.oic_high_quality,
+                    "Video quality",
+                    "What this camera can record — size and frame rate",
+                    value = if (current in qualities) current.label else qualities.first().label
+                ) {
+                    kit.sheet(
+                        "Video quality",
+                        "Only what this phone's camera can actually record is listed"
+                    ) { list, dialog ->
+                        val rows = kit.group(list)
+                        qualities.forEach { quality ->
+                            kit.row(
+                                rows,
+                                R.drawable.oic_high_quality,
+                                quality.label,
+                                if (quality == current) "Recording at this now" else null,
+                                value = if (quality == current) "on" else null,
+                                onClick = {
+                                    setVideoQuality(host, quality)
+                                    dialog.dismiss()
+                                    showSettings(host, kit, palette, aspect, onAspect, onVisualChange, qualities)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
             kit.sectionTitle(panel, "Screen & Frame Studio")
             listOf(
@@ -2626,8 +2722,28 @@ object OeaCameraApp {
             val sizes = runCatching { streamConfig()?.getOutputSizes(MediaRecorder::class.java)?.map { it.width to it.height } }
                 .getOrNull()
                 .orEmpty()
+            val wanted = videoQuality(activity)
+            if (sizes.any { it.first == wanted.width && it.second == wanted.height }) {
+                return Size(wanted.width, wanted.height)
+            }
             val picked = OeaCameraOptics.bestAspectSize(sizes, aspectMode.ratio, 1920L * 1080L) ?: (1280 to 720)
             return Size(picked.first, picked.second)
+        }
+
+        /**
+         * The qualities this camera can really record: a size the sensor
+         * offers, at a frame rate its auto-exposure can actually run.
+         */
+        fun supportedVideoQualities(): List<VideoQuality> {
+            val sizes = runCatching { streamConfig()?.getOutputSizes(MediaRecorder::class.java)?.toList() }
+                .getOrNull().orEmpty()
+            val ranges = runCatching {
+                characteristics()?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.toList()
+            }.getOrNull().orEmpty()
+            val ceiling = ranges.maxOfOrNull { it.upper } ?: 30
+            return VideoQuality.values().filter { quality ->
+                quality.fps <= ceiling && sizes.any { it.width == quality.width && it.height == quality.height }
+            }.ifEmpty { listOf(VideoQuality.FHD_30, VideoQuality.HD_30) }
         }
 
         // ------------------------------------------------------------- session
@@ -2679,6 +2795,7 @@ object OeaCameraApp {
             set(previewBuilder, CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
             set(previewBuilder, CaptureRequest.FLASH_MODE, if (flashMode == FlashMode.TORCH) CameraMetadata.FLASH_MODE_TORCH else CameraMetadata.FLASH_MODE_OFF)
             applyZoom(previewBuilder)
+            applyExposure(previewBuilder)
             previewRequest = previewBuilder
             val targets = ArrayList<Surface>()
             targets.add(surface)
@@ -2710,6 +2827,13 @@ object OeaCameraApp {
             } catch (error: Throwable) {
                 report("The preview could not be created: ${error.message ?: "camera busy"}")
             }
+        }
+
+        /** Puts a changed exposure onto the running preview. */
+        fun refreshExposure() = onCamera {
+            val builder = previewRequest ?: return@onCamera
+            applyExposure(builder)
+            updateRepeating()
         }
 
         private fun updateRepeating() {
@@ -2792,6 +2916,7 @@ object OeaCameraApp {
                 OeaCameraOptics.rotationDegrees(sensorOrientation, deviceRotationDegrees(), front))
             set(builder, CaptureRequest.JPEG_QUALITY, 94.toByte())
             applyZoom(builder)
+            applyExposure(builder)
             synchronized(captures) { captures.addLast(PendingCapture(SystemClock.elapsedRealtime(), callback)) }
             armWatchdog()
             val request = builder.build()
@@ -3034,6 +3159,24 @@ object OeaCameraApp {
             set(builder, CaptureRequest.SCALER_CROP_REGION, crop)
         }
 
+        /**
+         * Puts the chosen exposure on a request, in the units this lens
+         * counts: [CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP] says how
+         * many raw steps make one stop, and the range is in those same steps.
+         */
+        private fun applyExposure(builder: CaptureRequest.Builder) {
+            val steps = exposureSteps(activity)
+            if (steps == 0) return
+            val chars = characteristics() ?: return
+            val range = runCatching { chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) }.getOrNull() ?: return
+            val step = runCatching { chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP) }.getOrNull() ?: return
+            val denominator = step.denominator.toDouble()
+            if (step.numerator == 0 || denominator == 0.0) return
+            val perStop = (denominator / step.numerator.toDouble()).roundToInt().coerceAtLeast(1)
+            val wanted = (steps * perStop).coerceIn(range.lower, range.upper)
+            set(builder, CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, wanted)
+        }
+
         private fun aeMode(mode: FlashMode): Int = when (mode) {
             FlashMode.AUTO -> CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH
             FlashMode.ON -> CameraMetadata.CONTROL_AE_MODE_ON_ALWAYS_FLASH
@@ -3074,9 +3217,11 @@ object OeaCameraApp {
                         setAudioEncodingBitRate(128_000)
                         setAudioSamplingRate(44_100)
                     }
+                    val quality = videoQuality(activity)
+                    val sameSize = quality.width == size.width && quality.height == size.height
                     setVideoSize(size.width, size.height)
-                    setVideoFrameRate(30)
-                    setVideoEncodingBitRate(if (size.width >= 1920) 16_000_000 else 9_000_000)
+                    setVideoFrameRate(if (sameSize) quality.fps else 30)
+                    setVideoEncodingBitRate(if (sameSize) quality.bitRate else if (size.width >= 1920) 16_000_000 else 9_000_000)
                     // Without this a portrait recording plays on its side forever.
                     setOrientationHint(OeaCameraOptics.rotationDegrees(sensorOrientation, deviceRotationDegrees(), front))
                     if (captureRateHz > 0f) {
