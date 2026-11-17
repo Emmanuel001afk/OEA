@@ -50,12 +50,18 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
                 .putInt("last_sms_parts", messages.size)
                 .apply()
         }.onFailure { Log.w(TAG, "Could not record SMS delivery", it) }
-        val muted = runCatching {
+        val senderRaw = first.originatingAddress.orEmpty()
+        val prefs = runCatching {
             context.getSharedPreferences("oea_messaging_v2", Context.MODE_PRIVATE)
-                .getStringSet("muted_addresses", emptySet())
-                ?.contains(first.originatingAddress.orEmpty()) == true
+        }.getOrNull()
+        val suppressed = runCatching {
+            val mutedSet = prefs?.getStringSet("muted_addresses", emptySet()).orEmpty()
+            val blockedSet = prefs?.getStringSet("blocked_addresses", emptySet()).orEmpty()
+            (mutedSet + blockedSet).any { saved ->
+                saved == senderRaw || OeaSmsMatcher.sameAddress(saved, senderRaw)
+            }
         }.getOrDefault(false)
-        if (inserted && !muted) postNewMessageNotification(context, first.originatingAddress.orEmpty(), body)
+        if (inserted && !suppressed) postNewMessageNotification(context, senderRaw, body)
     }
 
     private fun subscriptionIdFrom(intent: Intent): Int {
@@ -81,6 +87,7 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
         }
         val openMessaging = runCatching {
             val launch = OeaMiniApps.launchIntent(context, "messaging")
+                .putExtra("oea.sms.address", sender)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             PendingIntent.getActivity(
                 context,

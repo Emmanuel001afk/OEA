@@ -28,6 +28,7 @@ import com.oea.launcher.R
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.multitask.projection.OeaLiveWindowManager
 import com.oea.launcher.multitask.projection.OeaLiveWindows
+import com.oea.launcher.multitask.projection.OeaProjectionPolicy
 import kotlin.math.abs
 
 /**
@@ -412,7 +413,7 @@ class OeaFloatingWindowService : AccessibilityService() {
         })
         body.addView(TextView(this).apply {
             text = if (OeaLiveWindows.enabled(this@OeaFloatingWindowService)) {
-                "Live windows are on: tap an app to open it here for real, on a private display. Your current app stays on the phone screen. Long-press an app for the old freeform request."
+                "Live windows are on: tap an app to open it here for real, on a private display. Your current app stays on the phone screen. OEA's own apps (Notes, Calculator, Messages, Phone, Clock, Weather and the rest) open here for real; other apps are marked below, because Android only lets an activity that declares allowEmbedded run on a display an app created. Long-press any app for the old freeform request."
             } else {
                 "Tap an app to request Android freeform. This panel is a floating launcher, not an embedded app window. Android/OEM may ignore the request and open the app full-screen; tap the arrow above to shrink this panel into a small floating ball (tap the ball to reopen it) and check. Reboot after enabling freeform in Developer options."
             }
@@ -467,6 +468,15 @@ class OeaFloatingWindowService : AccessibilityService() {
         }
 
         fun addAppRow(info: android.content.pm.ResolveInfo) {
+            // Say up front which apps Android will actually let onto the
+            // private display, instead of letting the user tap into a window
+            // that can only ever be empty. Android requires
+            // android:allowEmbedded of the activity itself; OEA's own apps
+            // declare it and third-party apps never do.
+            val blockedForLive = OeaLiveWindows.enabled(this) &&
+                OeaProjectionPolicy.check(
+                    this, info.activityInfo.packageName, info.activityInfo.name
+                ).verdict == OeaProjectionPolicy.Verdict.BLOCKED
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -477,26 +487,44 @@ class OeaFloatingWindowService : AccessibilityService() {
                     cornerRadius = dp(10).toFloat()
                 }
                 setPadding(dp(8), dp(6), dp(8), dp(6))
-                contentDescription = "Request ${info.loadLabel(packageManager)} in an Android freeform window"
+                contentDescription = if (blockedForLive) {
+                    "${info.loadLabel(packageManager)} cannot be opened in a live window"
+                } else {
+                    "Request ${info.loadLabel(packageManager)} in an Android freeform window"
+                }
             }
             val icon = ImageView(this).apply {
                 setImageDrawable(info.loadIcon(packageManager))
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
             row.addView(icon, LinearLayout.LayoutParams(dp(34), dp(34)))
-            row.addView(TextView(this).apply {
+            val labels = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), 0, 0, 0)
+            }
+            labels.addView(TextView(this).apply {
                 text = info.loadLabel(packageManager).toString()
-                setTextColor(0xFFF1F8FF.toInt())
+                setTextColor(if (blockedForLive) 0xFF9FB4CC.toInt() else 0xFFF1F8FF.toInt())
                 textSize = 13f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(dp(10), 0, 0, 0)
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+            })
+            if (blockedForLive) {
+                labels.addView(TextView(this).apply {
+                    text = "No live window — " + OeaProjectionPolicy.shortNote()
+                    setTextColor(0xFFFFB86B.toInt())
+                    textSize = 10f
+                    maxLines = 2
+                })
+            }
+            row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
             row.setOnClickListener {
                 val label = info.loadLabel(packageManager).toString()
                 if (OeaLiveWindows.enabled(this)) {
+                    // Pass the component this row is showing. Package alone
+                    // collapsed every OEA tool into "OEA Home".
                     val message = OeaLiveWindowManager.start(
-                        this, info.activityInfo.packageName, label
+                        this, info.activityInfo.packageName, label, info.activityInfo.name
                     )
                     android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
                 } else {
@@ -941,6 +969,22 @@ class OeaFloatingWindowService : AccessibilityService() {
     fun expand() {
         removeBall(animate = false)
         showWindow(animate = true)
+    }
+
+    /**
+     * Opens [app] from the workspace, using the only method OEA's own overlay
+     * can really deliver: a live projection window.
+     *
+     * "Float" on an app used to expand the workspace and forget which app was
+     * asked for, so the user had to find it again in the list. Returns false
+     * when live windows are off — the caller then leaves the workspace open
+     * rather than silently switching to Android freeform, which is a
+     * different method the user did not choose.
+     */
+    fun openApp(app: OeaAppInfo): String? {
+        if (!OeaLiveWindows.enabled(this)) return null
+        if (!OeaLiveWindowManager.canStart() && OeaLiveWindowManager.find(app.packageName, app.className) == null) return null
+        return OeaLiveWindowManager.start(this, app.packageName, app.label, app.className)
     }
 
     /**

@@ -143,8 +143,14 @@ jobs:
           set -euo pipefail
           SRC=oea/src/main/java/com/oea/launcher
           TOOLS=$SRC/OeaSystemToolsActivity.kt
-          grep -Fq "originalDndFilter" $SRC/gameboost/OeaGameBoostService.kt
-          grep -Fq "beginDndSession" $SRC/gameboost/OeaGameBoostService.kt
+          # Game Boost must record what a session changed and give it back, and
+          # the record has to outlive the process (a killed service used to
+          # leave Do Not Disturb switched on for good).
+          grep -Fq "OeaGameBoostSessionState.open(this, game)" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "OeaGameBoostSessionState.restore(this)" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "restoreIfOrphaned(this, sessionRunning = false)" $SRC/gameboost/OeaGameBoostService.kt
+          grep -Fq "fun restoreTarget" $SRC/gameboost/OeaGameBoostSessionState.kt
+          grep -Fq "fun restoreIfOrphaned" $SRC/gameboost/OeaGameBoostSessionState.kt
           grep -Fq "class OeaGameBoostActivity" $SRC/gameboost/OeaGameBoostActivity.kt
           grep -Fq "OeaGameBoostService.ACTION_REFRESH" $SRC/gameboost/OeaGameBoostActivity.kt
           grep -Fq "calculateLaunchBounds" $SRC/multitask/OeaMultitaskLauncher.kt
@@ -157,9 +163,68 @@ jobs:
           grep -Fq '"large" -> 520 to 700' $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.software.freeform_window_management" $SRC/multitask/OeaMultitaskLauncher.kt
           grep -Fq "android.activity.windowingMode" $SRC/multitask/OeaMultitaskLauncher.kt
+          # One resolver decides what "this app" means for every multitasking
+          # surface. A package-level answer opened OEA Home for every OEA tool,
+          # because they all share one package, and gave up when an update
+          # renamed or disabled the activity OEA was holding.
+          grep -Fq "object OeaMultitaskIntents" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "fun resolve(context: Context, packageName: String, className: String?)" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "fun record(context: Context, packageName: String, className: String?)" $SRC/multitask/OeaMultitaskIntents.kt
+          # OEA Home is itself a launcher activity, so a package-level fallback
+          # has to prefer the activities that are not home screens.
+          grep -Fq "Intent.CATEGORY_HOME" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "private fun ranked(context: Context, packageName: String)" $SRC/multitask/OeaMultitaskIntents.kt
+          grep -Fq "OeaMultitaskIntents.resolve(context, app)" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "OeaMultitaskIntents.record(context, app)" $SRC/multitask/OeaMultitaskLauncher.kt
+          grep -Fq "OeaMultitaskIntents.resolve(service, packageName, className)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "OeaMultitaskIntents.record(service, packageName, activityName)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "OeaMultitaskIntents.resolve(context, first)" $SRC/split/OeaSplitLauncher.kt
+          # No multitasking surface may ask the package instead of the component.
+          ! grep -Fq "getLaunchIntentForPackage" $SRC/multitask/OeaMultitaskLauncher.kt
+          ! grep -Fq "getLaunchIntentForPackage" $SRC/split/OeaSplitLauncher.kt
+          ! grep -Fq "getLaunchIntentForPackage" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          # The OEA floating workspace must remember which app was asked for.
+          grep -Fq "service.openApp(app)" $SRC/multitask/OeaFloatingWindows.kt
+          grep -Fq "fun openApp(app: OeaAppInfo)" $SRC/multitask/OeaFloatingWindowService.kt
+          # Pairing and live windows are per component, not per package.
+          grep -Fq "fun find(pkg: String, className: String?)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "first.packageName == second.packageName && first.className == second.className" $SRC/split/OeaSplitLauncher.kt
           grep -Fq "Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT" $SRC/split/OeaSplitLauncher.kt
           ! grep -Fq "Intent.FLAG_ACTIVITY_CLEAR_TOP" $SRC/split/OeaSplitLauncher.kt
           grep -Fq "toggleSplitScreen" $SRC/split/OeaSplitLauncher.kt
+          # Live windows: the projection must be able to SEE the private
+          # display. AccessibilityService.getWindows() returns the phone
+          # screen's windows only (verified in AccessibilityInteractionClient
+          # on Android 13/14/15), so a window-verified launch, watchdog and
+          # node input all have to read getWindowsOnAllDisplays().
+          grep -Fq "fun canSeePrivateDisplays" $SRC/multitask/projection/OeaProjectionController.kt
+          grep -Fq "getWindowsOnAllDisplays()" $SRC/multitask/projection/OeaProjectionController.kt
+          # A package filter that also accepts OEA's own package is not a
+          # package filter: it let any OEA window stand in for the target.
+          grep -Fq "includeOwnWindows" $SRC/multitask/projection/OeaProjectionController.kt
+          ! grep -Fq "OEA_SELF_PACKAGE_FALLBACK) {" $SRC/multitask/projection/OeaProjectionController.kt
+          # Android's precondition, checked before a display is ever created.
+          grep -Fq "object OeaProjectionPolicy" $SRC/multitask/projection/OeaProjectionPolicy.kt
+          grep -Fq "fun check(context: Context, packageName: String, className: String?)" $SRC/multitask/projection/OeaProjectionPolicy.kt
+          grep -Fq "FLAG_ALLOW_EMBEDDED = 0x80000000" $SRC/multitask/projection/OeaProjectionPolicy.kt
+          grep -Fq "OeaProjectionPolicy.check(service, packageName, activityName)" $SRC/multitask/projection/OeaLiveWindowManager.kt
+          grep -Fq "OeaProjectionPolicy.check(service, packageName, activityName)" $SRC/multitask/projection/OeaProjectionLaunch.kt
+          # No live window may claim to be live without a picture in it.
+          grep -Fq "awaitNewFrameSince" $SRC/multitask/projection/OeaLiveWindowSession.kt
+          grep -Fq "startReaderDrain()" $SRC/multitask/projection/OeaLiveWindowSession.kt
+          # OEA's own apps must declare allowEmbedded to be projectable.
+          grep -Fq 'android:allowEmbedded="true"' oea/src/main/AndroidManifest.xml
+          # Picture-in-picture on a phone Android gave none. FEATURE_PICTURE_IN_PICTURE
+          # is a device feature: without it no app can enter the system PiP task, so
+          # VIP must fall back to OEA's own floating window.
+          grep -Fq "class OeaPipWindow" $SRC/multitask/pip/OeaPipWindow.kt
+          grep -Fq "TYPE_ACCESSIBILITY_OVERLAY" $SRC/multitask/pip/OeaPipWindow.kt
+          grep -Fq "object OeaVipPip" $SRC/miniapps/OeaVipPip.kt
+          grep -Fq "fun blocked(context: Context)" $SRC/miniapps/OeaVipPip.kt
+          grep -Fq "private fun platformPipAvailable()" $SRC/miniapps/OeaVipPlayerActivity.kt
+          grep -Fq "OeaVipPip.blocked(this)" $SRC/miniapps/OeaVipPlayerActivity.kt
+          grep -Fq "OeaVipPip.start(applicationContext, handoff, at)" $SRC/miniapps/OeaVipPlayerActivity.kt
+          grep -Fq "if (OeaVipPip.showing()) OeaVipPip.stop()" $SRC/miniapps/OeaVipPlayerActivity.kt
           grep -Fq "Search apps or package names" "$TOOLS"
           grep -Fq "Overview" "$TOOLS"
           grep -Fq "UsageStatsManager" "$TOOLS"

@@ -80,6 +80,18 @@ open class OeaMiniAppActivity : Activity() {
             palette = OeaTheme.resolve(this)
             kit = OeaKit(this, palette)
             screenId = resolveScreenId()
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                runCatching {
+                    onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                        android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
+                    ) {
+                        val handled = runCatching { backHook?.invoke() == true }.getOrDefault(false)
+                        if (!handled) {
+                            if (screenId != null && isIndexHost) show(null) else finish()
+                        }
+                    }
+                }
+            }
             renderGuarded(keepScroll = false)
         }
         if (!created) showFatalFallback()
@@ -206,7 +218,7 @@ open class OeaMiniAppActivity : Activity() {
         super.onRestoreInstanceState(savedInstanceState)
         OeaFaultShield.guard(faultOwner("restore-state")) {
             lastScrollY = savedInstanceState.getInt(STATE_SCROLL_Y, lastScrollY).coerceAtLeast(0)
-            currentScroll?.let { scroll -> if (lastScrollY > 0) scroll.post { scroll.scrollTo(0, lastScrollY) } }
+            currentScroll?.let { scroll -> if (lastScrollY > 0) kit.restoreScroll(scroll, lastScrollY) }
         }
     }
 
@@ -251,7 +263,7 @@ open class OeaMiniAppActivity : Activity() {
     private var currentRoot: View? = null
 
     private fun render(keepScroll: Boolean) {
-        if (keepScroll) currentScroll?.let { lastScrollY = it.scrollY } else lastScrollY = 0
+        if (keepScroll) currentScroll?.let { lastScrollY = kit.currentScrollY(it) } else lastScrollY = 0
         currentScroll = null
         backHook = null
         OeaInsets.edgeToEdge(window, lightBars = !palette.dark)
@@ -299,17 +311,19 @@ open class OeaMiniAppActivity : Activity() {
         setContentView(page.root)
         currentRoot = page.root
         currentScroll = page.scroll
-        if (lastScrollY > 0) page.scroll.post { page.scroll.scrollTo(0, lastScrollY) }
-        // A short rise-and-fade: the rebuild is how a mini-app applies a change,
-        // and an instant swap reads as a flicker.
-        page.root.alpha = 0f
-        page.root.translationY = kit.dpf(10f)
-        page.root.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(200L)
-            .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
-            .start()
+        if (lastScrollY > 0) kit.restoreScroll(page.scroll, lastScrollY)
+        // Only animate on initial open/navigation; fading on an in-place state
+        // change looks like a screen flicker and exposes the top scroll position.
+        if (!keepScroll) {
+            page.root.alpha = 0f
+            page.root.translationY = kit.dpf(10f)
+            page.root.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(180L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                .start()
+        }
     }
 
     /**

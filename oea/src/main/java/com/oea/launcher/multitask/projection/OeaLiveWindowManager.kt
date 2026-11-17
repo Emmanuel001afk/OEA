@@ -71,21 +71,32 @@ object OeaLiveWindowManager {
         return synchronized(sessions) { sessions.toList() }
     }
 
-    fun findByPackage(pkg: String): OeaLiveWindowSession? {
+    /**
+     * The session already running this component.
+     *
+     * Matching the package alone made every OEA tool look like one app: with
+     * Notes already open in a live window, opening Calculator "already had a
+     * live window". When [className] is known it is matched too.
+     */
+    fun find(pkg: String, className: String?): OeaLiveWindowSession? {
         prune()
-        return synchronized(sessions) { sessions.firstOrNull { it.packageName == pkg } }
+        return synchronized(sessions) {
+            sessions.firstOrNull {
+                it.packageName == pkg && (className.isNullOrBlank() || it.activityName == className)
+            }
+        }
     }
 
     /**
      * Starts a live window for the launchable component of [packageName].
      * Returns a user-facing result line; never throws.
      */
-    fun start(context: android.content.Context, packageName: String, appLabel: String): String {
+    fun start(context: android.content.Context, packageName: String, appLabel: String, className: String? = null): String {
         val service = serviceRef
             ?: return "OEA Floating Window accessibility is off, so live app windows cannot run. Enable it in OEA Settings › Multitasking."
-        if (findByPackage(packageName) != null) {
-            val existing = findByPackage(packageName)
-            existing?.restore()
+        val existing = find(packageName, className)
+        if (existing != null) {
+            existing.restore()
             return "$appLabel already has a live window."
         }
         if (!canStart()) {
@@ -96,13 +107,22 @@ object OeaLiveWindowManager {
             return "Another app is still starting in a live window. Wait a moment."
         }
         prune()
-        val launchIntent = try {
-            service.packageManager.getLaunchIntentForPackage(packageName)
-        } catch (_: Throwable) {
-            null
-        } ?: return "$appLabel has no launchable activity."
+        // Resolve the component OEA means, not the package's default: an OEA
+        // tool shares OEA's package, so the default answer was OEA Home.
+        val launchIntent = com.oea.launcher.multitask.OeaMultitaskIntents.resolve(service, packageName, className)
+            ?: return "$appLabel has no activity OEA is allowed to open."
         val activityName = launchIntent.component?.className
             ?: return "$appLabel has no launchable activity."
+
+        // Android's own precondition, checked before a display is created and
+        // before anything is launched. Without this the phone spent up to a
+        // minute building a private display and running every legal launch
+        // route, only to end with an empty window — for an app the platform
+        // had ruled out from the start.
+        val policy = OeaProjectionPolicy.check(service, packageName, activityName)
+        if (policy.verdict == OeaProjectionPolicy.Verdict.BLOCKED) {
+            return OeaProjectionPolicy.blockedMessage(appLabel, policy)
+        }
 
         val metrics = service.resources.displayMetrics
         val index = count()
@@ -113,6 +133,8 @@ object OeaLiveWindowManager {
         synchronized(sessions) { sessions.add(session) }
         updateEventMask()
         notifyStateChanged()
+        // A live window is still the user opening that app.
+        com.oea.launcher.multitask.OeaMultitaskIntents.record(service, packageName, activityName)
         session.start()
         return "Starting a live window for $appLabel. Real app, private display, phone screen untouched."
     }

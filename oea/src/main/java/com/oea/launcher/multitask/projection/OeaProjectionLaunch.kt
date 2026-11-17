@@ -259,6 +259,34 @@ object OeaProjectionLaunch {
             )
         }
 
+        // ---- Step 0: the platform's own precondition ----------------------
+        // Android refuses outright to place an activity that does not declare
+        // allowEmbedded on an app-created display (verified in the Android
+        // 13/14/15 sources). Asking before anything is launched turns a long
+        // wait that ends in an empty window into one sentence.
+        val policy = OeaProjectionPolicy.check(service, packageName, activityName)
+        evidence += OeaEvidenceLine(
+            "Android's precondition: android:allowEmbedded on $packageName",
+            policy.verdict.name.lowercase() + " — " + policy.detail,
+            0L
+        )
+        if (policy.verdict == OeaProjectionPolicy.Verdict.BLOCKED) {
+            OeaProjectionTrampolineSpec.current = null
+            OeaProjectionTrampolineActivity.finishLiving()
+            return fail(
+                host, evidence, OeaProjectionPolicy.blockedMessage(appLabel, policy),
+                appLabel, elapsed()
+            )
+        }
+        if (!controller.canSeePrivateDisplays()) {
+            evidence += OeaEvidenceLine(
+                "Can the service see windows on a private display?",
+                "no — AccessibilityService.getWindowsOnAllDisplays() is unavailable on this " +
+                    "Android version, so OEA will not be able to confirm where the app landed",
+                0L
+            )
+        }
+
         // ---- Step 1: occupancy window (Presentation) on the display -------
         // NOTE (measured on the first device run and read in the AOSP
         // sources): this window does NOT by itself satisfy the launch rule —
@@ -567,28 +595,38 @@ object OeaProjectionLaunch {
         if (!onDisplay) {
             OeaProjectionTrampolineActivity.finishLiving()
             val thirdParty = packageName != OEA_SELF_PACKAGE
+            // Separate the real cause from the contributing one. "It was already
+            // open on the phone" is a hint about what to try next, not an
+            // explanation of why the projection failed — and for OEA's own apps
+            // it is nearly always true, because OEA's floating window is itself
+            // an OEA window sitting on the phone screen.
+            val alreadyOpenHint = if (wasAlreadyOnPhone) {
+                " $appLabel was also already open on the phone; Android brings an existing " +
+                    "window forward instead of starting a second copy, so closing it there " +
+                    "first may help."
+            } else {
+                ""
+            }
             val reason = when {
-                leakedToPhone && wasAlreadyOnPhone ->
-                    "$appLabel was already open on the phone, so Android brought that window " +
-                        "forward instead of starting a copy on the private display. Close " +
-                        "$appLabel on the phone first, then try again."
                 leakedToPhone && thirdParty ->
                     "$appLabel opened on the phone screen instead of the private display. This is " +
                         "the Android 13–15 rule, not a glitch: an app-created display is untrusted, " +
                         "and only activities that themselves declare allowEmbedded may run on it — " +
-                        "third-party apps never do, so this device sends them back to the phone. " +
-                        "Nothing was faked: OEA will not pretend a leaked launch succeeded."
+                        "third-party apps never do, so this device sends them back to the phone." +
+                        alreadyOpenHint +
+                        " Nothing was faked: OEA will not pretend a leaked launch succeeded."
                 leakedToPhone ->
-                    "This manufacturer opened $appLabel on the phone screen, so the projection was " +
-                        "cancelled. Nothing was faked: OEA will not pretend a leaked launch succeeded."
+                    "This manufacturer opened $appLabel on the phone screen, so the projection " +
+                        "was cancelled." + alreadyOpenHint +
+                        " Nothing was faked: OEA will not pretend a leaked launch succeeded."
                 thirdParty ->
                     "$appLabel never appeared on the virtual display. Android only allows " +
                         "activities that declare allowEmbedded to run on an app-created display, " +
-                        "and third-party apps never declare it — on this device that rule blocks " +
-                        "them from being projected."
+                        "and third-party apps never declare it — on this device that rule " +
+                        "blocks them from being projected." + alreadyOpenHint
                 else ->
                     "$appLabel never appeared on the virtual display. It may refuse secondary " +
-                        "displays (some apps do), or this manufacturer blocks it."
+                        "displays (some apps do), or this manufacturer blocks it." + alreadyOpenHint
             }
             return fail(host, evidence, reason, appLabel, elapsed())
         }

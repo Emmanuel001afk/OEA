@@ -117,6 +117,9 @@ internal object OeaSimDirectory {
 
     /** The label Messaging prints for a SIM: "SIM 1 • MTN Nigeria". */
     fun shortLabel(line: Line): String = OeaSimLabels.short(line.slot, line.displayName, line.carrierName)
+
+    /** Compact slot badge for the message composer so the text field stays roomy. */
+    fun compactLabel(line: Line): String = OeaSimLabels.compact(line.slot, line.displayName, line.carrierName)
 }
 
 /** The pure wording of a SIM label, split out so it is unit-tested without Android. */
@@ -132,6 +135,13 @@ internal object OeaSimLabels {
         val sim = if (slot >= 1) "SIM $slot" else "SIM"
         val name = displayName.trim().ifBlank { carrierName.trim() }
         return if (name.isBlank()) sim else "$sim • $name"
+    }
+
+    /** Compact badge ("SIM 1", "SIM 2") for tight horizontal bars like the SMS composer. */
+    fun compact(slot: Int, displayName: String = "", carrierName: String = ""): String {
+        if (slot >= 1) return "SIM $slot"
+        val name = displayName.trim().ifBlank { carrierName.trim() }
+        return if (name.isBlank()) "SIM" else name.take(6)
     }
 
     /** The network line for the details sheet, or null when it would only repeat the SIM line. */

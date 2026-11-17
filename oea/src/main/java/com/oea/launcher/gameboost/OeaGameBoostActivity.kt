@@ -105,6 +105,13 @@ class OeaGameBoostActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // This screen is in front, so no game can be. If a session left the
+        // phone holding a game's Do Not Disturb — its process was killed before
+        // it could put things back — this settles it instead of waiting for the
+        // next game to notice.
+        if (OeaGameBoostSessionState.restoreIfOrphaned(this, OeaGameBoost.activeGame != null)) {
+            toast("Do Not Disturb was still on from your last game. OEA has put it back.")
+        }
         if (loaded) render()
         handler.post(statsTick)
     }
@@ -206,7 +213,9 @@ class OeaGameBoostActivity : Activity() {
     }
 
     private fun renderContent() {
-        scroll?.let { tabScrollY[activeTab] = it.scrollY }
+        scroll?.let {
+            tabScrollY[activeTab] = if (::kit.isInitialized) kit.currentScrollY(it) else it.scrollY
+        }
         if (activeTab !in setOf("boost", "games", "controls")) activeTab = "boost"
         palette = gamePalette()
         kit = OeaAppKit(this, palette)
@@ -234,8 +243,9 @@ class OeaGameBoostActivity : Activity() {
             ),
             initialNav = activeTab
         ) { next ->
-            scroll?.let { tabScrollY[activeTab] = it.scrollY }
+            scroll?.let { tabScrollY[activeTab] = kit.currentScrollY(it) }
             activeTab = next
+            scroll = null
             render()
         }
         if (activeTab == "games") {
@@ -280,11 +290,12 @@ class OeaGameBoostActivity : Activity() {
             }
         }
 
-        rootHost.removeAllViews()
+        val oldCount = rootHost.childCount
         rootHost.addView(shell.root, FrameLayout.LayoutParams(-1, -1))
+        if (oldCount > 0) rootHost.removeViews(0, oldCount)
         scroll = shell.scroll
         val y = tabScrollY[activeTab] ?: 0
-        if (y > 0) shell.scroll.post { shell.scroll.scrollTo(0, y) }
+        if (y > 0) kit.restoreScroll(shell.scroll, y)
         if (activeTab == "boost") updateStats()
     }
 
@@ -679,6 +690,12 @@ class OeaGameBoostActivity : Activity() {
             p.edit().putBoolean("dnd", on).apply()
             refreshService()
         }
+        kit.note(
+            content,
+            "Both switches are applied every time a game opens — the same game again or a different one — and put back " +
+                "exactly as they were when the game closes. A screen recording still running is stopped and saved. " +
+                "If a session is interrupted before it can restore, the next time you open Game Boost or OEA Home puts it right."
+        )
     }
 
     private fun permissionsSection() {

@@ -60,6 +60,15 @@ interface GameFrontHost {
 
     /** Rebuilds this screen after a setting or a record changed. */
     fun frontRebuild()
+
+    /** Leaves the standalone game screen cleanly. */
+    fun frontExit() {}
+
+    /** Current saved orientation mode: `"auto"`, `"portrait"`, or `"landscape"`. */
+    fun frontOrientationMode(): String = "auto"
+
+    /** Persists and immediately applies `"auto"`, `"portrait"`, or `"landscape"`. */
+    fun frontSetOrientationMode(mode: String) {}
 }
 
 /**

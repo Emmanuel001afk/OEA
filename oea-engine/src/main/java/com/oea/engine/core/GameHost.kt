@@ -92,10 +92,23 @@ class GameHost(
         OeaEngine.init(activity)
         game.attach(this)
         graphics.hud = Hud(graphics, input)
-        activity.requestedOrientation = when (descriptor.orientation) {
-            GameOrientation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-            GameOrientation.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            GameOrientation.ANY -> ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+        val savedOrient = runCatching {
+            activity.getSharedPreferences("oea_game_${descriptor.id}", Context.MODE_PRIVATE)
+                .getString("screen_orientation", null)
+        }.getOrNull()
+        runCatching {
+            activity.requestedOrientation = when (savedOrient) {
+                "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                "auto" -> ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                else -> when (descriptor.orientation) {
+                    GameOrientation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    GameOrientation.LANDSCAPE ->
+                        if (descriptor.id == "arena") ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                        else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    GameOrientation.ANY -> ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                }
+            }
         }
         surface.setRenderer(Renderer())
         surface.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY

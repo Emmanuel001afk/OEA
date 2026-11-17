@@ -72,10 +72,11 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             overScrollMode = View.OVER_SCROLL_NEVER
             isVerticalScrollBarEnabled = false
             itemAnimator = DefaultItemAnimator().apply {
-                addDuration = 130L
-                removeDuration = 90L
-                moveDuration = 160L
-                changeDuration = 110L
+                supportsChangeAnimations = false
+                addDuration = 120L
+                removeDuration = 80L
+                moveDuration = 150L
+                changeDuration = 0L
             }
             setItemViewCacheSize(14)
         }
@@ -99,8 +100,10 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         isVerticalScrollBarEnabled = false
         addItemDecoration(OeaListSpacingDecoration(spacingPx))
         itemAnimator = DefaultItemAnimator().apply {
-            addDuration = 130L
-            removeDuration = 90L
+            supportsChangeAnimations = false
+            addDuration = 120L
+            removeDuration = 80L
+            changeDuration = 0L
         }
     }
 
@@ -361,7 +364,9 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
         val scroll: android.widget.ScrollView,
         val body: LinearLayout,
         val nav: BottomNav?
-    )
+    ) {
+        fun resetScroll() = this@OeaAppKit.resetScroll(scroll)
+    }
 
     fun appShell(
         title: String,
@@ -385,15 +390,14 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             clipToPadding = false
         }
-        val body = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
+        val body = scrollSafeColumn(scroll).apply {
             setPadding(dp(18), dp(4), dp(18), dp(24))
         }
         scroll.addView(body, FrameLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         val nav = if (navItems.isNotEmpty()) {
             bottomNav(navItems, initialNav) { id ->
-                scroll.scrollTo(0, 0)
+                this@OeaAppKit.resetScroll(scroll)
                 onNav(id)
             }.also { root.addView(it.root, LinearLayout.LayoutParams(-1, -2)) }
         } else null

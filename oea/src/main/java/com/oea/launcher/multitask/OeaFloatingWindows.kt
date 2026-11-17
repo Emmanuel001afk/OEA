@@ -62,8 +62,18 @@ object OeaFloatingWindows {
         if (service == null) return OeaMultitaskLauncher.Result(false,
             "OEA Floating Window accessibility is enabled, but Android has not connected the service yet. Reopen OEA Settings and check its status.")
         service.expand()
+        // Honour which app was asked for: with live windows on, the app opens
+        // here and now. OEA never falls back to Android freeform unasked —
+        // that is a different method with different requirements.
+        val opened = service.openApp(app)
+        if (opened != null) return OeaMultitaskLauncher.Result(true, opened)
+        val why = if (!com.oea.launcher.multitask.projection.OeaLiveWindows.enabled(context)) {
+            "Live app windows are off, so tap ${app.label} there to open it."
+        } else {
+            "All ${com.oea.launcher.multitask.projection.OeaLiveWindowManager.MAX_WINDOWS} live window slots are in use, so close one and tap ${app.label} there."
+        }
         return OeaMultitaskLauncher.Result(true,
-            "Opened OEA Floating Workspace. Tap an app to request a real Android freeform task; Android/OEM policy may refuse or ignore that request. The accessibility overlay itself cannot contain another app's Activity.")
+            "Opened OEA Floating Workspace. $why Android/OEM policy may refuse or ignore a freeform request; the accessibility overlay itself cannot contain another app's Activity.")
     }
 
     /** Turns the OEA-side preference on/off. */

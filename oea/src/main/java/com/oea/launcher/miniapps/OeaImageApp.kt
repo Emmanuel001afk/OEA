@@ -69,6 +69,8 @@ object OeaImageApp {
  * the column count — and a screen that keeps that state in locals gets rebuilt by
  * its host, which is how "the app forgets where I was" bugs are born.
  */
+private const val PAYLOAD_SELECTION = "selection"
+
 internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
 
     /** A picker request must return a URI; it must not open a viewer and lose the caller. */
@@ -855,19 +857,31 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         host.finish()
     }
 
+    private fun refreshSelectionStates(targetKey: String? = null) {
+        if (targetKey != null) {
+            val idx = rows.indexOfFirst { it is Row.Tile && it.item.key == targetKey }
+            if (idx >= 0) {
+                tiles.notifyItemChanged(idx, PAYLOAD_SELECTION)
+                return
+            }
+        }
+        if (rows.isNotEmpty()) tiles.notifyItemRangeChanged(0, rows.size, PAYLOAD_SELECTION)
+    }
+
     private fun beginSelection(position: Int): Boolean {
         val row = rows.getOrNull(position) as? Row.Tile ?: return false
         selecting = true
         selected.clear()
         selected.add(row.item.key)
-        tiles.notifyDataSetChanged()
+        refreshSelectionStates()
         updateSelectionBar()
         return true
     }
 
     private fun toggleSelected(item: Item) {
+        val wasEmpty = selected.isEmpty()
         if (!selected.remove(item.key)) selected.add(item.key)
-        tiles.notifyDataSetChanged()
+        if (wasEmpty) refreshSelectionStates() else refreshSelectionStates(item.key)
         updateSelectionBar()
     }
 
@@ -890,7 +904,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         selection.selectAll {
             selected.clear()
             itemsForViewer.forEach { selected.add(it.key) }
-            tiles.notifyDataSetChanged()
+            refreshSelectionStates()
             updateSelectionBar()
         }
         if (!selecting) selected.clear()
@@ -901,7 +915,7 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
         selected.clear()
         selection.setCount(0, 0)
         nav.root.visibility = if (surface == Surface.TRASH) View.GONE else View.VISIBLE
-        tiles.notifyDataSetChanged()
+        refreshSelectionStates()
     }
 
     private val selection: OeaAppKit.SelectionBar by lazy {
@@ -1156,6 +1170,27 @@ internal class EmageScreen(val host: Activity, val palette: OeaPalette) {
                 addView(cover.root, FrameLayout.LayoutParams(-1, -1))
             }
             return TileHolder(cover, shape)
+        }
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: MutableList<Any>) {
+            if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_SELECTION }) {
+                val tile = holder as? TileHolder ?: return
+                val row = rows.getOrNull(position) as? Row.Tile ?: return
+                val item = row.item
+                val isSelected = selecting && selected.contains(item.key)
+                val isFavourite = OeaMediaLibrary.isFavourite(host, item)
+                tile.cover.markSelected(isSelected)
+                tile.cover.showStar(isFavourite)
+                tile.cover.root.contentDescription = buildString {
+                    append(item.name.ifBlank { "Picture" })
+                    if (item.album.isNotBlank()) append(" • ${item.album}")
+                    if (isFavourite) append(" • favourite")
+                    if (isSelected) append(" • selected")
+                    append(if (selecting) ". Double tap to select." else ". Double tap to open.")
+                }
+                return
+            }
+            onBindViewHolder(holder, position)
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {

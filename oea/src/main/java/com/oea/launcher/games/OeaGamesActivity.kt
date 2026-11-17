@@ -154,19 +154,28 @@ open class OeaGamesActivity : Activity(), SessionListener {
     }
 
     private fun navigate(p: Page) {
-        currentScroll?.let { scrollMemory[key(page)] = it.scrollY }
+        currentScroll?.let { scrollMemory[key(page)] = kit.currentScrollY(it) }
         history.addLast(page)
         page = p
+        scrollMemory.remove(key(p))
+        currentScroll = null
         onEnter(p)
-        render()
+        render(preserveCurrent = false)
     }
 
     private fun goBack(): Boolean {
-        currentScroll?.let { scrollMemory[key(page)] = it.scrollY }
+        currentScroll?.let { scrollMemory[key(page)] = kit.currentScrollY(it) }
         onLeave(page)
-        val prev = history.removeLastOrNull() ?: return false.also { if (page != Page.Home) { page = Page.Home; render() } }
+        val prev = history.removeLastOrNull() ?: return false.also {
+            if (page != Page.Home) {
+                page = Page.Home
+                currentScroll = null
+                render(preserveCurrent = false)
+            }
+        }
         page = prev
-        render()
+        currentScroll = null
+        render(preserveCurrent = false)
         return true
     }
 
@@ -184,8 +193,11 @@ open class OeaGamesActivity : Activity(), SessionListener {
         if (p is Page.Nearby) { browser?.stop(); browser = null }
     }
 
-    private fun render() {
+    private fun render(preserveCurrent: Boolean = true) {
         try {
+            if (preserveCurrent) {
+                currentScroll?.let { scrollMemory[key(page)] = kit.currentScrollY(it) }
+            }
             when (val p = page) {
                 Page.Home -> renderHome()
                 is Page.Game -> renderGame(p.id)
@@ -211,7 +223,7 @@ open class OeaGamesActivity : Activity(), SessionListener {
         setContentView(p.root)
         currentScroll = p.scroll
         val y = scrollMemory[key(page)] ?: 0
-        if (y > 0) p.scroll.post { p.scroll.scrollTo(0, y) }
+        if (y > 0) kit.restoreScroll(p.scroll, y)
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()

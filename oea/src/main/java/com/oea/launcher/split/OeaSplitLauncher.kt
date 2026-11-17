@@ -12,6 +12,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.widget.Toast
 import com.oea.launcher.assistant.OeaAssistant
+import com.oea.launcher.multitask.OeaMultitaskIntents
 
 /**
  * Opens two apps side by side using Android's own split screen.
@@ -39,11 +40,34 @@ object OeaSplitLauncher {
 
     private val main = Handler(Looper.getMainLooper())
 
+    /**
+     * Splits two packages. The package-name form is what Settings and voice
+     * commands use, so it goes through the same resolver as an app entry:
+     * asking the package for its default entry point opened OEA Home for every
+     * OEA tool, because they all share one package.
+     */
     fun launchPair(context: Context, first: String, second: String): Result {
         if (first.isBlank() || second.isBlank() || first == second) return Result(false, "Choose two different apps.")
-        val pm = context.packageManager
-        val a = pm.getLaunchIntentForPackage(first) ?: return Result(false, "The first app cannot be launched.")
-        val b = pm.getLaunchIntentForPackage(second) ?: return Result(false, "The second app cannot be launched.")
+        val a = OeaMultitaskIntents.resolve(context, first, null)
+            ?: return Result(false, "The first app cannot be launched.")
+        val b = OeaMultitaskIntents.resolve(context, second, null)
+            ?: return Result(false, "The second app cannot be launched.")
+        OeaMultitaskIntents.record(context, first, a.component?.className)
+        OeaMultitaskIntents.record(context, second, b.component?.className)
+        return launchPair(context, a, b)
+    }
+
+    /** Splits two app entries, resolving each to the component OEA means. */
+    fun launchPair(context: Context, first: com.oea.launcher.model.OeaAppInfo, second: com.oea.launcher.model.OeaAppInfo): Result {
+        if (first.packageName == second.packageName && first.className == second.className) {
+            return Result(false, "Choose two different apps.")
+        }
+        val a = OeaMultitaskIntents.resolve(context, first)
+            ?: return Result(false, "${first.label} cannot be launched.")
+        val b = OeaMultitaskIntents.resolve(context, second)
+            ?: return Result(false, "${second.label} cannot be launched.")
+        OeaMultitaskIntents.record(context, first)
+        OeaMultitaskIntents.record(context, second)
         return launchPair(context, a, b)
     }
 

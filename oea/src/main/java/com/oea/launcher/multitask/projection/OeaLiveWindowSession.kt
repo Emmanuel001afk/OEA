@@ -50,6 +50,15 @@ class OeaLiveWindowSession(
 
         /** Reader-mode poll period. */
         private const val READER_POLL_MS = 120L
+
+        /**
+         * How long a freshly launched app may take to put one real picture on
+         * the private display before the window stops claiming it is live.
+         */
+        private const val FIRST_FRAME_MS = 6_000L
+
+        /** Polling period while waiting for that first frame. */
+        private const val FIRST_FRAME_POLL_MS = 100L
     }
 
     // ---------------------------------------------------------------- state
@@ -63,6 +72,22 @@ class OeaLiveWindowSession(
     private val thread = HandlerThread("oea-projection-$packageName").apply { start() }
     private val handler = Handler(thread.looper)
 
+    /**
+     * Frames get their own thread.
+     *
+     * The projection thread blocks for the whole launch ladder — occupancies,
+     * trampoline routes, task moves — which is up to a minute of waiting. Any
+     * frame work posted there (binding the presenter, draining the reader)
+     * simply did not run until the launch had finished, so the window sat
+     * empty for the entire start and the display's buffer queue went
+     * undrained. Nothing about frames may depend on the launch being over.
+     */
+    private val frameThread = HandlerThread("oea-projection-frames-$packageName").apply { start() }
+    private val frameHandler = Handler(frameThread.looper)
+
+    /** Guards the presenter swap: the main thread and the frame thread meet here. */
+    private val frameLock = Any()
+
     private var host: OeaVirtualDisplayHost? = null
     private var overlay: OeaLiveWindowOverlay? = null
     private var controller = OeaProjectionController { OeaLiveWindowManager.accessibilityService() }
@@ -71,6 +96,7 @@ class OeaLiveWindowSession(
     @Volatile private var frameMode = OeaFrameMode.NONE
     @Volatile private var lastEventUptime = 0L
     @Volatile private var lastActionReport = "Starting…"
+    @Volatile private var readerRunning = false
     private var textureSurface: Surface? = null
     private var launchEvidence: List<OeaEvidenceLine> = emptyList()
     private var startedAt = SystemClock.uptimeMillis()
@@ -97,7 +123,9 @@ class OeaLiveWindowSession(
         }
         host = displayHost
 
-        // 2) Floating window: the user sees progress immediately.
+        // 2) Floating window AND the pixel pipeline, both live before the
+        //    launch starts. The ladder below blocks this thread for as long
+        //    as it takes, so nothing that draws may wait for it.
         runOnMain {
             if (released) return@runOnMain
             val icon = appIconSafe()
@@ -106,7 +134,9 @@ class OeaLiveWindowSession(
                 displayHost.width, displayHost.height,
                 this@OeaLiveWindowSession
             )
-            o.onSurfaceTextureReady = { st -> handler.post { bindTexture(st) } }
+            // Bind the presenter on the calling thread: posting it to the
+            // projection thread used to queue it behind the whole launch.
+            o.onSurfaceTextureReady = { st -> bindTexture(st) }
             o.onFramePulse = { onFrameRendered() }
             try {
                 o.attach(startX, startY)
@@ -117,6 +147,10 @@ class OeaLiveWindowSession(
                 fail("The floating window could not be opened: ${t.message ?: t.javaClass.simpleName}")
             }
         }
+        // The display already has somewhere to render (the reader it was
+        // created with). Start draining it now, so frames flow from the first
+        // second and the display's buffer queue never stalls.
+        startReaderDrain()
 
         // 3) Launch ladder on this (background) thread.
         val result = OeaProjectionLaunch.launch(
@@ -128,12 +162,42 @@ class OeaLiveWindowSession(
             return
         }
 
-        // 4) Capability probe: is there anything to interact with?
+        // 4) A picture, not just a promise.
+        //
+        // The ladder reporting success means the target's window was seen on
+        // the private display. It does not mean any pixel of it reached this
+        // window, and a black rectangle wearing a green LIVE badge is the
+        // single worst thing this feature can do. Wait for frames that
+        // arrived *after* the target landed, so the check is about the app
+        // and not about the empty display behind it.
+        val framesAtLaunchEnd = displayHost.framesReceived
+        val t0 = SystemClock.uptimeMillis()
+        val framed = awaitNewFrameSince(framesAtLaunchEnd, FIRST_FRAME_MS)
+        if (!framed) {
+            fail(
+                "$appLabel is on the private display, but no picture of it reached this " +
+                    "window within ${FIRST_FRAME_MS / 1000}s. The window is not being shown " +
+                    "as live, because it is not.",
+                listOf(
+                    OeaEvidenceLine(
+                        "New frames after the app landed",
+                        "none — ${displayHost.framesReceived} frames total, none since the launch finished",
+                        SystemClock.uptimeMillis() - t0
+                    )
+                )
+            )
+            return
+        }
+        launchEvidence = launchEvidence + OeaEvidenceLine(
+            "New frames after the app landed",
+            "yes — ${displayHost.framesReceived - framesAtLaunchEnd} new frames; the app is being drawn here",
+            SystemClock.uptimeMillis() - t0
+        )
+
+        // 5) Capability probe: is there anything to interact with?
         val probe = controller.probe(displayHost.displayId, packageName)
         val viewOnly = !probe.nodeControlAvailable || !controller.displayAware()
 
-        // 5) Frame pipeline: prefer the zero-copy TextureView; the watchdog
-        //    falls back to ImageReader polling if no frame arrives.
         runOnMain {
             overlay?.setStatusBadge(
                 if (viewOnly) "VIEW-ONLY" else "LIVE",
@@ -152,53 +216,130 @@ class OeaLiveWindowSession(
         startWatchdog()
     }
 
-    private fun bindTexture(st: SurfaceTexture) {
-        if (released) return
-        val displayHost = host ?: return
-        st.setDefaultBufferSize(displayHost.width, displayHost.height)
-        val surface = Surface(st)
-        val swapped = displayHost.swapSurface(surface)
-        if (swapped) {
-            textureSurface = surface
-            frameMode = OeaFrameMode.TEXTURE
-            runOnMain { overlay?.setPresenterMode(OeaFrameMode.TEXTURE) }
-            // If the TextureView path yields no frame quickly (some OEMs
-            // refuse hardware-accelerated overlay windows), fall back.
-            handler.postDelayed({
-                if (!released && frameMode == OeaFrameMode.TEXTURE && displayHost.lastFrameUptimeMs == 0L) {
-                    switchToReader()
-                }
-            }, TEXTURE_FIRST_FRAME_MS)
-        } else {
-            surface.release()
-            switchToReader()
+    /** True once a frame newer than [framesAtStart] has reached the presenter. */
+    private fun awaitNewFrameSince(framesAtStart: Long, budgetMs: Long): Boolean {
+        val deadline = SystemClock.uptimeMillis() + budgetMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (released) return false
+            if ((host?.framesReceived ?: 0L) > framesAtStart) return true
+            try {
+                Thread.sleep(FIRST_FRAME_POLL_MS)
+            } catch (_: Throwable) {
+                return (host?.framesReceived ?: 0L) > framesAtStart
+            }
         }
+        return (host?.framesReceived ?: 0L) > framesAtStart
     }
 
-    private fun switchToReader() {
+    /**
+     * Points the virtual display at the TextureView's SurfaceTexture for
+     * zero-copy frames.
+     *
+     * Runs on the calling thread — the main thread, straight out of the
+     * SurfaceTexture callback — and returns immediately. It used to be posted
+     * to the projection thread, which is blocked inside the launch ladder for
+     * the whole start, so the display stayed pointed at the reader and the
+     * window stayed empty for as long as the launch took.
+     */
+    private fun bindTexture(st: SurfaceTexture) {
         val displayHost = host ?: return
-        textureSurface?.release()
-        textureSurface = null
-        val ok = displayHost.swapSurface(displayHost.surface())
-        frameMode = if (ok) OeaFrameMode.READER else OeaFrameMode.NONE
+        synchronized(frameLock) {
+            if (released) return
+            st.setDefaultBufferSize(displayHost.width, displayHost.height)
+            val surface = Surface(st)
+            if (displayHost.swapSurface(surface)) {
+                textureSurface?.release()
+                textureSurface = surface
+                frameMode = OeaFrameMode.TEXTURE
+            } else {
+                surface.release()
+                switchToReaderLocked()
+            }
+        }
+        val mode = frameMode
         runOnMain {
-            overlay?.setPresenterMode(frameMode)
-            if (frameMode == OeaFrameMode.NONE) {
+            overlay?.setPresenterMode(mode)
+            if (mode == OeaFrameMode.NONE) {
                 overlay?.setStatusLine("The private display works, but its frames cannot be shown in this window.")
             }
         }
-        if (ok) {
-            handler.post(object : Runnable {
-                override fun run() {
-                    if (released || frameMode != OeaFrameMode.READER) return
-                    val bitmap = displayHost.acquireLatestBitmap()
-                    if (bitmap != null) {
-                        displayHost.noteFrame()
-                        runOnMain { overlay?.showFrame(bitmap) }
-                    }
-                    handler.postDelayed(this, READER_POLL_MS)
+        // If the TextureView never renders (some OEMs refuse hardware
+        // -accelerated overlay windows), go back to the reader instead of
+        // showing nothing at all.
+        frameHandler.postDelayed({
+            if (!released && frameMode == OeaFrameMode.TEXTURE && displayHost.lastFrameUptimeMs == 0L) {
+                switchToReader()
+            }
+        }, TEXTURE_FIRST_FRAME_MS)
+    }
+
+    /**
+     * Starts pumping frames out of the reader.
+     *
+     * The reader is the surface the display was created with, so it is
+     * always available and never needs a swap. That makes it both the
+     * starting presenter and the fallback — and it means the display has a
+     * consumer from the first second, rather than filling its three buffer
+     * slots and stalling while OEA waits for a launch.
+     */
+    private fun startReaderDrain() {
+        synchronized(frameLock) {
+            if (released) return
+            val displayHost = host ?: return
+            if (displayHost.swapSurface(displayHost.surface())) frameMode = OeaFrameMode.READER
+        }
+        runOnMain { overlay?.setPresenterMode(frameMode) }
+        postReaderPoll()
+    }
+
+    private fun switchToReader() {
+        synchronized(frameLock) { switchToReaderLocked() }
+        val mode = frameMode
+        runOnMain {
+            overlay?.setPresenterMode(mode)
+            if (mode == OeaFrameMode.NONE) {
+                overlay?.setStatusLine("The private display works, but its frames cannot be shown in this window.")
+            }
+        }
+        postReaderPoll()
+    }
+
+    /** Call with [frameLock] held. */
+    private fun switchToReaderLocked() {
+        val displayHost = host ?: return
+        textureSurface?.release()
+        textureSurface = null
+        frameMode = if (displayHost.swapSurface(displayHost.surface())) OeaFrameMode.READER else OeaFrameMode.NONE
+    }
+
+    private fun postReaderPoll() {
+        synchronized(frameLock) {
+            if (released || readerRunning || frameMode != OeaFrameMode.READER) return
+            readerRunning = true
+        }
+        frameHandler.post(readerPoll)
+    }
+
+    private val readerPoll = object : Runnable {
+        override fun run() {
+            if (released) {
+                synchronized(frameLock) { readerRunning = false }
+                return
+            }
+            synchronized(frameLock) {
+                val displayHost = host
+                // The TextureView took over: one consumer owns the buffers.
+                if (frameMode != OeaFrameMode.READER || displayHost == null) {
+                    readerRunning = false
+                    return
                 }
-            })
+                val bitmap = displayHost.acquireLatestBitmap()
+                if (bitmap != null) {
+                    displayHost.noteFrame()
+                    runOnMain { overlay?.showFrame(bitmap) }
+                }
+            }
+            frameHandler.postDelayed(this, READER_POLL_MS)
         }
     }
 
@@ -291,7 +432,7 @@ class OeaLiveWindowSession(
     override fun onSurfaceLost() {
         // Presenter surface gone: fall back to the ImageReader so the
         // projection keeps rendering and staleness stays measurable.
-        handler.post { if (!released && frameMode == OeaFrameMode.TEXTURE) switchToReader() }
+        if (!released && frameMode == OeaFrameMode.TEXTURE) switchToReader()
     }
 
     override fun onClose() {
@@ -352,6 +493,7 @@ class OeaLiveWindowSession(
         released = true
         state = OeaProjectionState.STOPPED
         thread.quitSafely()
+        frameThread.quitSafely()
         // Release on main: surface teardown must not race view drawing.
         runOnMain {
             val displayHost = host

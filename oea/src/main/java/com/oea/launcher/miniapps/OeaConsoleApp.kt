@@ -1219,13 +1219,13 @@ Examples:
                 if (parts.size < 2) return "Usage: launch <package> — opens the app's main launcher activity"
                 val pkg = parts[1]
                 try {
-                    val pm = ctx.packageManager
-                    val intent = pm.getLaunchIntentForPackage(pkg)
-                    if (intent == null) "No launchable activity for $pkg (may be frozen, hidden, or a service-only package). Try 'package list' to verify it is installed."
+                    val intent = com.oea.launcher.multitask.OeaMultitaskIntents.resolve(ctx, pkg, null)
+                    if (intent == null) "No startable activity for $pkg (may be frozen, hidden, disabled, or a service-only package). Try 'package list' to verify it is installed."
                     else {
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         ctx.startActivity(intent)
-                        "Launching $pkg — startActivity succeeded. Confirm: switch to the app; if it bounces back, check freezer ('package list frozen')."
+                        com.oea.launcher.multitask.OeaMultitaskIntents.record(ctx, pkg, intent.component?.className)
+                        "Launching ${intent.component?.flattenToString() ?: pkg} — startActivity succeeded. Confirm: switch to the app; if it bounces back, check freezer ('package list frozen')."
                     }
                 } catch (e: Throwable) { "Launch failed: ${e.message}" }
             }
@@ -1317,7 +1317,13 @@ Examples:
             }
 
             "pip" -> {
-                "PIP: ${if (Build.VERSION.SDK_INT >= 26) "supported, use video player PIP button" else "not supported (needs Android 8+)"}\nWhat it does: picture-in-picture for video playback\nAuthorize: none, but app must support"
+                val systemPip = ctx.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+                val blocked = com.oea.launcher.miniapps.OeaVipPip.blocked(ctx)
+                "PIP (system): ${if (systemPip) "this phone reports picture-in-picture" else "NOT SUPPORTED by this phone (FEATURE_PICTURE_IN_PICTURE missing) — no app can use Android's PiP here"}\n" +
+                    "PIP (OEA): ${if (blocked == null) "available — VIP's pip button draws OEA's own floating window" else "unavailable — $blocked"}\n" +
+                    "What it does: picture-in-picture for video playback\n" +
+                    "How OEA does it: the window comes from the multitasking family (accessibility overlay, else draw-over-apps); VIP is OEA's own player, so the video goes straight into that window's surface — no virtual display, no launch ladder\n" +
+                    "Confirm: VIP pip button opens a draggable, resizable video window while you keep using the phone"
             }
 
             "dnd" -> when (parts.getOrNull(1)?.lowercase()) {
@@ -1546,7 +1552,9 @@ Examples:
         kit.sheet("Multitasking Doctor", "Freeform, split, PIP") { panel, _ ->
             val freeform = com.oea.launcher.multitask.OeaMultitaskLauncher.freeformEnabled(host)
             kit.banner(panel, if (freeform) R.drawable.oic_check_circle_fill else R.drawable.oic_info, "Freeform: ${if (freeform) "enabled" else "disabled"}", "Floating windows need Developer options › Enable freeform windows. OEM may not expose it.", tone = if (freeform) OeaKit.Tone.SUCCESS else OeaKit.Tone.INFO)
-            kit.note(panel, "Split-screen: Android 7+ supports via ActivityManager. OEM and app can deny. OEA waits for first app to be in front before launching adjacent, verifies with Assistant and recovers once via system split toggle.\nPIP: Android 8+ supports picture-in-picture for video; use VIP player's PIP button.")
+            val systemPip = host.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+            val pipBlocked = com.oea.launcher.miniapps.OeaVipPip.blocked(host)
+            kit.note(panel, "Split-screen: Android 7+ supports via ActivityManager. OEM and app can deny. OEA waits for first app to be in front before launching adjacent, verifies with Assistant and recovers once via system split toggle.\nPIP: Android's own picture-in-picture is ${if (systemPip) "reported by this phone" else "NOT available on this phone — FEATURE_PICTURE_IN_PICTURE is missing, so no app can enter it"}. ${if (pipBlocked == null) "VIP's pip button falls back to OEA's own floating video window (multitasking overlay; VIP is OEA's player, so no virtual display is involved)." else "OEA's fallback window cannot be drawn yet: $pipBlocked"}")
         }
     }
 

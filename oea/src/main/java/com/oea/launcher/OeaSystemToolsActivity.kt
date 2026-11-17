@@ -277,6 +277,28 @@ open class OeaSystemToolsActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (rootScreen != "hub") return
+        val requested = when (intent.getStringExtra(EXTRA_SCREEN)) {
+            "call_blocker" -> { openActivity(OeaCallBlockerActivity::class.java); return }
+            "game_boost" -> { openActivity(OeaGameBoostActivity::class.java); return }
+            "freezer" -> { openActivity(OeaFreezerActivity::class.java); return }
+            "games" -> { openActivity(com.oea.launcher.games.OeaGamesActivity::class.java); return }
+            "multitask", "overview" -> "overview"
+            "multitasking" -> "multitasking"
+            "split" -> "split"
+            "home" -> "home"
+            "notifications" -> "notifications"
+            "power" -> "power"
+            "stability" -> "stability"
+            else -> null
+        }
+        if (requested != null && requested != current) {
+            stack.clear()
+            currentScroll = null
+            scrollPositions.remove(requested)
+            current = requested
+            show(current)
+        }
     }
 
     override fun onResume() {
@@ -330,9 +352,11 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private fun navigate(screen: String) {
-        currentScroll?.let { scrollPositions[current] = it.scrollY }
+        currentScroll?.let { scrollPositions[current] = if (::kit.isInitialized) kit.currentScrollY(it) else it.scrollY }
         stack.addLast(current)
         current = screen
+        scrollPositions.remove(screen)
+        currentScroll = null
         show(screen)
     }
 
@@ -342,7 +366,7 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private fun rerender() {
-        currentScroll?.let { scrollPositions[current] = it.scrollY }
+        currentScroll?.let { scrollPositions[current] = if (::kit.isInitialized) kit.currentScrollY(it) else it.scrollY }
         show(current)
     }
 
@@ -407,7 +431,7 @@ open class OeaSystemToolsActivity : Activity() {
         if (previous != null) host.removeView(previous)
         currentScroll = page.scroll
         val y = scrollPositions[current] ?: 0
-        if (y > 0) page.scroll.post { page.scroll.scrollTo(0, y) }
+        if (y > 0) kit.restoreScroll(page.scroll, y)
     }
 
     private fun openActivity(cls: Class<*>) {
@@ -1048,7 +1072,6 @@ open class OeaSystemToolsActivity : Activity() {
         }
         kit.switchRow(switching, R.drawable.oic_battery_full, "Turn on by itself", "When the battery gets low, without asking", dataStore.lowModeAuto()) {
             dataStore.setLowModeAuto(it)
-            rerender()
         }
         kit.stepperRow(switching, R.drawable.oic_insights, "Turn on at", "Battery percentage", dataStore.lowModeThreshold() / 5, 1, 10, { "${it * 5}%" }) {
             dataStore.setLowModeThreshold(it * 5)
@@ -1422,12 +1445,10 @@ open class OeaSystemToolsActivity : Activity() {
         kit.switchRow(motion, R.drawable.oic_gesture, "Require two waves", "Fewer accidental wakes: wave twice within ~1.5s", OeaPower.requireTwoWaves(this)) {
             OeaPower.prefs(this).edit().putBoolean(com.oea.launcher.power.OeaPower.KEY_TWO_WAVES, it).apply()
             OeaPower.syncWakeService(this)
-            rerender()
         }
         kit.switchRow(motion, R.drawable.oic_visibility_off, "Pocket guard", "Ignore waves and lifts while covered (pocket/bag)", OeaPower.pocketGuard(this)) {
             OeaPower.prefs(this).edit().putBoolean(com.oea.launcher.power.OeaPower.KEY_POCKET, it).apply()
             OeaPower.syncWakeService(this)
-            rerender()
         }
         if (com.oea.launcher.perf.OeaLowMode.active(this)) {
             kit.banner(box, R.drawable.oic_battery_charging_full, "LOW mode is on",
@@ -1549,7 +1570,6 @@ open class OeaSystemToolsActivity : Activity() {
                 group.addView(sens)
                 kit.switchRow(group, R.drawable.oic_gesture, "Require two waves", "Fewer accidental wakes: wave twice within about a second and a half", power.requireTwoWaves(this)) {
                     power.set(this, power.KEY_TWO_WAVES, it)
-                    rerender()
                 }
             }
         }
@@ -1564,7 +1584,6 @@ open class OeaSystemToolsActivity : Activity() {
         if (power.waveToWake(this) || (power.liftToWake(this) && lift != null)) {
             kit.switchRow(group, R.drawable.oic_shield, "Pocket guard", "Ignores the sensor while it stays covered, in a pocket or bag", power.pocketGuard(this)) {
                 power.set(this, power.KEY_POCKET, it)
-                rerender()
             }
         }
         kit.sectionTitle(box, "Turn the screen off")
@@ -2600,7 +2619,7 @@ open class OeaSystemToolsActivity : Activity() {
                     apply(freezerSelected.toList(), true)
                 }, LinearLayout.LayoutParams(-2, dp(42)))
             }
-            adapter.notifyDataSetChanged()
+            kit.notifyListStable(list, adapter)
         }
         searchField.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -2991,22 +3010,29 @@ open class OeaSystemToolsActivity : Activity() {
 
         fun launchApp(app: OeaAppInfo) {
             protectedLaunch(app) {
-                val launch = packageManager.getLaunchIntentForPackage(app.packageName)
+                // Same resolver the floating/split/live paths use: the package's
+                // default entry point is OEA Home for every OEA tool, so asking
+                // the package instead of the component opened the wrong app.
+                val launch = com.oea.launcher.multitask.OeaMultitaskIntents.resolve(this, app)
                 if (launch == null) toast("This app has no launchable activity.")
                 else runCatching {
                     startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    com.oea.launcher.multitask.OeaMultitaskIntents.record(this, app)
                     com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(this, app.packageName)
                 }.onFailure { toast("Android could not open ${app.label}.") }
             }
         }
 
         fun splitWith(current: OeaAppInfo) {
-            val others = choices.filter { it.packageName != current.packageName }
-            kit.pickApps("Split ${current.label} with…", null, others, emptySet(), { it.packageName }, multi = false) { chosen ->
-                val other = others.firstOrNull { it.packageName in chosen } ?: return@pickApps
+            // Keyed by component, not package: OEA's own apps all share one
+            // package, so a package key made them indistinguishable here.
+            val keyOf = { app: OeaAppInfo -> app.packageName + "/" + app.className }
+            val others = choices.filter { keyOf(it) != keyOf(current) }
+            kit.pickApps("Split ${current.label} with…", null, others, emptySet(), keyOf, multi = false) { chosen ->
+                val other = others.firstOrNull { keyOf(it) in chosen } ?: return@pickApps
                 protectedLaunch(current) {
                     protectedLaunch(other) {
-                        val result = OeaSplitLauncher.launchPair(this, current.packageName, other.packageName)
+                        val result = OeaSplitLauncher.launchPair(this, current, other)
                         if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
                     }
                 }
@@ -3178,7 +3204,7 @@ open class OeaSystemToolsActivity : Activity() {
                 kit.row(group, R.drawable.oic_splitscreen, pair.title.ifBlank { members.joinToString(" | ") { it.label } }, members.joinToString(" + ") { it.label }) {
                     protectedLaunch(members[0]) {
                         protectedLaunch(members[1]) {
-                            val result = OeaSplitLauncher.launchPair(this, members[0].packageName, members[1].packageName)
+                            val result = OeaSplitLauncher.launchPair(this, members[0], members[1])
                             if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
                         }
                     }
@@ -3211,7 +3237,7 @@ open class OeaSystemToolsActivity : Activity() {
                         dialog.dismiss()
                         protectedLaunch(first) {
                             protectedLaunch(second) {
-                                val result = OeaSplitLauncher.launchPair(this, first.packageName, second.packageName)
+                                val result = OeaSplitLauncher.launchPair(this, first, second)
                                 if (!result.success || result.message.startsWith("Turn on")) toast(result.message)
                             }
                         }

@@ -114,7 +114,7 @@ class OeaProjectionTrampolineActivity : Activity() {
         if (display != spec.displayId) return
         if (startedTarget) return
         startedTarget = true
-        val error = startTarget(spec.packageName, spec.activityName)
+        val error = startTarget(spec.packageName, spec.activityName, spec.displayId)
         if (error != null) {
             spec.reportFailure(error)
             finish()
@@ -123,12 +123,28 @@ class OeaProjectionTrampolineActivity : Activity() {
         }
     }
 
-    private fun startTarget(packageName: String, activityName: String): String? {
+    private fun startTarget(packageName: String, activityName: String, displayId: Int): String? {
         // Same-task launch first: the target inherits this activity's task
         // (and therefore its display). No NEW_TASK, no launch options.
         val sameTask = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
             component = ComponentName(packageName, activityName)
+        }
+        // Naming the display as well, when the phone lets us. OEA already has
+        // an activity record here (this activity), which is the condition
+        // Android sets on the caller; saying the display out loud stops an
+        // OEM from quietly deciding the target belongs on the phone screen.
+        // Several manufacturers throw instead of falling back, hence the
+        // plain attempt straight afterwards.
+        if (displayId != Display.DEFAULT_DISPLAY) {
+            try {
+                val explicit = android.app.ActivityOptions.makeBasic()
+                explicit.launchDisplayId = displayId
+                startActivity(sameTask, explicit.toBundle())
+                return null
+            } catch (_: Throwable) {
+                // Fall through to the unadorned same-task start.
+            }
         }
         try {
             startActivity(sameTask)
