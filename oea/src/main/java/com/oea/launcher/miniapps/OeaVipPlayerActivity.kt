@@ -1793,50 +1793,26 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
      * next, so that is all that gets built: one row for now, a bounded window
      * for up next, and a count of what is behind it.
      */
+    /** Resume position (ms) for a queue entry, or 0 if never started. */
+    private fun resumePosition(uri: Uri): Long =
+        runCatching { OeaVipStore.position(this, uri) }.getOrDefault(0L)
+
     private fun showQueueSheet() {
         val total = entries.size
         sheet("Queue", "$total ${if (total == 1) "clip" else "clips"} • playing ${index + 1}") { panel ->
             val now = panel.group()
             current()?.let { entry ->
+                val pos = resumePosition(entry.uri)
+                val detail = if (pos > 0L) "Resumed at ${clock(pos)}" else "Now playing"
                 panel.row(
                     now,
                     R.drawable.oic_play_arrow,
                     entry.title.substringBeforeLast('.'),
-                    "Now playing",
+                    detail,
                     selected = true
                 )
-            }
-            val upcoming = entries.drop(index + 1).take(QUEUE_WINDOW)
-            if (upcoming.isNotEmpty()) {
-                panel.heading("Up next")
-                val group = panel.group()
-                upcoming.forEachIndexed { offset, entry ->
-                    val position = index + 1 + offset
-                    panel.row(
-                        group,
-                        R.drawable.oic_queue_music,
-                        entry.title.substringBeforeLast('.'),
-                        "Clip ${position + 1}",
-                        onClick = {
-                            panel.dismiss()
-                            saveProgress()
-                            openEntry(position, 0L)
-                        }
-                    )
-                }
-            }
-            val before = index
-            val after = (total - index - 1 - upcoming.size).coerceAtLeast(0)
-            val hidden = before + after
-            if (hidden > 0) {
-                panel.note(
-                    "Showing the ${upcoming.size + 1} clips from here. " +
-                        "$hidden ${if (hidden == 1) "is" else "are"} further away — " +
-                        "previous and next walk through them."
-                )
-            }
-            panel.buttons(
-                if (total > 1) "Take this clip out" to {
+                panel.row(now, R.drawable.oic_delete, "Remove from queue", null, chevron = false) {
+                    panel.dismiss()
                     saveProgress()
                     entries = entries.filterIndexed { position, _ -> position != index }
                     index = index.coerceAtMost(entries.lastIndex)
@@ -1844,6 +1820,50 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                         finish()
                     } else {
                         openEntry(index, 0L)
+                    }
+                }
+            }
+
+            val remaining = entries.filterIndexed { position, _ -> position != index }
+            if (remaining.isNotEmpty()) {
+                panel.heading("Up next (${remaining.size})")
+                val group = panel.group()
+                remaining.forEachIndexed { offset, entry ->
+                    val position = if (offset < index) offset else offset + 1
+                    val pos = resumePosition(entry.uri)
+                    val detail = if (pos > 0L) "Resumed at ${clock(pos)}" else "Clip ${position + 1}"
+                    panel.row(
+                        group,
+                        R.drawable.oic_queue_music,
+                        entry.title.substringBeforeLast('.'),
+                        detail,
+                        chevron = true,
+                        onClick = {
+                            panel.dismiss()
+                            saveProgress()
+                            openEntry(position, 0L)
+                        }
+                    )
+                    panel.row(group, R.drawable.oic_delete, "Remove", null, chevron = false) {
+                        val newIndex = if (position < index) index - 1 else index
+                        entries = entries.filterIndexed { p, _ -> p != position }
+                        index = newIndex.coerceAtMost(entries.lastIndex)
+                        panel.dismiss()
+                        showQueueSheet()
+                    }
+                }
+            }
+
+            panel.buttons(
+                if (total > 1) "Clear queue" to {
+                    saveProgress()
+                    val currentEntry = current()
+                    entries = if (currentEntry != null) listOf(currentEntry) else emptyList()
+                    index = 0
+                    if (entries.isEmpty()) {
+                        finish()
+                    } else {
+                        openEntry(0, 0L)
                     }
                 } else "There is nothing else in the queue" to { },
                 "Close" to { }
@@ -2246,10 +2266,12 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         /**
          * How much of the range a full-height drag covers. Below 1 a drag has
          * to travel further than the screen is tall to cross every step, which
-         * is what makes a slide feel like a control instead of a switch.
+         * is what makes a slide feel like a control instead of a switch. Kept
+         * deliberately low so a short flick cannot sweep the whole range — the
+         * sliders felt twitchy at 1.0 / 0.85.
          */
-        private const val BRIGHTNESS_GAIN = 0.85f
-        private const val VOLUME_GAIN = 1.0f
+        private const val BRIGHTNESS_GAIN = 0.5f
+        private const val VOLUME_GAIN = 0.6f
 
         private const val REQUEST_SUBTITLE = 4321
         private const val ACTION_PIP_PLAY = "com.oea.launcher.vip.PIP_PLAY"

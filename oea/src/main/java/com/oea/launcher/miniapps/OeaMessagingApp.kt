@@ -289,7 +289,7 @@ object OeaMessagingApp {
         val read = (prefs.getStringSet(KEY_MARKED_READ, emptySet()) ?: emptySet()).toMutableSet()
         val unread = (prefs.getStringSet(KEY_MARKED_UNREAD, emptySet()) ?: emptySet()).toMutableSet()
         if (on) { read.add(key); unread.remove(key) } else { read.remove(key); unread.add(key) }
-        prefs.edit().putStringSet(KEY_MARKED_READ, read).putStringSet(KEY_MARKED_UNREAD, unread).apply()
+        prefs.edit().putStringSet(KEY_MARKED_READ, read).putStringSet(KEY_MARKED_UNREAD, unread).commit()
     }
 
     internal fun clearReadOverrides(ctx: Context, address: String) {
@@ -299,7 +299,7 @@ object OeaMessagingApp {
         val read = (prefs.getStringSet(KEY_MARKED_READ, emptySet()) ?: emptySet()).toMutableSet()
         val unread = (prefs.getStringSet(KEY_MARKED_UNREAD, emptySet()) ?: emptySet()).toMutableSet()
         if (read.remove(key) || unread.remove(key)) {
-            prefs.edit().putStringSet(KEY_MARKED_READ, read).putStringSet(KEY_MARKED_UNREAD, unread).apply()
+            prefs.edit().putStringSet(KEY_MARKED_READ, read).putStringSet(KEY_MARKED_UNREAD, unread).commit()
         }
     }
 
@@ -1550,7 +1550,7 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
         val prefs = OeaMessagingApp.prefs(host)
         val values = (prefs.getStringSet(key, emptySet()) ?: emptySet()).toMutableSet()
         if (on) values.add(thread.canonicalKey) else values.remove(thread.canonicalKey)
-        prefs.edit().putStringSet(key, values).apply()
+        prefs.edit().putStringSet(key, values).commit()
     }
 
     /** Every starred message, gathered from the threads that own them. */

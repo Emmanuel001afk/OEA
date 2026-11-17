@@ -201,6 +201,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
     private val homeTiles = mutableListOf<OeaTileView>()
     private val dockTiles = mutableListOf<OeaTileView>()
     private var rebuildPosted = false
+    /** Set while a rebuild was skipped because the user is touching Home; flushed on touch up. */
+    private var rebuildDeferred = false
+    private var touched = false
+    /** Gesture detector for double-tap, triple-tap and single-tap on Home. Wired into dispatchTouchEvent so it works globally. */
+    private lateinit var homeGestures: GestureDetector
     private var resumed = false
     private var closeDrawerOnPause = false
     /** [OeaIconOverrides.version] as last seen; a change means tiles need new drawables. */
@@ -351,12 +356,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         tapRouter.onTripleTap = {
             if (!drawerOpen && drag == null) gesture("triple_tap")
         }
-        val homeGestures = GestureDetector(context, emptyGestureListener())
-        homeColumn.setOnTouchListener { _, event ->
-            homeGestures.onTouchEvent(event)
-            trackTwoFinger(event)
-            true
-        }
+        homeGestures = GestureDetector(context, emptyGestureListener())
+        // Gesture detection lives in dispatchTouchEvent so double-tap, triple-tap
+        // and two-finger swipe work anywhere on Home — not just on empty space
+        // between icons. Child views (pager tiles, dock, search) consume their own
+        // touch events and never reach homeColumn's onTouchListener.
 
         drawer.visibility = GONE
         addView(drawer, LayoutParams(-1, -1))
@@ -439,6 +443,21 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         com.oea.launcher.fault.OeaFaultShield.guard("home:glass-touch") { trackGlass(ev) }
+        // Feed every touch event to the gesture detector so double-tap, triple-tap
+        // and two-finger swipe are detected even when a child view (app icon,
+        // pager page, dock tile) consumes its own click. The detector only
+        // schedules a decision — it never consumes the event, so child views
+        // still handle their own taps and swipes normally.
+        homeGestures.onTouchEvent(ev)
+        trackTwoFinger(ev)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> touched = true
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                touched = false
+                // A rebuild that was deferred while the finger was down runs now.
+                if (rebuildDeferred) { rebuildDeferred = false; scheduleRebuild() }
+            }
+        }
         return super.dispatchTouchEvent(ev)
     }
 
@@ -1536,6 +1555,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     internal fun scheduleRebuild() {
         if (rebuildPosted) return
+        // Never rebuild while the finger is down: relayout under a touch can
+        // jump tiles out from under the user. Defer until touch ends.
+        if (touched) { rebuildDeferred = true; return }
         rebuildPosted = true
         main.post { rebuildPosted = false; rebuild() }
     }
@@ -2026,7 +2048,11 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         }.getOrDefault(false)
         if (launched) {
             store.recordLaunch(app.packageName, app.className)
-            if (drawerOpen) closeDrawerOnPause = true
+            // Close the drawer now (not when Home resumes) so the user sees an
+            // immediate response instead of an open drawer covering Home while the
+            // new activity starts. When Home returns, onHostPaused already folded
+            // any open query drawer into closeDrawerOnPause.
+            if (drawerOpen) closeDrawer(animate = false)
             // A selected game opened from OEA starts its Game Boost session
             // directly; nothing watches the foreground while no game runs.
             runCatching { com.oea.launcher.gameboost.OeaGameBoost.onAppLaunched(context, app.packageName) }

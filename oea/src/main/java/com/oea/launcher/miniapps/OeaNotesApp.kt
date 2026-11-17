@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.speech.RecognizerIntent
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -57,6 +60,7 @@ object OeaNotesApp {
     data class Note(
         val id: Long,
         val text: String,
+        val title: String = "",
         val pinned: Boolean,
         val tag: String,
         val folder: String,
@@ -115,21 +119,29 @@ object OeaNotesApp {
             val p = row.split(SEP_FIELD)
             if (p.size < 4) return@mapNotNull null
             try {
+                // Notes written before the title field was added have 14 fields
+                // (id..deletedAt). Newer notes have 15 with title at index 2.
+                val hasTitle = p.size >= 15
+                val firstLine = p[1].lineSequence().firstOrNull() ?: ""
                 Note(
                     id = p[0].toLong(),
                     text = p[1],
-                    pinned = p[2] == "1",
-                    tag = p[3],
-                    folder = p.getOrNull(4) ?: "General",
-                    color = p.getOrNull(5) ?: "default",
-                    checklist = p.getOrNull(6) == "1",
-                    created = p.getOrNull(7)?.toLongOrNull() ?: 0L,
-                    updated = p.getOrNull(8)?.toLongOrNull() ?: p.getOrNull(7)?.toLongOrNull() ?: 0L,
-                    private = p.getOrNull(9) == "1",
-                    archived = p.getOrNull(10) == "1",
-                    reminder = p.getOrNull(11)?.toLongOrNull() ?: 0L,
-                    attachment = p.getOrNull(12) ?: "",
-                    deletedAt = p.getOrNull(13)?.toLongOrNull() ?: 0L
+                    title = if (hasTitle) p[2].ifBlank { firstLine } else firstLine,
+                    pinned = if (hasTitle) p[3] == "1" else p[2] == "1",
+                    tag = if (hasTitle) p.getOrNull(4) ?: "General" else p.getOrNull(3) ?: "General",
+                    folder = if (hasTitle) p.getOrNull(5) ?: "General" else p.getOrNull(4) ?: "General",
+                    color = if (hasTitle) p.getOrNull(6) ?: "default" else p.getOrNull(5) ?: "default",
+                    checklist = if (hasTitle) p.getOrNull(7) == "1" else p.getOrNull(6) == "1",
+                    created = if (hasTitle) p.getOrNull(8)?.toLongOrNull() ?: 0L else p.getOrNull(7)?.toLongOrNull() ?: 0L,
+                    updated = if (hasTitle)
+                        p.getOrNull(9)?.toLongOrNull() ?: p.getOrNull(8)?.toLongOrNull() ?: 0L
+                    else
+                        p.getOrNull(8)?.toLongOrNull() ?: p.getOrNull(7)?.toLongOrNull() ?: 0L,
+                    private = if (hasTitle) p.getOrNull(10) == "1" else p.getOrNull(9) == "1",
+                    archived = if (hasTitle) p.getOrNull(11) == "1" else p.getOrNull(10) == "1",
+                    reminder = if (hasTitle) p.getOrNull(12)?.toLongOrNull() ?: 0L else p.getOrNull(11)?.toLongOrNull() ?: 0L,
+                    attachment = if (hasTitle) p.getOrNull(13) ?: "" else p.getOrNull(12) ?: "",
+                    deletedAt = if (hasTitle) p.getOrNull(14)?.toLongOrNull() ?: 0L else p.getOrNull(13)?.toLongOrNull() ?: 0L
                 )
             } catch (_: Throwable) { null }
         }.sortedWith(compareByDescending<Note> { it.pinned }.thenByDescending { it.updated })
@@ -139,6 +151,7 @@ object OeaNotesApp {
         listOf(
             n.id.toString(),
             n.text.replace(SEP_FIELD, " ").replace(SEP_ROW, " "),
+            n.title.replace(SEP_FIELD, " ").replace(SEP_ROW, " "),
             if (n.pinned) "1" else "0",
             n.tag.replace(SEP_FIELD, " "),
             n.folder.replace(SEP_FIELD, " "),
@@ -240,6 +253,15 @@ object OeaNotesApp {
                 OeaAppKit.Action(R.drawable.oic_delete, "Trash", "Deleted notes, kept for $TRASH_DAYS days") {
                     refresh("trash")
                 },
+                OeaAppKit.Action(R.drawable.oic_history, "Previous 7 Days", "Notes updated in the last week") {
+                    refresh("7days")
+                },
+                OeaAppKit.Action(R.drawable.oic_history, "Previous 30 Days", "Notes from 8 to 30 days ago") {
+                    refresh("30days")
+                },
+                OeaAppKit.Action(R.drawable.oic_schedule, "This Month", "Notes from the start of this month") {
+                    refresh("month")
+                },
                 OeaAppKit.Action(R.drawable.oic_share_filled, "Export notes", "Share or copy your saved notes") {
                     val exportable = load(host, KEY_NOTES) +
                         load(host, KEY_ARCHIVED).map { it.copy(archived = true) }
@@ -279,6 +301,9 @@ object OeaNotesApp {
                 "pinned" -> "Pinned"
                 "reminders" -> "Reminders"
                 "voice" -> "Voice Notes"
+                "7days" -> "Previous 7 Days"
+                "30days" -> "Previous 30 Days"
+                "month" -> "This Month"
                 else -> "Notes"
             }
 
@@ -287,6 +312,15 @@ object OeaNotesApp {
                 load(host, KEY_ARCHIVED).map { it.copy(archived = true) } +
                 load(host, KEY_TRASH)
 
+            val now = System.currentTimeMillis()
+            val sevenDaysAgo = now - 7L * DAY_MS
+            val thirtyDaysAgo = now - 30L * DAY_MS
+            val monthStart = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
             val scopedNotes = allNotes.filter { note ->
                 when (filter) {
                     "pinned" -> note.pinned && !note.private && note.deletedAt == 0L
@@ -296,16 +330,21 @@ object OeaNotesApp {
                     "archived" -> note.archived && !note.private && note.deletedAt == 0L
                     "reminders" -> note.reminder > 0 && !note.private && note.deletedAt == 0L
                     "trash" -> note.deletedAt > 0L
+                    "7days" -> note.updated >= sevenDaysAgo && !note.archived && !note.private && note.deletedAt == 0L
+                    "30days" -> note.updated >= thirtyDaysAgo && note.updated < sevenDaysAgo && !note.archived && !note.private && note.deletedAt == 0L
+                    "month" -> note.updated >= monthStart && note.updated < thirtyDaysAgo && !note.archived && !note.private && note.deletedAt == 0L
                     else -> !note.archived && !note.private && note.deletedAt == 0L
                 }
             }
 
+            val isTimeFilter = filter in setOf("7days", "30days", "month")
             folderBar.removeAllViews()
-            // One pass for every folder's total: counting each folder on its
-            // own walked the whole list once per folder.
-            val folderCounts = scopedNotes.groupingBy { it.folder.ifBlank { "General" } }.eachCount()
-            val folders = folderCounts.keys.sorted()
-            if (folders.size > 1) {
+            if (!isTimeFilter) {
+                // One pass for every folder's total: counting each folder on its
+                // own walked the whole list once per folder.
+                val folderCounts = scopedNotes.groupingBy { it.folder.ifBlank { "General" } }.eachCount()
+                val folders = folderCounts.keys.sorted()
+                if (folders.size > 1) {
                 folderScroll.visibility = View.VISIBLE
                 folderBar.addView(kit.chip("All", currentFolder == null) { currentFolder = null; refresh(filter) }, LinearLayout.LayoutParams(-2, kit.dp(38)).apply { rightMargin = kit.dp(6) })
                 folders.forEach { folder ->
@@ -319,6 +358,7 @@ object OeaNotesApp {
                 currentFolder = null
                 folderScroll.visibility = View.GONE
             }
+            } // close if (!isTimeFilter)
 
             content.removeAllViews()
             if (filter == "trash" && scopedNotes.isNotEmpty()) {
@@ -358,11 +398,15 @@ object OeaNotesApp {
                     filter == "pinned" -> Triple(R.drawable.oic_push_pin, "No pinned notes", "Pin important notes so they stay at the top.")
                     filter == "reminders" -> Triple(R.drawable.oic_alarm, "No note reminders", "Open any note to attach a reminder time.")
                     filter == "trash" -> Triple(R.drawable.oic_delete, "The trash is empty", "Notes you delete stay here for $TRASH_DAYS days before they go for good.")
+                    filter == "7days" -> Triple(R.drawable.oic_history, "No recent notes", "No notes updated in the last 7 days.")
+                    filter == "30days" -> Triple(R.drawable.oic_history, "No notes from this period", "No notes updated between 8 and 30 days ago.")
+                    filter == "month" -> Triple(R.drawable.oic_schedule, "No notes this month", "No notes from the start of this month.")
                     else -> Triple(R.drawable.oic_edit, "No notes yet", "Write a note, start a checklist, or dictate by voice.")
                 }
                 val ctaLabel = when {
                     searchQuery.isNotBlank() -> "Clear search"
                     filter == "archived" || filter == "pinned" || filter == "reminders" || filter == "trash" -> null
+                    filter in setOf("7days", "30days", "month") -> null
                     filter == "checklist" -> "New checklist"
                     filter == "private" -> "New private note"
                     else -> "New note"
@@ -386,9 +430,13 @@ object OeaNotesApp {
                 if (grouped.size > 1) kit.sectionTitle(content, "$folder · ${notes.size}")
                 val g = kit.group(content)
                 notes.forEach { note ->
-                    val lines = note.text.lineSequence().filter { it.isNotBlank() }.toList()
-                    val heading = if (note.private) (lines.firstOrNull()?.take(36) ?: "Private note") else (lines.firstOrNull()?.take(48) ?: "Note")
-                    val snippet = if (!note.private && !note.checklist && lines.size > 1) lines[1].take(48) else null
+                    val heading = note.title.ifBlank {
+                        val lines = note.text.lineSequence().filter { it.isNotBlank() }.toList()
+                        if (note.private) lines.firstOrNull()?.take(36) ?: "Private note"
+                        else lines.firstOrNull()?.take(48) ?: "Note"
+                    }
+                    val bodyLines = note.text.lineSequence().filter { it.isNotBlank() }.toList()
+                    val snippet = if (!note.private && !note.checklist && bodyLines.size > 1) bodyLines[1].take(48) else null
                     val subtitle = buildString {
                         if (note.pinned) append("Pinned · ")
                         if (note.checklist) {
@@ -411,7 +459,7 @@ object OeaNotesApp {
                     kit.row(g, icon, heading, subtitle, value = colorLabel, chevron = true) {
                         if (note.deletedAt > 0L) {
                             val left = TRASH_DAYS - ((System.currentTimeMillis() - note.deletedAt) / DAY_MS)
-                            kit.actions(note.text.lineSequence().firstOrNull()?.take(36) ?: "Note",
+                            kit.actions(note.title.ifBlank { note.text.lineSequence().firstOrNull() ?: "Note" }.take(36),
                                 if (left > 0L) "$left ${if (left == 1L) "day" else "days"} left in the trash" else "Goes for good on the next clean",
                                 listOf(
                                     OeaAppKit.Action(R.drawable.oic_history, "Put it back", "Returns to where it was before you deleted it") {
@@ -466,6 +514,7 @@ object OeaNotesApp {
 
     private fun createNote(host: Activity, kit: OeaAppKit, private: Boolean, onDone: () -> Unit) {
         kit.sheet(if (private) "New private note" else "New note", if (private) "Protected with your App Lock PIN" else null) { panel, dialog ->
+            val titleField = kit.field("Title", "")
             val textField = multilineField(kit, "Write your note…", "")
             val folderField = kit.field("Folder (General, Work, Ideas…)", "General")
             val tagField = kit.field("Tag (optional)", "")
@@ -481,6 +530,7 @@ object OeaNotesApp {
                 }
             }
             paintColors()
+            panel.addView(titleField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(textField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(folderField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
             panel.addView(tagField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
@@ -488,19 +538,22 @@ object OeaNotesApp {
             panel.addView(kit.buttonRow(
                 kit.quietButton("Cancel") { dialog.dismiss() },
                 kit.primaryButton("Save note") {
+                    val title = titleField.text.toString().trim()
                     val text = textField.text.toString().trim()
-                    if (text.isEmpty()) {
+                    if (text.isEmpty() && title.isEmpty()) {
                         android.widget.Toast.makeText(host, "Write something first", android.widget.Toast.LENGTH_SHORT).show()
                         return@primaryButton
                     }
+                    val fullText = if (title.isNotEmpty()) "$title\n$text" else text
                     createNoteWithText(
                         host,
-                        text,
+                        fullText,
                         tagField.text.toString().trim().ifBlank { "General" },
                         folderField.text.toString().trim().ifBlank { "General" },
                         private,
                         selectedColor,
-                        false
+                        false,
+                        title = title
                     ) { onDone() }
                     dialog.dismiss()
                 }
@@ -520,14 +573,14 @@ object OeaNotesApp {
                     val title = titleField.text.toString().trim().ifBlank { "Checklist" }
                     val items = itemsField.text.toString().lineSequence().map { it.trim() }.filter { it.isNotBlank() }.map { "[ ] $it" }.joinToString("\n")
                     val fullText = if (items.isBlank()) title else "$title\n$items"
-                    createNoteWithText(host, fullText, "checklist", "General", false, "default", true) { onDone() }
+                    createNoteWithText(host, fullText, "checklist", "General", false, "default", true, title = title) { onDone() }
                     dialog.dismiss()
                 }
             ))
         }
     }
 
-    private fun createNoteWithText(host: Activity, text: String, tag: String, folder: String, private: Boolean, color: String = "default", checklist: Boolean = false, onDone: () -> Unit) {
+    private fun createNoteWithText(host: Activity, text: String, tag: String, folder: String, private: Boolean, color: String = "default", checklist: Boolean = false, title: String = "", onDone: () -> Unit) {
         val p = prefs(host)
         val key = when {
             private -> KEY_PRIVATE
@@ -541,19 +594,19 @@ object OeaNotesApp {
         var id = now
         val taken = existing.map { it.id }.toHashSet()
         while (taken.contains(id)) id++
-        val note = Note(id, text, false, tag, folder, color, checklist, now, now, private, false, 0L, "")
+        val note = Note(id, text, title, false, tag, folder, color, checklist, now, now, private, false, 0L, "", 0L)
         p.edit().putString(key, encode(existing + note)).apply()
         drop(host, key)
         onDone()
     }
 
     private fun createNoteWithText(host: Activity, text: String, tag: String, private: Boolean, onDone: () -> Unit) {
-        createNoteWithText(host, text, tag, "General", private, "default", false, onDone)
+        createNoteWithText(host, text, tag, "General", private, "default", false, onDone = onDone)
     }
 
     private fun showNoteDetail(host: Activity, kit: OeaAppKit, initialNote: Note, onDone: () -> Unit) {
         var note = initialNote
-        kit.sheet(note.text.lineSequence().firstOrNull()?.take(36) ?: "Note", fullStampFormat.format(Date(note.updated))) { panel, dialog ->
+        kit.sheet(note.title.ifBlank { note.text.lineSequence().firstOrNull() ?: "Note" }, fullStampFormat.format(Date(note.updated))) { panel, dialog ->
             if (!note.checklist) {
                 val textView = kit.text(renderMarkdown(note.text), 15.5f, kit.palette.text).apply {
                     setLineSpacing(kit.dpf(3f), 1f)
@@ -586,6 +639,7 @@ object OeaNotesApp {
             val metaParts = buildList {
                 add(note.folder.ifBlank { "General" })
                 if (note.tag.isNotBlank() && note.tag != "General") add("#${note.tag}")
+                add("Created ${stampFormat.format(Date(note.created))}")
                 if (note.reminder > 0L) add("Reminder ${reminderStampFormat.format(Date(note.reminder))}")
             }
             panel.addView(kit.text(metaParts.joinToString(" · "), 12.5f, kit.palette.textSecondary).apply {
@@ -648,6 +702,35 @@ object OeaNotesApp {
                     dialog.dismiss()
                     onDone()
                 }
+                kit.row(actionsGroup, R.drawable.oic_open_in_new, "Move note", null, chevron = true) {
+                    dialog.dismiss()
+                    kit.sheet("Move note", "Choose a folder") { movePanel, moveDialog ->
+                        val group = kit.group(movePanel)
+                        listOf("General", "Work", "Personal", "Study", "Ideas").forEach { folderName ->
+                            kit.row(group, R.drawable.oic_folder, folderName, if (note.folder == folderName) "Current" else null, chevron = false) {
+                                moveDialog.dismiss()
+                                moveNote(host, note, folderName)
+                                onDone()
+                            }
+                        }
+                        panel.addView(kit.text("Or type a custom folder:", 12f, kit.palette.textSecondary).apply { setPadding(kit.dp(4), kit.dp(8), kit.dp(4), kit.dp(4)) }, LinearLayout.LayoutParams(-1, -2))
+                        val customFolder = kit.field("Folder name", note.folder.ifBlank { "General" })
+                        movePanel.addView(customFolder, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
+                        movePanel.addView(kit.buttonRow(
+                            kit.quietButton("Cancel") { moveDialog.dismiss() },
+                            kit.primaryButton("Move") {
+                                val f = customFolder.text.toString().trim().ifBlank { "General" }
+                                moveDialog.dismiss()
+                                moveNote(host, note, f)
+                                onDone()
+                            }
+                        ))
+                    }
+                }
+            }
+            kit.row(actionsGroup, R.drawable.oic_home, "Add to Home Screen", null, chevron = true) {
+                dialog.dismiss()
+                addNoteToHomeScreen(host, note)
             }
             kit.row(actionsGroup, R.drawable.oic_share_filled, "Share", null) {
                 try { host.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, note.text), "Share note")) } catch (_: Throwable) {}
@@ -675,9 +758,49 @@ object OeaNotesApp {
         }
     }
 
-    private fun renderMarkdown(text: String): String {
-        // Simple markdown stripping for display: **bold** -> bold, *italic* -> italic, but TextView doesn't support rich, so just return text
-        return text
+    private fun renderMarkdown(text: String): CharSequence {
+        // **bold**, *italic*, ***bold italic*** — rendered with real spans so the
+        // viewer keeps the emphasis the writer typed instead of flattening it.
+        val out = SpannableStringBuilder()
+        var i = 0
+        val n = text.length
+        while (i < n) {
+            val c = text[i]
+            if (c == '*' && i + 2 < n && text[i + 1] == '*' && text[i + 2] == '*') {
+                val end = text.indexOf("***", i + 3)
+                if (end >= 0) {
+                    val start = out.length
+                    out.append(text, i + 3, end)
+                    out.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, out.length, Spannable.SPAN_INCLUSIVE_EXCLUSIVE)
+                    out.setSpan(StyleSpan(android.graphics.Typeface.ITALIC), start, out.length, Spannable.SPAN_INCLUSIVE_EXCLUSIVE)
+                    i = end + 3
+                    continue
+                }
+            }
+            if (c == '*' && i + 1 < n && text[i + 1] == '*') {
+                val end = text.indexOf("**", i + 2)
+                if (end >= 0) {
+                    val start = out.length
+                    out.append(text, i + 2, end)
+                    out.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, out.length, Spannable.SPAN_INCLUSIVE_EXCLUSIVE)
+                    i = end + 2
+                    continue
+                }
+            }
+            if (c == '*') {
+                val end = text.indexOf('*', i + 1)
+                if (end >= 0) {
+                    val start = out.length
+                    out.append(text, i + 1, end)
+                    out.setSpan(StyleSpan(android.graphics.Typeface.ITALIC), start, out.length, Spannable.SPAN_INCLUSIVE_EXCLUSIVE)
+                    i = end + 1
+                    continue
+                }
+            }
+            out.append(c)
+            i++
+        }
+        return out
     }
 
     private fun togglePin(host: Activity, note: Note) {
@@ -706,6 +829,44 @@ object OeaNotesApp {
         p.edit().putString(fromKey, encode(fromList)).putString(toKey, encode(toList)).apply()
         drop(host, fromKey)
         drop(host, toKey)
+    }
+
+    /** Moves a note to a different folder by rewriting its folder field in place. */
+    private fun moveNote(host: Activity, note: Note, newFolder: String) {
+        val p = prefs(host)
+        val key = when {
+            note.private -> KEY_PRIVATE
+            note.archived -> KEY_ARCHIVED
+            else -> KEY_NOTES
+        }
+        val list = load(host, key).map { if (it.id == note.id) it.copy(folder = newFolder, updated = System.currentTimeMillis()) else it }
+        p.edit().putString(key, encode(list)).apply()
+        drop(host, key)
+    }
+
+    /** Pins a shortcut to this note on the Home Screen (Android 8.0+). */
+    private fun addNoteToHomeScreen(host: Activity, note: Note) {
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            val shortcutManager = host.getSystemService(android.content.pm.ShortcutManager::class.java)
+            val label = note.title.ifBlank { note.text.lineSequence().firstOrNull() ?: "Note" }
+            if (shortcutManager != null && shortcutManager.isRequestPinShortcutSupported) {
+                val shortcut = android.content.pm.ShortcutInfo.Builder(host, "note_${note.id}")
+                    .setShortLabel(label.take(15))
+                    .setLongLabel(label.take(30))
+                    .setIcon(android.graphics.drawable.Icon.createWithResource(host, R.drawable.oic_edit))
+                    .setIntent(Intent(host, host.javaClass).apply {
+                        action = "com.oea.launcher.NOTES_OPEN_NOTE"
+                        putExtra("note_id", note.id)
+                    })
+                    .build()
+                shortcutManager.requestPinShortcut(shortcut, null)
+                android.widget.Toast.makeText(host, "Note added to Home Screen", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                android.widget.Toast.makeText(host, "This phone does not support pinning shortcuts", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            android.widget.Toast.makeText(host, "Home Screen shortcuts require Android 8.0+", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun updateNote(host: Activity, note: Note, newText: String) {

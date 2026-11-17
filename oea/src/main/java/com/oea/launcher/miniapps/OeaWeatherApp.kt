@@ -2,6 +2,8 @@ package com.oea.launcher.miniapps
 
 import android.app.Activity
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -155,6 +157,18 @@ object OeaWeatherApp {
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** True when the phone has an active (metered or unmetered) data connection. */
+    private fun isOnline(ctx: Context): Boolean {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val network = cm.activeNetwork
+            network != null && cm.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        } else {
+            val network = cm.activeNetworkInfo
+            network != null && network.isConnected
+        }
+    }
 
     // ------------------------------------------------------------------ search
 
@@ -375,11 +389,18 @@ object OeaWeatherApp {
                 host.runOnUiThread {
                     if (host.isDestroyed) return@runOnUiThread
                     content.removeAllViews()
+                    val (title, message) = if (!isOnline(host)) {
+                        "No internet connection" to
+                            "Connect to mobile data or Wi-Fi, then tap Retry to load live conditions."
+                    } else {
+                        "Forecast unavailable" to
+                            "The forecast service did not respond. Tap Retry to try again."
+                    }
                     content.addView(
                         kit.emptyState(
                             R.drawable.oic_warning_fill,
-                            "Forecast unavailable",
-                            "Connect to the internet and tap Retry to load live conditions.",
+                            title,
+                            message,
                             "Retry"
                         ) { fetch(host, kit, content, true, onLoaded) },
                         LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(12) }

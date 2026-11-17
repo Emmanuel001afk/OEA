@@ -478,6 +478,8 @@
             android:taskAffinity="com.oea.launcher.app.camera"
             android:launchMode="singleTask"
             android:theme="@style/OeaFullscreenAppTheme"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
             android:windowSoftInputMode="adjustResize"
             android:allowEmbedded="true" >
             <intent-filter>

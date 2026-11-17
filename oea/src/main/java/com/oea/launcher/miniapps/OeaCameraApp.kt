@@ -2843,6 +2843,14 @@ object OeaCameraApp {
         }
 
         private fun deviceRotationDegrees(): Int {
+            // The camera activity is locked to portrait in the manifest, so the
+            // window never rotates. If we still used the physical device rotation
+            // here, a phone held in landscape would rotate the preview buffer for
+            // landscape while the window stays portrait — leaving the preview
+            // sideways. Treat the device as always in portrait.
+            if (activity.requestedOrientation == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
+                return 0
+            }
             val rotation = runCatching {
                 (textureView.display ?: activity.windowManager.defaultDisplay).rotation
             }.getOrDefault(Surface.ROTATION_0)

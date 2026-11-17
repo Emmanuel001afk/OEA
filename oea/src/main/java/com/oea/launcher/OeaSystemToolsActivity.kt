@@ -792,7 +792,7 @@ open class OeaSystemToolsActivity : Activity() {
         kit.sectionTitle(box, "Icons")
         group = kit.group(box)
         choiceRow(group, R.drawable.oic_interests, "Icon shape",
-            listOf("system" to "System default", "circle" to "Circle", "squircle" to "Squircle", "rounded" to "Rounded square", "teardrop" to "Teardrop", "square" to "Square", "dotted" to "Dotted"),
+            listOf("system" to "System default", "circle" to "Circle", "squircle" to "Squircle", "rounded" to "Rounded square", "teardrop" to "Teardrop", "square" to "Square", "dotted" to "Dotted", "barrel" to "Barrel", "leaf" to "Leaf"),
             dataStore.iconShape()) { dataStore.setIconShape(it); OeaIconController.shared(this).invalidate() }
         if (Build.VERSION.SDK_INT >= 33) {
             kit.switchRow(group, R.drawable.oic_contrast, "Themed icons", "Tints icons with your colours when the app supports it", dataStore.themedIcons()) {
@@ -884,6 +884,8 @@ open class OeaSystemToolsActivity : Activity() {
         "teardrop" -> "Teardrop"
         "rounded" -> "Rounded"
         "dotted" -> "Dotted"
+        "barrel" -> "Barrel"
+        "leaf" -> "Leaf"
         else -> "System"
     }
 

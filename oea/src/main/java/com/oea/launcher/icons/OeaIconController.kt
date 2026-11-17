@@ -565,6 +565,23 @@ class OeaIconController(private val context: Context) {
                     }
                     close()
                 }
+                "barrel" -> Path().apply {
+                    // Rounded corners on top only, like a barrel or tank top.
+                    val r = s / 2f
+                    addRoundRect(RectF(0f, 0f, s, s * 0.6f), r * 0.5f, r * 0.5f, Path.Direction.CW)
+                    lineTo(s.toFloat(), s.toFloat())
+                    lineTo(0f, s.toFloat())
+                    close()
+                }
+                "leaf" -> Path().apply {
+                    // Leaf shape: two teardrop curves meeting at top and bottom.
+                    val r = s / 2f
+                    val c = s * 0.5f
+                    moveTo(r.toFloat(), 0f)
+                    cubicTo(c.toFloat(), 0f, s.toFloat(), r.toFloat(), r.toFloat(), s.toFloat())
+                    cubicTo(0f, r.toFloat(), 0f, 0f, r.toFloat(), 0f)
+                    close()
+                }
                 else -> null
             }
         }

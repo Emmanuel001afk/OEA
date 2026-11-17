@@ -31,9 +31,8 @@ class OeaApplication : Application() {
         // Game Boost, Call Blocker, Freezer, Settings) never pay for Home and
         // never inherit a Home initialization problem.
         OeaFaultShield.guard("app:runtime") { OeaRuntime.initialize(this) }
-        // Capabilities are read from Android, not cached blindly: a service the
-        // user switched on while OEA was in the background must be noticed.
-        OeaFaultShield.guard("app:capabilities") { OeaPrivileges.snapshot(this) }
+        // Capabilities are read lazily from Android (snapshot() caches for 500 ms),
+        // so they never sit in front of Home's first frame on a cold start.
         // OEA Game Engine: register the built-in games and let games publish live
         // activities to the launcher's Dynamic Island. Cheap: no GPU, no network
         // and no game objects are created here.
