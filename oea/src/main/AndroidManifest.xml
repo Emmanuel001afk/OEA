@@ -607,6 +607,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- All in One: the variety arcade. One app entry, nineteen cabinets.
+             The cabinet room is a second activity in the same task, so Back
+             from any game lands on the wall rather than leaving the app. -->
+        <activity
+            android:name="com.oea.launcher.games.OeaAllInOneActivity"
+            android:exported="true"
+            android:label="All in One"
+            android:icon="@drawable/ic_oea_allinone"
+            android:roundIcon="@drawable/ic_oea_allinone"
+            android:taskAffinity="com.oea.launcher.game.allinone"
+            android:launchMode="singleTask"
+            android:theme="@style/OeaGameTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:allowEmbedded="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.oea.games.allinone.ArcadeGameActivity"
+            android:exported="false"
+            android:label="All in One game"
+            android:taskAffinity="com.oea.launcher.game.allinone"
+            android:launchMode="singleTop"
+            android:theme="@style/OeaGameTheme"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:allowEmbedded="true" />
         <!-- A running game (OpenGL ES 3). Handles rotation itself, so switching a
              game to landscape never restarts it. -->
         <activity
