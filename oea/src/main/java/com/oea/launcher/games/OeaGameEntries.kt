@@ -1,6 +1,7 @@
 package com.oea.launcher.games
 
 import com.oea.games.OeaStandaloneGameActivity
+import com.oea.games.allinone.ArcadeGameActivity
 
 /**
  * The three games as true standalone mini-apps: each launcher entry IS the
@@ -29,6 +30,8 @@ val oeaGameEntryScreens: List<String> = listOf(
     OeaEndlessDaysActivity::class.java.name,
     OeaSendOffActivity::class.java.name,
     OeaChessGameActivity::class.java.name,
+    OeaAllInOneActivity::class.java.name,
+    ArcadeGameActivity::class.java.name,
 )
 
 /** Endless Days — the train-yard runner. */
