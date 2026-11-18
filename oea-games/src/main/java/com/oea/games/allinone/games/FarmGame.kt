@@ -290,7 +290,7 @@ class FarmGame : ArcadeBaseGame() {
             val rect = RectF(l, height * 0.63f, l + seedW, height * 0.735f)
             seedRects += rect
             val active = index == selected
-            ArcadeDraw.panel(canvas, rect, if (active) crop.color else 0xFF2A3B32, seedW * 0.2f,
+            ArcadeDraw.panel(canvas, rect, if (active) crop.color else 0xFF2A3B32.toInt(), seedW * 0.2f,
                 if (active) ArcadeColors.WHITE else 0x33FFFFFF, 1.4f)
             ArcadeDraw.text(canvas, crop.glyph, rect.centerX(), rect.top + height * 0.035f, height * 0.026f,
                 Color.WHITE, align = Paint.Align.CENTER)

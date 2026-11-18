@@ -119,7 +119,7 @@ class DartsGame : ArcadeBaseGame() {
             },
             detail = "Finished on ${lastMessage.lowercase()} with the ${(3 - dartsLeft).coerceAtLeast(1)} dart throw. " +
                 "Aim at treble twenty while the score is high, then switch to the double that leaves zero.",
-            score = (if (winner == 0) 300 else 80) + config.level * 10,
+            score = (if (winner == 0) 300L else 80L) + config.level * 10L,
             stars = if (winner == 0) 3 else 1
         )
     }

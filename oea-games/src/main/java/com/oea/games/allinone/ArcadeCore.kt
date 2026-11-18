@@ -634,5 +634,5 @@ object ArcadeCatalog {
 /** Tile art is chosen per cabinet and drawn in code, never shipped as a bitmap. */
 enum class ArcadeArtKind {
     RACING, DARTS, ARCHERY, BLOCKS, WORD, WHOT, SOLITAIRE, LUDO, LIFE,
-    MEMORY, TICTACTOE, POOL, SNOOKER, HIDE, PINGPONG, PUZZLE, QUIZ, CHESS,
+    MEMORY, TICTACTOE, POOL, SNOOKER, HIDE, PINGPONG, PUZZLE, QUIZ, CHESS, FARM,
 }

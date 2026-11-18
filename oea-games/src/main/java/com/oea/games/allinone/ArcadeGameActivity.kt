@@ -3,7 +3,10 @@ package com.oea.games.allinone
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,6 +16,10 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.view.animation.OvershootInterpolator
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
 import com.oea.engine.OeaEngine
 import com.oea.engine.net.session.NetSession
 import com.oea.engine.net.session.SessionPhase
@@ -200,6 +207,27 @@ class ArcadeGameActivity : Activity(), ArcadeFrontHost {
 
     private fun buildHud(cabinet: ArcadeSpec): View {
         val overlay = FrameLayout(this)
+        // Two soft scrims instead of a hard bar: the title stays legible over a
+        // bright board, and the status line over a dark one, without boxing the
+        // game in.
+        overlay.addView(
+            View(this).apply {
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0xB8000000.toInt(), 0x00000000)
+                )
+            },
+            FrameLayout.LayoutParams(-1, ArcadeUi.dp(this, 128f), Gravity.TOP)
+        )
+        overlay.addView(
+            View(this).apply {
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.BOTTOM_TOP,
+                    intArrayOf(0xA6000000.toInt(), 0x00000000)
+                )
+            },
+            FrameLayout.LayoutParams(-1, ArcadeUi.dp(this, 110f), Gravity.BOTTOM)
+        )
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -332,16 +360,17 @@ class ArcadeGameActivity : Activity(), ArcadeFrontHost {
             null -> 2
         }
         val earnedStars = if (result.won == false) 0 else stars
+        val previousBest = progress.best(cabinet.id, config.level)
         val firstClear = progress.record(cabinet.id, config.level, earnedStars, result.score)
         main.removeCallbacks(ticker)
         sendScore(result.score)
         if (firstClear && config.level < cabinet.levels) {
             toast("Level ${config.level + 1} unlocked.")
         }
-        buildResultCard(result, earnedStars)
+        buildResultCard(result, earnedStars, previousBest)
     }
 
-    private fun buildResultCard(result: ArcadeResult, stars: Int) {
+    private fun buildResultCard(result: ArcadeResult, stars: Int, previousBest: Long) {
         val cabinet = spec ?: return
         val frame = root ?: return
         resultOverlay?.let { frame.removeView(it) }
@@ -356,18 +385,33 @@ class ArcadeGameActivity : Activity(), ArcadeFrontHost {
             background = ArcadeUi.rounded(0xFFFFFBF4.toInt(), ArcadeUi.dp(this@ArcadeGameActivity, 24f))
         }
         card.addView(
+            View(this).apply { background = ArcadeUi.rounded(cabinet.accent, ArcadeUi.dp(this@ArcadeGameActivity, 2f)) },
+            LinearLayout.LayoutParams(ArcadeUi.dp(this@ArcadeGameActivity, 46f), ArcadeUi.dp(this@ArcadeGameActivity, 4f)).apply {
+                bottomMargin = ArcadeUi.dp(this@ArcadeGameActivity, 9f)
+            }
+        )
+        card.addView(
             ArcadeUi.text(this, if (result.won == false) "NEXT TIME" else "LEVEL CLEAR", 9.5f, cabinet.accent, bold = true)
                 .apply { letterSpacing = 0.2f }
         )
         card.addView(ArcadeUi.text(this, result.headline, 23f, ArcadeColors.INK, bold = true).apply { setPadding(0, ArcadeUi.dp(this@ArcadeGameActivity, 3f), 0, ArcadeUi.dp(this@ArcadeGameActivity, 5f)) })
         val starsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val starViews = ArrayList<TextView>()
         (1..3).forEach { index ->
-            starsRow.addView(
-                ArcadeUi.text(this, "★", 26f, if (index <= stars) ArcadeColors.GOLD else 0xFFE2D5C3.toInt(), bold = true)
-                    .apply { setPadding(0, 0, ArcadeUi.dp(this@ArcadeGameActivity, 5f), 0) }
-            )
+            val glyph = ArcadeUi.text(this, "★", 26f, if (index <= stars) ArcadeColors.GOLD else 0xFFE2D5C3.toInt(), bold = true).apply {
+                setPadding(0, 0, ArcadeUi.dp(this@ArcadeGameActivity, 5f), 0)
+            }
+            starViews += glyph
+            starsRow.addView(glyph)
         }
         card.addView(starsRow)
+        starViews.forEachIndexed { index, glyph ->
+            glyph.scaleX = 0f
+            glyph.scaleY = 0f
+            glyph.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                .setStartDelay((index * 90).toLong()).setDuration(260)
+                .setInterpolator(OvershootInterpolator()).start()
+        }
         card.addView(
             ArcadeUi.text(this, result.detail, 12.5f, ArcadeColors.INK_SOFT).apply {
                 setPadding(0, ArcadeUi.dp(this@ArcadeGameActivity, 6f), 0, ArcadeUi.dp(this@ArcadeGameActivity, 6f))
@@ -377,7 +421,8 @@ class ArcadeGameActivity : Activity(), ArcadeFrontHost {
         card.addView(
             ArcadeUi.text(
                 this,
-                "Score ${result.score} · level ${config.level} · ${config.difficulty.label}" +
+                "Score ${result.score}" + (if (result.score > previousBest && previousBest > 0) " · new best" else if (previousBest > 0) " · best $previousBest" else "") +
+                    " · level ${config.level} · ${config.difficulty.label}" +
                     if (session != null) "\nShared level: both phones played the same seed" else "",
                 11.5f, ArcadeColors.INK_SOFT
             )
@@ -423,6 +468,16 @@ class ArcadeGameActivity : Activity(), ArcadeFrontHost {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
         card.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ArcadeUi.dp(this@ArcadeGameActivity, 8f) })
+        card.addView(
+            ArcadeUi.outlineButton(this, "Share this result", ArcadeColors.INK_SOFT) { shareResult(cabinet, result) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = ArcadeUi.dp(this@ArcadeGameActivity, 7f) }
+        )
+        // Confetti drawn behind the card, in the cabinet's own colours.
+        scrim.addView(
+            BurstView(this, cabinet.accent),
+            0,
+            FrameLayout.LayoutParams(-1, -1)
+        )
         card.addView(
             ArcadeUi.text(this, "Done", 13f, ArcadeColors.INK_SOFT, bold = true).apply {
                 gravity = Gravity.CENTER
@@ -505,6 +560,57 @@ class ArcadeGameActivity : Activity(), ArcadeFrontHost {
         if (!resultShown && gameView != null) {
             main.removeCallbacks(ticker)
             main.post(ticker)
+        }
+    }
+
+    private fun shareResult(cabinet: ArcadeSpec, result: ArcadeResult) {
+        val text = "${cabinet.title} · level ${config.level} · ${result.score} points" +
+            if (result.won == false) " (not cleared yet)" else " — ${result.headline}"
+        runCatching {
+            startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(Intent.EXTRA_TEXT, "$text\nPlayed in All in One on OEA."),
+                    "Share your result"
+                )
+            )
+        }
+    }
+
+    /** A short, cheap confetti burst: forty pieces, one second, no assets. */
+    private class BurstView(context: Context, accent: Int) : View(context) {
+        private val started = System.nanoTime()
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val colors = intArrayOf(accent, ArcadeColors.GOLD, ArcadeColors.MINT, ArcadeColors.SKY, ArcadeColors.WHITE)
+        private val random = Random(7)
+        private val pieces = Array(44) {
+            floatArrayOf(
+                random.nextFloat(),                      // x (0–1)
+                random.nextFloat() * 0.35f,              // y start (0–1)
+                random.nextFloat() * 0.5f + 0.25f,       // drift
+                random.nextFloat() * 0.9f + 0.4f,        // speed
+                random.nextFloat() * 360f,               // angle
+                random.nextFloat() * 7f + 4f,            // size
+                colors[random.nextInt(colors.size)].toFloat(),
+            )
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val seconds = (System.nanoTime() - started) / 1_000_000_000f
+            if (seconds > 1.5f) return
+            val w = width.toFloat()
+            val h = height.toFloat()
+            val fade = (1f - seconds / 1.5f).coerceIn(0f, 1f)
+            pieces.forEach { piece ->
+                val angle = Math.toRadians((piece[4] + seconds * 140f).toDouble())
+                val travel = piece[3] * seconds
+                val x = piece[0] * w + cos(angle).toFloat() * travel * w * 0.18f
+                val y = h * (0.2f + piece[1]) + sin(angle).toFloat() * travel * h * 0.12f + seconds * seconds * h * 0.22f
+                paint.color = piece[6].toInt()
+                paint.alpha = (255 * fade).toInt().coerceIn(0, 255)
+                canvas.drawCircle(x, y, piece[5], paint)
+            }
+            postInvalidateOnAnimation()
         }
     }
 

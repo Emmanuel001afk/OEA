@@ -59,7 +59,7 @@ class OeaAllInOneActivity : Activity(), ArcadeHubHost {
 
     // ---------------------------------------------------------------- hub host
 
-    override fun openCabinet(spec: ArcadeSpec) {
+    override fun openCabinet(spec: ArcadeSpec, seed: Long?) {
         if (spec.externalApp == "chess") {
             runCatching { startActivity(Intent(this, OeaChessGameActivity::class.java)) }
                 .onFailure { toast("Chess is not available in this build.") }
@@ -73,7 +73,7 @@ class OeaAllInOneActivity : Activity(), ArcadeHubHost {
             level = progress.unlocked(spec.id),
             difficulty = progress.difficulty(),
             players = 1,
-            seed = System.nanoTime(),
+            seed = seed ?: System.nanoTime(),
             mode = ArcadePlayMode.AI,
         )
         startActivity(ArcadeGameActivity.starter(this, spec, config))

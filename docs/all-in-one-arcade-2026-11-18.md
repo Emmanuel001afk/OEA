@@ -133,3 +133,42 @@ failure modes that used to leave a lobby silent.
   shared-seed friend challenge instead.
 - There are no ads and no purchases, so the reference's "REMOVE ADS" button is
   represented by the profile/stars counter instead.
+
+## UI 2.0 and build repair (this branch)
+
+The first merge shipped the arcade but the CI build failed: eight Kotlin type
+errors stopped compilation (a `Float` target, `quadraticBezierTo`, a missing
+`ArcadeArtKind.FARM`, a dialog referring to itself, and four `setPadding` calls
+passing `0f` where an `Int` was required). All eight are fixed, and the workflow
+now compiles Kotlin as its own step so a type error names the file and line
+instead of failing inside an unrelated camera test.
+
+Interface changes in the same pass:
+
+- **Today's Challenge** hero card: one cabinet a day, played on a shared seed so
+  everyone gets the same board; it shows the level, the level's stars and opens
+  straight into that seed.
+- **Search** across all 19 cabinets (name, tagline or shelf), with results count
+  and an empty state.
+- **Surprise me** in the header opens a random playable cabinet.
+- **Poster tiles**: diagonal gloss, level pill, three explicit stars for the
+  current level, and a progress rail with a travelling knob.
+- **Keep-going card**: a progress bar under the last cabinet's name.
+- **Front screen**: icon mode tabs, difficulty is visible in every mode (the
+  host's difficulty is what a friend match uses), level chips show earned stars,
+  and the level line shows the best score or "not cleared yet".
+- **Cabinet poster**: properly rounded artwork, a difficulty pill and the level's
+  stars over the art.
+- **In-game HUD**: soft top and bottom scrims instead of a hard bar, so title and
+  status stay readable over both bright and dark boards.
+- **Result card**: accent strip, stars that pop in one after another, a "new
+  best" line comparing against the previous best, a share action and a short
+  confetti burst in the cabinet's colours.
+
+### Workflow fixes
+
+- `actions/checkout@v4` → `v5`, `actions/setup-java@v4` → `v5`.
+- New **Compile Kotlin** step (`:oea:compileDebugKotlin`) in front of the camera
+  tests, turning every `e:` line into a `::error::` annotation.
+- AAPT2 and apksigner are discovered from the newest installed build-tools
+  instead of a hard-coded `36.1.0` path.

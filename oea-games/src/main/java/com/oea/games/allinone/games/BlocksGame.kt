@@ -55,7 +55,7 @@ class BlocksGame : ArcadeBaseGame() {
         points = 0
         cleared = 0
         placed = 0
-        target = (170 + config.level * 145) * (0.9f + skill * 0.35f)
+        target = ((170 + config.level * 145) * (0.9f + skill * 0.35f)).toInt()
         tray = arrayOfNulls(3)
         refill()
     }
