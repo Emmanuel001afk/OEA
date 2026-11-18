@@ -371,7 +371,7 @@ object ArcadeDraw {
         // Distant hills and the target.
         val hill = Path().apply {
             moveTo(r.left, r.top + r.height() * 0.72f)
-            quadraticBezierTo(r.left + r.width() * 0.35f, r.top + r.height() * 0.5f, r.right, r.top + r.height() * 0.76f)
+            quadTo(r.left + r.width() * 0.35f, r.top + r.height() * 0.5f, r.right, r.top + r.height() * 0.76f)
             lineTo(r.right, r.bottom)
             lineTo(r.left, r.bottom)
             close()

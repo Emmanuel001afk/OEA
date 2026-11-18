@@ -334,7 +334,7 @@ class ArcadeLobby(
                 list.removeAllViews()
                 list.addView(ArcadeUi.text(activity, "Looking…", 12.5f, ArcadeColors.INK_SOFT))
                 stopDiscovery()
-                startBrowser(dialog)
+                startBrowser(d)
             })
             body.addView(ArcadeUi.outlineButton(activity, "Close", ArcadeColors.INK_SOFT) { d.dismiss() }, LinearLayout.LayoutParams(-1, -2))
         }

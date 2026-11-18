@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.view.Gravity
@@ -136,7 +137,7 @@ class ArcadeFrontScreen(
     private fun modeSection(): View {
         val column = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         column.addView(sectionTitle("A game"))
-        val tabs = if (spec.twoPlayer) listOf("Vs OEA AI", "Two players", "A friend") else listOf("Vs OEA AI", "A friend")
+        val tabs = if (spec.twoPlayer) listOf("🤖  AI", "👥  Two", "🌐  Friend") else listOf("🤖  AI", "🌐  Friend")
         val active = when {
             !spec.twoPlayer && mode == ArcadePlayMode.TWO_PLAYER -> 0
             spec.twoPlayer -> when (mode) {
@@ -177,12 +178,12 @@ class ArcadeFrontScreen(
         }
         column.addView(
             ArcadeUi.text(activity, blurb, 11.5f, ArcadeColors.INK_SOFT).apply {
-                setPadding(dp(2f), dp(8f), dp(2f), 0f)
+                setPadding(dp(2f), dp(8f), dp(2f), 0)
                 setLineSpacing(dp(2f).toFloat(), 1f)
             }
         )
-        if (mode != ArcadePlayMode.FRIENDS) {
-            column.addView(sectionTitle("Difficulty"), LinearLayout.LayoutParams(-1, -2))
+        run {
+            column.addView(sectionTitle(if (mode == ArcadePlayMode.FRIENDS) "Difficulty for the host" else "Difficulty"), LinearLayout.LayoutParams(-1, -2))
             val diffRow = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
             ArcadeDifficulty.entries.forEach { item ->
                 val on = item == difficulty
@@ -205,7 +206,7 @@ class ArcadeFrontScreen(
             column.addView(diffRow, LinearLayout.LayoutParams(-1, -2))
             column.addView(
                 ArcadeUi.text(activity, difficulty.blurb, 11f, ArcadeColors.INK_SOFT).apply {
-                    setPadding(dp(2f), dp(7f), dp(2f), 0f)
+                    setPadding(dp(2f), dp(7f), dp(2f), 0)
                 }
             )
         }
@@ -222,9 +223,10 @@ class ArcadeFrontScreen(
         (1..spec.levels).forEach { number ->
             val open = number <= unlocked
             val on = number == level
+            val earned = progress.stars(spec.id, number)
             val chip = ArcadeUi.text(
                 activity,
-                if (open) number.toString() else "🔒",
+                if (!open) "🔒" else if (earned > 0) "$number  ★$earned" else number.toString(),
                 12f,
                 if (on) Color.WHITE else if (open) ArcadeColors.INK else 0xFFB6A893.toInt(),
                 bold = on
@@ -252,9 +254,14 @@ class ArcadeFrontScreen(
             },
             LinearLayout.LayoutParams(-1, -2)
         )
+        val best = progress.best(spec.id, level)
         column.addView(
-            ArcadeUi.text(activity, "Level ${level} of ${spec.levels} · ${progress.stars(spec.id, level)} of 3 stars", 11f, ArcadeColors.INK_SOFT)
-                .apply { setPadding(dp(2f), dp(7f), 0f, 0f) }
+            ArcadeUi.text(
+                activity,
+                "Level $level of ${spec.levels} · ${progress.stars(spec.id, level)} of 3 stars" +
+                    if (best > 0) " · best $best" else " · not cleared yet",
+                11f, ArcadeColors.INK_SOFT
+            ).apply { setPadding(dp(2f), dp(7f), 0, 0) }
         )
         return column
     }
@@ -358,7 +365,7 @@ class ArcadeFrontScreen(
     private fun sectionTitle(value: String): TextView =
         ArcadeUi.text(activity, value.uppercase(), 10f, ArcadeColors.INK_SOFT, bold = true).apply {
             letterSpacing = 0.16f
-            setPadding(dp(2f), dp(10f), 0f, dp(8f))
+            setPadding(dp(2f), dp(10f), 0, dp(8f))
         }
 }
 
@@ -373,10 +380,24 @@ class ArcadeHero(context: Context, private val spec: ArcadeSpec, private val pro
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
         scene.set(0f, 0f, w, h)
+        val radius = 22f * density
+        // Clip first, so the artwork itself has rounded corners rather than
+        // sitting in a square behind a rounded border.
+        val clip = Path().apply { addRoundRect(scene, radius, radius, Path.Direction.CW) }
+        canvas.save()
+        canvas.clipPath(clip)
         ArcadeDraw.art(canvas, spec.art, scene, spec.accent)
-        paint.shader = LinearGradient(0f, h * 0.3f, 0f, h, intArrayOf(0x00000000, 0xCC000000.toInt()), null, Shader.TileMode.CLAMP)
-        canvas.drawRoundRect(scene, 24f * density, 24f * density, paint)
+        paint.shader = LinearGradient(0f, h * 0.28f, 0f, h, intArrayOf(0x00000000, 0xE0000000.toInt()), null, Shader.TileMode.CLAMP)
+        canvas.drawRect(scene, paint)
         paint.shader = null
+        canvas.restore()
+
+        // A quiet ring keeps the poster separate from the paper.
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.2f * density
+        paint.color = 0x1A000000
+        canvas.drawRoundRect(scene, radius, radius, paint)
+        paint.style = Paint.Style.FILL
         spec.badge?.let { badge ->
             val size = 10f * density
             val width = ArcadeDraw.measure(badge, size, bold = true) + 22f * density
@@ -384,14 +405,31 @@ class ArcadeHero(context: Context, private val spec: ArcadeSpec, private val pro
             canvas.drawRoundRect(16f * density, 16f * density, 16f * density + width, 37f * density, 9f * density, 9f * density, paint)
             ArcadeDraw.text(canvas, badge, 16f * density + width / 2f, 30f * density, size, Color.WHITE, bold = true, align = Paint.Align.CENTER)
         }
-        ArcadeDraw.text(canvas, spec.title, 18f * density, h - 46f * density, 21f * density, Color.WHITE, bold = true)
+        ArcadeDraw.text(canvas, spec.title, 18f * density, h - 48f * density, 21f * density, Color.WHITE, bold = true)
         ArcadeDraw.text(
             canvas,
             "Level ${progress.unlocked(spec.id)} · ${spec.levels} levels · AI, two players, friends",
             18f * density,
-            h - 25f * density,
+            h - 27f * density,
             11.5f * density,
             Color.argb(225, 255, 255, 255)
         )
+        // Difficulty pill, top right: the player sees what the AI is set to
+        // before opening the front screen's controls.
+        val label = progress.difficulty().label.uppercase()
+        val pillSize = 9.5f * density
+        val pillWidth = ArcadeDraw.measure(label, pillSize, bold = true) + 20f * density
+        val pillLeft = w - 16f * density - pillWidth
+        paint.color = Color.argb(150, 12, 10, 20)
+        canvas.drawRoundRect(pillLeft, 15f * density, w - 16f * density, 35f * density, 10f * density, 10f * density, paint)
+        ArcadeDraw.text(canvas, label, pillLeft + pillWidth / 2f, 29f * density, pillSize, Color.WHITE, bold = true, align = Paint.Align.CENTER)
+        // Earned stars on this level, bottom right.
+        val stars = progress.stars(spec.id, progress.unlocked(spec.id))
+        var starX = w - 20f * density
+        for (index in 3 downTo 1) {
+            ArcadeDraw.text(canvas, "★", starX, h - 27f * density, 14f * density,
+                if (index <= stars) ArcadeColors.GOLD else Color.argb(80, 255, 255, 255), bold = true, align = Paint.Align.RIGHT)
+            starX -= 15f * density
+        }
     }
 }

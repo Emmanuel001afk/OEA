@@ -26,9 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout OEA
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
@@ -41,6 +41,20 @@ jobs:
         # entry Game Boost does not recognise. Runs before the build so the
         # failure is readable.
         run: python3 tools/check-kotlin.py
+      - name: Compile Kotlin (launcher, engine, arcade)
+        # A dedicated compile before the tests: when a type error stops the
+        # build, this step names it as a `:error:` annotation on the exact file
+        # and line instead of failing later inside a camera test with a log
+        # nobody can read. It compiles the debug variant, which pulls in
+        # :oea-engine and :oea-games exactly as the release build does.
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:compileDebugKotlin --stacktrace 2>&1 | tee "$RUNNER_TEMP/compile.log"; then
+            { grep -E '^e: ' "$RUNNER_TEMP/compile.log" || true; } | head -80 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
       - name: Camera geometry regression tests
         run: |
           set -o pipefail
@@ -483,13 +497,14 @@ jobs:
         run: |
           APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"
           test -n "$APK"
-          AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          AAPT2="$BUILD_TOOLS/aapt2"
           "$AAPT2" dump badging "$APK" | grep -F "package: name='com.oea.launcher'"
           if "$AAPT2" dump badging "$APK" | grep -Fq "com.android.launcher3"; then
             echo "ERROR: Launcher3 identity remains in the APK."
             exit 1
           fi
-          APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
           "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
       - name: Verify the games are inside the APK
@@ -497,7 +512,8 @@ jobs:
           set -euo pipefail
           APK="$(find oea/build/outputs/apk -type f -name '*.apk' -print -quit)"
           test -n "$APK"
-          AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          AAPT2="$BUILD_TOOLS/aapt2"
           # Each game keeps its own identity inside the one APK:
           # its own launcher activity, icon and label.
           for activity in \

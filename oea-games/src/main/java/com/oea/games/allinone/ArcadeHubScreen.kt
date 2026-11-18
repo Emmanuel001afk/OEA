@@ -21,11 +21,16 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
 import com.oea.games.ui.GameInsets
 
 /** What the hub can ask of the app that hosts it. */
 interface ArcadeHubHost {
-    fun openCabinet(spec: ArcadeSpec)
+    /** Opens a cabinet. [seed] pins the board (the daily challenge uses one). */
+    fun openCabinet(spec: ArcadeSpec, seed: Long? = null)
     fun openFriends(spec: ArcadeSpec? = null)
     fun openProfile()
     fun toast(message: String)
@@ -51,10 +56,12 @@ class ArcadeHubScreen(
     private val root = FrameLayout(context).apply { setBackgroundColor(ArcadeColors.CREAM) }
     private val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private var selected: ArcadeCategory? = null
+    private var query = ""
     private lateinit var coinText: TextView
     private lateinit var gridHolder: LinearLayout
     private lateinit var chipsHolder: LinearLayout
     private lateinit var progressText: TextView
+    private lateinit var shelfTitle: TextView
 
     private fun dp(value: Int): Int = (value * density + 0.5f).toInt()
     private fun dpf(value: Float): Float = value * density
@@ -66,6 +73,10 @@ class ArcadeHubScreen(
             clipToPadding = false
             addView(content)
         }
+        root.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(0xFFFBF4E8.toInt(), ArcadeColors.CREAM, 0xFFF1E3D0.toInt())
+        )
         root.addView(scroll, FrameLayout.LayoutParams(-1, -1))
         content.setPadding(dp(18), dp(14), dp(18), dp(30))
         root.setOnApplyWindowInsetsListener { _, insets ->
@@ -86,6 +97,8 @@ class ArcadeHubScreen(
         content.removeAllViews()
         content.addView(header(), LinearLayout.LayoutParams(-1, -2))
         content.addView(continueCard(), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
+        content.addView(dailyCard(), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        content.addView(searchRow(), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
         chipsHolder = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(4), 0, dp(4))
@@ -98,8 +111,7 @@ class ArcadeHubScreen(
             },
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) }
         )
-        val shelfTitle = TextView(context).apply {
-            text = selected?.label ?: "ALL CABINETS"
+        shelfTitle = TextView(context).apply {
             setTextColor(ArcadeColors.INK_SOFT)
             textSize = 10.5f
             letterSpacing = 0.18f
@@ -141,15 +153,127 @@ class ArcadeHubScreen(
         coins.addView(coinText, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(5) })
         row.addView(coins, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) })
 
+        val surprise = FrameLayout(context).apply {
+            background = RippleDrawable(ColorStateList.valueOf(0x22000000), rounded(0xFFFBF4E8.toInt(), 22, 0xFFE2D2BC.toInt(), 1), rounded(Color.WHITE, 22))
+            isClickable = true
+            contentDescription = "Surprise me — open a random cabinet"
+            setOnClickListener {
+                val playable = ArcadeCatalog.all().filter { it.isPlayable }
+                if (playable.isNotEmpty()) host.openCabinet(playable.random())
+            }
+        }
+        surprise.addView(label("🎲", 17f, ArcadeColors.INK, bold = true).apply { gravity = Gravity.CENTER })
+        row.addView(surprise, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(8) })
+
         val profile = FrameLayout(context).apply {
             background = RippleDrawable(ColorStateList.valueOf(0x22000000), rounded(ArcadeColors.INK, 22), rounded(Color.WHITE, 22))
             isClickable = true
+            contentDescription = "Your arcade profile"
             setOnClickListener { host.openProfile() }
         }
-        profile.addView(label("●", 22f, ArcadeColors.MINT, bold = true).apply { gravity = Gravity.CENTER })
+        profile.addView(label("☰", 20f, ArcadeColors.WHITE, bold = true).apply { gravity = Gravity.CENTER })
         row.addView(profile, LinearLayout.LayoutParams(dp(44), dp(44)))
         return row
     }
+
+    /**
+     * One cabinet a day, the same seed for everyone: a reason to open the app
+     * that the wall alone cannot give. The card is deliberately darker and wider
+     * than a tile so it reads as an event, not as another game.
+     */
+    private fun dailyCard(): View {
+        val spec = dailySpec()
+        val level = progress.unlocked(spec.id)
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(17), dp(15), dp(15), dp(15))
+            background = RippleDrawable(
+                ColorStateList.valueOf(0x26FFFFFF),
+                GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF22203A.toInt(), spec.accent)),
+                rounded(Color.WHITE, 22)
+            )
+            isClickable = true
+            setOnClickListener { host.openCabinet(spec, dailySeed()) }
+        }
+        val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        top.addView(label("TODAY'S CHALLENGE", 9.5f, ArcadeColors.MINT, bold = true).apply { letterSpacing = 0.2f }, LinearLayout.LayoutParams(0, -2, 1f))
+        top.addView(label("SAME SEED FOR ALL", 8.5f, Color.argb(200, 255, 255, 255), bold = true).apply { letterSpacing = 0.12f })
+        card.addView(top, LinearLayout.LayoutParams(-1, -2))
+        card.addView(label(spec.title, 21f, Color.WHITE, bold = true).apply { setPadding(0, dp(5), 0, dp(2)) })
+        card.addView(label("${spec.levelName(level)} · ${spec.levels} levels · everyone plays the same board today", 11.5f, Color.argb(225, 255, 255, 255)))
+        val action = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(11), 0, 0) }
+        action.addView(
+            label("Play today's board", 12.5f, Color.WHITE, bold = true).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(16), dp(9), dp(16), dp(9))
+                background = rounded(Color.argb(48, 255, 255, 255), 15, Color.argb(90, 255, 255, 255), 1)
+            },
+            LinearLayout.LayoutParams(-2, -2)
+        )
+        action.addView(label("★ ${dailyStars(spec)}", 12f, ArcadeColors.GOLD, bold = true), LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(12) })
+        card.addView(action, LinearLayout.LayoutParams(-1, -2))
+        return card
+    }
+
+    private fun searchRow(): View {
+        val shell = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(2), dp(12), dp(2))
+            background = rounded(0xFFFFFBF4.toInt(), 18, 0xFFE7D8C3.toInt(), 1)
+        }
+        shell.addView(label("⌕", 18f, ArcadeColors.INK_SOFT, bold = true), LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) })
+        val field = EditText(context).apply {
+            hint = "Search ${ArcadeCatalog.all().size} cabinets"
+            setHintTextColor(0xFFB3A38D.toInt())
+            setTextColor(ArcadeColors.INK)
+            textSize = 13f
+            setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            background = null
+            setPadding(0, dp(11), 0, dp(11))
+            setText(query)
+            setSelection(text.length)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: Editable?) {
+                    val next = s?.toString().orEmpty()
+                    if (next == query) return
+                    query = next
+                    renderGrid()
+                }
+            })
+        }
+        shell.addView(field, LinearLayout.LayoutParams(0, -2, 1f))
+        if (query.isNotBlank()) {
+            shell.addView(label("✕", 15f, ArcadeColors.INK_SOFT, bold = true).apply {
+                setPadding(dp(10), dp(8), dp(2), dp(8))
+                isClickable = true
+                setOnClickListener {
+                    query = ""
+                    populate()
+                }
+            })
+        }
+        return shell
+    }
+
+    private fun dailySpec(): ArcadeSpec {
+        val playable = ArcadeCatalog.all().filter { it.isPlayable }
+        if (playable.isEmpty()) return ArcadeCatalog.all().first()
+        val day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+        return playable[day % playable.size]
+    }
+
+    private fun dailySeed(): Long {
+        val calendar = java.util.Calendar.getInstance()
+        val year = calendar.get(java.util.Calendar.YEAR).toLong()
+        val day = calendar.get(java.util.Calendar.DAY_OF_YEAR).toLong()
+        return year * 1000L + day
+    }
+
+    private fun dailyStars(spec: ArcadeSpec): Int = progress.stars(spec.id, progress.unlocked(spec.id))
 
     private fun continueCard(): View {
         val spec = progress.continueSpec() ?: ArcadeCatalog.byId("racing") ?: ArcadeCatalog.all().first()
@@ -172,6 +296,12 @@ class ArcadeHubScreen(
         texts.addView(
             label("${spec.levelName(level)} · ${progress.stars(spec.id, level)}/3 stars · played ${progress.playedCount(spec.id)}×", 11.5f, Color.argb(225, 255, 255, 255))
         )
+        val fraction = progress.levelFraction(spec.id).coerceIn(0f, 1f)
+        val rail = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        rail.addView(View(context).apply { background = rounded(Color.WHITE, 2) },
+            LinearLayout.LayoutParams(0, dp(4), fraction.coerceAtLeast(0.0001f)))
+        rail.addView(View(context), LinearLayout.LayoutParams(0, dp(4), (1f - fraction).coerceAtLeast(0.0001f)))
+        texts.addView(rail, LinearLayout.LayoutParams(-1, dp(4)).apply { topMargin = dp(7); rightMargin = dp(10) })
         card.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
         val play = FrameLayout(context).apply { background = rounded(Color.argb(235, 255, 255, 255), 24) }
         play.addView(label("▶", 17f, spec.accent, bold = true).apply { gravity = Gravity.CENTER })
@@ -203,11 +333,38 @@ class ArcadeHubScreen(
 
     // -------------------------------------------------------------------- grid
 
+    private fun renderGrid() {
+        gridHolder.removeAllViews()
+        grid()
+    }
+
     private fun grid() {
         var specs = if (selected == null) ArcadeCatalog.all() else ArcadeCatalog.inCategory(selected)
         if (selected == ArcadeCategory.FAVOURITES) {
             val recent = progress.recent().mapNotNull { ArcadeCatalog.byId(it) }
             specs = recent.ifEmpty { ArcadeCatalog.all().filter { it.badge != null } }
+        }
+        if (query.isNotBlank()) {
+            specs = specs.filter {
+                it.title.contains(query, ignoreCase = true) ||
+                    it.tagline.contains(query, ignoreCase = true) ||
+                    it.category.label.contains(query, ignoreCase = true)
+            }
+        }
+        shelfTitle.text = if (query.isNotBlank()) {
+            "RESULTS · ${specs.size}"
+        } else {
+            "${selected?.label ?: "ALL CABINETS"} · ${specs.size}"
+        }
+        if (specs.isEmpty()) {
+            gridHolder.addView(
+                label("No cabinet matches \u201c$query\u201d. Try a game name or a shelf.", 13f, ArcadeColors.INK_SOFT).apply {
+                    setPadding(dp(4), dp(24), dp(4), dp(24))
+                }
+            )
+            progressText.text = "${progress.totalStars()} stars · ${ArcadeCatalog.all().count { it.isPlayable }} cabinets"
+            coinText.text = progress.coins().toString()
+            return
         }
         var i = 0
         while (i < specs.size) {
@@ -216,12 +373,12 @@ class ArcadeHubScreen(
                 weightSum = 2f
             }
             val left = specs[i]
-            row.addView(tile(left), LinearLayout.LayoutParams(0, dp(228), 1f).apply { rightMargin = dp(11) })
+            row.addView(tile(left), LinearLayout.LayoutParams(0, dp(238), 1f).apply { rightMargin = dp(11) })
             val right = specs.getOrNull(i + 1)
             if (right != null) {
-                row.addView(tile(right), LinearLayout.LayoutParams(0, dp(228), 1f))
+                row.addView(tile(right), LinearLayout.LayoutParams(0, dp(238), 1f))
             } else {
-                row.addView(View(context), LinearLayout.LayoutParams(0, dp(228), 1f))
+                row.addView(View(context), LinearLayout.LayoutParams(0, dp(238), 1f))
             }
             gridHolder.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
             i += 2
@@ -361,6 +518,15 @@ class ArcadeTileView(
         val artRect = RectF(scene.left, scene.top, scene.right, scene.top + h * 0.72f)
         ArcadeDraw.art(canvas, spec.art, artRect, spec.accent)
 
+        // A soft diagonal gloss makes the poster feel like printed card rather
+        // than a flat rectangle of colour.
+        paint.shader = LinearGradient(
+            artRect.left, artRect.bottom, artRect.right, artRect.top,
+            intArrayOf(0x00FFFFFF, 0x1FFFFFFF, 0x00FFFFFF), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP
+        )
+        canvas.drawRoundRect(artRect, radius, radius, paint)
+        paint.shader = null
+
         // Scrim, so the title is legible over a bright scene.
         paint.shader = LinearGradient(
             0f, artRect.top, 0f, artRect.top + artRect.height() * 0.62f,
@@ -398,24 +564,41 @@ class ArcadeTileView(
 
         val unlocked = progress.unlocked(spec.id)
         val stars = (1..spec.levels).sumOf { progress.stars(spec.id, it) }
-        ArcadeDraw.text(canvas, "LVL $unlocked / ${spec.levels}", dp(14f), plateTop + dp(19f), dp(10.5f), spec.accent, bold = true)
-        ArcadeDraw.text(canvas, "★ $stars", scene.right - dp(14f), plateTop + dp(19f), dp(10.5f), 0xFFB08A2E.toInt(), bold = true, align = Paint.Align.RIGHT)
+        val pillText = "LVL $unlocked/${spec.levels}"
+        val pillWidth = ArcadeDraw.measure(pillText, dp(10f), bold = true) + dp(18f)
+        paint.color = Color.argb(28, Color.red(spec.accent), Color.green(spec.accent), Color.blue(spec.accent))
+        canvas.drawRoundRect(dp(14f), plateTop + dp(11f), dp(14f) + pillWidth, plateTop + dp(27f), dp(8f), dp(8f), paint)
+        ArcadeDraw.text(canvas, pillText, dp(23f), plateTop + dp(22f), dp(10f), spec.accent, bold = true)
 
-        // Progress rail.
+        // Earned stars, drawn one by one so a player can see what is left.
+        val earned = progress.stars(spec.id, unlocked)
+        var starX = scene.right - dp(14f)
+        for (index in 3 downTo 1) {
+            val full = index <= earned
+            ArcadeDraw.text(canvas, "★", starX, plateTop + dp(23f), dp(12f),
+                if (full) 0xFFE0A21B.toInt() else 0xFFE3D6C4.toInt(), bold = true, align = Paint.Align.RIGHT)
+            starX -= dp(14f)
+        }
+
+        // Progress rail with a travelling knob, so the bar reads at a glance.
         val railLeft = dp(14f)
         val railRight = scene.right - dp(14f)
-        val railY = plateTop + dp(28f)
+        val railY = plateTop + dp(34f)
         paint.color = 0xFFEDE3D5.toInt()
-        canvas.drawRoundRect(railLeft, railY, railRight, railY + dp(5f), dp(3f), dp(3f), paint)
+        canvas.drawRoundRect(railLeft, railY, railRight, railY + dp(6f), dp(3f), dp(3f), paint)
         val fraction = progress.levelFraction(spec.id).coerceIn(0f, 1f)
         if (fraction > 0.001f) {
             paint.color = spec.accent
-            canvas.drawRoundRect(railLeft, railY, railLeft + (railRight - railLeft) * fraction, railY + dp(5f), dp(3f), dp(3f), paint)
+            canvas.drawRoundRect(railLeft, railY, railLeft + (railRight - railLeft) * fraction, railY + dp(6f), dp(3f), dp(3f), paint)
+            paint.color = ArcadeColors.WHITE
+            canvas.drawCircle(railLeft + (railRight - railLeft) * fraction, railY + dp(3f), dp(4.5f), paint)
+            paint.color = spec.accent
+            canvas.drawCircle(railLeft + (railRight - railLeft) * fraction, railY + dp(3f), dp(2.4f), paint)
         }
 
         // The line that sells the cabinet.
         val line = ArcadeDraw.wrap(spec.tagline, dp(11f), railRight - railLeft, bold = false).firstOrNull().orEmpty()
-        ArcadeDraw.text(canvas, line, railLeft, railY + dp(20f), dp(11f), ArcadeColors.INK_SOFT)
+        ArcadeDraw.text(canvas, line, railLeft, railY + dp(22f), dp(11f), ArcadeColors.INK_SOFT)
 
         // A thumb affordance for the shell's cards (a real button, not artwork).
         val badgeCircle = plateTop - dp(21f)

@@ -428,6 +428,7 @@ class LifePathGame : ArcadeBaseGame() {
                     return true
                 }
             }
+            Stage.MONTH_END -> Unit
         }
         return true
     }

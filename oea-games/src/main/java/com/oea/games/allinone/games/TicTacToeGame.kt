@@ -102,21 +102,21 @@ class TicTacToeGame : ArcadeBaseGame() {
                 won = null,
                 headline = "A draw",
                 detail = "Nobody could break through. A draw is a real result here — the perfect game ends level.",
-                score = 40,
+                score = 40L,
                 stars = 2
             )
             twoPlayer -> finish(
                 won = winner == 1,
                 headline = "Player $winner wins",
                 detail = if (winner == 1) "Player 1 found the line." else "Player 2 found the line.",
-                score = 100,
+                score = 100L,
                 stars = 3
             )
             winner == 1 -> finish(
                 won = true,
                 headline = "You win",
                 detail = "Level ${config.level} beaten on a ${size}×${size} board. Try the next difficulty before moving on.",
-                score = 100 + config.level * 10,
+                score = 100L + config.level * 10L,
                 stars = 3
             )
             else -> finish(
@@ -127,7 +127,7 @@ class TicTacToeGame : ArcadeBaseGame() {
                 } else {
                     "The AI took the middle and the fork. Take the centre first and answer every threat."
                 },
-                score = 20,
+                score = 20L,
                 stars = 1
             )
         }
