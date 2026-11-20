@@ -60,7 +60,8 @@ the default arm64 APK is the right one.
    (latest)** in SDK Manager, then double-click the setup again.
 4. The script downloads the emulator image, creates `oea-laptop`, starts it,
    installs OEA and sets it as Home. First run takes a while; later runs reuse
-   everything.
+   everything. It also puts an **OEA** shortcut on the desktop; `Start-OEA.cmd`
+   starts the Android device and opens OEA on later runs.
 
 ### Linux and macOS: two commands
 
@@ -171,5 +172,7 @@ laptop — is what preserves the launcher, the arcade and every app it manages.
   OEA and optional APKs, sets Home.
 - `tools/laptop/windows/OEA-Laptop-Setup.cmd` — the Windows double-click setup
   (`OEA-Laptop-Setup.ps1` next to it does the work).
+- `tools/laptop/windows/Start-OEA.cmd` — starts the Android device and opens
+  OEA; the setup puts a shortcut to it on the desktop.
 - `tools/laptop/package-windows.sh` — bundles the APK, the Windows setup and
   this guide into `OEA-laptop-windows.zip`.

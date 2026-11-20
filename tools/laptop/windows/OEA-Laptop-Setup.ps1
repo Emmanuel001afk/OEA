@@ -217,8 +217,33 @@ Write-Step "Setting OEA as the Home app"
 & $adb shell cmd package set-home-activity com.oea.launcher/.OeaLauncherActivity | Out-Null
 & $adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME | Out-Null
 
+$startScript = Join-Path $PSScriptRoot "Start-OEA.cmd"
+if (Test-Path $startScript) {
+    try {
+        # Keep a copy outside the extracted zip, so the desktop shortcut keeps
+        # working even if the download folder is cleaned up.
+        $installDir = Join-Path $env:LOCALAPPDATA "OEA"
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        Copy-Item $startScript (Join-Path $installDir "Start-OEA.cmd") -Force
+        Set-Content -Path (Join-Path $installDir "avd-name.txt") -Value $AvdName -NoNewline
+
+        $desktop = [Environment]::GetFolderPath("Desktop")
+        $shortcutPath = Join-Path $desktop "OEA.lnk"
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = Join-Path $installDir "Start-OEA.cmd"
+        $shortcut.WorkingDirectory = $installDir
+        $shortcut.Description = "OEA - the all-in-one Android launcher"
+        $shortcut.Save()
+        Write-Host "Desktop shortcut created: $shortcutPath"
+    } catch {
+        Write-Host "The desktop shortcut could not be created; use Start-OEA.cmd instead."
+    }
+}
+
 Write-Host ""
 Write-Host "OEA is installed and set as Home." -ForegroundColor Green
+Write-Host "Use the OEA shortcut on the desktop, or Start-OEA.cmd, to open it again."
 Write-Host "If Android asks which Home app to use, choose OEA and 'Always'."
 Write-Host "Mouse clicks are taps; the keyboard types."
 exit 0
