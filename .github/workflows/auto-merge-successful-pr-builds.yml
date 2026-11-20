@@ -102,11 +102,31 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.1.0/apksigner"
           "$APKSIGNER" verify --verbose "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-latest.apk"
+      - name: Build the x86_64 laptop APK
+        # Pushes made with GITHUB_TOKEN do not trigger the push workflow, so
+        # this job is the only place a main build happens. The laptop APK must
+        # be built here as well or oea-laptop-latest would never be published.
+        run: ./gradlew :oea:assembleDebug -PextraAbi=x86_64 --stacktrace
+      - name: Verify and stage the laptop APK
+        run: |
+          set -euo pipefail
+          APK="$(find oea/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          unzip -l "$APK" | grep -Eq 'lib/x86_64/.*\.so$'
+          cp "$APK" "$RUNNER_TEMP/OEA-laptop-x86_64.apk"
+          ls -l "$RUNNER_TEMP/OEA-laptop-x86_64.apk"
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: oea-launcher-apk-after-merge
           path: ${{ runner.temp }}/OEA-latest.apk
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload laptop APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oea-laptop-apk-after-merge
+          path: ${{ runner.temp }}/OEA-laptop-x86_64.apk
           retention-days: 7
           if-no-files-found: error
       - name: Publish latest APK release
@@ -123,4 +143,18 @@ jobs:
             gh release upload oea-latest "${ASSETS[@]}" --repo "$REPOSITORY" --clobber
           else
             gh release create oea-latest "${ASSETS[@]}" --repo "$REPOSITORY" --title "OEA Latest" --notes "Latest OEA Launcher and OEA game builds from main."
+          fi
+      - name: Publish the laptop APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ASSETS=("$RUNNER_TEMP/OEA-laptop-x86_64.apk")
+          if gh release view oea-laptop-latest --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload oea-laptop-latest "${ASSETS[@]}" --repo "$REPOSITORY" --clobber
+          else
+            gh release create oea-laptop-latest "${ASSETS[@]}" --repo "$REPOSITORY" \
+              --title "OEA for laptop Android" \
+              --notes "OEA, the Android launcher, packaged with x86_64 native libraries so it installs in Waydroid, Android-x86 or an x86_64 emulator. Install it, set OEA as the Home app, and its Home screen, drawer, arcade and games run with the mouse and keyboard. Setup guide: docs/oea-on-a-laptop.md."
           fi
