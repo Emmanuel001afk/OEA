@@ -24,6 +24,7 @@ mkdir -p "$PKG"
 cp "$APK" "$PKG/$(basename "$APK")"
 cp "$ROOT/tools/laptop/windows/OEA-Laptop-Setup.cmd" "$PKG/"
 cp "$ROOT/tools/laptop/windows/OEA-Laptop-Setup.ps1" "$PKG/"
+cp "$ROOT/tools/laptop/windows/Start-OEA.cmd" "$PKG/"
 cp "$ROOT/docs/oea-on-a-laptop.md" "$PKG/README.md"
 
 OUT_DIR="$(dirname "$OUT")"

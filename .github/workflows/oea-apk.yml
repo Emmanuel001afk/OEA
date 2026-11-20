@@ -612,6 +612,7 @@ jobs:
           fi
 
   build-laptop-apk:
+    # The laptop artifact is a release APK plus OEA-laptop-windows.zip.
     # OEA as a launcher on a laptop means Android running on the laptop (see
     # docs/oea-on-a-laptop.md). That environment is normally x86_64, while the
     # phone APK carries only arm64/armv7 native libraries. This job builds and
