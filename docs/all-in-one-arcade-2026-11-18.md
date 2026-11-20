@@ -172,3 +172,19 @@ Interface changes in the same pass:
   tests, turning every `e:` line into a `::error::` annotation.
 - AAPT2 and apksigner are discovered from the newest installed build-tools
   instead of a hard-coded `36.1.0` path.
+
+## Rule and visual audit (same day)
+
+Feedback that "most of the games aren't making sense" led to a cabinet-by-cabinet
+audit against the real games. The full document is
+[`game-audit-2026-11-18.md`](game-audit-2026-11-18.md); the changes it produced:
+
+- **Ludo** rebuilt on the canonical 15x15 cross board (yards, 52-square track,
+  home columns, safe squares, four tokens, capture, exact finish).
+- **Tic Tac Toe** turn-handover bug fixed; 4x4 levels relabelled as four in a row.
+- **Darts** now requires a double or bull to finish and applies real busts.
+- **Ping Pong** is first to 11 with ITTF serve rotation.
+- **Pool** is 8-ball (open table, groups, 8 last, early 8 loses) and **Snooker**
+  is scored with reds and colours, respotted colours and a proper clearance.
+- The remaining backlog — racing laps, hide-and-seek naming, archery ends, the
+  life-sim description and in-game coaching — is listed in the audit.

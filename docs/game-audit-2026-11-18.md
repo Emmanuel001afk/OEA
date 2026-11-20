@@ -78,6 +78,21 @@ and a bust ends the visit and reverts the score.
 first to 11, win by two, with serve rotating every two points and every point at
 10–10, as the ITTF laws require.
 
+**Pool — rebuilt as 8-ball.** The old cabinet was "pot more balls than the
+opponent", which is not a game anyone plays. It now racks fifteen balls with the
+8 in the middle of the third row and a solid and a stripe on the back corners.
+The table is open after the break; the first legal pot claims solids or stripes;
+the 8 is only legal after your group is cleared; potting it early loses the
+frame; the white is a foul with ball in hand; and the level tightens the pockets.
+Stripes are drawn as white balls with a coloured band.
+
+**Snooker — rebuilt with points.** The old cabinet used pool rules and added four
+points for a foul. It now has fifteen reds and the six colours on their spots,
+red-then-colour while reds remain, colours respotted, the closing clearance in
+ascending order (yellow, green, brown, blue, pink, black), fouls worth at least
+four and more when a high colour is involved, and the frame decided on points.
+The board shows what is on — red, a colour, or the next clearance colour.
+
 ### Matches the real game already
 
 - **Blocks** — 8x8 grid, three offered shapes, no rotation, rows and columns clear
@@ -99,21 +114,17 @@ first to 11, win by two, with serve rotating every two points and every point at
 
 ### Still to fix (in priority order)
 
-1. **Pool and Snooker.** This is the same class of fault as the old Ludo. Pool is
-   currently "pot more balls than the opponent" with no groups and no 8-ball
-   finish; Snooker uses the same rules plus a four-point foul, with no reds and
-   colours. Both need to be rebuilt around the real rules. This is the next change.
-2. **Car Racing.** The cabinet is an endless traffic dodger, not a race: no laps,
+1. **Car Racing.** The cabinet is an endless traffic dodger, not a race: no laps,
    no grid, no opponents racing to a finish. Either add a lap counter and a
    position, or rename it to what it is.
-3. **Hide & Seek.** The game is a torch-lit stealth maze with watchers and three
+2. **Hide & Seek.** The game is a torch-lit stealth maze with watchers and three
    keys. That is a good game, but it is not hide-and-seek; the name sets the wrong
    expectation. Rename it (for example "The Dark House") and say what it is.
-4. **Archery.** Five arrows in a single end is a practice round, not a World
+3. **Archery.** Five arrows in a single end is a practice round, not a World
    Archery round. Use five ends of three arrows and score each end.
-5. **Life Path.** It is a career-and-life simulation, not The Game of Life's
+4. **Life Path.** It is a career-and-life simulation, not The Game of Life's
    spinner-and-board. Keep the simulation but make the description say so.
-6. **In-game coaching.** The how-to lists exist on the front screens, but a first
+5. **In-game coaching.** The how-to lists exist on the front screens, but a first
    player should get one short, game-specific line on the canvas — especially for
    aiming controls (darts, pool, archery).
 
@@ -131,4 +142,7 @@ you the one thing you must do next.
 - `oea-games/.../games/TicTacToeGame.kt` — full rewrite (turn bug fixed).
 - `oea-games/.../games/DartsGame.kt` — double-out and bust rules.
 - `oea-games/.../games/PingPongGame.kt` — 11-point games and serve rotation.
+- `oea-games/.../games/PoolGame.kt` — 8-ball groups/8-last and scored snooker in
+  one engine; pocket size now scales with the level.
+- `oea-games/.../ArcadeCore.kt` — pool/snooker cabinet descriptions match the rules.
 - this document.

@@ -288,7 +288,7 @@ object ArcadeCatalog {
         ArcadeSpec(
             id = "pool",
             title = "POOL",
-            tagline = "Nine balls, six pockets, no excuses",
+            tagline = "Solids, stripes, and the 8 last",
             category = ArcadeCategory.SPORTS,
             accent = ArcadeColors.MINT,
             art = ArcadeArtKind.POOL,
@@ -296,8 +296,9 @@ object ArcadeCatalog {
             twoPlayer = true,
             howTo = listOf(
                 "🎯" to "Drag from the cue ball to aim, then pull back further for more power",
-                "⚪" to "Sink every coloured ball before your opponent. The white comes back if it drops",
-                "🪄" to "A foul gives the opponent a free shot — the table shows it",
+                "🟡" to "The table is open after the break: the first legal pot claims solids or stripes",
+                "8️⃣" to "Clear your group first; the 8 only goes down last, and an early 8 loses the frame",
+                "⚪" to "Pot the white and it is a foul: your opponent gets ball in hand",
                 "👥" to "Play the OEA AI or hand the phone over: two players, one table",
             ),
             create = { PoolGame() },
@@ -478,8 +479,8 @@ object ArcadeCatalog {
             accent = ArcadeColors.DEEP_SEA,
             art = ArcadeArtKind.SNOOKER,
             levels = 8,
-            levelNames = listOf("Six reds", "Six reds · tight pockets", "Ten reds", "Ten reds · cushion",
-                "Fifteen reds", "Fifteen reds · tight", "Colour clearance", "The black final"),
+            levelNames = listOf("The long table", "Tight pockets", "Cushion control", "The baulk end",
+                "Long pots", "Tight pockets II", "Colour clearance", "The black final"),
             twoPlayer = true,
             howTo = listOf(
                 "🔴" to "Red, then a colour, then a red again. Colours are respotted until the end",
