@@ -56,10 +56,21 @@ board fill up. That is why the cabinet felt meaningless rather than merely easy.
 yards, no home columns, no safe squares and no capture, so nothing about it
 matched Ludo. It is now a real 15x15 cross board: four yards at the corners, the
 52-square clockwise track with the four start squares, five home-column squares
-per seat, the four-triangle centre, four tokens a side, six to enter, six for a
-bonus roll, three sixes losing the turn, captures back to the yard, eight safe
-squares and an exact roll to finish. The AI weighs finishing, capture, safety and
-progress; Easy adds noise. Two-player is red against green, opposite corners.
+per seat and the four-triangle centre. The movement rules are the two-dice house
+variant asked for on the phone: roll two dice, move **one token by the total**, a
+six on either die brings a token out of the yard, doubles earn another roll and
+three doubles lose the turn. Captures, the eight safe squares and the exact
+finish are canonical; a token on the last home-column square steps into the
+centre with any total because two dice cannot roll a one. The AI weighs
+finishing, capture, safety and progress; Easy adds noise. Two-player is red
+against green, opposite corners.
+
+The board was redrawn as a real cabinet: ivory bevel, four labelled corner
+yards with token sockets, a 52-square track with direction arrows on the start
+squares, gold star safe squares, chevrons down each home column, a four-triangle
+centre with a star, glossy tokens with shadows and a pulsing ring on every legal
+token, two animated dice with a running total, a seat-coloured roll button and
+progress chips that show how many tokens each seat has home.
 
 **Tic Tac Toe — rebuilt and de-bugged.** The AI never handed the turn back; that
 was the actual defect. Turn order is now explicit, one mark per turn, and the
