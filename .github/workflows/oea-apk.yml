@@ -651,9 +651,12 @@ jobs:
             echo "::warning::OEA_DEBUG_KEYSTORE_BASE64 is not set: this APK is signed with a new random key and cannot update a previously installed OEA in place."
           fi
       - name: Build the x86_64 laptop APK
+        # Release, not debug: minified and resource-shrunk exactly like the
+        # phone build, so the laptop download is a finished install rather than
+        # a debuggable development artifact.
         run: |
           set -o pipefail
-          if ! ./gradlew :oea:assembleDebug -PextraAbi=x86_64 --stacktrace 2>&1 | tee "$RUNNER_TEMP/laptop-build.log"; then
+          if ! ./gradlew :oea:assembleRelease -PextraAbi=x86_64 --stacktrace 2>&1 | tee "$RUNNER_TEMP/laptop-build.log"; then
             # Annotations are the only part of a failed job this repository can
             # read back through the API, so name the cause instead of hiding it
             # in a log attachment.
@@ -666,12 +669,23 @@ jobs:
       - name: Verify the laptop APK
         run: |
           set -euo pipefail
-          APK="$(find oea/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          APK="$(find oea/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
           test -n "$APK"
           # The WebRTC native library is the reason the default APK cannot
           # install on x86_64. If it is missing here, the APK is not a laptop
           # build and must not be published.
           unzip -l "$APK" | grep -Eq 'lib/x86_64/.*\.so$'
+          # This must be the finished release build: correct identity, signed,
+          # and not debuggable. A debug APK accidentally published here would
+          # pass every other check.
+          AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
+          BADGING="$("$AAPT2" dump badging "$APK")"
+          echo "$BADGING" | grep -Fq "package: name='com.oea.launcher'"
+          if echo "$BADGING" | grep -Fq "application-debuggable"; then
+            echo "ERROR: the laptop APK is debuggable; publish a release build." >&2
+            exit 1
+          fi
+          "$ANDROID_HOME/build-tools/36.1.0/apksigner" verify "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-laptop-x86_64.apk"
           ls -l "$RUNNER_TEMP/OEA-laptop-x86_64.apk"
       - name: Upload laptop APK
@@ -681,17 +695,28 @@ jobs:
           path: ${{ runner.temp }}/OEA-laptop-x86_64.apk
           retention-days: 7
           if-no-files-found: error
+      - name: Package the Windows setup
+        # One archive a Windows user can extract and double-click: the release
+        # APK, the setup scripts and the guide.
+        run: ./tools/laptop/package-windows.sh "$RUNNER_TEMP/OEA-laptop-x86_64.apk" "$RUNNER_TEMP/OEA-laptop-windows.zip"
+      - name: Upload Windows setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: oea-laptop-windows
+          path: ${{ runner.temp }}/OEA-laptop-windows.zip
+          retention-days: 7
+          if-no-files-found: error
       - name: Publish the laptop APK
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ASSETS=("$RUNNER_TEMP/OEA-laptop-x86_64.apk")
+          ASSETS=("$RUNNER_TEMP/OEA-laptop-x86_64.apk" "$RUNNER_TEMP/OEA-laptop-windows.zip")
           if gh release view oea-laptop-latest >/dev/null 2>&1; then
             gh release upload oea-laptop-latest "${ASSETS[@]}" --clobber
           else
             gh release create oea-laptop-latest "${ASSETS[@]}" \
               --title "OEA for laptop Android" \
-              --notes "OEA, the Android launcher, packaged with x86_64 native libraries so it installs in Waydroid, Android-x86 or an x86_64 emulator. Install it, set OEA as the Home app, and its Home screen, drawer, arcade and games run with the mouse and keyboard. Setup guide: docs/oea-on-a-laptop.md."
+              --notes "OEA, the Android launcher, as a release build (minified and resource-shrunk like the phone APK) with x86_64 native libraries. Install it in Waydroid, Android-x86 or an x86_64 emulator and set OEA as Home; its Home screen, drawer, arcade and games then run with the mouse and keyboard. On Windows, extract OEA-laptop-windows.zip and double-click OEA-Laptop-Setup.cmd. Guide: docs/oea-on-a-laptop.md."
           fi

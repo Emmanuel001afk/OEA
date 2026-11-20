@@ -21,10 +21,13 @@ case "$ABI" in
     ;;
 esac
 
-echo "Building OEA with the $ABI ABI ..."
-./gradlew :oea:assembleDebug -PextraAbi="$ABI" "$@"
+echo "Building the release OEA APK with the $ABI ABI ..."
+# assembleRelease, not assembleDebug: this is the same minified, resource-shrunk
+# build the phone ships, just with the laptop ABI added. A debug APK would be
+# larger, slower and marked debuggable, which is not a finished install.
+./gradlew :oea:assembleRelease -PextraAbi="$ABI" "$@"
 
-APK="$(find oea/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+APK="$(find oea/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
 if [ -z "$APK" ] || [ ! -f "$APK" ]; then
   echo "No debug APK was produced." >&2
   exit 1

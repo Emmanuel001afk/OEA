@@ -91,10 +91,12 @@ OEA is an Android launcher, so it runs on a laptop by running Android on the
 laptop and setting OEA as its Home app (Waydroid, Android-x86, or the Android
 Studio emulator). Build the x86_64 APK, or download it from the
 [`oea-laptop-latest`](https://github.com/Emmanuel001afk/OEA/releases/tag/oea-laptop-latest)
-release, then follow [OEA on a laptop](docs/oea-on-a-laptop.md):
+release, then follow [OEA on a laptop](docs/oea-on-a-laptop.md). On Windows,
+extract `OEA-laptop-windows.zip` and double-click `OEA-Laptop-Setup.cmd`; it
+sets up Android, installs the release APK and makes OEA Home.
 
 ```bash
-./tools/laptop/build-apk.sh          # -> dist/OEA-laptop-x86_64.apk
+./tools/laptop/build-apk.sh          # -> dist/OEA-laptop-x86_64.apk (release)
 ./tools/laptop/install-waydroid.sh   # or install-emulator.sh
 ```
 

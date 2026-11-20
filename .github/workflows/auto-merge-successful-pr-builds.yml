@@ -106,15 +106,26 @@ jobs:
         # Pushes made with GITHUB_TOKEN do not trigger the push workflow, so
         # this job is the only place a main build happens. The laptop APK must
         # be built here as well or oea-laptop-latest would never be published.
-        run: ./gradlew :oea:assembleDebug -PextraAbi=x86_64 --stacktrace
+        # Release, not debug: this is the finished build users install.
+        run: ./gradlew :oea:assembleRelease -PextraAbi=x86_64 --stacktrace
       - name: Verify and stage the laptop APK
         run: |
           set -euo pipefail
-          APK="$(find oea/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          APK="$(find oea/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
           test -n "$APK"
           unzip -l "$APK" | grep -Eq 'lib/x86_64/.*\.so$'
+          AAPT2="$ANDROID_HOME/build-tools/36.1.0/aapt2"
+          BADGING="$("$AAPT2" dump badging "$APK")"
+          echo "$BADGING" | grep -Fq "package: name='com.oea.launcher'"
+          if echo "$BADGING" | grep -Fq "application-debuggable"; then
+            echo "ERROR: the laptop APK is debuggable; publish a release build." >&2
+            exit 1
+          fi
+          "$ANDROID_HOME/build-tools/36.1.0/apksigner" verify "$APK"
           cp "$APK" "$RUNNER_TEMP/OEA-laptop-x86_64.apk"
           ls -l "$RUNNER_TEMP/OEA-laptop-x86_64.apk"
+      - name: Package the Windows setup
+        run: ./tools/laptop/package-windows.sh "$RUNNER_TEMP/OEA-laptop-x86_64.apk" "$RUNNER_TEMP/OEA-laptop-windows.zip"
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -126,7 +137,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: oea-laptop-apk-after-merge
-          path: ${{ runner.temp }}/OEA-laptop-x86_64.apk
+          path: |
+            ${{ runner.temp }}/OEA-laptop-x86_64.apk
+            ${{ runner.temp }}/OEA-laptop-windows.zip
           retention-days: 7
           if-no-files-found: error
       - name: Publish latest APK release
@@ -150,11 +163,11 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          ASSETS=("$RUNNER_TEMP/OEA-laptop-x86_64.apk")
+          ASSETS=("$RUNNER_TEMP/OEA-laptop-x86_64.apk" "$RUNNER_TEMP/OEA-laptop-windows.zip")
           if gh release view oea-laptop-latest --repo "$REPOSITORY" >/dev/null 2>&1; then
             gh release upload oea-laptop-latest "${ASSETS[@]}" --repo "$REPOSITORY" --clobber
           else
             gh release create oea-laptop-latest "${ASSETS[@]}" --repo "$REPOSITORY" \
               --title "OEA for laptop Android" \
-              --notes "OEA, the Android launcher, packaged with x86_64 native libraries so it installs in Waydroid, Android-x86 or an x86_64 emulator. Install it, set OEA as the Home app, and its Home screen, drawer, arcade and games run with the mouse and keyboard. Setup guide: docs/oea-on-a-laptop.md."
+              --notes "OEA, the Android launcher, as a release build (minified and resource-shrunk like the phone APK) with x86_64 native libraries. Install it in Waydroid, Android-x86 or an x86_64 emulator and set OEA as Home. On Windows, extract OEA-laptop-windows.zip and double-click OEA-Laptop-Setup.cmd. Guide: docs/oea-on-a-laptop.md."
           fi
