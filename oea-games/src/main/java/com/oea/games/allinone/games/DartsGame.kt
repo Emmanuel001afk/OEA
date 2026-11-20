@@ -72,7 +72,7 @@ class DartsGame : ArcadeBaseGame() {
         val r = distance / radius
         if (r > 1.04f) return Triple(0, "MISS", false)
         if (r < 0.035f) return Triple(50, "BULL", true)
-        if (r < 0.095f) return Triple(25, "25", true)
+        if (r < 0.095f) return Triple(25, "25", false)
         var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat() + 90f
         angle = ((angle % 360f) + 360f) % 360f
         val sector = order[(((angle + 9f) / 18f).toInt()) % 20]
@@ -84,32 +84,39 @@ class DartsGame : ArcadeBaseGame() {
     }
 
     private fun throwDart(x: Float, y: Float, player: Int) {
-        val (value, label, _) = valueAt(x, y)
+        val (value, label, isDouble) = valueAt(x, y)
         darts.add(Dart(x, y, player, value, label))
         dartsLeft--
         val remaining = scores[player] - value
         lastMessage = if (value == 0) "Missed the board" else "$label · $value"
-        if (remaining == 0) {
+
+        // 501/301 is double-out: the dart that reaches zero must be a double or
+        // the bull. Reaching zero any other way is a bust, exactly as on a real
+        // oche, and a bust ends the visit immediately.
+        if (remaining == 0 && isDouble) {
             scores[player] = 0
             settle(player)
             return
         }
-        if (remaining < 0 || (remaining == 1 && config.level >= 5)) {
+        if (remaining <= 1 || (remaining == 0 && !isDouble)) {
             scores[player] = turnStart
-            lastMessage = "Bust — back to $turnStart"
-        } else {
-            scores[player] = remaining
+            lastMessage = if (remaining == 0) "Bust — $label is not a double" else "Bust — back to $turnStart"
+            endVisit()
+            return
         }
-        if (dartsLeft <= 0) {
-            dartsLeft = 3
-            turn = if (twoPlayer) 1 - turn else 1 - turn
-            turnStart = scores[turn]
-            if (!twoPlayer && turn == 1) aiDelay = 0.6f
-        }
+        scores[player] = remaining
+        if (dartsLeft <= 0) endVisit()
+    }
+
+    private fun endVisit() {
+        dartsLeft = 3
+        turn = 1 - turn
+        turnStart = scores[turn]
+        if (!twoPlayer && turn == 1) aiDelay = 0.6f
     }
 
     private fun settle(winner: Int) {
-        val won = winner == 0 || (twoPlayer && winner == 0)
+        val won = winner == 0
         finish(
             won = won,
             headline = when {

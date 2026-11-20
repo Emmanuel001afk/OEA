@@ -45,6 +45,7 @@ class PingPongGame : ArcadeBaseGame() {
     private var paddleW = 0.2f
     private var paddleH = 0.018f
     private var ballR = 0.014f
+    private var servePlayer = 0
     private var spin = 0f
     private var rallies = 0
     private var bestRally = 0
@@ -52,7 +53,7 @@ class PingPongGame : ArcadeBaseGame() {
     private val twoPlayer: Boolean get() = config.mode == ArcadePlayMode.TWO_PLAYER
 
     override fun onStart() {
-        target = if (config.level <= 2) 7 else 11
+        target = 11
         speed = 0.5f + config.level * 0.032f + skill * 0.22f
         paddleW = if (twoPlayer) 0.24f else 0.2f
         paddleH = 0.018f
@@ -63,7 +64,8 @@ class PingPongGame : ArcadeBaseGame() {
         scoreTwo = 0
         rallies = 0
         bestRally = 0
-        resetServe(towardPlayerOne = true)
+        servePlayer = 0
+        resetServe(towardPlayerOne = false)
     }
 
     private fun resetServe(towardPlayerOne: Boolean) {
@@ -157,7 +159,11 @@ class PingPongGame : ArcadeBaseGame() {
             )
             return
         }
-        resetServe(towardPlayerOne = !toPlayerOne)
+        // ITTF service rotation: every two points, and every point at 10-10.
+        val total = scoreOne + scoreTwo
+        val every = if (scoreOne >= 10 && scoreTwo >= 10) 1 else 2
+        if (total % every == 0) servePlayer = 1 - servePlayer
+        resetServe(towardPlayerOne = servePlayer == 1)
     }
 
     private fun predict(): Float {
@@ -180,8 +186,9 @@ class PingPongGame : ArcadeBaseGame() {
         val ny = (y / height).coerceIn(0f, 1f)
         if (twoPlayer) {
             if (ny > 0.5f) {
+                val previous = paddleOne
                 paddleOne = nx.coerceIn(paddleW / 2f, 1f - paddleW / 2f)
-                spin = ((nx - paddleOne) * 6f).coerceIn(-1f, 1f)
+                spin = ((paddleOne - previous) * 24f).coerceIn(-1f, 1f)
             } else {
                 paddleTwo = nx.coerceIn(paddleW / 2f, 1f - paddleW / 2f)
             }
@@ -195,9 +202,9 @@ class PingPongGame : ArcadeBaseGame() {
     override fun status(): String {
         if (done()) return "Match over"
         return if (twoPlayer) {
-            "P1 $scoreOne — $scoreTwo P2 · first to $target, two clear"
+            "P1 $scoreOne — $scoreTwo P2 · serve ${if (servePlayer == 0) "P1" else "P2"} · first to $target, two clear"
         } else {
-            "You $scoreOne — $scoreTwo OEA AI · first to $target · rally $rallies"
+            "You $scoreOne — $scoreTwo OEA AI · ${if (servePlayer == 0) "your" else "AI"} serve · first to $target"
         }
     }
 
