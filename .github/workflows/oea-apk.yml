@@ -626,7 +626,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
+          # No shared Gradle cache here: this job runs beside the phone job, and
+          # a cache restored while the other job is writing it can fail the
+          # build before Gradle even configures. The laptop build is short
+          # enough to resolve its own dependencies.
       - name: Make Gradle executable
         run: chmod +x ./gradlew
       - name: Check the laptop scripts
@@ -648,7 +651,18 @@ jobs:
             echo "::warning::OEA_DEBUG_KEYSTORE_BASE64 is not set: this APK is signed with a new random key and cannot update a previously installed OEA in place."
           fi
       - name: Build the x86_64 laptop APK
-        run: ./gradlew :oea:assembleDebug -PextraAbi=x86_64 --stacktrace
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:assembleDebug -PextraAbi=x86_64 --stacktrace 2>&1 | tee "$RUNNER_TEMP/laptop-build.log"; then
+            # Annotations are the only part of a failed job this repository can
+            # read back through the API, so name the cause instead of hiding it
+            # in a log attachment.
+            { grep -E '^(e: |FAILURE:|\* What went wrong:|Could not |Caused by: )' "$RUNNER_TEMP/laptop-build.log" || true; } \
+              | head -30 | while IFS= read -r line; do
+                  printf '::error::%s\n' "${line//%/%25}"
+                done
+            exit 1
+          fi
       - name: Verify the laptop APK
         run: |
           set -euo pipefail
