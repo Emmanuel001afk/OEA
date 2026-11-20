@@ -10,71 +10,66 @@ import com.oea.games.allinone.ArcadeDifficulty
 import com.oea.games.allinone.ArcadeDraw
 import com.oea.games.allinone.ArcadePlayMode
 import com.oea.games.allinone.ArcadeTouch
+import kotlin.math.min
 
 /**
- * Tic Tac Toe, with a ladder that actually changes the opponent.
+ * Tic Tac Toe, with the turn order fixed.
  *
- * Levels 1–5 are the classic 3×3 board: easy wanders, normal sees one move
- * ahead, hard and expert play a perfect minimax and cannot be beaten. From level
- * six the board is 4×4 and needs four in a row, which makes the centre and the
- * corners genuinely different squares instead of a solved game.
+ * The first version had a real bug: after the AI moved it never handed the turn
+ * back, so it kept filling the board on its own and the player only ever got one
+ * move. That is why the game felt meaningless. The turn now belongs to exactly
+ * one side at a time, and the board makes it obvious whose move it is.
+ *
+ * Levels 1–5 are classic 3×3. From level 6 the board is 4×4 and needs four in a
+ * row. Easy wanders, Normal makes mistakes, Hard and Expert play a perfect
+ * minimax on 3×3 and a threat search on 4×4.
  */
 class TicTacToeGame : ArcadeBaseGame() {
 
     private var size = 3
-    private var need = 3
     private var board = IntArray(9)
     private var player = 1
     private var turn = true
     private var aiDelay = 0f
     private var winLine = IntArray(0)
     private var drawn = 0
-    private var yourWins = 0
-    private var theirWins = 0
-    private var rounds = 1
-    private var round = 1
+    private var lastMove = -1
     private val cells = ArrayList<RectF>()
+
+    private val twoPlayer: Boolean get() = config.mode == ArcadePlayMode.TWO_PLAYER
 
     override fun onStart() {
         size = if (config.level >= 6) 4 else 3
-        need = size
-        rounds = 1
-        round = 1
-        yourWins = 0
-        theirWins = 0
-        startRound(true)
-    }
-
-    private fun startRound(playerStarts: Boolean) {
         board = IntArray(size * size)
         player = 1
-        turn = playerStarts
+        turn = true
         winLine = IntArray(0)
         aiDelay = 0f
         drawn = 0
-        if (!turn) aiDelay = 0.45f
+        lastMove = -1
+        cells.clear()
     }
 
     override fun update(dt: Float) {
         super.update(dt)
-        if (done()) return
-        if (aiDelay > 0f) {
+        if (done() || twoPlayer) return
+        if (!turn && aiDelay > 0f) {
             aiDelay -= dt
             if (aiDelay <= 0f) aiMove()
         }
     }
 
     override fun touch(phase: ArcadeTouch, x: Float, y: Float, width: Float, height: Float): Boolean {
-        if (done() || phase != ArcadeTouch.DOWN) return false
-        if (!turn && config.mode != ArcadePlayMode.TWO_PLAYER) return false
+        if (done() || phase != ArcadeTouch.DOWN || !turn) return false
         val index = cells.indexOfFirst { ArcadeDraw.inside(it, x, y) }
         if (index < 0 || index >= board.size || board[index] != 0) return false
-        place(index, if (config.mode == ArcadePlayMode.TWO_PLAYER) player else 1)
+        place(index, if (twoPlayer) player else 1)
         return true
     }
 
     private fun place(index: Int, mark: Int) {
         board[index] = mark
+        lastMove = index
         drawn++
         val line = bestLine(mark)
         if (line.isNotEmpty()) {
@@ -86,46 +81,51 @@ class TicTacToeGame : ArcadeBaseGame() {
             settle(0)
             return
         }
-        if (config.mode == ArcadePlayMode.TWO_PLAYER) {
+        if (twoPlayer) {
             player = if (player == 1) 2 else 1
             turn = true
-        } else {
+        } else if (mark == 1) {
+            // The human moved: the AI's turn, after a beat so the move is seen.
             turn = false
-            aiDelay = 0.4f - skill * 0.2f
+            aiDelay = (0.5f - skill * 0.25f).coerceAtLeast(0.18f)
+        } else {
+            // The AI moved: hand the board straight back to the player.
+            turn = true
+            aiDelay = 0f
         }
     }
 
     private fun settle(winner: Int) {
-        val twoPlayer = config.mode == ArcadePlayMode.TWO_PLAYER
         when {
             winner == 0 -> finish(
                 won = null,
                 headline = "A draw",
-                detail = "Nobody could break through. A draw is a real result here — the perfect game ends level.",
+                detail = "Nobody could break through. On 3×3 a perfect game is always a draw — the next level adds the 4×4 board.",
                 score = 40L,
                 stars = 2
             )
             twoPlayer -> finish(
                 won = winner == 1,
-                headline = "Player $winner wins",
-                detail = if (winner == 1) "Player 1 found the line." else "Player 2 found the line.",
+                headline = "Player ${if (winner == 1) 1 else 2} wins",
+                detail = if (winner == 1) "Player 1 found the line with X." else "Player 2 found the line with O.",
                 score = 100L,
                 stars = 3
             )
             winner == 1 -> finish(
                 won = true,
                 headline = "You win",
-                detail = "Level ${config.level} beaten on a ${size}×${size} board. Try the next difficulty before moving on.",
+                detail = "A line on ${size}×${size} at ${config.difficulty.label.lowercase()} difficulty. " +
+                    "Win a level to unlock the next one; the AI gets sharper as you climb.",
                 score = 100L + config.level * 10L,
                 stars = 3
             )
             else -> finish(
                 won = false,
                 headline = "The AI wins",
-                detail = if (config.level >= 6) {
-                    "On a 4×4 board the AI sees the open lines a move before you do. Block the long diagonal early."
+                detail = if (size == 4) {
+                    "On 4×4 the AI counts open lines a move ahead. Take the centre and block every three."
                 } else {
-                    "The AI took the middle and the fork. Take the centre first and answer every threat."
+                    "The AI took the centre and forked you. Take the centre first and answer every threat."
                 },
                 score = 20L,
                 stars = 1
@@ -139,7 +139,7 @@ class TicTacToeGame : ArcadeBaseGame() {
         if (empty.isEmpty()) return
         val choice = when {
             config.difficulty == ArcadeDifficulty.EASY && rand() > 0.3f -> empty.random(random)
-            config.difficulty == ArcadeDifficulty.NORMAL && rand() > 0.68f -> empty.random(random)
+            config.difficulty == ArcadeDifficulty.NORMAL && rand() > 0.7f -> empty.random(random)
             size == 3 -> perfectMove(empty)
             else -> heuristicMove(empty)
         }
@@ -149,15 +149,14 @@ class TicTacToeGame : ArcadeBaseGame() {
     // ------------------------------------------------------------------ search
 
     private fun bestLine(mark: Int): IntArray {
-        val lines = allLines()
-        for (line in lines) if (line.all { board[it] == mark }) return line
+        for (line in allLines()) if (line.all { board[it] == mark }) return line
         return IntArray(0)
     }
 
     private fun allLines(): List<IntArray> {
         val lines = ArrayList<IntArray>()
-        for (r in 0 until size) lines += IntArray(size) { c -> r * size + c }
-        for (c in 0 until size) lines += IntArray(size) { r -> r * size + c }
+        for (row in 0 until size) lines += IntArray(size) { col -> row * size + col }
+        for (col in 0 until size) lines += IntArray(size) { row -> row * size + col }
         lines += IntArray(size) { i -> i * size + i }
         lines += IntArray(size) { i -> i * size + (size - 1 - i) }
         return lines
@@ -208,40 +207,40 @@ class TicTacToeGame : ArcadeBaseGame() {
     }
 
     /**
-     * 4×4 is too wide for a naive full search on a phone frame, so the AI looks
-     * for immediate wins and blocks, then scores every empty square by how many
-     * open lines of its own and of yours pass through it.
+     * 4×4 is too wide for a naive full search on a phone frame, so the AI takes
+     * an immediate win, blocks an immediate loss, then scores every empty square
+     * by the open lines that pass through it.
      */
     private fun heuristicMove(empty: List<Int>): Int {
-        val win = immediate(2)
-        if (win != null) return win
-        val block = immediate(1)
-        if (block != null) return block
+        immediate(2)?.let { return it }
+        immediate(1)?.let { return it }
         return empty.maxByOrNull { index ->
             var score = 0f
             for (line in allLines()) {
                 if (index !in line) continue
                 var mine = 0
                 var theirs = 0
-                var blocked = 0
                 for (cell in line) {
                     when (board[cell]) {
                         2 -> mine++
                         1 -> theirs++
-                        0 -> Unit
-                        else -> blocked++
                     }
                 }
-                if (blocked > 0) continue
                 if (theirs > 0 && mine > 0) continue
-                score += if (mine > 0) Math.pow(2.0, mine.toDouble()).toFloat() * 0.7f else Math.pow(2.0, theirs.toDouble()).toFloat()
-                if (cellCenter(index) == cellCenter(line[line.size / 2])) score += 0.4f
+                score += if (mine > 0) Math.pow(2.0, mine.toDouble()).toFloat() * 0.75f
+                else Math.pow(2.0, theirs.toDouble()).toFloat()
             }
+            if (isCentre(index)) score += 0.6f
             score
         } ?: empty.first()
     }
 
-    private fun cellCenter(index: Int): Float = index.toFloat()
+    private fun isCentre(index: Int): Boolean {
+        val row = index / size
+        val col = index % size
+        val middle = size / 2
+        return (row == middle || row == middle - 1) && (col == middle || col == middle - 1)
+    }
 
     private fun immediate(mark: Int): Int? {
         for (index in board.indices) {
@@ -254,74 +253,115 @@ class TicTacToeGame : ArcadeBaseGame() {
         return null
     }
 
-    // -------------------------------------------------------------------- draw
+    // ------------------------------------------------------------------- status
 
     override fun status(): String {
         if (done()) return if (winLine.isNotEmpty()) "Line complete" else "Board drawn"
-        val whose = if (config.mode == ArcadePlayMode.TWO_PLAYER) "Player $player" else if (turn) "Your turn" else "OEA AI is thinking"
-        return if (config.mode == ArcadePlayMode.TWO_PLAYER) "$whose · X and O on one phone" else "$whose · ${config.difficulty.label}"
+        val whose = when {
+            twoPlayer -> "Player $player · ${if (player == 1) "X" else "O"}"
+            turn -> "Your turn · X"
+            else -> "OEA AI thinking · O"
+        }
+        return "$whose · level ${config.level}"
     }
 
-    override fun hint(): String = if (drawn == 0 && config.mode != ArcadePlayMode.TWO_PLAYER) {
-        "You are X. The centre is the strongest first move."
-    } else ""
+    override fun hint(): String = when {
+        done() -> ""
+        twoPlayer -> "Pass the phone: ${if (player == 1) "Player 1 is X" else "Player 2 is O"}."
+        drawn == 0 -> "You are X. The centre is the strongest first move."
+        else -> ""
+    }
+
+    override fun score(): Long = drawn.toLong() * 5L
+
+    // --------------------------------------------------------------------- draw
 
     override fun draw(canvas: Canvas, width: Float, height: Float) {
-        canvas.drawColor(0xFF171F3D.toInt())
-        val p = ArcadeDraw.paint(0x335B79FF)
-        canvas.drawCircle(width * 0.15f, height * 0.2f, width * 0.3f, p)
-        canvas.drawCircle(width * 0.9f, height * 0.75f, width * 0.36f, p)
+        canvas.drawColor(0xFF141B36.toInt())
+        val glow = ArcadeDraw.paint(Color.TRANSPARENT)
+        glow.shader = android.graphics.RadialGradient(width * 0.2f, height * 0.15f, width * 0.9f,
+            intArrayOf(0x335B79FF, 0x00141B36), null, android.graphics.Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, 0f, width, height, glow)
 
-        val boardSize = minOf(width * 0.88f, height * 0.66f)
+        // Turn banner.
+        val headline = when {
+            done() && winLine.isNotEmpty() -> "LINE COMPLETE"
+            done() -> "DRAW"
+            twoPlayer -> "PLAYER $player · ${if (player == 1) "X" else "O"}"
+            turn -> "YOUR TURN · X"
+            else -> "AI THINKING · O"
+        }
+        val bannerColor = when {
+            done() -> ArcadeColors.GOLD
+            twoPlayer && player == 2 -> 0xFF6FD6FF.toInt()
+            turn -> ArcadeColors.CORAL
+            else -> 0xFF6FD6FF.toInt()
+        }
+        val bannerWidth = ArcadeDraw.measure(headline, height * 0.019f, bold = true) + width * 0.09f
+        ArcadeDraw.panel(canvas, width * 0.5f - bannerWidth / 2f, height * 0.06f,
+            width * 0.5f + bannerWidth / 2f, height * 0.115f, 0x33000000, height * 0.03f, bannerColor, 1.6f)
+        ArcadeDraw.text(canvas, headline, width * 0.5f, height * 0.098f, height * 0.019f, bannerColor,
+            bold = true, align = Paint.Align.CENTER)
+
+        // Board: a cream plate with one rounded cell per square, so the grid is
+        // built from cells rather than from thin rules.
+        val boardSize = min(width * 0.9f, height * 0.62f)
         val left = (width - boardSize) / 2f
-        val top = height * 0.16f + (height * 0.62f - boardSize) / 2f
+        val top = height * 0.16f + (height * 0.64f - boardSize) / 2f
         val cell = boardSize / size
+        val gap = cell * 0.06f
+        ArcadeDraw.panel(canvas, left - gap * 2f, top - gap * 2f, left + boardSize + gap * 2f, top + boardSize + gap * 2f,
+            0xFFFDF8EF.toInt(), cell * 0.12f, 0x33000000, 2f)
         cells.clear()
-        for (i in 0 until size * size) {
-            val c = i % size
-            val r = i / size
-            cells += RectF(left + c * cell, top + r * cell, left + (c + 1) * cell, top + (r + 1) * cell)
+        for (index in board.indices) {
+            val col = index % size
+            val row = index / size
+            val rect = RectF(left + col * cell + gap, top + row * cell + gap,
+                left + (col + 1) * cell - gap, top + (row + 1) * cell - gap)
+            cells += rect
+            val inWin = winLine.contains(index)
+            val fill = when {
+                inWin -> 0xFFFFF0C2.toInt()
+                index == lastMove -> 0xFFFFF6E6.toInt()
+                else -> 0xFFF7EEDF.toInt()
+            }
+            ArcadeDraw.panel(canvas, rect, fill, cell * 0.14f,
+                if (inWin) ArcadeColors.GOLD else 0xFFE6D7C2.toInt(), if (inWin) 2f else 1f)
         }
 
-        ArcadeDraw.panel(canvas, left - cell * 0.05f, top - cell * 0.05f, left + boardSize + cell * 0.05f,
-            top + boardSize + cell * 0.05f, 0xFF202A55.toInt(), cell * 0.1f)
-        for (i in 1 until size) {
-            ArcadeDraw.line(canvas, left + i * cell, top, left + i * cell, top + boardSize, 0x66FFFFFF, cell * 0.02f)
-            ArcadeDraw.line(canvas, left, top + i * cell, left + boardSize, top + i * cell, 0x66FFFFFF, cell * 0.02f)
-        }
-        for (i in board.indices) {
-            val rect = cells[i]
-            val mark = board[i]
+        // Marks.
+        for (index in board.indices) {
+            val mark = board[index]
             if (mark == 0) continue
-            val color = if (mark == 1) ArcadeColors.CORAL else 0xFF6FD6FF.toInt()
+            val rect = cells[index]
+            val color = if (mark == 1) ArcadeColors.CORAL else 0xFF3E8EE0.toInt()
             val pad = cell * 0.24f
             if (mark == 1) {
-                ArcadeDraw.line(canvas, rect.left + pad, rect.top + pad, rect.right - pad, rect.bottom - pad, color, cell * 0.075f)
-                ArcadeDraw.line(canvas, rect.right - pad, rect.top + pad, rect.left + pad, rect.bottom - pad, color, cell * 0.075f)
+                ArcadeDraw.line(canvas, rect.left + pad, rect.top + pad, rect.right - pad, rect.bottom - pad,
+                    color, cell * 0.085f)
+                ArcadeDraw.line(canvas, rect.right - pad, rect.top + pad, rect.left + pad, rect.bottom - pad,
+                    color, cell * 0.085f)
             } else {
-                canvas.drawCircle(rect.centerX(), rect.centerY(), cell * 0.27f, ArcadeDraw.paint(Color.TRANSPARENT, cell * 0.075f).apply { this.color = color })
+                ArcadeDraw.circle(canvas, rect.centerX(), rect.centerY(), cell * 0.28f, Color.TRANSPARENT,
+                    color, cell * 0.085f)
             }
         }
+
+        // Winning line over the marks.
         if (winLine.isNotEmpty()) {
             val a = cells[winLine.first()]
             val b = cells[winLine.last()]
-            ArcadeDraw.line(canvas, a.centerX(), a.centerY(), b.centerX(), b.centerY(), 0xFFFFD34D.toInt(), cell * 0.06f)
+            ArcadeDraw.line(canvas, a.centerX(), a.centerY(), b.centerX(), b.centerY(), 0xCCFFB020.toInt(), cell * 0.05f)
         }
 
-        if (config.mode == ArcadePlayMode.TWO_PLAYER) {
-            val chipW = width * 0.36f
-            for (i in 0..1) {
-                val x = width * 0.08f + i * (chipW + width * 0.12f)
-                val rect = RectF(x, height * 0.875f, x + chipW, height * 0.925f)
-                val active = (i == 0) == turn
-                ArcadeDraw.panel(canvas, rect, if (active) ArcadeColors.WHITE else 0x22FFFFFF, rect.height() / 2f,
-                    0x33FFFFFF, 1.5f)
-                ArcadeDraw.text(canvas, if (i == 0) "P1 · X" else "P2 · O", rect.centerX(), rect.centerY() + rect.height() * 0.18f,
-                    rect.height() * 0.44f, if (active) ArcadeColors.INK else Color.WHITE, bold = true, align = Paint.Align.CENTER)
-            }
-        } else {
-            ArcadeDraw.text(canvas, "${config.difficulty.label.uppercase()} · ${if (size == 3) "3 IN A ROW" else "4 IN A ROW"}",
-                width / 2f, height * 0.925f, height * 0.016f, 0x88FFFFFF.toInt(), bold = true, align = Paint.Align.CENTER)
+        // Footer: mode, difficulty and the size of the board.
+        val footer = when {
+            twoPlayer -> "Pass and play · X and O on one phone"
+            else -> "${config.difficulty.label} AI · ${if (size == 3) "3 in a row" else "4 in a row"}"
         }
+        ArcadeDraw.text(canvas, footer, width * 0.5f, height * 0.925f, height * 0.014f,
+            0xAAFFFFFF.toInt(), bold = true, align = Paint.Align.CENTER)
+        ArcadeDraw.text(canvas, if (size == 3) "3×3" else "4×4", width * 0.5f, height * 0.955f, height * 0.012f,
+            0x66FFFFFF, align = Paint.Align.CENTER)
     }
 }
