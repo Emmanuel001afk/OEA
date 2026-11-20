@@ -1,130 +1,137 @@
-# OEA on a laptop
+# OEA on a laptop: the setup that works
 
-Short answer: **OEA is an Android launcher, not a desktop app.** Today it runs on
-a laptop through Android (an emulator or a mirrored phone). A native Windows /
-macOS / Linux build would need a port, and the launcher half of OEA is the part
-that cannot be ported as-is.
+**OEA is the launcher. Android is the operating system underneath it.** OEA's
+Home screen, app drawer, folders, dock, widgets, search, arcade and games all
+talk to Android APIs — `PackageManager`, the HOME intent, `AppWidgetHost`,
+`TelecomManager`. OEA cannot be a Windows/macOS/Linux desktop shell, because
+there is no Android underneath to launch.
 
-## What the project is today
+So the configuration that actually works is:
 
-- One Android APK, `com.oea.launcher` (`minSdk 26`, `targetSdk 36`,
-  `compileSdk 36`, Java 21, Kotlin 2.3.20).
-- Three Gradle modules: `oea` (the launcher and the arcade shell, Android Views
-  and custom canvases), `oea-engine` (OpenGL ES 3 game engine) and `oea-games`
-  (the games; Android library, `android.graphics.Canvas` drawing).
-- There is no desktop target in `settings.gradle`, no web build and no
-  Compose Multiplatform setup.
+> **Android runs on the laptop. OEA is installed as its Home app.**
+> Everything OEA does — and every Android app you install — then works the same
+> way it does on a phone, with the mouse as a finger and the keyboard as a
+> keyboard.
 
-## Route 1 — Android emulator (the closest thing to "OEA on a laptop")
+That is a real, supported setup, not a workaround. It is what this document
+sets up, with scripts in `tools/laptop/`.
 
-What you need:
+## Pick your Android-on-laptop environment
 
-| Item | Requirement |
+| Your laptop | Use | Why |
+|---|---|---|
+| Linux with Wayland (GNOME/KDE/Sway) | **Waydroid** | Fastest, integrates with the desktop, Android 11/13 images, GApps optional |
+| Windows 10/11, macOS, Linux | **Android Studio emulator** | One install, API 36, x86_64 or arm64, best for trying OEA |
+| Any PC, no Android Studio | **Android-x86 / LineageOS in a VM** | Full Android install, no Google account required |
+| A spare phone and a cable | **scrcpy mirror** | Highest fidelity; the phone does the work |
+
+All four run the same OEA APK. This branch ships an x86_64 build, because
+laptop Android is usually x86_64 and the normal phone APK only carries
+`arm64-v8a`/`armeabi-v7a` native libraries (WebRTC). On Apple Silicon, the
+default arm64 APK is the right one.
+
+## The two-minute version
+
+```bash
+# 1. Build the laptop APK (x86_64 by default; pass arm64-v8a on Apple Silicon)
+./tools/laptop/build-apk.sh
+
+# 2a. Linux + Waydroid (Waydroid already installed and initialised)
+./tools/laptop/install-waydroid.sh
+
+# 2b. Or Android Studio emulator: creates an API 36 AVD if needed
+./tools/laptop/install-emulator.sh
+```
+
+Both scripts install OEA, try to set it as the Home app, and open Android. If
+Android asks **"Which app should open as Home?"**, choose **OEA** and **Always**.
+That is the whole trick.
+
+Prebuilt laptop APKs are attached to the **`oea-laptop-latest`** release
+(`OEA-laptop-x86_64.apk`) by CI; `oea-latest` remains the phone release.
+
+## After OEA is Home
+
+You land on OEA's own Home screen, in a window you can resize or maximise. From
+there, the parts that work with no phone hardware:
+
+- **The arcade and its 20 cabinets** — Car Racing, Life Path, Pool, Snooker,
+  Darts, Archery, Blocks, Word Finder, Whot, Ludo, Solitaire, Tap Match, Tic
+  Tac Toe, Hide & Seek, Slide Puzzle, Ping Pong, Farm, Manners & Etiquette, Job
+  Interview and Chess — plus **Endless Days** and **Send Off** as standalone
+  games. Every game keeps its own entry, as on the phone.
+- **The app drawer, folders, dock, search and themes** — they enumerate and
+  launch whatever Android apps are installed.
+- **Home-screen widgets** from apps that provide them.
+- **The multitask view, app freezer, permission manager, file and system tools.**
+- **Any APK you sideload** into the environment. It appears in the drawer
+  immediately, exactly as on a phone.
+
+Install apps as you go:
+
+```bash
+./tools/laptop/install-waydroid.sh ~/Downloads/Signal.apk   # Waydroid
+./tools/laptop/install-emulator.sh ~/Downloads/Signal.apk   # emulator
+```
+
+## What needs more than a bare Android install
+
+These are properties of the Android environment, not of OEA, and each has a
+one-line fix:
+
+| Want | Do this |
 |---|---|
-| Computer | Windows 10/11, macOS 12+, or Linux with KVM; 64-bit |
-| Memory | 8 GB minimum, 16 GB comfortable |
-| Disk | ~10 GB free (Android Studio + SDK + one emulator image) |
-| CPU | Virtualisation enabled in firmware (WHPX/Hyper-V on Windows, KVM on Linux, Hypervisor.framework on macOS) |
-| Software | Android Studio (bundles JDK 21), SDK Platform 36, Build-Tools 36.x, platform-tools, emulator |
-| Device | AVD with **API 36** and Google APIs; `arm64-v8a` image on Apple Silicon, `x86_64` on Intel/AMD |
+| Play Store, Google sign-in, Play Services apps | Initialise Waydroid with GApps (`sudo waydroid init -s GAPPS`); the emulator image already has Google APIs |
+| Banking / DRM / Play Integrity apps | They may refuse a rooted or emulated device; that is their check, not OEA |
+| Apps shipped only as ARM | Use an emulator/VM with ARM translation, or the arm64 emulator on Apple Silicon |
+| Phone calls and SMS | Need a modem: a USB LTE dongle, a SIP/Telecom app, or mirror a real phone with scrcpy |
+| Camera | Works with the emulator's virtual camera or a host webcam passed to the VM; Waydroid camera support is device-dependent |
+| Bluetooth | Pass the host adapter through to the VM; not available inside Waydroid |
 
-Steps:
+Phone-only OEA surfaces (the Phone app, call blocker, SIM directory, torch)
+open but have nothing to talk to without a modem. That is expected on a laptop.
 
-1. Install Android Studio and, in the SDK Manager, Android 16 (API 36) and the
-   latest Build-Tools.
-2. Create a Pixel-class AVD with the API 36 system image and start it.
-3. Build and install:
-   ```bash
-   ./gradlew :oea:installDebug
-   ```
-   or install the APK directly:
-   ```bash
-   adb install -r oea/build/outputs/apk/debug/oea-debug.apk
-   ```
-   The shipped ABIs are `arm64-v8a` and `armeabi-v7a`. For an x86_64 emulator,
-   build the debug APK with the extra ABI:
-   ```bash
-   ./gradlew :oea:assembleDebug -PextraAbi=x86_64
-   ```
-4. Inside the emulator, open OEA and choose it as Home (Settings › Apps › Default
-   apps › Home app). The launcher, the arcade, the games and the settings all run.
+## Make it feel like a laptop
 
-Honest limits: the emulator has no SIM/Telecom, no real camera quality, no
-Bluetooth, no Device Owner, and sensors are simulated. Those OEA features will be
-missing or inert. Mouse clicks become taps; there is no touch pressure or
-multi-touch beyond what the emulator forwards.
+- **Resize OEA's window.** `OeaLauncherActivity` is declared
+  `resizeableActivity="true"` and `screenOrientation="nosensor"`, so freeform and
+  desktop Android window it correctly instead of forcing a phone shape.
+- **Change density, not resolution, if icons look large:**
+  ```bash
+  waydroid shell wm density 240            # or 200/280; 160 is "default"
+  waydroid shell wm size 1280x800          # optional, if the window is huge
+  ```
+  On the emulator: `adb shell wm density 240`.
+- **Multi-window Android** (Waydroid): `waydroid prop set persist.waydroid.multi_windows true`
+  then restart the session — OEA stays Home while other Android apps open as
+  laptop windows.
+- **Mouse and keyboard** are native Android input: click = tap, drag = swipe,
+  wheel scrolls lists, arrow keys and Tab move focus, Enter activates, Esc goes
+  back.
 
-## Route 2 — mirror a real phone (best fidelity)
+## If it does not work
 
-- Phone with USB debugging on, a data cable, `adb` and [scrcpy](https://github.com/Genymobile/scrcpy)
-  on the laptop.
-- `scrcpy` shows the phone in a window; the mouse is your finger and the keyboard
-  types. Everything works because it is the phone doing the work. This is the
-  route to use for testing a real build, not for a laptop-native experience.
+| Symptom | Fix |
+|---|---|
+| `INSTALL_FAILED_NO_MATCHING_ABIS` | You installed the phone APK. Use `dist/OEA-laptop-x86_64.apk` (or `arm64-v8a` on Apple Silicon). |
+| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | An older OEA with a different signature is installed: `adb uninstall com.oea.launcher` (or `waydroid app remove com.oea.launcher`), then install again. |
+| Android boots to its own launcher | Open Settings › Apps › Default apps › Home app › **OEA**, or run `adb shell cmd package set-home-activity com.oea.launcher/.OeaLauncherActivity`. |
+| Black screen after setting OEA as Home | Resize the window once, or `adb shell am force-stop com.oea.launcher` and press Home. |
+| Games run but the 3D engine is slow | Enable GPU/host rendering: emulator `-gpu host`; Waydroid uses the host GPU by default; Android-x86 needs Mesa with GLES 3. |
 
-## Route 3 — Android on the laptop without Studio
+## Why not a native desktop OEA?
 
-- **Waydroid** (Linux, Wayland) or **Android-x86** in a VM: same APK, more setup,
-  same Android-only limits.
-- A cloud Android phone (any provider) with the APK sideloaded.
+A native build would be a different product: it would launch desktop
+applications, not Android ones, and would have to reimplement Home, the drawer,
+widgets, notifications, Telecom and device policy. That is a desktop shell, not
+a port of OEA. Keeping OEA on Android — including Android running on the
+laptop — is what preserves the launcher, the arcade and every app it manages.
 
-## Route 4 — a native desktop build
+## Files
 
-This is a different product, not a packaging checkbox. What carries over and what
-does not:
-
-**Portable with work**
-
-- The game rules and state machines in `oea-games` are ordinary Kotlin. The 19
-  arcade cabinets could share a desktop shell.
-- `oea-engine` is OpenGL ES 3: it can run on desktop OpenGL 3.3+ through a small
-  GLES compatibility layer (ANGLE/LWJGL), or be replaced with Skia.
-- Kotlin/JVM tooling, Gradle, the JVM tests.
-
-**Needs replacing**
-
-- `android.graphics.Canvas` / `Paint` / `Path` drawing in the arcade — port to
-  Skia/Compose Canvas or write a thin shim.
-- Android lifecycle (`Activity`, `Service`, `BroadcastReceiver`) → desktop windows
-  and an app lifecycle.
-- `SharedPreferences`/DataStore → a desktop settings store.
-- Touch input → mouse, trackpad, keyboard and gamepad, plus window resizing.
-
-**Android-only, no desktop equivalent**
-
-- The HOME role and the app drawer (`PackageManager`, intents, shortcuts).
-- Home-screen widgets (`AppWidgetHost`).
-- Notification listener, status bar and Quick Settings tiles.
-- Telecom call screening, SIM/telephony, Bluetooth.
-- Device Owner / DevicePolicy, accessibility services, overlay windows.
-- Wallpaper service, live wallpapers, camera2, split screen and OEA's live app
-  windows.
-
-Those are the launcher's identity. A desktop OEA that keeps them would have to
-reimplement the equivalents of a desktop shell (window manager, dock, file/app
-launcher), which is a new product rather than a port.
-
-**Work estimate**
-
-- **OEA Arcade desktop** (hub + 19 cabinets, no launcher): realistic first step.
-  Add a Compose Multiplatform desktop target, move the game logic into a shared
-  module, replace Canvas drawing, add mouse/keyboard input, package with
-  `jpackage` (MSI/DMG/AppImage). This is the version worth building if the aim is
-  "play OEA games on my laptop".
-- **Full OEA launcher desktop**: large; most of the systems above would be
-  stubs or new desktop code. The Android APK would remain the real product.
-
-**Build requirements for a desktop port**
-
-- JDK 21, Gradle 9.x, Kotlin 2.3.x, Compose Multiplatform (or Skia/LWJGL).
-- CI on `windows-latest`, `macos-latest` and `ubuntu-latest`.
-- Packaging/signing per OS; auto-update is a separate piece of work.
-- Users: any 64-bit laptop with 4 GB RAM; OpenGL 3.3+ for the 3D engine; ~300 MB
-  disk.
-
-## Recommendation
-
-- To use OEA on a laptop **now**: emulator (Route 1) or scrcpy (Route 2).
-- To ship a laptop-native OEA: start with **OEA Arcade desktop** — the games are
-  the portable part — and keep the launcher on Android, where Home, widgets,
-  calls and device policy actually exist.
+- `tools/laptop/build-apk.sh` — builds `dist/OEA-laptop-<abi>.apk` with the
+  extra ABI (`-PextraAbi`).
+- `tools/laptop/install-waydroid.sh` — installs OEA (and optional APKs) into
+  Waydroid, sets Home, opens the UI.
+- `tools/laptop/install-emulator.sh` — creates/starts an API 36 AVD, installs
+  OEA and optional APKs, sets Home.
