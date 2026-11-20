@@ -48,7 +48,8 @@ Android asks **"Which app should open as Home?"**, choose **OEA** and **Always**
 That is the whole trick.
 
 Prebuilt laptop APKs are attached to the **`oea-laptop-latest`** release
-(`OEA-laptop-x86_64.apk`) by CI; `oea-latest` remains the phone release.
+(`OEA-laptop-x86_64.apk`) by the post-merge main build; `oea-latest` remains the
+phone release.
 
 ## After OEA is Home
 

@@ -85,6 +85,19 @@ Static check: `python3 tools/check-kotlin.py` — bracket balance over a real Ko
 
 The resulting application ID is `com.oea.launcher`.
 
+### On a laptop
+
+OEA is an Android launcher, so it runs on a laptop by running Android on the
+laptop and setting OEA as its Home app (Waydroid, Android-x86, or the Android
+Studio emulator). Build the x86_64 APK, or download it from the
+[`oea-laptop-latest`](https://github.com/Emmanuel001afk/OEA/releases/tag/oea-laptop-latest)
+release, then follow [OEA on a laptop](docs/oea-on-a-laptop.md):
+
+```bash
+./tools/laptop/build-apk.sh          # -> dist/OEA-laptop-x86_64.apk
+./tools/laptop/install-waydroid.sh   # or install-emulator.sh
+```
+
 Release builds run R8 (`minifyEnabled` + `shrinkResources`) with the rules in `oea/proguard-rules.pro` and `gradle/proguard-game.pro`, ship only the `arm64-v8a` and `armeabi-v7a` native libraries, and store native libraries compressed. Every CI run prints the resulting APK sizes in the workflow summary. See [Independent games, same polish, smaller APKs](docs/games-independent-polish-and-apk-size-2026-10-17.md).
 
 ### Updating without losing your Home
