@@ -2,9 +2,12 @@ package com.oea.games.allinone.games
 
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.RectF
 import com.oea.games.allinone.ArcadeBaseGame
 import com.oea.games.allinone.ArcadeColors
@@ -25,11 +28,19 @@ import kotlin.math.sin
  * back to the yard, eight safe squares (four starts plus four star squares) and
  * an exact roll to finish.
  *
+ * Two dice are rolled each turn and the total is the number of squares one
+ * token moves. A six on either die brings a token out of the yard (the token
+ * takes the whole roll to leave); doubles earn another roll, and three doubles in
+ * a row lose the turn. A token needs an exact total to enter the centre.
+ *
  * Positions are measured from a seat's own start square:
  *   -1        in the yard
  *   0..50     the 51 shared squares the token must travel
  *   51..55    its five private home-column squares
  *   56        home, in its triangle in the centre
+ *
+ * A token on 55 (the last home-column square) steps into the centre with any
+ * total: the dice cannot make the one-square move on their own.
  *
  * Modes:
  *  - vs AI: you (red, bottom-left) against three computer seats; level sets how
@@ -85,11 +96,14 @@ class LudoGame : ArcadeBaseGame() {
     private var positions = Array(4) { IntArray(4) { -1 } }
     private var captures = IntArray(4)
     private var turn = 0
-    private var dice = 0
-    private var shownDice = 6
+    private var dieOne = 0
+    private var dieTwo = 0
+    private var shownOne = 6
+    private var shownTwo = 3
     private var rolled = false
     private var rolling = 0f
-    private var sixes = 0
+    private var doubles = false
+    private var doubleCount = 0
     private var aiThink = 0f
     private var passDelay = 0f
     private var message = ""
@@ -110,15 +124,18 @@ class LudoGame : ArcadeBaseGame() {
         positions = Array(4) { IntArray(4) { -1 } }
         captures = IntArray(4)
         turn = 0
-        dice = 0
-        shownDice = 6
+        dieOne = 0
+        dieTwo = 0
+        shownOne = 6
+        shownTwo = 3
         rolled = false
         rolling = 0f
-        sixes = 0
+        doubles = false
+        doubleCount = 0
         aiThink = 0f
         passDelay = 0f
         legal = ArrayList()
-        message = "Roll a six to bring a token out of the yard."
+        message = "Roll two dice — the total is your move. A six on either die brings a token out."
     }
 
     // -------------------------------------------------------------------- rules
@@ -170,15 +187,21 @@ class LudoGame : ArcadeBaseGame() {
         return sameSeat >= 2
     }
 
+    private val dice: Int get() = dieOne + dieTwo
+
     private fun legalMoves(seat: Int): List<Int> {
         if (!rolled || rolling > 0f || done()) return emptyList()
         val moves = ArrayList<Int>()
+        val canEnter = dieOne == 6 || dieTwo == 6
         for (token in 0..3) {
             val position = positions[seat][token]
             when {
                 position == 56 -> Unit
-                position == -1 -> if (dice == 6) moves += token
-                position + 1 <= 56 -> moves += token
+                position == -1 -> if (canEnter) moves += token
+                // The last home-column square is one step from the centre, and
+                // two dice cannot roll a one, so any total steps in from there.
+                position == 55 -> moves += token
+                position + dice <= 56 -> moves += token
             }
         }
         return moves
@@ -191,17 +214,20 @@ class LudoGame : ArcadeBaseGame() {
         if (done()) return
         if (rolling > 0f) {
             rolling -= dt
-            shownDice = 1 + (elapsed * 18f).toInt() % 6
+            shownOne = 1 + (elapsed * 17f).toInt() % 6
+            shownTwo = 1 + (elapsed * 11f + 2f).toInt() % 6
             if (rolling <= 0f) {
-                shownDice = dice
+                shownOne = dieOne
+                shownTwo = dieTwo
                 legal = ArrayList(legalMoves(turn))
+                val total = "${dieOne} + ${dieTwo} = $dice"
                 if (legal.isEmpty()) {
-                    message = "${nameOf(turn)} rolled $dice — no legal move."
+                    message = "${nameOf(turn)} rolled $total — no legal move."
                     passDelay = 0.9f
                 } else if (isAi(turn)) {
                     aiThink = 0.55f
                 } else {
-                    message = "${nameOf(turn)} rolled $dice. Tap a highlighted token."
+                    message = "${nameOf(turn)} rolled $total. Tap a highlighted token."
                 }
             }
             return
@@ -240,27 +266,44 @@ class LudoGame : ArcadeBaseGame() {
 
     private fun roll() {
         if (rolled || rolling > 0f || done() || passDelay > 0f) return
-        dice = random.nextInt(6) + 1
-        shownDice = dice
+        dieOne = random.nextInt(6) + 1
+        dieTwo = random.nextInt(6) + 1
+        shownOne = dieOne
+        shownTwo = dieTwo
         rolled = true
-        if (dice == 6) sixes++ else sixes = 0
-        if (sixes == 3) {
-            message = "${nameOf(turn)} rolled three sixes — turn lost."
-            sixes = 0
+        doubles = dieOne == dieTwo
+        if (doubles) {
+            doubleCount++
+        } else {
+            doubleCount = 0
+        }
+        if (doubleCount == 3) {
+            message = "${nameOf(turn)} rolled a third double — turn lost."
+            doubleCount = 0
+            doubles = false
             rolled = false
-            dice = 0
+            dieOne = 0
+            dieTwo = 0
             passDelay = 1.0f
             return
         }
-        rolling = 0.42f
+        rolling = 0.5f
         legal = ArrayList()
     }
 
     private fun move(seat: Int, token: Int) {
-        if (dice == 0 || done()) return
+        if (dieOne == 0 || done()) return
         val position = positions[seat][token]
         if (position == 56) return
-        val target = if (position == -1) 0 else position + 1
+        // The total on the two dice is the distance moved. Leaving the yard
+        // uses the whole roll: the token appears on its start square. A token on
+        // the last home-column square steps into the centre with any total,
+        // because the dice cannot make the single step on their own.
+        val target = when {
+            position == -1 -> 0
+            position == 55 -> 56
+            else -> position + dice
+        }
         if (target > 56) return
         var announcement = ""
 
@@ -292,16 +335,21 @@ class LudoGame : ArcadeBaseGame() {
             return
         }
 
-        val rolledSix = dice == 6
+        val extraRoll = doubles
+        val distance = dice
         rolled = false
         legal = ArrayList()
-        if (rolledSix) {
-            message = listOfNotNull(announcement.takeIf { it.isNotEmpty() }, "Six — roll again.").joinToString(" ")
+        dieOne = 0
+        dieTwo = 0
+        doubles = false
+        if (extraRoll) {
+            message = listOfNotNull(
+                announcement.takeIf { it.isNotEmpty() },
+                "Doubles — $distance moved, roll again."
+            ).joinToString(" ")
             if (isAi(turn)) aiThink = 0.7f
-            dice = 0
         } else {
-            sixes = 0
-            dice = 0
+            doubleCount = 0
             turn = nextSeat(turn)
             message = listOfNotNull(announcement.takeIf { it.isNotEmpty() }, "${nameOf(turn)}'s turn.").joinToString(" ")
             if (isAi(turn)) aiThink = 0.9f
@@ -310,9 +358,11 @@ class LudoGame : ArcadeBaseGame() {
 
     private fun passTurn() {
         rolled = false
-        dice = 0
+        dieOne = 0
+        dieTwo = 0
+        doubles = false
+        doubleCount = 0
         legal = ArrayList()
-        sixes = 0
         turn = nextSeat(turn)
         message = "${nameOf(turn)}'s turn."
         if (isAi(turn)) aiThink = 0.9f
@@ -324,7 +374,7 @@ class LudoGame : ArcadeBaseGame() {
             headline = if (twoPlayer) "${nameOf(seat)} wins" else if (seat == 0) "You win" else "${nameOf(seat)} wins",
             detail = "Four tokens home" +
                 (if (captures[seat] > 0) " with ${captures[seat]} capture${if (captures[seat] == 1) "" else "s"}" else "") +
-                ". All four of your tokens must reach the centre; a token needs an exact roll to get in.",
+                ". All four of your tokens must reach the centre; a token needs an exact total to get in.",
             score = 320L + captures[seat] * 25L + config.level * 20L,
             stars = if (seat == 0) 3 else 1
         )
@@ -342,7 +392,11 @@ class LudoGame : ArcadeBaseGame() {
         var bestScore = -Float.MAX_VALUE
         for (token in moves) {
             val position = positions[turn][token]
-            val target = if (position == -1) 0 else position + 1
+            val target = when {
+                position == -1 -> 0
+                position == 55 -> 56
+                else -> position + dice
+            }
             var value = target * 0.5f
             if (target == 56) value += 1000f
             if (position == -1) value += 140f
@@ -376,8 +430,8 @@ class LudoGame : ArcadeBaseGame() {
         val whose = if (isAi(turn)) "${seats[turn].name} AI" else nameOf(turn)
         val diceText = when {
             rolling > 0f -> "rolling…"
-            dice == 0 -> "ready"
-            else -> "rolled $dice"
+            dieOne == 0 -> "ready"
+            else -> "$dieOne + $dieTwo = $dice"
         }
         val homes = activeSeats.joinToString(" · ") { "${seats[it].short} ${homeCount(it)}/4" }
         return "$whose · $diceText · $homes"
@@ -386,9 +440,9 @@ class LudoGame : ArcadeBaseGame() {
     override fun hint(): String = when {
         done() -> ""
         isAi(turn) -> "The AI is thinking."
-        !rolled -> "Tap ROLL. You need a six to leave the yard."
+        !rolled -> "Tap ROLL. Two dice decide the move; a six on either die brings a token out."
         legal.isEmpty() -> "No legal move — the turn passes."
-        else -> "Tap one of the highlighted tokens to move it $dice."
+        else -> "Tap a highlighted token to move it $dice squares. A six on either die can also leave the yard."
     }
 
     override fun score(): Long = captures[0] * 25L + homeCount(0) * 60L
@@ -396,18 +450,27 @@ class LudoGame : ArcadeBaseGame() {
     // --------------------------------------------------------------------- draw
 
     override fun draw(canvas: Canvas, width: Float, height: Float) {
-        canvas.drawColor(0xFF1C2233.toInt())
+        val glow = ArcadeDraw.paint(Color.TRANSPARENT)
+        glow.shader = RadialGradient(
+            width * 0.5f, height * 0.3f, width * 1.1f,
+            intArrayOf(0xFF2A3557.toInt(), 0xFF0D1120.toInt()), null, Shader.TileMode.CLAMP
+        )
+        canvas.drawRect(0f, 0f, width, height, glow)
 
         val boardSize = min(width * 0.94f, height * 0.6f)
         cell = boardSize / 15f
         boardLeft = (width - boardSize) / 2f
-        boardTop = height * 0.05f
+        boardTop = height * 0.045f
 
-        // Board plate.
-        val plate = RectF(boardLeft - cell * 0.18f, boardTop - cell * 0.18f,
-            boardLeft + boardSize + cell * 0.18f, boardTop + boardSize + cell * 0.18f)
-        ArcadeDraw.shadow(canvas, plate, cell * 0.6f, 0.35f)
-        ArcadeDraw.panel(canvas, plate, 0xFFFBF4E6.toInt(), cell * 0.5f, 0x22000000, 1.5f)
+        // Ivory board with a warm bevel, a soft drop shadow and an inner rule.
+        val plate = RectF(boardLeft - cell * 0.22f, boardTop - cell * 0.22f,
+            boardLeft + boardSize + cell * 0.22f, boardTop + boardSize + cell * 0.22f)
+        ArcadeDraw.shadow(canvas, plate, cell * 0.9f, 0.55f)
+        ArcadeDraw.panel(canvas, plate, 0xFFF7EEDD.toInt(), cell * 0.6f, 0xFFD8C5A4.toInt(), cell * 0.055f)
+        ArcadeDraw.panel(canvas,
+            boardLeft - cell * 0.05f, boardTop - cell * 0.05f,
+            boardLeft + boardSize + cell * 0.05f, boardTop + boardSize + cell * 0.05f,
+            0x00000000, cell * 0.3f, 0x33FFFFFF, cell * 0.02f)
 
         drawYards(canvas)
         drawTrack(canvas)
@@ -429,46 +492,88 @@ class LudoGame : ArcadeBaseGame() {
             val rect = cellRect(info.yardCol, info.yardRow).let {
                 RectF(it.left, it.top, it.right + cell * 5f, it.bottom + cell * 5f)
             }
-            ArcadeDraw.panel(canvas, rect, info.color, cell * 0.55f)
+            val active = seat == turn && !done()
+            if (active) {
+                ArcadeDraw.panel(canvas,
+                    RectF(rect.left - cell * 0.11f, rect.top - cell * 0.11f,
+                        rect.right + cell * 0.11f, rect.bottom + cell * 0.11f),
+                    0x22FFD34D, cell * 0.65f, ArcadeColors.GOLD, cell * 0.07f)
+            }
+            ArcadeDraw.panel(canvas, rect, info.color, cell * 0.6f)
+            // A lighter inner rim, then the cream resting square.
+            ArcadeDraw.panel(canvas,
+                RectF(rect.left + cell * 0.22f, rect.top + cell * 0.22f,
+                    rect.right - cell * 0.22f, rect.bottom - cell * 0.22f),
+                0x22FFFFFF, cell * 0.5f)
             val inset = cell * 0.75f
             val inner = RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset)
-            ArcadeDraw.panel(canvas, inner, 0xFFFDF8EE.toInt(), cell * 0.45f)
+            ArcadeDraw.panel(canvas, inner, 0xFFFDF8EE.toInt(), cell * 0.45f, 0x22FFFFFF, cell * 0.02f)
+
+            val label = when {
+                twoPlayer && seat == 0 -> "P1"
+                twoPlayer && seat == 2 -> "P2"
+                twoPlayer -> ""
+                seat == 0 -> "YOU"
+                else -> info.short
+            }
+            if (label.isNotEmpty()) {
+                val pill = RectF(rect.centerX() - cell * 0.95f, rect.top + cell * 0.3f,
+                    rect.centerX() + cell * 0.95f, rect.top + cell * 1.02f)
+                ArcadeDraw.panel(canvas, pill, 0x2EFFFFFF, pill.height() / 2f, 0x44FFFFFF, cell * 0.02f)
+                ArcadeDraw.text(canvas, label, pill.centerX(), pill.centerY() + pill.height() * 0.27f,
+                    pill.height() * 0.46f, 0xFFFFFFFF.toInt(), bold = true, align = Paint.Align.CENTER)
+            }
+
             for (socket in 0..3) {
                 val point = yardPoint(seat, socket)
-                ArcadeDraw.circle(canvas, point.x, point.y, cell * 0.36f, 0x14000000)
-                ArcadeDraw.circle(canvas, point.x, point.y, cell * 0.31f, info.color, 0xFFFDF8EE.toInt(), cell * 0.05f)
+                ArcadeDraw.circle(canvas, point.x, point.y + cell * 0.045f, cell * 0.37f, 0x1A000000)
+                ArcadeDraw.circle(canvas, point.x, point.y, cell * 0.35f, 0xFFFFFBF2.toInt(),
+                    info.color, cell * 0.045f)
+                ArcadeDraw.circle(canvas, point.x, point.y, cell * 0.12f, 0x22000000)
             }
         }
     }
 
     private fun drawTrack(canvas: Canvas) {
         for ((index, point) in track.withIndex()) {
-            val rect = cellRect(point.first, point.second, cell * 0.075f)
+            val rect = cellRect(point.first, point.second, cell * 0.07f)
             val owner = seats.firstOrNull { it.start == index }
-            val color = when {
+            val star = index in safeSquares && owner == null
+            val fill = when {
                 owner != null -> owner.color
-                index in safeSquares -> 0xFFFFE7AE.toInt()
+                star -> 0xFFFFF0C2.toInt()
                 else -> 0xFFFFFDF8.toInt()
             }
-            ArcadeDraw.panel(canvas, rect, color, cell * 0.16f, 0xFFDCCEB6.toInt(), cell * 0.035f)
+            ArcadeDraw.panel(canvas, rect, fill, cell * 0.18f, 0xFFE1D3B8.toInt(), cell * 0.03f)
             if (owner != null) {
-                ArcadeDraw.circle(canvas, rect.centerX(), rect.centerY(), cell * 0.16f, 0x33FFFFFF)
-            } else if (index in safeSquares) {
-                drawStar(canvas, rect.centerX(), rect.centerY(), cell * 0.2f, 0xFFC79A2E.toInt())
+                drawArrow(canvas, rect.centerX(), rect.centerY(), cell * 0.19f, trackDirection(index), 0xE6FFFFFF.toInt())
+            } else if (star) {
+                drawStar(canvas, rect.centerX(), rect.centerY(), cell * 0.2f, 0xFFC08A1E.toInt())
+            } else {
+                ArcadeDraw.circle(canvas, rect.centerX(), rect.centerY(), cell * 0.045f, 0x22000000)
             }
         }
 
-        // Home columns.
+        // Private home columns, with chevrons pointing at the centre.
         for (seat in seats.indices) {
+            val direction = when (seat) {
+                0 -> 0   // up
+                1 -> 1   // right
+                2 -> 2   // down
+                else -> 3 // left
+            }
             for (step in 0..4) {
                 val spot = homeCell(seat, step)
-                val rect = cellRect(spot.first, spot.second, cell * 0.075f)
-                ArcadeDraw.panel(canvas, rect, seats[seat].color, cell * 0.16f, 0x33FFFFFF, cell * 0.03f)
+                val rect = cellRect(spot.first, spot.second, cell * 0.07f)
+                val alpha = 0xC8 + step * 10
+                ArcadeDraw.panel(canvas, rect, seats[seat].color, cell * 0.18f, 0x33FFFFFF, cell * 0.028f)
+                drawChevron(canvas, rect.centerX(), rect.centerY(), cell * 0.16f, direction,
+                    Color.argb(alpha.coerceAtMost(255), 255, 255, 255))
             }
         }
 
-        // Small arrows on the four home entrances, so the turn-off is obvious.
-        for (seat in activeSeats) {
+        // Coloured arrows on the four home-entrance squares.
+        for (seat in seats.indices) {
             val entry = when (seat) {
                 0 -> 7 to 14
                 1 -> 0 to 7
@@ -476,8 +581,19 @@ class LudoGame : ArcadeBaseGame() {
                 else -> 14 to 7
             }
             val rect = cellRect(entry.first, entry.second)
-            ArcadeDraw.text(canvas, "▲", rect.centerX(), rect.centerY() + cell * 0.12f, cell * 0.34f,
-                seats[seat].color, bold = true, align = Paint.Align.CENTER)
+            val direction = when (seat) { 0 -> 0; 1 -> 1; 2 -> 2; else -> 3 }
+            drawArrow(canvas, rect.centerX(), rect.centerY(), cell * 0.26f, direction, seats[seat].color)
+        }
+    }
+
+    private fun trackDirection(index: Int): Int {
+        val here = track[index]
+        val next = track[(index + 1) % track.size]
+        return when {
+            next.first > here.first -> 1
+            next.first < here.first -> 3
+            next.second > here.second -> 2
+            else -> 0
         }
     }
 
@@ -487,8 +603,8 @@ class LudoGame : ArcadeBaseGame() {
         val right = left + 3 * cell
         val bottom = top + 3 * cell
         val mid = PointF((left + right) / 2f, (top + bottom) / 2f)
-        ArcadeDraw.panel(canvas, RectF(left, top, right, bottom), 0xFFFBF4E6.toInt(), cell * 0.2f,
-            0xFFDCCEB6.toInt(), cell * 0.05f)
+        ArcadeDraw.panel(canvas, RectF(left, top, right, bottom), 0xFFF3E8D4.toInt(), cell * 0.24f,
+            0xFFD8C5A4.toInt(), cell * 0.05f)
         val tl = PointF(left, top)
         val tr = PointF(right, top)
         val bl = PointF(left, bottom)
@@ -506,9 +622,10 @@ class LudoGame : ArcadeBaseGame() {
             path.lineTo(points[2].x, points[2].y)
             path.close()
             canvas.drawPath(path, ArcadeDraw.paint(seats[seat].color))
-            canvas.drawPath(path, ArcadeDraw.paint(0xCCFFFDF8.toInt(), cell * 0.025f))
+            canvas.drawPath(path, ArcadeDraw.paint(0xCCFFFDF8.toInt(), cell * 0.03f))
         }
-        ArcadeDraw.circle(canvas, mid.x, mid.y, cell * 0.16f, 0xFFFFFDF8.toInt(), 0x55221100, cell * 0.02f)
+        ArcadeDraw.circle(canvas, mid.x, mid.y, cell * 0.26f, 0xFFFFFBF0.toInt(), 0x33000000, cell * 0.02f)
+        drawStar(canvas, mid.x, mid.y, cell * 0.2f, 0xFFC08A1E.toInt())
     }
 
     private fun drawTokens(canvas: Canvas) {
@@ -517,19 +634,51 @@ class LudoGame : ArcadeBaseGame() {
         for (seat in activeSeats) {
             for (token in 0..3) {
                 val point = tokenPoint(seat, token)
-                val radius = cell * 0.3f
+                val finished = positions[seat][token] == 56
+                val radius = if (finished) cell * 0.21f else cell * 0.3f
                 val rect = RectF(point.x - radius, point.y - radius, point.x + radius, point.y + radius)
-                if (seat == turn && !isAi(turn) && rolled && rolling <= 0f && legal.contains(token)) {
-                    ArcadeDraw.circle(canvas, point.x, point.y, radius + cell * (0.1f + pulse * 0.08f),
+                val movable = seat == turn && !isAi(turn) && rolled && rolling <= 0f && legal.contains(token)
+                if (movable) {
+                    ArcadeDraw.circle(canvas, point.x, point.y, radius + cell * (0.1f + pulse * 0.09f),
                         0x33FFD34D, ArcadeColors.GOLD, cell * 0.05f)
                 }
-                ArcadeDraw.circle(canvas, point.x + cell * 0.03f, point.y + cell * 0.06f, radius,
-                    0x33000000)
-                ArcadeDraw.circle(canvas, point.x, point.y, radius, seats[seat].color, 0xFFFFFFFF.toInt(), cell * 0.055f)
-                ArcadeDraw.circle(canvas, point.x - radius * 0.3f, point.y - radius * 0.34f, radius * 0.22f, 0x66FFFFFF)
+                ArcadeDraw.circle(canvas, point.x + cell * 0.02f, point.y + cell * 0.08f, radius, 0x40000000)
+                ArcadeDraw.circle(canvas, point.x, point.y, radius, seats[seat].color)
+                ArcadeDraw.circle(canvas, point.x, point.y, radius, Color.TRANSPARENT, 0xFFFFFFFF.toInt(), cell * 0.055f)
+                ArcadeDraw.circle(canvas, point.x - radius * 0.28f, point.y - radius * 0.32f, radius * 0.26f, 0x59FFFFFF)
+                ArcadeDraw.circle(canvas, point.x, point.y, radius * 0.16f, 0x33000000)
                 if (legal.contains(token) && seat == turn) tokenRects += Triple(seat, token, rect)
             }
         }
+    }
+
+    private fun drawArrow(canvas: Canvas, cx: Float, cy: Float, size: Float, direction: Int, color: Int) {
+        val path = Path()
+        path.moveTo(0f, -size)
+        path.lineTo(size * 0.82f, size * 0.28f)
+        path.lineTo(size * 0.3f, size * 0.28f)
+        path.lineTo(size * 0.3f, size)
+        path.lineTo(-size * 0.3f, size)
+        path.lineTo(-size * 0.3f, size * 0.28f)
+        path.lineTo(-size * 0.82f, size * 0.28f)
+        path.close()
+        val matrix = Matrix()
+        matrix.postRotate(direction * 90f)
+        matrix.postTranslate(cx, cy)
+        path.transform(matrix)
+        canvas.drawPath(path, ArcadeDraw.paint(color))
+    }
+
+    private fun drawChevron(canvas: Canvas, cx: Float, cy: Float, size: Float, direction: Int, color: Int) {
+        val path = Path()
+        path.moveTo(-size, size * 0.55f)
+        path.lineTo(0f, -size * 0.55f)
+        path.lineTo(size, size * 0.55f)
+        val matrix = Matrix()
+        matrix.postRotate(direction * 90f)
+        matrix.postTranslate(cx, cy)
+        path.transform(matrix)
+        canvas.drawPath(path, ArcadeDraw.paint(color, size * 0.34f))
     }
 
     private fun tokenPoint(seat: Int, token: Int): PointF {
@@ -596,54 +745,106 @@ class LudoGame : ArcadeBaseGame() {
     }
 
     private fun drawControls(canvas: Canvas, width: Float, height: Float, boardSize: Float) {
-        val top = boardTop + boardSize + height * 0.035f
-        val diceSize = min(width * 0.15f, height * 0.085f)
-        val diceLeft = width * 0.08f
-        ArcadeDraw.die(canvas, diceLeft, top, diceSize, shownDice, 0xFFFFFDF8.toInt(), ArcadeColors.INK)
-        ArcadeDraw.text(canvas, when {
-            rolling > 0f -> "ROLLING"
-            dice == 0 -> "TAP TO ROLL"
-            else -> "ROLLED $dice"
-        }, diceLeft + diceSize / 2f, top + diceSize + height * 0.022f, height * 0.013f,
-            0xAAFFFFFF.toInt(), bold = true, align = Paint.Align.CENTER)
+        val top = boardTop + boardSize + height * 0.032f
+        val diceSize = min(width * 0.1f, height * 0.07f)
+        val diceGap = diceSize * 0.3f
+        val left = width * 0.055f
+        val total = when {
+            rolling > 0f -> "…"
+            dieOne == 0 -> "—"
+            else -> "$dice"
+        }
 
-        val buttonLeft = diceLeft + diceSize + width * 0.07f
-        rollRect = RectF(buttonLeft, top, width * 0.92f, top + diceSize)
+        // Dice tray: two dice, a plus, and the total that is this turn's move.
+        val trayRight = left + diceSize * 2f + diceGap + width * 0.13f
+        ArcadeDraw.panel(canvas, RectF(left - width * 0.02f, top - height * 0.012f,
+            trayRight, top + diceSize + height * 0.012f), 0x18FFFFFF, diceSize * 0.22f, 0x22FFFFFF, 1f)
+        ArcadeDraw.die(canvas, left, top, diceSize, shownOne, 0xFFFFFBF2.toInt(), ArcadeColors.INK)
+        ArcadeDraw.text(canvas, "+", left + diceSize + diceGap / 2f, top + diceSize * 0.58f,
+            diceSize * 0.5f, 0xCCFFFFFF.toInt(), bold = true, align = Paint.Align.CENTER)
+        ArcadeDraw.die(canvas, left + diceSize + diceGap, top, diceSize, shownTwo,
+            0xFFFFFBF2.toInt(), ArcadeColors.INK)
+        ArcadeDraw.text(canvas, "= $total", left + diceSize * 2f + diceGap * 1.6f, top + diceSize * 0.58f,
+            diceSize * 0.55f, ArcadeColors.GOLD, bold = true)
+        ArcadeDraw.text(canvas, if (dieOne == 6 || dieTwo == 6) "A six can leave the yard" else "Total is your move",
+            left, top + diceSize + height * 0.022f, height * 0.0115f, 0x99FFFFFF.toInt(), bold = true)
+
+        // Roll button.
+        rollRect = RectF(width * 0.545f, top, width * 0.945f, top + diceSize)
         val canRoll = !rolled && rolling <= 0f && !isAi(turn) && !done()
-        val seatColor = if (isAi(turn)) 0x33FFFFFF else seats[turn].color
+        val activeColor = seats[turn].color
+        if (canRoll) {
+            ArcadeDraw.panel(canvas, RectF(rollRect.left - 2f, rollRect.top - 2f, rollRect.right + 2f, rollRect.bottom + 2f),
+                0x33FFD34D, rollRect.height() / 2f, ArcadeColors.GOLD, 1.5f)
+        }
         ArcadeDraw.panel(canvas, rollRect,
-            if (canRoll) seatColor else 0x22FFFFFF,
+            if (canRoll) activeColor else 0x1FFFFFFF,
             rollRect.height() / 2f,
-            if (canRoll) 0x66FFFFFF else 0x11FFFFFF, 1.5f)
+            if (canRoll) 0x66FFFFFF else 0x22FFFFFF, 1.2f)
         val label = when {
             done() -> "GAME OVER"
-            isAi(turn) -> "${seats[turn].name.uppercase()} AI…"
-            rolled -> "MOVING"
-            else -> "${nameOf(turn).uppercase()} · ROLL"
+            isAi(turn) -> "${seats[turn].name.uppercase()} AI · THINKING"
+            rolled -> "$total SQUARES"
+            else -> "ROLL"
         }
         ArcadeDraw.text(canvas, label, rollRect.centerX(), rollRect.centerY() + rollRect.height() * 0.17f,
-            ArcadeDraw.fitted(label, rollRect.height() * 0.34f, rollRect.width() * 0.9f, bold = true),
-            if (canRoll) 0xFF1B1524.toInt() else 0x99FFFFFF.toInt(), bold = true, align = Paint.Align.CENTER)
-
-        // Progress chips, one per seat: dots for tokens home.
-        val chipY = top + diceSize + height * 0.045f
-        val chipWidth = (width * 0.86f) / activeSeats.size
-        activeSeats.forEachIndexed { index, seat ->
-            val left = width * 0.07f + index * chipWidth
-            val rect = RectF(left, chipY, left + chipWidth - width * 0.02f, chipY + height * 0.045f)
-            val active = seat == turn && !done()
-            ArcadeDraw.panel(canvas, rect, if (active) seats[seat].color else 0x22FFFFFF, rect.height() / 2f,
-                if (active) 0x66FFFFFF else 0x11FFFFFF, 1f)
-            val label = if (twoPlayer) (if (seat == 0) "P1" else "P2") else seats[seat].short
-            ArcadeDraw.text(canvas, "$label ${homeCount(seat)}/4", rect.centerX(), rect.centerY() + rect.height() * 0.18f,
-                rect.height() * 0.42f, if (active) 0xFF1B1524.toInt() else 0xCCFFFFFF.toInt(),
-                bold = true, align = Paint.Align.CENTER)
+            ArcadeDraw.fitted(label, rollRect.height() * 0.36f, rollRect.width() * 0.86f, bold = true),
+            if (canRoll) 0xFF18121F.toInt() else 0xCCFFFFFF.toInt(), bold = true, align = Paint.Align.CENTER)
+        if (canRoll) {
+            ArcadeDraw.text(canvas, nameOf(turn).uppercase(), rollRect.centerX(),
+                rollRect.centerY() - rollRect.height() * 0.22f, rollRect.height() * 0.2f,
+                0xCC2A1E12.toInt(), bold = true, align = Paint.Align.CENTER)
         }
 
-        // Message line.
+        // Seat chips with home progress.
+        val chipY = top + diceSize + height * 0.055f
+        val gap = width * 0.016f
+        val totalWidth = width * 0.89f
+        val chipWidth = (totalWidth - gap * (activeSeats.size - 1)) / activeSeats.size
+        activeSeats.forEachIndexed { index, seat ->
+            val chipLeft = width * 0.055f + index * (chipWidth + gap)
+            val rect = RectF(chipLeft, chipY, chipLeft + chipWidth, chipY + height * 0.044f)
+            val active = seat == turn && !done()
+            ArcadeDraw.panel(canvas, rect,
+                if (active) seats[seat].color else 0x16FFFFFF,
+                rect.height() / 2f,
+                if (active) 0xFFE8C77A.toInt() else 0x22FFFFFF,
+                if (active) 1.6f else 1f)
+            ArcadeDraw.circle(canvas, rect.left + rect.height() * 0.62f, rect.centerY(),
+                rect.height() * 0.19f, if (active) 0xFF18121F.toInt() else seats[seat].color)
+            val name = when {
+                twoPlayer && seat == 0 -> "P1"
+                twoPlayer -> "P2"
+                seat == 0 -> "YOU"
+                else -> seats[seat].name.uppercase()
+            }
+            ArcadeDraw.text(canvas, name, rect.left + rect.height() * 0.95f,
+                rect.centerY() + rect.height() * 0.16f, rect.height() * 0.36f,
+                if (active) 0xFF18121F.toInt() else 0xE6FFFFFF.toInt(), bold = true)
+            // Four pips: filled pips are tokens home.
+            val pips = homeCount(seat)
+            val pipR = rect.height() * 0.09f
+            val startX = rect.right - rect.height() * 0.9f
+            for (i in 0..3) {
+                val x = startX + i * (pipR * 2.6f)
+                if (i < pips) {
+                    ArcadeDraw.circle(canvas, x, rect.centerY(), pipR,
+                        if (active) 0xFF18121F.toInt() else 0xFFFFFBF2.toInt())
+                } else {
+                    ArcadeDraw.circle(canvas, x, rect.centerY(), pipR, Color.TRANSPARENT,
+                        if (active) 0x6618121F else 0x66FFFFFF, 1.2f)
+                }
+            }
+        }
+
+        ArcadeDraw.text(canvas, "TWO DICE · THE TOTAL IS THE MOVE · DOUBLES ROLL AGAIN",
+            width / 2f, chipY + height * 0.075f, height * 0.011f, 0x77FFFFFF.toInt(),
+            bold = true, align = Paint.Align.CENTER)
+
         if (message.isNotEmpty()) {
-            ArcadeDraw.text(canvas, message, width / 2f, height * 0.975f, height * 0.0135f,
-                0xCCFFFFFF.toInt(), align = Paint.Align.CENTER)
+            val size = ArcadeDraw.fitted(message, height * 0.0135f, width * 0.9f)
+            ArcadeDraw.text(canvas, message, width / 2f, height * 0.972f, size,
+                0xE6FFFFFF.toInt(), align = Paint.Align.CENTER)
         }
     }
 

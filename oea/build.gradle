@@ -12,7 +12,12 @@ android {
         versionCode 9
         versionName "0.4.0-alpha9"
         // WebRTC ships native code; every current phone is covered by these two ABIs.
+        // To run a debug build in an x86_64 emulator (the laptop route), add
+        // -PextraAbi=x86_64; release builds stay phone-only.
         ndk { abiFilters.addAll(["arm64-v8a", "armeabi-v7a"]) }
+        if (project.hasProperty("extraAbi")) {
+            ndk { abiFilters.add(project.property("extraAbi").toString()) }
+        }
     }
     buildTypes {
         release {

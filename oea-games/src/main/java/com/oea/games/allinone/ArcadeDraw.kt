@@ -517,7 +517,8 @@ object ArcadeDraw {
         c.drawPath(tri, paint(0xFFE3566E.toInt()))
         circle(c, left + grid * 2.2f, top + grid * 1.6f, size * 0.055f, colors[0])
         circle(c, left + grid * 2.2f, top + grid * 1.6f, size * 0.055f, Color.TRANSPARENT, ArcadeColors.WHITE, 2f)
-        die(c, r.right - size * 0.28f, r.bottom - size * 0.3f, size * 0.22f, 6)
+        die(c, r.right - size * 0.42f, r.bottom - size * 0.3f, size * 0.2f, 6)
+        die(c, r.right - size * 0.2f, r.bottom - size * 0.24f, size * 0.2f, 3)
     }
 
     private fun lifeArt(c: Canvas, r: RectF) {
