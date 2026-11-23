@@ -1574,9 +1574,16 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val target = ws.getCurrentPage()
         val builtPages = ArrayList<OeaCellLayout>()
         var successfulPages = 0
-        for (page in 0 until ws.pages()) {
+        // The workspace JSON is parsed once here, not once per page: items() and
+        // folders() each decode the stored array, and a rebuild used to pay that for
+        // every page even though the answer cannot change inside the loop.
+        val pages = ws.pages()
+        val allItems = ws.items()
+        val allFolders = ws.folders()
+        val allWidgets = widgetRects.toList()
+        for (page in 0 until pages) {
             val built = try {
-                buildPage(page).also { successfulPages++ }
+                buildPage(page, allWidgets, allFolders, allItems).also { successfulPages++ }
             } catch (error: Throwable) {
                 // Keep the last working pager if every page fails; a failed
                 // refresh must never turn a usable Home into a blank screen.
@@ -1596,7 +1603,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         pager.removeAllViews()
         builtPages.forEach { pager.addView(it) }
         pager.setPageImmediately(target)
-        indicator.pages = ws.pages()
+        indicator.pages = pages
         indicator.position = target.toFloat()
         stage("dock") { renderDock() }
         stage("drawer refresh") { if (drawer.visibility == VISIBLE) drawer.refresh() }
@@ -1617,7 +1624,12 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
 
     private var scheduleRebuildAfterDrag = false
 
-    private fun buildPage(page: Int): OeaCellLayout {
+    private fun buildPage(
+        page: Int,
+        placedWidgets: List<WidgetRect>,
+        folders: List<OeaWorkspaceStore.Folder>,
+        items: List<OeaWorkspaceStore.Item>
+    ): OeaCellLayout {
         val layout = OeaCellLayout(context)
         layout.cols = cols()
         layout.rows = rows()
@@ -1627,14 +1639,14 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         layout.emptyGestures = GestureDetector(context, emptyGestureListener())
         // Each widget/icon is isolated: one broken provider or tile must not
         // drop the rest of the page.
-        widgetRects.filter { it.page == page }.forEach { rect ->
+        placedWidgets.filter { it.page == page }.forEach { rect ->
             stage("widget ${rect.id}") {
                 val host = widgets.createView(context, rect.id) ?: return@stage
                 val frame = WidgetFrame(context, rect.id, host)
                 layout.addView(frame, OeaCellLayout.LayoutParams(rect.x, rect.y, rect.spanX, rect.spanY))
             }
         }
-        ws.folders().filter { it.page == page }.forEach { folder ->
+        folders.filter { it.page == page }.forEach { folder ->
             stage("folder ${folder.id}") {
                 val tile = OeaTileView(context)
                 bindFolderTile(tile, folder, TileStyle.HOME)
@@ -1643,7 +1655,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
                 homeTiles += tile
             }
         }
-        ws.items().filter { it.page == page }.forEach { item ->
+        items.filter { it.page == page }.forEach { item ->
             stage("item ${item.id}") {
                 val tile = OeaTileView(context)
                 if (item.isShortcut) {
@@ -1728,7 +1740,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         tile.key = appKey(app)
         tile.payload = TileRef(app = app, source = if (style == TileStyle.DRAWER) Source.DRAWER else Source.HOME_ITEM)
         tile.label = app.label
-        tile.icon = icons.icon(app.packageName, app.className)
+        tile.icon = iconFor(tile, app)
         tile.badgeCount = badgeFor(app.packageName)
         tile.frozen = isFrozen(app.packageName)
         tile.locked = OeaAppLockStore.isLocked(context, appKey(app))
@@ -1742,7 +1754,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         tile.key = folder.id
         tile.payload = TileRef(folder = folder, source = Source.HOME_FOLDER)
         tile.label = if (folder.isPair) folder.title.ifBlank { members.joinToString(" | ") { it.label } } else folder.title
-        tile.previews = members.take(4).map { icons.icon(it.packageName, it.className) }
+        tile.previews = previewIcons(tile, folder, members)
         tile.badgeCount = if (members.any { badgeFor(it.packageName) > 0 }) members.sumOf { badgeFor(it.packageName) } else 0
         tile.frozen = false
         tile.locked = false
@@ -1759,12 +1771,64 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         val shortcutIcon = shortcutIconCache.getOrPut(item.id) {
             item.shortcutId?.let { id -> shortcuts.find(item.packageName, id)?.let { shortcuts.icon(it) } }
         }
-        val appIcon = app?.let { icons.icon(it.packageName, it.className) }
+        val appIcon = app?.let { icons.peek(it.packageName, it.className) }
         tile.icon = shortcutIcon ?: appIcon
         tile.smallBadge = if (shortcutIcon != null) appIcon else null
+        // A shortcut's own icon comes from LauncherApps once per shortcut (cached in
+        // shortcutIconCache). The app's icon — the tile's own when the shortcut has
+        // none, otherwise the little badge on it — is filled without blocking the
+        // frame; assigning the badge first keeps a warm bind identical to before.
+        if (app != null && appIcon == null) {
+            val key = tile.key
+            icons.request(app.packageName, app.className) { drawable ->
+                if (tile.key != key) return@request
+                if (shortcutIcon == null) tile.icon = drawable else tile.smallBadge = drawable
+            }
+        }
         tile.badgeCount = 0
         tile.frozen = isFrozen(item.packageName)
         tile.locked = false
+    }
+
+    /**
+     * Binds an app's icon without letting the frame wait for it.
+     *
+     * [OeaIconController.peek] only reads the memory cache: a warm Home looks
+     * exactly as before, and a cold one (fresh process with the disk cache warm, or
+     * after a memory trim) shows the label immediately while the icon is resolved on
+     * a background thread. The callback checks the tile's key first, so a recycled
+     * drawer row can never end up with the previous app's icon.
+     */
+    private fun iconFor(tile: OeaTileView, app: OeaAppInfo): android.graphics.drawable.Drawable? {
+        val cached = icons.peek(app.packageName, app.className)
+        if (cached != null) return cached
+        val key = appKey(app)
+        icons.request(app.packageName, app.className) { drawable ->
+            if (tile.key == key && tile.kind == OeaTileView.Kind.APP) tile.icon = drawable
+        }
+        return null
+    }
+
+    /** The same non-blocking treatment for the up-to-four icons drawn on a folder tile. */
+    private fun previewIcons(
+        tile: OeaTileView,
+        folder: OeaWorkspaceStore.Folder,
+        members: List<OeaAppInfo>
+    ): List<android.graphics.drawable.Drawable?> {
+        val shown = members.take(4)
+        val previews = shown.map { icons.peek(it.packageName, it.className) }.toMutableList()
+        shown.forEachIndexed { index, member ->
+            if (previews.getOrNull(index) != null) return@forEachIndexed
+            icons.request(member.packageName, member.className) { drawable ->
+                if (tile.key != folder.id) return@request
+                val updated = tile.previews.toMutableList()
+                if (index < updated.size) {
+                    updated[index] = drawable
+                    tile.previews = updated
+                }
+            }
+        }
+        return previews
     }
 
     /** Updates badges and frozen/locked states in place (no relayout). */
@@ -2776,7 +2840,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         if (target >= pager.pageCount()) {
             if (pager.pageCount() >= OeaWorkspaceStore.MAX_PAGES) return
             ws.setPages(pager.pageCount() + 1)
-            pager.addView(buildPage(pager.pageCount()))
+            // A fresh page has no items, folders or widgets yet; the stored lists are
+            // read once here so adding a page keeps the same single-parse contract.
+            pager.addView(buildPage(pager.pageCount(), widgetRects.toList(), ws.folders(), ws.items()))
             indicator.pages = pager.pageCount()
         }
         clearPageHighlights()

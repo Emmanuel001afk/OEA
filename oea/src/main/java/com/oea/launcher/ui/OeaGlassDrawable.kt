@@ -82,6 +82,30 @@ class OeaGlassDrawable(
     private var causticsPhase = 0f
     private var causticsCallback: android.view.Choreographer.FrameCallback? = null
 
+    /**
+     * The caustic's colour stops, computed once per tint instead of once per frame.
+     * Only the phase moves while the drift runs, so rebuilding the colours inside
+     * the frame callback was allocating for nothing 60 times a second.
+     */
+    private var causticColors: IntArray? = null
+    private var causticColorsKey = 0L
+    private var causticFrame = 0
+
+    private fun causticStops(): IntArray {
+        // Both colours in one key: a collision here would quietly tint the pane wrong.
+        val key = (fill.toLong() shl 32) or (tintOrAccent().toLong() and 0xFFFFFFFFL)
+        causticColors?.let { if (causticColorsKey == key) return it }
+        val stops = intArrayOf(
+            Color.TRANSPARENT,
+            OeaTheme.alpha(OeaTheme.blend(fill, Color.WHITE, 0.5f), 0x1E),
+            OeaTheme.alpha(tintOrAccent(), 0x14),
+            Color.TRANSPARENT
+        )
+        causticColors = stops
+        causticColorsKey = key
+        return stops
+    }
+
     fun setCaustics(enabled: Boolean) {
         if (enabled == causticsOn) return
         causticsOn = enabled
@@ -98,9 +122,14 @@ class OeaGlassDrawable(
                     return
                 }
                 // A slow drift: one full sweep takes about nine seconds, which reads
-                // as light moving rather than as an animation playing.
-                causticsPhase = (causticsPhase + 1f / (9f * 60f)) % 1f
-                invalidateSelf()
+                // as light moving rather than as an animation playing. At that speed
+                // 30 updates a second look identical to 60, and each skipped frame is
+                // a gradient and a pane of glass the GPU does not have to draw.
+                causticFrame++
+                if (causticFrame % 2 == 0) {
+                    causticsPhase = (causticsPhase + 2f / (9f * 60f)) % 1f
+                    invalidateSelf()
+                }
                 android.view.Choreographer.getInstance().postFrameCallback(this)
             }
         }
@@ -135,13 +164,8 @@ class OeaGlassDrawable(
         val x = -w * 0.3f + travel * causticsPhase
         sheen.shader = LinearGradient(
             x - w * 0.5f, 0f, x + w * 0.5f, h,
-            intArrayOf(
-                Color.TRANSPARENT,
-                OeaTheme.alpha(OeaTheme.blend(fill, Color.WHITE, 0.5f), 0x1E),
-                OeaTheme.alpha(tintOrAccent(), 0x14),
-                Color.TRANSPARENT
-),
-            floatArrayOf(0f, 0.4f, 0.6f, 1f), Shader.TileMode.CLAMP
+            causticStops(),
+            CAUSTIC_STOPS, Shader.TileMode.CLAMP
 )
         canvas.drawRoundRect(rect, radiusWithBend(h), radiusWithBend(h), sheen)
         sheen.shader = null
@@ -347,6 +371,9 @@ class OeaGlassDrawable(
     }
 
     companion object {
+        /** Fixed positions of the caustic's four colour stops; only the colours move. */
+        private val CAUSTIC_STOPS = floatArrayOf(0f, 0.4f, 0.6f, 1f)
+
         /** One frosted noise tile, shared by every liquid surface in the process. */
         @Volatile private var noiseTile: Bitmap? = null
 

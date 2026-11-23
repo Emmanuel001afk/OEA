@@ -64,6 +64,15 @@ jobs:
             done
             exit 1
           fi
+      - name: Search ranking regression tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.search.OeaSearchIndexTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-search.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-search.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
       - name: Use the stable OEA signing key (optional)
         # Without this, every runner creates a new random debug key, so each
         # APK has a different signature and cannot update the previous one
@@ -378,6 +387,33 @@ jobs:
           # The widget renders a thumbnail instead of promising controls it lacks.
           grep -Fq '@+id/camera_thumb' oea/src/main/res/layout/oea_widget_camera.xml
           grep -Fq 'setImageViewBitmap' $SRC/widgets/OeaMiniAppWidgets.kt
+      - name: Verify the responsiveness work
+        run: |
+          set -euo pipefail
+          SRC=oea/src/main/java/com/oea/launcher
+          ICONS=$SRC/icons/OeaIconController.kt
+          WORKSPACE=$SRC/workspace/OeaWorkspace.kt
+          DRAWER=$SRC/workspace/OeaDrawerView.kt
+          GLASS=$SRC/ui/OeaGlassDrawable.kt
+          KIT=$SRC/ui/OeaKit.kt
+          # A tile binding takes the cached icon and asks for the rest off the frame,
+          # so no decode, PackageManager call or render runs inside Home's frame.
+          grep -Fq 'fun peek(packageName: String, className: String? = null)' "$ICONS"
+          grep -Fq 'fun request(packageName: String, className: String? = null, onReady: (Drawable) -> Unit)' "$ICONS"
+          grep -Fq 'icons.peek(' "$WORKSPACE"
+          ! grep -Fq 'icons.icon(' "$WORKSPACE"
+          grep -Fq 'fun appIconAsync(' "$KIT"
+          grep -Fq 'appIconAsync(app)' "$KIT"
+          # Typing compares prepared keys instead of normalizing every label again.
+          grep -Fq 'searchIndex.score(' "$DRAWER"
+          ! grep -Fq 'Normalizer.normalize' "$DRAWER"
+          # The workspace JSON is parsed once per rebuild, not once per page.
+          grep -Fq 'val allItems = ws.items()' "$WORKSPACE"
+          ! grep -Fq 'ws.items().filter { it.page == page }' "$WORKSPACE"
+          grep -Fq 'items: List<OeaWorkspaceStore.Item>' "$WORKSPACE"
+          # The glass drift reuses its colour stops and redraws at half rate.
+          grep -Fq 'CAUSTIC_STOPS' "$GLASS"
+          grep -Fq 'causticFrame % 2' "$GLASS"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

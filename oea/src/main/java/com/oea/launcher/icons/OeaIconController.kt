@@ -94,11 +94,78 @@ class OeaIconController(private val context: Context) {
         return BitmapDrawable(context.resources, bitmap)
     }
 
+    /**
+     * The icon only if it is already in memory.
+     *
+     * This is the call a view should make while it is binding: it cannot decode a
+     * PNG, touch PackageManager or run a Canvas, so it can never cost a frame.
+     * Pair it with [request] to fill the gap.
+     */
+    fun peek(packageName: String, className: String? = null): Drawable? {
+        val key = cacheKey(currentStyle(), packageName, className)
+        val bitmap = rendered.get(key) ?: return null
+        return BitmapDrawable(context.resources, bitmap)
+    }
+
+    /**
+     * Resolves an icon without blocking the caller, then hands it back on the main
+     * thread.
+     *
+     * Home and the drawer bind tiles on the UI thread, and [iconBitmap] does real
+     * work on a miss: a PNG decode from the persistent cache or a render through
+     * PackageManager, a Drawable and a Canvas. After a process restart (disk warm,
+     * memory cold) that was one disk decode per tile in the first frame, and after
+     * a memory trim it was a full re-render per tile. Neither belongs in a frame.
+     *
+     * A cached icon is delivered immediately, on the calling thread, so a warm Home
+     * is unchanged. The callback is never invoked more than once, and duplicate
+     * requests for the same icon while one is already running are dropped.
+     */
+    fun request(packageName: String, className: String? = null, onReady: (Drawable) -> Unit) {
+        val style = currentStyle()
+        val key = cacheKey(style, packageName, className)
+        rendered.get(key)?.let { cached ->
+            onReady(BitmapDrawable(context.resources, cached))
+            return
+        }
+        // One load per icon, however many tiles ask for it: the first caller owns
+        // the work and everyone else waits for the same result. Without this, a
+        // launcher rebuilding Home while the drawer is open would resolve the same
+        // icon once per tile, and a dropped duplicate would leave a tile blank.
+        val waiting = java.util.Collections.synchronizedList(mutableListOf<(Drawable) -> Unit>())
+        val alreadyLoading = pending.putIfAbsent(key, waiting)
+        if (alreadyLoading != null) {
+            alreadyLoading += onReady
+            return
+        }
+        runCatching {
+            resolveExecutor.execute {
+                // load() puts the bitmap in the cache before the waiters are released,
+                // so a request that races this delivery finds it and is answered at once.
+                val bitmap = runCatching { load(key, packageName, className, style) }.getOrNull()
+                pending.remove(key)
+                if (bitmap != null) {
+                    val drawable = BitmapDrawable(context.resources, bitmap)
+                    val listeners = synchronized(waiting) { waiting.toList() }
+                    main.post { listeners.forEach { listener -> runCatching { listener(drawable) } } }
+                }
+            }
+        }.onFailure { pending.remove(key) }
+    }
+
     fun iconBitmap(packageName: String, className: String? = null): Bitmap? {
         val style = currentStyle()
-        // A per-app icon override changes the source drawable, so it (and, for
-        // gallery pictures, the picture's last-modified stamp) belongs in the
-        // cache key or a changed icon would keep showing the old bitmap.
+        val key = cacheKey(style, packageName, className)
+        rendered.get(key)?.let { return it }
+        return load(key, packageName, className, style)
+    }
+
+    /**
+     * The cache key for one icon: the style, the component and whatever per-app
+     * override is in force. A gallery-picture override carries the picture's
+     * last-modified stamp so a changed picture cannot keep the old bitmap.
+     */
+    private fun cacheKey(style: Style, packageName: String, className: String?): String {
         val override = OeaIconOverrides.spec(context, packageName, className)
         val overrideKey = when {
             override == null -> ""
@@ -109,11 +176,18 @@ class OeaIconController(private val context: Context) {
             override.startsWith("image:") -> "|ov:$override@${OeaIconOverrides.imageStamp(context, override)}"
             else -> "|ov:$override"
         }
-        val key = style.key + "|" + packageName + "/" + className.orEmpty() + overrideKey
-        rendered.get(key)?.let { return it }
+        return style.key + "|" + packageName + "/" + className.orEmpty() + overrideKey
+    }
+
+    /**
+     * Everything a miss costs: the persistent cache first, then PackageManager and
+     * a render. Safe to call from any thread, but [iconBitmap] and [request] are
+     * what callers should use instead of reaching here on the UI thread.
+     */
+    private fun load(key: String, packageName: String, className: String?, style: Style): Bitmap? {
         // Rendered icons persist across process restarts: after Android kills
-        // OEA in the background, Home comes back with its icons immediately
-        // instead of re-rendering every icon on the main thread.
+        // OEA in the background, Home comes back with its icons warm instead of
+        // re-rendering every icon.
         val disk = diskName(key, packageName, style.pack)
         if (disk != null) readDisk(disk)?.let { cached ->
             rendered.put(key, cached)
@@ -502,6 +576,15 @@ class OeaIconController(private val context: Context) {
         private const val DISK_MAX_FILES = 2400
         private const val DISK_KEEP_FILES = 1600
         private val stamps = ConcurrentHashMap<String, Long>()
+        /** Icons being resolved off the UI thread, with the callbacks waiting on each. */
+        private val pending = ConcurrentHashMap<String, MutableList<(Drawable) -> Unit>>()
+        private val main = android.os.Handler(android.os.Looper.getMainLooper())
+        private val resolveExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "OeaIconResolve").apply {
+                isDaemon = true
+                priority = Thread.NORM_PRIORITY - 1
+            }
+        }
         @Volatile private var diskWrites = 0
         private val diskExecutor = Executors.newSingleThreadExecutor { task ->
             Thread(task, "OeaIconDisk").apply {
