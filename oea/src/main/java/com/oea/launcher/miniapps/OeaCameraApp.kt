@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -508,20 +509,24 @@ object OeaCameraApp {
                 LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) }
             )
             root.addView(column, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
-            // The permission dialog returns to a stale screen; re-check on attach.
-            root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) {
-                    if (host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
-                        v.parent is android.view.ViewGroup
-                    ) {
-                        (v.parent as android.view.ViewGroup).post {
-                            (v.parent as? android.view.ViewGroup)?.removeView(v)
-                        }
-                    }
+            // Granting the permission (or coming back from Android's settings page)
+            // used to leave this card on screen forever: the mini-app host resumes
+            // the camera helper it never built, and the camera is only built on a
+            // fresh render. So the screen itself asks the host to rebuild once the
+            // permission is really there. This is the whole first-run path — the
+            // card is all a new install sees — so it has to end in a viewfinder.
+            val miniApp = host as? OeaMiniAppActivity
+            val rebuildWhenGranted: () -> Unit = {
+                if (host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                    if (miniApp != null) miniApp.refresh() else runCatching { host.recreate() }
                 }
-
-                override fun onViewDetachedFromWindow(v: View) = Unit
-            })
+            }
+            if (miniApp != null) {
+                miniApp.permissionHook = rebuildWhenGranted
+                // "Open app settings" returns through onResume, not a permission
+                // result, so this path needs the same re-check.
+                miniApp.resumeHook = rebuildWhenGranted
+            }
             return root
         }
 
@@ -1990,6 +1995,54 @@ object OeaCameraApp {
         }.getOrNull()
     }
 
+    /**
+     * The MediaStore row [publish] created for one saved file, if this phone has
+     * one. Names carry a millisecond stamp, so a display name is unique to a shot.
+     */
+    private fun publishedCopy(context: Context, name: String): Uri? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        return runCatching {
+            val selection = "${MediaStore.Images.Media.DISPLAY_NAME} = ? AND ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Images.Media._ID),
+                selection,
+                arrayOf(name, "Pictures/OEA%"),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0))
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Removes a photo completely: the private file OEA develops *and* the copy
+     * [publish] put in the device's Pictures collection.
+     *
+     * Deleting only the private one left the picture in every other gallery, and
+     * EMAGE's merge (one picture from the two copies, keyed on the name) stopped
+     * matching, so the "deleted" photo came back on the next scan.
+     */
+    private fun deleteSavedPhoto(context: Context, file: File) {
+        val published = publishedCopy(context, file.name)
+        runCatching { file.delete() }
+        if (published != null) runCatching { context.contentResolver.delete(published, null, null) }
+    }
+
+    /** Keeps the published copy in step with a file a touch-up pass just rewrote. */
+    private fun syncPublishedCopy(context: Context, file: File) {
+        val published = publishedCopy(context, file.name) ?: return
+        runCatching {
+            context.contentResolver.openOutputStream(published, "wt")?.use { out ->
+                file.inputStream().use { it.copyTo(out) }
+            }
+        }
+    }
+
     /** Makes the file visible to EMAGE, the system gallery and other apps, once. */
     private fun publish(context: Context, file: File) {
         runCatching {
@@ -2092,7 +2145,7 @@ object OeaCameraApp {
                     kit.tonalButton("Delete") {
                         dialog.dismiss()
                         kit.confirm("Delete photo?", file.name, "Delete", destructive = true) {
-                            file.delete()
+                            deleteSavedPhoto(host, file)
                             runCatching { OeaThumbnails.invalidateAll() }
                             runCatching { OeaWidgetStudio.refreshWidgets(host, "camera") }
                         }
@@ -2121,6 +2174,9 @@ object OeaCameraApp {
     private fun applyEffectToFile(host: Activity, file: File, mode: CaptureMode, blurFaces: Boolean, preview: ImageView) {
         CAPTURE.execute {
             val done = runCatching { OeaCameraEffects.applyToFile(file, mode, blurFaces) }.getOrDefault(false)
+            // The file was rewritten: the copy in the device's collection still
+            // holds the old pixels, so the gallery would show the un-touched photo.
+            if (done) syncPublishedCopy(host, file)
             host.runOnUiThread {
                 if (host.isDestroyed) return@runOnUiThread
                 if (!done) {
@@ -2431,7 +2487,6 @@ object OeaCameraApp {
 
         private var recorder: MediaRecorder? = null
         private var recordingFile: File? = null
-        private var recordPreviewSurface: Surface? = null
 
         private val surfaceListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
@@ -3174,9 +3229,15 @@ object OeaCameraApp {
          */
         private fun applyExposure(builder: CaptureRequest.Builder) {
             val steps = exposureSteps(activity)
-            if (steps == 0) return
             val chars = characteristics() ?: return
             val range = runCatching { chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) }.getOrNull() ?: return
+            if (steps == 0) {
+                // The builder outlives one frame: it is the repeating preview
+                // request. Returning early here left the previous compensation on
+                // it, so the chip said "EV 0" while the camera stayed at "+3".
+                set(builder, CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, 0.coerceIn(range.lower, range.upper))
+                return
+            }
             val step = runCatching { chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP) }.getOrNull() ?: return
             val denominator = step.denominator.toDouble()
             if (step.numerator == 0 || denominator == 0.0) return
@@ -3243,10 +3304,12 @@ object OeaCameraApp {
                 }
                 recorder = created
                 val recorderSurface = created.surface
-                texture.setDefaultBufferSize(size.width, size.height)
-                runCatching { recordPreviewSurface?.release() }
-                val previewSurfaceForRecording = Surface(texture)
-                recordPreviewSurface = previewSurfaceForRecording
+                // The record session previews through the viewfinder's own surface,
+                // at the viewfinder's own buffer size. Resizing the texture to the
+                // video size here left the preview stretched for the whole clip:
+                // setTransform had been computed for the old buffer dimensions and
+                // was only recomputed when the still session came back.
+                val previewSurfaceForRecording = previewSurface ?: Surface(texture).also { previewSurface = it }
                 runCatching { session?.close() }
                 session = null
                 val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
@@ -3313,8 +3376,6 @@ object OeaCameraApp {
             }
             runCatching { session?.close() }
             session = null
-            runCatching { recordPreviewSurface?.release() }
-            recordPreviewSurface = null
             val file = recordingFile
             recordingFile = null
             if (!keepFile) {
