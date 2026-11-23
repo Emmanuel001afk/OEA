@@ -7,11 +7,13 @@ flow through (`OeaMiniAppActivity`, `OeaMediaLibrary`, `OeaThumbnails`,
 Every finding is a code fact from this tree, and every one listed under
 "What was wrong" was repaired in this change set.
 
-Verification boundary, stated up front: this workspace has **no JDK and no
-Android SDK**, so nothing here was compiled or run. The CI camera guards and the
-JVM optics suite were checked by inspection and by running the guard greps
-locally; the conclusions that need a phone (preview orientation, HAL behaviour,
-timing on pause) are listed in §5 and were not observed.
+Verification: the branch was compiled and tested by this repository's own
+workflow (`OEA Launcher APK`, run
+[45264419509](https://github.com/Emmanuel001afk/OEA/actions/runs/45264419509), PR
+#148) — static check, Kotlin compile of launcher/engine/arcade, the camera
+geometry JVM suite, every guard step and the APK build all green, with the
+release publication correctly skipped. What that run cannot tell you is how a
+vendor HAL behaves; those items are in §5 and were not observed on a phone.
 
 ---
 
@@ -171,15 +173,25 @@ this change cannot rotate existing pictures.
 
 ---
 
-## 4. Verification done here
+## 4. Verification
 
-* Every `Verify the camera and the torch` grep in `.github/workflows/oea-apk.yml`
-  re-run locally against the changed tree: 39 checks, 0 failures.
-* `OeaCameraOpticsTest` gained `aTurnedJpegThatAlreadyHasTheShapeNeedsNoPixelWork`,
-  which pins the 4:3-buffer/3:4-request case that used to force the downscale
-  (not executed: no JDK in this workspace).
-* Brace/paren balance and a line-by-line read of every changed hunk. That is static
-  review, not compilation.
+* **CI, on this branch**: static check, `Compile Kotlin (launcher, engine,
+  arcade)`, `Camera geometry regression tests`, `Run engine and game unit tests`,
+  all seventeen guard steps and the APK build — green
+  ([run 45264419509](https://github.com/Emmanuel001afk/OEA/actions/runs/45264419509)).
+  The `Verify the camera and the torch` step gained guards for each fix above, so
+  the wiring cannot quietly regress.
+* **Locally, before pushing**: every changed file parsed under the Kotlin 2.4 front
+  end (no syntax errors, only unresolved Android/AndroidX symbols — this workspace
+  has no SDK); `OeaCameraOpticsTest` was executed on a JVM against stub JUnit —
+  18/18 green, including the new
+  `aTurnedJpegThatAlreadyHasTheShapeNeedsNoPixelWork`; the camera guard step was
+  extracted from the workflow and executed (90 lines); `tools/check-kotlin.py`
+  passed; the workflow YAML still parses.
+
+What none of that covers is the phone: preview orientation and flash behaviour on
+a particular HAL, timing on pause/resume, and the resolution figure in the
+captured-photo sheet. That is §5.
 
 ---
 
