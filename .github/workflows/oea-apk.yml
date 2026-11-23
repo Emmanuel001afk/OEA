@@ -414,6 +414,52 @@ jobs:
           # The glass drift reuses its colour stops and redraws at half rate.
           grep -Fq 'CAUSTIC_STOPS' "$GLASS"
           grep -Fq 'causticFrame % 2' "$GLASS"
+      - name: VIP subtitle regression tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaSubtitlesTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-vip.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-vip.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the VIP work
+        run: |
+          set -euo pipefail
+          SRC=oea/src/main/java/com/oea/launcher/miniapps
+          PLAYER=$SRC/OeaVipPlayerActivity.kt
+          FRAMES=$SRC/OeaVipFrames.kt
+          SERVICE=$SRC/OeaVipAudioService.kt
+          SUBS=$SRC/OeaSubtitles.kt
+          # Frames are opened, read and released on one owned thread, never on the UI one.
+          grep -Fq 'internal class OeaVipFrames' "$FRAMES"
+          grep -Fq 'getScaledFrameAtTime' "$FRAMES"
+          grep -Fq 'fun close()' "$FRAMES"
+          grep -Fq 'frames?.open(' "$PLAYER"
+          ! grep -Fq 'MediaMetadataRetriever' "$PLAYER"
+          # A subtitle probe that finishes late cannot paint over the next clip.
+          grep -Fq 'sequence != subtitleSeq' "$PLAYER"
+          # Focus is handed back when VIP stops making noise, not only when it dies.
+          grep -Fq 'private fun releaseFocus()' "$PLAYER"
+          grep -Fqx '            releaseFocus()' "$PLAYER"
+          grep -Fqx '            requestFocus()' "$PLAYER"
+          grep -Fqx '        releaseFocus()' "$PLAYER"
+          # The background-audio notification can actually be posted on Android 13+.
+          grep -Fq 'POST_NOTIFICATIONS' "$PLAYER"
+          grep -Fq 'askNotificationPermission()' "$PLAYER"
+          grep -Fq 'BigTextStyle' "$SERVICE"
+          ! grep -Fq 'InboxStyle' "$SERVICE"
+          # A foreground service always shows its notification, even to stop itself.
+          grep -Fq 'private fun ensureForeground()' "$SERVICE"
+          grep -Fq 'ensureForeground()' "$SERVICE"
+          # A PiP refusal that comes back as false falls through to OEA's own window.
+          grep -Fq 'if (!entered) oeaPip()' "$PLAYER"
+          # A paused player stops repainting the same position four times a second.
+          grep -Fq 'at != lastPaintedMs' "$PLAYER"
+          # The subtitle reader keeps a BOM and a cue number out of the dialogue.
+          grep -Fq 'removePrefix("\uFEFF")' "$SUBS"
+          ! grep -Fq 'CUE_ID' "$SUBS"
+          grep -Fq 'lines.drop(timeAt + 1)' "$SUBS"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

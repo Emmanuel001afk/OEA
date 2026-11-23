@@ -74,7 +74,10 @@ object OeaSubtitles {
 
     /** Parses SRT/VTT (and only strips the tags SSA/ASS would need, refusing the rest). */
     fun parse(name: String, raw: String): Track? {
-        val normalised = raw.replace("\r\n", "\n").replace("\r", "\n")
+        // A byte-order mark is not text: left in place it glued the first cue's index
+        // ("1") onto the first line of dialogue, because that line no longer looked
+        // like a number. Subtitle files written on Windows carry one routinely.
+        val normalised = raw.removePrefix("\uFEFF").replace("\r\n", "\n").replace("\r", "\n")
         // The cue list and the track have to be built in one place: the old shape put
         // `?.let` on the last branch only, so a WebVTT file returned a bare cue list
         // and the caller never saw a track at all.
@@ -93,15 +96,16 @@ object OeaSubtitles {
     private fun parseSrt(text: String): List<Cue> {
         val cues = ArrayList<Cue>(256)
         val blocks = text.split(Regex("\n{2,}"))
-        var index = 0
-        while (index < blocks.size) {
-            val block = blocks[index].trim()
-            index++
-            if (block.isEmpty()) continue
-            val lines = block.split('\n')
-            val timeLine = lines.firstOrNull { TIME.matcher(it).find() || SHORT_TIME.matcher(it).find() } ?: continue
-            val span = parseSpan(timeLine) ?: continue
-            val body = lines.filter { it != timeLine && it.trim().toIntOrNull() == null && !CUE_ID.matcher(it.trim()).matches() }
+        for (raw in blocks) {
+            val lines = raw.trim().split('\n')
+            if (lines.isEmpty()) continue
+            val timeAt = lines.indexOfFirst { TIME.matcher(it).find() || SHORT_TIME.matcher(it).find() }
+            if (timeAt < 0) continue
+            val span = parseSpan(lines[timeAt]) ?: continue
+            // Everything before the timing line is a cue number (or an id); everything
+            // after it is dialogue. The old filter also dropped dialogue that happened
+            // to be a number — "1984", "42" — because it removed every numeric line.
+            val body = lines.drop(timeAt + 1)
                 .joinToString("\n") { clean(it) }
                 .trim()
             if (body.isEmpty()) continue
@@ -110,17 +114,19 @@ object OeaSubtitles {
         return cues.sortedBy { it.startMs }
     }
 
-    private val CUE_ID = Pattern.compile("""\d{1,7}""")
-
     private fun parseVtt(text: String): List<Cue> {
         val cues = ArrayList<Cue>(256)
         val body = text.substringAfter("WEBVTT", text)
         body.split(Regex("\n{2,}")).forEach { block ->
             val trimmed = block.trim()
             if (trimmed.isEmpty() || trimmed.startsWith("NOTE") || trimmed.startsWith("STYLE") || trimmed.startsWith("REGION")) return@forEach
-            val timeLine = trimmed.lineSequence().firstOrNull { it.contains("-->") } ?: return@forEach
-            val span = parseSpan(timeLine) ?: return@forEach
-            val caption = trimmed.lines().filter { it != timeLine }.joinToString("\n") { clean(it) }.trim()
+            val lines = trimmed.lines()
+            val timeAt = lines.indexOfFirst { it.contains("-->") }
+            if (timeAt < 0) return@forEach
+            val span = parseSpan(lines[timeAt]) ?: return@forEach
+            // WebVTT lets a cue carry an identifier line above its timing. Everything
+            // before the timing is a label for the file, not words on the screen.
+            val caption = lines.drop(timeAt + 1).joinToString("\n") { clean(it) }.trim()
             if (caption.isEmpty()) return@forEach
             cues.add(Cue(span.first, span.second, caption))
         }
