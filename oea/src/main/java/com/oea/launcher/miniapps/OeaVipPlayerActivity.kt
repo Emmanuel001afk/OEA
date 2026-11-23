@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -103,7 +104,6 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private var sleepDeadline = 0L
     private var sleepAfterClip = false
     private var brightness = -1f
-    private var lastSavedAt = 0L
     private var previewSeq = 0
     private var subtitleSeq = 0
     private var lastPaintedMs = -1L
@@ -121,6 +121,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private var rotation = OeaVipStore.Rotation.AUTO
     private var loop = OeaVipStore.Loop.OFF
     private var speed = 1f
+    /* What the decoder is actually running at — a device may refuse a rate. */
+    private var appliedSpeed = 1f
+    /* Cover art for the notification and the lock screen, read off the frame thread. */
+    private var artwork: Bitmap? = null
     private var subtitlesOn = true
     private var subtitleTrack: OeaSubtitles.Track? = null
     private var subtitleOffset = 0L
@@ -633,7 +637,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 } else {
                     seeking = false
                     thumbPreview.visibility = View.GONE
-                    seekTo(target)
+                    jumpTo(target)
                     scheduleHide()
                 }
             }
@@ -715,7 +719,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 }
                 isClickable = true
                 setOnClickListener {
-                    seekTo(0L)
+                    jumpTo(0L)
                     resumeBar.visibility = View.GONE
                 }
             }
@@ -801,6 +805,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         // the old retriever is released on its own thread instead of on the UI one.
         frames?.close()
         frames = OeaVipFrames()
+        artwork = null
         lastPaintedMs = -1L
         player?.let { old ->
             runCatching { old.reset(); old.release() }
@@ -910,8 +915,26 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
      */
     private fun openFrames() {
         val entry = current() ?: return
-        if (isAudio) return
+        if (isAudio) {
+            // No frames under the scrubber for a song, but the shade wants a cover.
+            if (OeaVipStore.backgroundAudio(this)) loadArtwork(entry)
+            return
+        }
         frames?.open(this, entry.uri)
+    }
+
+    /**
+     * The picture on the notification, the lock screen and a car's display. Read on
+     * the frame thread (embedded cover art where the file has it, a frame from ten
+     * seconds in otherwise), then handed to the service once it arrives.
+     */
+    private fun loadArtwork(entry: Entry) {
+        if (artwork != null) return
+        frames?.open(this, entry.uri)
+        frames?.artwork(ARTWORK_SIZE, ARTWORK_AT_MS) { bitmap ->
+            artwork = bitmap
+            if (OeaVipAudioService.running) syncService()
+        }
     }
 
     private fun showPreview(at: Long) {
@@ -1021,9 +1044,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
      * clip, then never again.
      */
     private fun maybeShowGestureHint() {
-        val prefs = getSharedPreferences("oea_vip", Context.MODE_PRIVATE)
-        if (prefs.getBoolean("hint_gestures", false)) return
-        prefs.edit().putBoolean("hint_gestures", true).apply()
+        if (OeaVipStore.hintSeen(this)) return
+        OeaVipStore.setHintSeen(this, true)
         handler.postDelayed({
             flash("Slide left = brightness • right = volume • double-tap = seek • hold = 2×")
             handler.postDelayed({ flash("Tap once for controls • lock keeps them still") }, 2600L)
@@ -1118,10 +1140,15 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         if (!prepared) return
         val now = runCatching { player?.currentPosition?.toLong() ?: 0L }.getOrDefault(0L)
         val limit = if (durationMs > 0L) durationMs else Int.MAX_VALUE.toLong()
-        seekTo((now + delta).coerceIn(0L, limit))
+        jumpTo((now + delta).coerceIn(0L, limit))
     }
 
-    private fun seekTo(target: Long) {
+    /**
+     * `jumpTo`, not `seekTo`: [OeaVipAudioService.Control] declares `seekTo(position)`
+     * for the lock screen and a car, and a private method of the same signature would
+     * have had the override call itself.
+     */
+    private fun jumpTo(target: Long) {
         if (!prepared) return
         val mp = player ?: return
         runCatching { if (Build.VERSION.SDK_INT >= 26) mp.seekTo(target, MediaPlayer.SEEK_CLOSEST) else mp.seekTo(target.toInt()) }
@@ -1129,23 +1156,35 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         scrub.positionMs = target
         elapsed.text = clock(target)
         saveProgress()
+        // The shade's position is pushed, not polled: one call per seek is what the
+        // old four-second timer was standing in for.
+        syncService()
     }
 
     private fun applySpeed() {
         val mp = player ?: return
         val value = if (boosting) (speed * 2f).coerceAtMost(4f) else speed
+        var applied = value
         runCatching {
             val params = mp.playbackParams
             params.speed = value
+            // Faster without going up: the pitch stays where it was, so 1.5× is the
+            // same voice sooner rather than a chipmunk. Devices that time-stretch
+            // already did this; the ones that resample did not.
+            params.pitch = 1f
             mp.playbackParams = params
+            // Some decoders clamp or refuse a rate. Ask what took rather than
+            // printing a number the player is not running at.
+            applied = runCatching { mp.playbackParams.speed }.getOrDefault(value)
         }
-        speedPill.text = OeaVipStore.speedLabel(value) + if (boosting) " held" else ""
+        appliedSpeed = applied
+        speedPill.text = OeaVipStore.speedLabel(applied) + if (boosting) " held" else ""
+        syncService()
     }
 
     private fun saveProgress() {
         val entry = current() ?: return
         if (durationMs <= 0L) return
-        lastSavedAt = SystemClock.elapsedRealtime()
         OeaVipStore.rememberPosition(this, entry.uri, positionMs, durationMs)
     }
 
@@ -1176,7 +1215,6 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 if (sleepPill.visibility != View.VISIBLE) sleepPill.visibility = View.VISIBLE
             }
         }
-        if (OeaVipAudioService.running && SystemClock.elapsedRealtime() - lastSavedAt > 4_000L) syncService()
     }
 
     private fun pauseForSleep(reason: String) {
@@ -1636,7 +1674,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         playing = runCatching { player?.isPlaying == true }.getOrDefault(false),
         positionMs = positionMs,
         durationMs = durationMs,
-        art = null
+        speed = appliedSpeed,
+        art = artwork
     )
 
     override fun togglePlayPause() = togglePlay()
@@ -1646,6 +1685,12 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     override fun previous() = step(-1)
 
     override fun skipBy(deltaMs: Long) = seekBy(deltaMs)
+
+    /** A lock-screen or car seek: an absolute position, clamped to the clip. */
+    override fun seekTo(positionMs: Long) {
+        val limit = if (durationMs > 0L) durationMs else positionMs.coerceAtLeast(0L)
+        jumpTo(positionMs.coerceIn(0L, limit))
+    }
 
     override fun dismiss() {
         saveProgress()
@@ -1985,7 +2030,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             panel.switch(info, R.drawable.oic_music_note, "Audio keeps playing", "Music continues when you leave VIP",
                 OeaVipStore.backgroundAudio(this)) { value ->
                 OeaVipStore.setBackgroundAudio(this, value)
-                if (value) askNotificationPermission()
+                if (value) {
+                    askNotificationPermission()
+                    current()?.let { loadArtwork(it) }
+                }
                 syncService()
             }
             panel.switch(info, R.drawable.oic_play_arrow, "Next clip automatically", "When one ends, start the next in the queue",
@@ -2326,6 +2374,12 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
         private const val REQUEST_SUBTITLE = 4321
         private const val REQUEST_NOTIFICATIONS = 4322
+
+        /** Big enough for the shade and a lock screen, small enough to be free. */
+        private const val ARTWORK_SIZE = 512
+
+        /** Where a cover is taken from when a file carries no embedded art. */
+        private const val ARTWORK_AT_MS = 10_000L
         private const val ACTION_PIP_PLAY = "com.oea.launcher.vip.PIP_PLAY"
         private const val ACTION_PIP_PREV = "com.oea.launcher.vip.PIP_PREV"
         private const val ACTION_PIP_NEXT = "com.oea.launcher.vip.PIP_NEXT"

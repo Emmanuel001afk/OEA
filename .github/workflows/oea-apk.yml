@@ -414,10 +414,13 @@ jobs:
           # The glass drift reuses its colour stops and redraws at half rate.
           grep -Fq 'CAUSTIC_STOPS' "$GLASS"
           grep -Fq 'causticFrame % 2' "$GLASS"
-      - name: VIP subtitle regression tests
+      - name: VIP subtitle and cover-art regression tests
         run: |
           set -o pipefail
-          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaSubtitlesTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-vip.log"; then
+          if ! ./gradlew :oea:testDebugUnitTest \
+              --tests 'com.oea.launcher.miniapps.OeaSubtitlesTest' \
+              --tests 'com.oea.launcher.miniapps.OeaVipFramesTest' \
+              --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-vip.log"; then
             { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-vip.log" || true; } | head -60 | while IFS= read -r line; do
               printf '::error::%s\n' "${line//%/%25}"
             done
@@ -431,31 +434,58 @@ jobs:
           FRAMES=$SRC/OeaVipFrames.kt
           SERVICE=$SRC/OeaVipAudioService.kt
           SUBS=$SRC/OeaSubtitles.kt
+          STORE=$SRC/OeaVipStore.kt
           # Frames are opened, read and released on one owned thread, never on the UI one.
           grep -Fq 'internal class OeaVipFrames' "$FRAMES"
           grep -Fq 'getScaledFrameAtTime' "$FRAMES"
           grep -Fq 'fun close()' "$FRAMES"
           grep -Fq 'frames?.open(' "$PLAYER"
           ! grep -Fq 'MediaMetadataRetriever' "$PLAYER"
-          # A subtitle probe that finishes late cannot paint over the next clip.
-          grep -Fq 'sequence != subtitleSeq' "$PLAYER"
-          # Focus is handed back when VIP stops making noise, not only when it dies.
+          # Cover art is decoded with a sample factor instead of at full resolution.
+          grep -Fq 'inSampleSize = sampleSize(' "$FRAMES"
+          grep -Fq 'internal fun sampleSize(' "$FRAMES"
+          grep -Fq 'art = artwork' "$PLAYER"
+          grep -Fq 'fun artwork(size: Int, atMs: Long' "$FRAMES"
+          # The service publishes a real MediaSession: lock screen, car, island, carousel.
+          grep -Fq 'MediaSession(this, SESSION_TAG)' "$SERVICE"
+          grep -Fq 'Notification.MediaStyle()' "$SERVICE"
+          grep -Fq '.setMediaSession(session?.sessionToken)' "$SERVICE"
+          grep -Fq 'setPlaybackState(playback)' "$SERVICE"
+          grep -Fq 'setMetadata(metadata)' "$SERVICE"
+          grep -Fq 'MediaMetadata.METADATA_KEY_ALBUM_ART' "$SERVICE"
+          grep -Fq 'isActive = true' "$SERVICE"
+          grep -Fq 'session?.release()' "$SERVICE"
+          ! grep -Fq 'InboxStyle' "$SERVICE"
+          ! grep -Fq 'BigTextStyle' "$SERVICE"
+          # Media buttons belong to the session, not to a hand-registered receiver.
+          ! grep -Fq 'ACTION_MEDIA_BUTTON' "$SERVICE"
+          ! grep -Fq 'abortBroadcast' "$SERVICE"
+          # A foreground service always shows its notification, even to stop itself.
+          grep -Fq 'private fun ensureForeground()' "$SERVICE"
+          grep -Fq 'ensureForeground()' "$SERVICE"
+          # The shade is pushed on events, not nudged every four seconds.
+          ! grep -Fq '4_000L) syncService' "$PLAYER"
+          grep -Fq 'override fun seekTo(positionMs: Long)' "$PLAYER"
+          grep -Fq 'private fun jumpTo(target: Long)' "$PLAYER"
           grep -Fq 'private fun releaseFocus()' "$PLAYER"
           grep -Fqx '            releaseFocus()' "$PLAYER"
           grep -Fqx '            requestFocus()' "$PLAYER"
           grep -Fqx '        releaseFocus()' "$PLAYER"
+          # Speed keeps the pitch, and the pill reports what the decoder took.
+          grep -Fq 'params.pitch = 1f' "$PLAYER"
+          grep -Fq 'appliedSpeed = applied' "$PLAYER"
+          grep -Fq 'speed = appliedSpeed' "$PLAYER"
           # The background-audio notification can actually be posted on Android 13+.
           grep -Fq 'POST_NOTIFICATIONS' "$PLAYER"
           grep -Fq 'askNotificationPermission()' "$PLAYER"
-          grep -Fq 'BigTextStyle' "$SERVICE"
-          ! grep -Fq 'InboxStyle' "$SERVICE"
-          # A foreground service always shows its notification, even to stop itself.
-          grep -Fq 'private fun ensureForeground()' "$SERVICE"
-          grep -Fq 'ensureForeground()' "$SERVICE"
           # A PiP refusal that comes back as false falls through to OEA's own window.
           grep -Fq 'if (!entered) oeaPip()' "$PLAYER"
           # A paused player stops repainting the same position four times a second.
           grep -Fq 'at != lastPaintedMs' "$PLAYER"
+          # The gesture hint is a store setting, not a second preferences file.
+          grep -Fq 'fun hintSeen(context: Context)' "$STORE"
+          grep -Fq 'OeaVipStore.hintSeen(this)' "$PLAYER"
+          ! grep -Fq 'getSharedPreferences("oea_vip"' "$PLAYER"
           # The subtitle reader keeps a BOM and a cue number out of the dialogue.
           grep -Fq 'removePrefix("\uFEFF")' "$SUBS"
           ! grep -Fq 'CUE_ID' "$SUBS"
