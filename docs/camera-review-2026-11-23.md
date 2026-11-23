@@ -7,11 +7,16 @@ flow through (`OeaMiniAppActivity`, `OeaMediaLibrary`, `OeaThumbnails`,
 Every finding is a code fact from this tree, and every one listed under
 "What was wrong" was repaired in this change set.
 
-Verification boundary, stated up front: this workspace has **no JDK and no
-Android SDK**, so nothing here was compiled or run. The CI camera guards and the
-JVM optics suite were checked by inspection and by running the guard greps
-locally; the conclusions that need a phone (preview orientation, HAL behaviour,
-timing on pause) are listed in §5 and were not observed.
+Verification, stated up front: the repair was compiled, unit-tested and packaged
+by this repository's own workflow before it merged — [`OEA Launcher APK`, run
+45264419509](https://github.com/Emmanuel001afk/OEA/actions/runs/45264419509) on
+PR #148, merged as `071aaa8`. Static check, `Compile Kotlin (launcher, engine,
+arcade)`, `Camera geometry regression tests` (a real `:oea:testDebugUnitTest`
+run of `OeaCameraOpticsTest`), all fifty-five camera guard checks, and both APK
+builds came back green; publishing the release was correctly skipped because the
+branch was not `main`. What that run cannot tell you is how a particular vendor
+HAL behaves — preview orientation on a given phone, flash on auto, pause timing
+under load — and those items are listed in §5 and were not observed on hardware.
 
 ---
 
@@ -171,15 +176,34 @@ this change cannot rotate existing pictures.
 
 ---
 
-## 4. Verification done here
+## 4. Verification
 
-* Every `Verify the camera and the torch` grep in `.github/workflows/oea-apk.yml`
-  re-run locally against the changed tree: 39 checks, 0 failures.
-* `OeaCameraOpticsTest` gained `aTurnedJpegThatAlreadyHasTheShapeNeedsNoPixelWork`,
-  which pins the 4:3-buffer/3:4-request case that used to force the downscale
-  (not executed: no JDK in this workspace).
-* Brace/paren balance and a line-by-line read of every changed hunk. That is static
-  review, not compilation.
+**In CI, on the merged tree.** Run
+[45264419509](https://github.com/Emmanuel001afk/OEA/actions/runs/45264419509)
+(`build-apk` and `build-laptop-apk`, both green):
+
+* `Static check (Kotlin structure, app registration, manifests)` — 295 sources.
+* `Compile Kotlin (launcher, engine, arcade)` — the whole launcher compiles,
+  which is what makes these repairs code rather than a proposal.
+* `Camera geometry regression tests` — `./gradlew :oea:testDebugUnitTest --tests
+  com.oea.launcher.camera.OeaCameraOpticsTest`, including the new
+  `aTurnedJpegThatAlreadyHasTheShapeNeedsNoPixelWork`, which pins the
+  4:3-buffer/3:4-request case that used to force the ~5 MP downscale.
+* `Verify the camera and the torch` — now fifty-five checks, one for each wiring
+  fact above (`permissionHook = rebuildWhenGranted`, `bufferMatchesRequest`,
+  `deleteSavedPhoto`, `publishVideo`, `release(quitThread = false)`/`pauseNow`,
+  and `OeaPhotoDecode.upright` in each of the six readers), so none of it can
+  quietly regress.
+* Both APKs build; sizes are reported on the PR.
+
+**Locally, before pushing** (this workspace has no Android SDK, so these are
+front-end and JVM checks, not a Gradle build): every changed source parsed under
+the Kotlin 2.x front end with no syntax errors — only unresolved Android/AndroidX
+symbols; `OeaCameraOpticsTest` executed on a JVM against stub JUnit, 18/18 green;
+the camera guard step extracted from the workflow and executed, 55/55 green;
+`tools/check-kotlin.py` green; the workflow YAML still parsed.
+
+Nothing above exercises a camera. §5 is the part only a phone can answer.
 
 ---
 
