@@ -195,9 +195,10 @@ notification replaces it on the same tick (`OeaVipAudioService.kt:90-92`, `:128-
 
 ## 4. Verification
 
-The repair was compiled, unit-tested and packaged by this repository's own workflow;
-the run that carries this change set is named in the pull request that merged it, and
-its green result is what this document claims.
+The repair was compiled, unit-tested and packaged by this repository's own workflow:
+[`OEA Launcher APK`, run 45276126005](https://github.com/Emmanuel001afk/OEA/actions/runs/45276126005)
+on PR #152, merged as `4db980c`. Every step listed below came back green, and
+publishing the release was correctly skipped because the branch was not `main`.
 
 * `Static check (Kotlin structure, app registration, manifests)` —
   `tools/check-kotlin.py`: 299 sources, brackets balanced, manifests consistent
