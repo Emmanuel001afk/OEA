@@ -110,6 +110,10 @@ who already dismissed the hint sees it a second time.
 
 ## 7. Verification
 
+Everything below ran in [`OEA Launcher APK`, run 45280192021](https://github.com/Emmanuel001afk/OEA/actions/runs/45280192021)
+on PR #154, merged as `049f78e`; every step came back green, and publishing the
+release was correctly skipped because the branch was not `main`.
+
 * `VIP subtitle and cover-art regression tests` — `:oea:testDebugUnitTest` of
   `OeaSubtitlesTest` (12 cases) and the new `OeaVipFramesTest` (5 cases over the
   sample-size arithmetic).
@@ -122,9 +126,8 @@ who already dismissed the hint sees it a second time.
   to `jumpTo`; and the *absence* of the four-second nudge.
 * Static check (`tools/check-kotlin.py`): 300 sources, brackets balanced, manifests
   consistent.
-* The Kotlin compile, the camera and search tests, the responsiveness guards and both
-  APK builds run in the same job; the run that carries this change set is named in the
-  pull request that merged it.
+* The Kotlin compile (`Compile Kotlin (launcher, engine, arcade)`), the camera and
+  search tests, the responsiveness guards and both APK builds ran in the same run.
 
 Not verifiable here: no Android SDK, no phone, no car head unit. Nothing in this pass
 was compiled on this machine — the CI job's green result is the claim.
