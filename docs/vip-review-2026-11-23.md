@@ -164,34 +164,36 @@ notification replaces it on the same tick (`OeaVipAudioService.kt:90-92`, `:128-
 
 ---
 
-## 3. What this pass did not change, and why
+## 3. What this pass did not change, and what a follow-up closed
 
-* **No `MediaSession`.** VIP's background audio uses a hand-rolled notification plus
-  `ACTION_MEDIA_BUTTON` receiver. That works, but the system's media resumption
-  carousel, the lock-screen player and Bluetooth AVRCP metadata all read a
-  `MediaSession`, which VIP does not publish — so the phone shows no title or artist
-  on a car screen. Replacing the receiver with a session changes which component
-  handles every media button; with no device here to check double-handling or headset
-  ordering, that is a change to make with a phone in hand, not blind.
-* **The notification has no artwork.** `status()` returns `art = null`
-  (`OeaVipPlayerActivity.kt:1633-1640`); `Status.art` is wired through to
-  `setLargeIcon` but nothing ever fills it. Adding it means reading embedded album art
-  or a poster frame off the UI thread for every background-audio session — a feature,
-  scheduled after the session work above, not a repair.
-* **Speed changes go through `playbackParams`.** Whether the pitch is corrected is a
-  property of the device's decoder, not of VIP; nothing here can promise it.
-* **The service is nudged every four seconds** while it is up
-  (`OeaVipPlayerActivity.kt:1179`). That is deliberate — it keeps the progress bar
-  moving without a per-second IPC — and a seek updates the shade on the next beat.
-* **`maybeShowGestureHint()` uses a different preferences file** (`oea_vip`) from the
-  store (`oea_vip_v3`), so the one-time hint flag sits apart from the settings. It is
-  harmless and moving it would show the hint a second time to everyone who has seen
-  it, so it stays.
-* **Audio-only detection is by file extension** (`AUDIO_ONLY` in the companion). A
-  video container with no video track is still treated as video; the player copes, it
-  just does not hide the surface.
+This pass listed five things it deliberately left alone. Four of them were closed
+immediately afterwards in [VIP playback session](vip-playback-session-2026-11-23.md),
+because "the notification only works while VIP is in front of you" is a poorer answer
+than the feature deserves:
 
----
+* **No `MediaSession`** — closed. The service now publishes a platform `MediaSession`
+  with metadata, cover art, playback state and transport callbacks, so the lock
+  screen, a car's Bluetooth display, the media resumption carousel and OEA's own
+  Dynamic Island and glance card can all see and drive VIP. The hand-registered
+  `ACTION_MEDIA_BUTTON` receiver went with it.
+* **The notification had no artwork** — closed. `Status.art` is filled from the file's
+  embedded cover or a frame ten seconds in, decoded with a sampled bitmap.
+* **Speed changes went through `playbackParams` and left the pitch to the device** —
+  closed. `pitch` is pinned to 1, and the speed pill reports the rate the decoder
+  actually took.
+* **The service was nudged every four seconds** — closed. The position lives in
+  `PlaybackState` and the framework extrapolates it; the service is published on play,
+  pause, seek, speed, clip change, start and stop instead of on a timer.
+* **`maybeShowGestureHint()` used a separate preferences file** — closed. The flag is
+  an `OeaVipStore` setting, read through from the old file once so nobody sees the hint
+  twice.
+
+Still not changed:
+
+* **Audio-only detection is by file extension** (`AUDIO_ONLY` in the player's
+  companion). A video container with no video track is treated as video; the player
+  copes, it just does not hide the surface. Fixing it properly means asking the
+  extractor, which is a different feature.
 
 ## 4. Verification
 

@@ -27,6 +27,10 @@ object OeaVipStore {
     private const val KEY_SUB_ON = "subtitle_enabled"
     private const val KEY_SUBTITLES = "subtitle_files"
     private const val KEY_HIDE_CONTROLS = "hide_controls_ms"
+    private const val KEY_HINT = "hint_gestures_seen"
+
+    /** The file the player used to keep its one-time flag in, before it had a store. */
+    private const val LEGACY_PREFS = "oea_vip"
     private const val KEY_ROTATION = "rotation"
     private const val SEP_ROW = "\u001E"
     private const val SEP_FIELD = "\u001F"
@@ -240,6 +244,24 @@ object OeaVipStore {
     fun setSubtitlesOn(context: Context, value: Boolean) = prefs(context).edit().putBoolean(KEY_SUB_ON, value).apply()
 
     fun hideControlsAfter(context: Context): Long = prefs(context).getLong(KEY_HIDE_CONTROLS, 3800L)
+
+    /**
+     * Whether the gesture hint has been shown. It is a player setting like any other,
+     * so it lives here now; the old flag is read through once, so the hint is not
+     * shown a second time to everyone who already dismissed it.
+     */
+    fun hintSeen(context: Context): Boolean {
+        val store = prefs(context)
+        if (store.contains(KEY_HINT)) return store.getBoolean(KEY_HINT, false)
+        val legacy = runCatching {
+            context.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE).getBoolean("hint_gestures", false)
+        }.getOrDefault(false)
+        if (legacy) setHintSeen(context, true)
+        return legacy
+    }
+
+    fun setHintSeen(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean(KEY_HINT, value).apply()
     fun setHideControlsAfter(context: Context, value: Long) = prefs(context).edit().putLong(KEY_HIDE_CONTROLS, value).apply()
 
     /** The label a list shows beside a clip: "12:03 of 48:10" or "Unwatched". */
