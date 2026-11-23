@@ -161,13 +161,15 @@ what a launcher's Home button does.
 
 ## 4. Verification
 
-* **CI, on this branch**: `Compile Kotlin (launcher, engine, arcade)`,
-  `Camera geometry regression tests`, the new `Search ranking regression tests`,
-  `Verify the responsiveness work` (13 guards: `peek`/`request` exist and the tile
-  binder uses them, no `icons.icon(` left in the workspace, `appIconAsync` in the
-  kit, `searchIndex.score` in the drawer and no `Normalizer` left there, one
-  workspace parse per rebuild, cached caustic stops), the static check, both APK
-  builds — see the pull request for the run.
+* **CI, on this branch**: run
+  [45270596278](https://github.com/Emmanuel001afk/OEA/actions/runs/45270596278) —
+  `Static check`, `Compile Kotlin (launcher, engine, arcade)`, `Camera geometry
+  regression tests`, the new `Search ranking regression tests` (the JVM test class
+  above, through Gradle), the new `Verify the responsiveness work` step (13 guards:
+  `peek`/`request` exist and the tile binder uses them, no `icons.icon(` left in the
+  workspace, `appIconAsync` in the kit, `searchIndex.score` in the drawer with no
+  `Normalizer` left there, one workspace parse per rebuild, cached caustic stops),
+  and both APK builds. Release publication is correctly skipped off `main`.
 * **Locally**: `OeaSearchIndexTest` 9/9 on a JVM (stub JUnit, run before CI saw it);
   the responsiveness guard step executed from the workflow file, 13/13; the
   benchmark quoted in §1.2; `tools/check-kotlin.py` green over 297 sources; every
