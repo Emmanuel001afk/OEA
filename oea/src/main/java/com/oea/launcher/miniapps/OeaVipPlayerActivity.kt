@@ -16,7 +16,6 @@ import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
@@ -88,7 +87,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     private var player: MediaPlayer? = null
     private var fx: OeaVipAudioFx? = null
-    private var retriever: MediaMetadataRetriever? = null
+    private var frames: OeaVipFrames? = null
     private var durationMs = 0L
     private var positionMs = 0L
     private var videoWidth = 0
@@ -106,6 +105,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private var brightness = -1f
     private var lastSavedAt = 0L
     private var previewSeq = 0
+    private var subtitleSeq = 0
+    private var lastPaintedMs = -1L
 
     // One brightness/volume slide. The value is read ONCE, when the slide
     // starts, and the finger's displacement from that point is what moves it.
@@ -796,8 +797,11 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         index = at
         saveProgress()
         stopFx()
-        runCatching { retriever?.release() }
-        retriever = null
+        // Frames belong to the clip they were opened on: closing is threaded, so
+        // the old retriever is released on its own thread instead of on the UI one.
+        frames?.close()
+        frames = OeaVipFrames()
+        lastPaintedMs = -1L
         player?.let { old ->
             runCatching { old.reset(); old.release() }
         }
@@ -856,7 +860,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             runCatching { mp.start() }
             onPlayStateChanged()
             loadSidecar()
-            startRetriever()
+            openFrames()
         }
         created.setOnInfoListener { _, what, _ ->
             // MEDIA_INFO_VIDEO_RENDERING_START: the decoder has a frame on screen,
@@ -899,32 +903,28 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }.start()
     }
 
-    private fun startRetriever() {
+    /**
+     * Hands the clip to the frame thread. Nothing is opened here: a `setDataSource`
+     * on the UI thread is a file open and a container parse in the middle of
+     * playback starting, which is the one hitch a player cannot afford.
+     */
+    private fun openFrames() {
         val entry = current() ?: return
         if (isAudio) return
-        retriever = runCatching {
-            MediaMetadataRetriever().apply { setDataSource(this@OeaVipPlayerActivity, entry.uri) }
-        }.getOrNull()
+        frames?.open(this, entry.uri)
     }
 
     private fun showPreview(at: Long) {
-        val grabber = retriever ?: return
+        val grabber = frames ?: return
         if (inPip || isAudio) return
         val sequence = ++previewSeq
-        PREVIEW.execute {
-            val wanted = dp(150) * 16 / 9
-            val bitmap = runCatching {
-                if (Build.VERSION.SDK_INT >= 27) {
-                    grabber.getScaledFrameAtTime(at * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, wanted, dp(150))
-                } else {
-                    grabber.getFrameAtTime(at * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                }
-            }.getOrNull()
-            handler.post {
-                if (sequence != previewSeq || bitmap == null) return@post
-                thumbPreview.setImageBitmap(bitmap)
-                thumbPreview.visibility = View.VISIBLE
-            }
+        // Measured here: dp() reads the display metrics and belongs to the UI thread.
+        val width = dp(150) * 16 / 9
+        val height = dp(150)
+        grabber.frame(at, width, height) { bitmap ->
+            if (sequence != previewSeq || bitmap == null) return@frame
+            thumbPreview.setImageBitmap(bitmap)
+            thumbPreview.visibility = View.VISIBLE
         }
     }
 
@@ -941,6 +941,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         val clip = current()?.uri ?: return
         val remembered = OeaVipStore.subtitleFor(this, clip)
         val from = sidecar
+        val sequence = ++subtitleSeq
         PROBE.execute {
             val app = applicationContext
             val found: Pair<String, OeaSubtitles.Track>? = runCatching {
@@ -960,7 +961,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 }
             }.getOrNull()
             handler.post {
-                if (isDestroyed) return@post
+                // The probe can outlive the clip that asked for it — a big file on a
+                // slow card, a subtitle behind a content provider. Without this token
+                // the previous clip's cues were painted over the one now playing.
+                if (isDestroyed || sequence != subtitleSeq) return@post
                 if (found == null) return@post
                 val (name, track) = found
                 base = track
@@ -1047,9 +1051,11 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             if (playing) Color.BLACK else Color.WHITE
         )
         if (playing) {
+            requestFocus()
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             scheduleHide()
         } else {
+            releaseFocus()
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             saveProgress()
             if (!inPip) setChrome(true)
@@ -1146,11 +1152,18 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private fun tick() {
         val mp = player ?: return
         if (!seeking && prepared) {
-            positionMs = runCatching { mp.currentPosition.toLong() }.getOrDefault(positionMs)
-            scrub.positionMs = positionMs
-            elapsed.text = clock(positionMs)
-            remaining.text = if (durationMs > 0L) "− ${clock((durationMs - positionMs).coerceAtLeast(0L))} left" else "unknown length"
-            paintSubtitle()
+            val at = runCatching { mp.currentPosition.toLong() }.getOrDefault(positionMs)
+            positionMs = at
+            // A paused player reports the same position four times a second. Two
+            // formatted strings and a cue lookup per report is work for nothing, so
+            // the labels repaint when the position moves, not when the timer fires.
+            if (at != lastPaintedMs) {
+                lastPaintedMs = at
+                scrub.positionMs = at
+                elapsed.text = clock(at)
+                remaining.text = if (durationMs > 0L) "− ${clock((durationMs - at).coerceAtLeast(0L))} left" else "unknown length"
+                paintSubtitle()
+            }
         }
         if (runCatching { mp.isPlaying }.getOrDefault(false) != playToggle.selected) onPlayStateChanged()
         if (sleepDeadline > 0L) {
@@ -1408,12 +1421,31 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             toast("A picture-in-picture window needs a video")
             return
         }
-        if (platformPipAvailable()) {
-            runCatching { enterPictureInPictureMode(pipParams()) }
-                .onFailure { oeaPip() }
-            return
+        // enterPictureInPictureMode reports refusal by returning false as often as by
+        // throwing (an OEM that hides the feature, a task that has left the screen).
+        // Both used to end in a row that did nothing at all.
+        val entered = platformPipAvailable() &&
+            runCatching { enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
+        if (!entered) oeaPip()
+    }
+
+    /**
+     * Android 13 hides any notification the app was never allowed to post, and the
+     * background-audio notification is the transport controls — without it the
+     * feature still plays but cannot be paused from the shade or a headset.
+     *
+     * Asked where the user turns the feature on rather than at launch: a permission
+     * dialog on a video player's first frame is noise.
+     */
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val granted = runCatching {
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+        }.getOrDefault(android.content.pm.PackageManager.PERMISSION_DENIED)
+        if (granted == android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        runCatching {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
         }
-        oeaPip()
     }
 
     /** Android's own PiP: a system task this phone may simply not have. */
@@ -1559,7 +1591,27 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             }
             .build()
         focusRequest = request
-        runCatching { audio.requestAudioFocus(request) }
+        val granted = runCatching { audio.requestAudioFocus(request) }
+            .getOrDefault(AudioManager.AUDIOFOCUS_REQUEST_FAILED)
+        // A refusal is not a request we hold: keeping the field non-null here meant
+        // VIP never asked again for the rest of the clip.
+        if (granted != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focusRequest = null
+    }
+
+    /**
+     * Hands the audio back the moment VIP stops making noise.
+     *
+     * Focus used to be abandoned only in `onDestroy`, so a paused VIP sat on the
+     * `AUDIOFOCUS_GAIN` it took while playing: music that ducked or paused for the
+     * video stayed down until the player itself was destroyed.
+     */
+    private fun releaseFocus() {
+        val request = focusRequest ?: return
+        focusRequest = null
+        runCatching { audio.abandonAudioFocusRequest(request) }
+        // The duck is a player volume as well as a focus state: clear it, so the next
+        // clip does not start at the level a call or a notification left behind.
+        runCatching { player?.setVolume(1f, 1f) }
     }
 
     private fun stopFx() {
@@ -1933,6 +1985,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             panel.switch(info, R.drawable.oic_music_note, "Audio keeps playing", "Music continues when you leave VIP",
                 OeaVipStore.backgroundAudio(this)) { value ->
                 OeaVipStore.setBackgroundAudio(this, value)
+                if (value) askNotificationPermission()
                 syncService()
             }
             panel.switch(info, R.drawable.oic_play_arrow, "Next clip automatically", "When one ends, start the next in the queue",
@@ -2206,12 +2259,11 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         runCatching { unregisterReceiver(pipReceiver) }
         runCatching { unregisterReceiver(lockReceiver) }
         stopFx()
-        runCatching { retriever?.release() }
-        retriever = null
+        frames?.close()
+        frames = null
         runCatching { player?.release() }
         player = null
-        runCatching { focusRequest?.let { audio.abandonAudioFocusRequest(it) } }
-        focusRequest = null
+        releaseFocus()
         clearBrightnessOverride()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (OeaVipAudioService.running) OeaVipAudioService.stop(this)
@@ -2273,6 +2325,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         private const val VOLUME_GAIN = 0.6f
 
         private const val REQUEST_SUBTITLE = 4321
+        private const val REQUEST_NOTIFICATIONS = 4322
         private const val ACTION_PIP_PLAY = "com.oea.launcher.vip.PIP_PLAY"
         private const val ACTION_PIP_PREV = "com.oea.launcher.vip.PIP_PREV"
         private const val ACTION_PIP_NEXT = "com.oea.launcher.vip.PIP_NEXT"
@@ -2280,13 +2333,6 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
         private val PROBE = java.util.concurrent.Executors.newFixedThreadPool(2) { task ->
             Thread(task, "OeaVipInfo").apply { isDaemon = true }
-        }
-
-        private val PREVIEW = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
-            Thread(task, "OeaVipPreview").apply {
-                isDaemon = true
-                priority = Thread.MIN_PRIORITY
-            }
         }
     }
 }

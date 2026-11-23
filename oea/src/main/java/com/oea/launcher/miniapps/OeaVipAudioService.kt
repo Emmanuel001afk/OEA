@@ -89,6 +89,7 @@ class OeaVipAudioService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         control = pendingControl ?: control
+        ensureForeground()
         when (intent?.action) {
             ACTION_STOP -> {
                 runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
@@ -112,6 +113,29 @@ class OeaVipAudioService : Service() {
         if (instance === this) instance = null
         running = false
         super.onDestroy()
+    }
+
+    /**
+     * A service started with `startForegroundService` owes Android a notification
+     * within five seconds — even when its first job turns out to be stopping.
+     *
+     * `stop` and a status-less `update` both went straight to `stopSelf()`, which
+     * Android 8 answers with `RemoteServiceException: Context.startForegroundService()
+     * did not then call Service.startForeground()`. Nothing in VIP reaches that path
+     * today, so this is a hazard removed rather than a bug observed; the placeholder
+     * is replaced by the real notification on the same tick.
+     */
+    private fun ensureForeground() {
+        if (Build.VERSION.SDK_INT < 26) return
+        if (lastStatus != null) return
+        runCatching {
+            val note = build(Status(title = "VIP", subtitle = "", playing = false, positionMs = 0L, durationMs = 0L))
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIF, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(NOTIF, note)
+            }
+        }
     }
 
     /**
@@ -187,7 +211,13 @@ class OeaVipAudioService : Service() {
             builder.setSubText("${OeaMediaLibrary.formatDuration(status.positionMs)} / ${OeaMediaLibrary.formatDuration(status.durationMs)}")
         }
         status.art?.let { builder.setLargeIcon(it) }
-        builder.setStyle(NotificationCompat.InboxStyle().addLine(status.title))
+        // InboxStyle put the title in the expanded shade a second time and threw the
+        // album line away; a player's expanded notification should read as one card.
+        builder.setStyle(
+            NotificationCompat.BigTextStyle().bigText(
+                listOfNotNull(status.title, status.subtitle.takeIf { it.isNotBlank() }).joinToString("\n")
+            )
+        )
         return builder.build()
     }
 
