@@ -33,10 +33,9 @@ import com.oea.launcher.R
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.model.OeaAppInfo
 import com.oea.launcher.search.OeaSearchAction
+import com.oea.launcher.search.OeaSearchIndex
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
-import java.text.Normalizer
-import java.util.Locale
 import kotlin.math.abs
 
 /**
@@ -81,6 +80,16 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
     private var downX = 0f
     private var closing = false
     private var velocity: VelocityTracker? = null
+
+    /**
+     * Search keys per app, kept between keystrokes.
+     *
+     * Typing used to normalize every label on every key: an ICU decomposition, a
+     * mark-stripping regex and a lowercase per app, then a split and a join, all of
+     * which depend only on the label. [OeaSearchIndex] does that once per app and a
+     * keystroke only compares; the ranking itself is unchanged.
+     */
+    private val searchIndex = OeaSearchIndex()
 
     init {
         isClickable = true
@@ -376,13 +385,13 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
             val nameSorted = ws.store.sortMode() == OeaDataStore.SortMode.NAME
             if (listMode) {
                 filtered.forEach { app ->
-                    if (nameSorted) indexLetter(app.label)?.let { c -> if (letters.none { it.first == c }) letters += c to out.size }
+                    if (nameSorted) indexLetter(app)?.let { c -> if (letters.none { it.first == c }) letters += c to out.size }
                     out += Row.ListApp(app)
                 }
             } else {
                 filtered.chunked(cols).forEach { chunk ->
                     if (nameSorted) chunk.forEach { app ->
-                        indexLetter(app.label)?.let { c -> if (letters.none { it.first == c }) letters += c to out.size }
+                        indexLetter(app)?.let { c -> if (letters.none { it.first == c }) letters += c to out.size }
                     }
                     out += Row.Apps(chunk)
                 }
@@ -430,38 +439,16 @@ class OeaDrawerView(context: Context, private val ws: OeaWorkspace) : FrameLayou
         postDelayed(actionsRequest, 90L)
     }
 
-    private fun indexLetter(label: String): Char? {
-        val first = label.trim().firstOrNull() ?: return null
-        val c = Normalizer.normalize(first.toString(), Normalizer.Form.NFD).firstOrNull()?.uppercaseChar() ?: return null
-        return if (c in 'A'..'Z') c else '#'
-    }
-
-    /**
-     * Compiled once: [normalize] runs for every app on every keystroke while the
-     * user types in search, and building a Regex (which compiles a Pattern) there
-     * made typing cost grow with the app count.
-     */
-    private val combiningMarks = Regex("\\p{Mn}+")
-
-    private fun normalize(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD)
-        .replace(combiningMarks, "").lowercase(Locale.getDefault())
+    private fun indexLetter(app: OeaAppInfo): Char? =
+        searchIndex.initial(searchIndex.entry(ws.appKey(app), app.label, app.packageName))
 
     /** Prefix > word-start > initials > substring > package name. */
     private fun rank(apps: List<OeaAppInfo>, query: String): List<OeaAppInfo> {
-        val q = normalize(query)
+        val q = searchIndex.normalize(query)
         return apps.mapNotNull { app ->
-            val label = normalize(app.label)
-            val words = label.split(' ', '-', '_', '.').filter { it.isNotEmpty() }
-            val initials = words.joinToString("") { it.take(1) }
-            val score = when {
-                label.startsWith(q) -> 0
-                words.any { it.startsWith(q) } -> 1
-                q.length >= 2 && initials.startsWith(q) -> 2
-                label.contains(q) -> 3
-                app.packageName.lowercase(Locale.ROOT).contains(q) -> 4
-                else -> return@mapNotNull null
-            }
-            Triple(app, score, label)
+            val entry = searchIndex.entry(ws.appKey(app), app.label, app.packageName)
+            val score = searchIndex.score(entry, q) ?: return@mapNotNull null
+            Triple(app, score, entry.normalized)
         }.sortedWith(compareBy<Triple<OeaAppInfo, Int, String>>({ it.second }, { -ws.store.launchCount(ws.appKey(it.first)) }, { it.third }))
             .map { it.first }
     }

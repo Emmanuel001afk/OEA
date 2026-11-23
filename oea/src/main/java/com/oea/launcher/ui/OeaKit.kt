@@ -191,6 +191,20 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
 
     fun appIcon(app: OeaAppInfo): Drawable? = OeaIconController.shared(context).icon(app.packageName, app.className.ifBlank { null })
 
+    /**
+     * The same icon for a row that is being bound: whatever is cached is returned
+     * now, and a cold icon arrives through [onReady] instead of being decoded or
+     * rendered inside the frame. Callers tag the view they are filling so a recycled
+     * row cannot receive the previous app's icon.
+     */
+    fun appIconAsync(app: OeaAppInfo, onReady: (Drawable) -> Unit): Drawable? {
+        val controller = OeaIconController.shared(context)
+        val className = app.className.ifBlank { null }
+        val cached = controller.peek(app.packageName, className)
+        if (cached == null) controller.request(app.packageName, className) { onReady(it) }
+        return cached
+    }
+
     fun text(value: CharSequence, sizeSp: Float, color: Int, face: Typeface = OeaType.regular) = TextView(context).apply {
         text = value
         textSize = sizeSp
@@ -969,7 +983,11 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
                     }
                     val key = keyOf(app)
                     val isOn = key in chosen
-                    (row.getChildAt(0) as ImageView).setImageDrawable(appIcon(app))
+                    val iconView = row.getChildAt(0) as ImageView
+                    iconView.tag = key
+                    iconView.setImageDrawable(appIconAsync(app) { drawable ->
+                        if (iconView.tag == key) iconView.setImageDrawable(drawable)
+                    })
                     val texts = row.getChildAt(1) as LinearLayout
                     (texts.getChildAt(0) as TextView).apply {
                         text = app.label
