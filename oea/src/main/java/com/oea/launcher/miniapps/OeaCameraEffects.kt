@@ -437,7 +437,13 @@ internal object OeaCameraEffects {
         return written
     }
 
-    private const val SAVE_MAX = 2400
+    /**
+     * The long edge a touch-up pass rewrites a file at. It matches what the capture
+     * pipeline itself decodes (2600-3000 px), so asking for "Brighten the shadows"
+     * on a full-resolution still no longer costs a quarter of its pixels for a tone
+     * curve.
+     */
+    private const val SAVE_MAX = 3000
 
     /** A soft, flattering pass — used by the shutter sheet as a one-tap option. */
     fun soft(bitmap: Bitmap) {

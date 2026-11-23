@@ -177,6 +177,23 @@ class OeaCameraOpticsTest {
         assertEquals(0f, OeaCameraOptics.displayAspect(0f, 90), 0.0001f)
     }
 
+    @Test fun aTurnedJpegThatAlreadyHasTheShapeNeedsNoPixelWork() {
+        // This is the regression that made every portrait photograph ~5 MP: the
+        // request was compared with the buffer's sideways shape, so a 4:3 sensor
+        // frame could never answer a 3:4 portrait request and every still went
+        // through a decode, a turn and a re-encode.
+        assertTrue(OeaCameraOptics.bufferMatchesRequest(4f / 3f, 3f / 4f, 90))
+        assertTrue(OeaCameraOptics.bufferMatchesRequest(16f / 9f, 9f / 16f, 270))
+        // A square request is a real crop whatever the rotation.
+        assertFalse(OeaCameraOptics.bufferMatchesRequest(4f / 3f, 1f, 90))
+        // Upright already: buffer and request are compared directly.
+        assertTrue(OeaCameraOptics.bufferMatchesRequest(1.5f, 1.5f, 0))
+        assertFalse(OeaCameraOptics.bufferMatchesRequest(4f / 3f, 3f / 4f, 0))
+        // Rubbish in, "needs work" out — never "already right".
+        assertFalse(OeaCameraOptics.bufferMatchesRequest(0f, 3f / 4f, 90))
+        assertFalse(OeaCameraOptics.bufferMatchesRequest(4f / 3f, 0f, 90))
+    }
+
     @Test fun aspectHelpersSurviveRubbish() {
         assertTrue(OeaCameraOptics.matchesAspect(1280, 720, 0f))
         assertEquals(1f, OeaCameraOptics.aspectOf(0, 0), 0.0001f)

@@ -93,6 +93,28 @@ object OeaCameraOptics {
         return nearDioptres * percent.coerceIn(0, 100) / 100f
     }
 
+    /**
+     * Whether a JPEG whose pixels are [bufferAspect] wide-to-tall already has the
+     * shape the request asked for, once its own EXIF rotation is applied.
+     *
+     * A portrait 3:4 still is a 4:3 buffer turned 90 degrees. Comparing the request
+     * with the upright shape *before* turning — which is what the camera used to do
+     * — said "no" to every portrait photograph, and that is why every portrait
+     * photograph was decoded, turned and re-encoded at the decoder's working size.
+     *
+     * [tolerance] is relative to the wanted shape, as in [matchesAspect].
+     */
+    fun bufferMatchesRequest(
+        bufferAspect: Float,
+        uprightAspect: Float,
+        rotationDegrees: Int,
+        tolerance: Float = 0.01f
+    ): Boolean {
+        if (bufferAspect <= 0f || uprightAspect <= 0f) return false
+        val wanted = displayAspect(uprightAspect, rotationDegrees)
+        return kotlin.math.abs(bufferAspect - wanted) <= tolerance * wanted
+    }
+
     fun aspectOf(width: Int, height: Int): Float =
         if (width <= 0 || height <= 0) 1f else width.toFloat() / height.toFloat()
 

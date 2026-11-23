@@ -247,11 +247,15 @@ class OeaThemeStore private constructor(context: Context) {
             var sample = 1
             while (bounds.outWidth / (sample * 2) >= maxW || bounds.outHeight / (sample * 2) >= maxH) sample *= 2
             val options = BitmapFactory.Options().apply { inSampleSize = sample }
+            // A camera photo keeps its rotation in EXIF; a wallpaper or theme drawn
+            // from one must be turned before it is scaled or it lands on its side.
+            val tag = com.oea.launcher.ui.OeaPhotoDecode.tagOfSource(source)
             val decoded = source()?.use { BitmapFactory.decodeStream(it, null, options) } ?: return null
-            val scale = minOf(maxW / decoded.width.toFloat(), maxH / decoded.height.toFloat(), 1f)
-            if (scale >= 0.999f) return decoded
-            val scaled = Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt().coerceAtLeast(1), (decoded.height * scale).toInt().coerceAtLeast(1), true)
-            if (scaled !== decoded) decoded.recycle()
+            val upright = com.oea.launcher.ui.OeaPhotoDecode.upright(decoded, tag)
+            val scale = minOf(maxW / upright.width.toFloat(), maxH / upright.height.toFloat(), 1f)
+            if (scale >= 0.999f) return upright
+            val scaled = Bitmap.createScaledBitmap(upright, (upright.width * scale).toInt().coerceAtLeast(1), (upright.height * scale).toInt().coerceAtLeast(1), true)
+            if (scaled !== upright) upright.recycle()
             return scaled
         }
     }
