@@ -165,9 +165,12 @@ internal object OeaEmageEditor {
                         inSampleSize = sample
                         inPreferredConfig = Bitmap.Config.ARGB_8888
                     }
-                    host.contentResolver.openInputStream(item.uri)?.use {
+                    val decoded = host.contentResolver.openInputStream(item.uri)?.use {
                         BitmapFactory.decodeStream(it, null, options)
                     } ?: error("Picture could not be decoded")
+                    // The editor works on upright pixels and saves a new file with no
+                    // orientation tag, so a tag-turned source has to be turned first.
+                    com.oea.launcher.ui.OeaPhotoDecode.upright(host, item.uri, decoded)
                 }
                 host.runOnUiThread {
                     if (!dialog.isShowing) {

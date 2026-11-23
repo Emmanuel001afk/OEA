@@ -216,7 +216,7 @@ internal object OeaEmageViewer {
                     inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                 }
                 context.contentResolver.openInputStream(item.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
-            }.getOrNull()
+            }.getOrNull()?.let { com.oea.launcher.ui.OeaPhotoDecode.upright(context, item.uri, it) }
             val activity = hostRef.get() ?: run {
                 bitmap?.takeIf { !it.isRecycled }?.recycle()
                 return@execute

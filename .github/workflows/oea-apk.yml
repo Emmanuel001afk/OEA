@@ -351,6 +351,27 @@ jobs:
           # Both new preferences have a row in the settings sheet.
           grep -Fq 'setMirrorSelfies' "$CAMERA"
           grep -Fq 'setLevelEnabled' "$CAMERA"
+          # Granting the permission ends on a viewfinder, not on the card that asks.
+          grep -Fq 'permissionHook = rebuildWhenGranted' "$CAMERA"
+          # A still keeps the camera's own JPEG when its only "work" is the EXIF tag.
+          grep -Fq 'bufferMatchesRequest' "$CAMERA"
+          grep -Fq 'fun bufferMatchesRequest(' "$OPTICS"
+          # Deleting a photo removes the copy in the device's collection as well.
+          grep -Fq 'fun deleteSavedPhoto(' "$CAMERA"
+          grep -Fq 'Pictures/OEA%' "$CAMERA"
+          # A clip reaches the phone's gallery the way a still does.
+          grep -Fq 'fun publishVideo(' "$CAMERA"
+          grep -Fq 'Movies/OEA' "$CAMERA"
+          # Teardown is posted to the camera thread; a pause keeps that thread.
+          grep -Fq 'private fun release(quitThread: Boolean)' "$CAMERA"
+          grep -Fq 'fun pauseNow() = release(quitThread = false)' "$CAMERA"
+          # Rotation that lives in EXIF is turned wherever OEA draws a picture.
+          grep -Fq 'fun upright(' $SRC/ui/OeaPhotoDecode.kt
+          for OWNER in ui/OeaThumbnails.kt miniapps/OeaEmageViewer.kt \
+                       miniapps/OeaEmageEditor.kt widgets/OeaMiniAppWidgets.kt \
+                       themes/OeaThemeStore.kt; do
+            grep -Fq 'OeaPhotoDecode.upright' "$SRC/$OWNER"
+          done
           # The torch picks a camera that has a flash and reports real state.
           grep -Fq 'FLASH_INFO_AVAILABLE' "$TORCH"
           grep -Fq 'registerTorchCallback' "$TORCH"

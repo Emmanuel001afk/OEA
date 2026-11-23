@@ -236,6 +236,9 @@ class OeaCameraWidgetProvider : AppWidgetProvider() {
         var sample = 1
         val target = 128
         while (bounds.outWidth / (sample * 2) >= target && bounds.outHeight / (sample * 2) >= target) sample *= 2
-        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+        val decoded = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+        // The newest camera photo keeps its rotation in EXIF now, and the home
+        // app draws whatever bitmap it is handed.
+        decoded?.let { com.oea.launcher.ui.OeaPhotoDecode.upright(it, com.oea.launcher.ui.OeaPhotoDecode.tagOf(file)) }
     }.getOrNull()
 }

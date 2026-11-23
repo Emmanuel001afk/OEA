@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -508,20 +509,24 @@ object OeaCameraApp {
                 LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) }
             )
             root.addView(column, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
-            // The permission dialog returns to a stale screen; re-check on attach.
-            root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) {
-                    if (host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
-                        v.parent is android.view.ViewGroup
-                    ) {
-                        (v.parent as android.view.ViewGroup).post {
-                            (v.parent as? android.view.ViewGroup)?.removeView(v)
-                        }
-                    }
+            // Granting the permission (or coming back from Android's settings page)
+            // used to leave this card on screen forever: the mini-app host resumes
+            // the camera helper it never built, and the camera is only built on a
+            // fresh render. So the screen itself asks the host to rebuild once the
+            // permission is really there. This is the whole first-run path — the
+            // card is all a new install sees — so it has to end in a viewfinder.
+            val miniApp = host as? OeaMiniAppActivity
+            val rebuildWhenGranted: () -> Unit = {
+                if (host.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                    if (miniApp != null) miniApp.refresh() else runCatching { host.recreate() }
                 }
-
-                override fun onViewDetachedFromWindow(v: View) = Unit
-            })
+            }
+            if (miniApp != null) {
+                miniApp.permissionHook = rebuildWhenGranted
+                // "Open app settings" returns through onResume, not a permission
+                // result, so this path needs the same re-check.
+                miniApp.resumeHook = rebuildWhenGranted
+            }
             return root
         }
 
@@ -1030,7 +1035,9 @@ object OeaCameraApp {
             refreshLevel()
             syncShutterUi()
             when (mode) {
-                CaptureMode.QR -> openQrScanner(host, kit, palette) { dialog -> qrDialog = dialog }
+                // A scanner that cannot open must not leave the rail claiming QR
+                // mode: put the previous mode back and let the toast explain why.
+                CaptureMode.QR -> if (!openQrScanner(host, kit, palette) { dialog -> qrDialog = dialog }) selectMode(previousMode)
                 CaptureMode.VIDEO, CaptureMode.TIMELAPSE -> {
                     if (host.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                         runCatching { host.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC_PERMISSION) }
@@ -1105,6 +1112,13 @@ object OeaCameraApp {
                     }.also { innerCapture.layoutParams = it }
                     captureBtn.contentDescription = "Start recording"
                 }
+                captureMode == CaptureMode.QR -> {
+                    innerCapture.background = kit.oval(Color.WHITE)
+                    (innerCapture.layoutParams as FrameLayout.LayoutParams).apply {
+                        width = dp(56); height = dp(56); gravity = Gravity.CENTER
+                    }.also { innerCapture.layoutParams = it }
+                    captureBtn.contentDescription = "Scan a code"
+                }
                 else -> {
                     innerCapture.background = kit.oval(Color.WHITE)
                     (innerCapture.layoutParams as FrameLayout.LayoutParams).apply {
@@ -1147,7 +1161,7 @@ object OeaCameraApp {
             modeChips.forEach { (_, view) -> view.alpha = 1f }
             refreshLevel()
             if (!externalCapture) {
-                MediaScannerConnection.scanFile(host, arrayOf(file.absolutePath), arrayOf("video/mp4"), null)
+                publishVideo(host, file)
                 toast(host, "Recording stopped and saved: ${file.name}")
             }
         }
@@ -1330,6 +1344,10 @@ object OeaCameraApp {
                     }
                     return@stopVideoRecording
                 }
+                // Published before the external branch: a caller that asked for the
+                // clip is not a reason for the recording to vanish from the user's
+                // own gallery.
+                publishVideo(host, file)
                 if (externalCapture) {
                     if (!finishExternalCapture(host, captureTarget, file, "video/mp4")) {
                         file.delete()
@@ -1338,7 +1356,6 @@ object OeaCameraApp {
                     }
                     return@stopVideoRecording
                 }
-                MediaScannerConnection.scanFile(host, arrayOf(file.absolutePath), arrayOf("video/mp4"), null)
                 toast(host, "Video saved: ${file.name}")
             }
         }
@@ -1576,10 +1593,10 @@ object OeaCameraApp {
      * phone. The previous version asked for the standalone zxing *client* app,
      * which is not installed on essentially any phone, so QR mode did nothing.
      */
-    private fun openQrScanner(host: Activity, kit: OeaKit, palette: OeaPalette, onCreated: (Dialog) -> Unit) {
+    private fun openQrScanner(host: Activity, kit: OeaKit, palette: OeaPalette, onCreated: (Dialog) -> Unit): Boolean {
         if (host.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             toast(host, "Camera permission is needed to scan a code")
-            return
+            return false
         }
         val dialog = Dialog(host, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
         val root = FrameLayout(host)
@@ -1625,8 +1642,13 @@ object OeaCameraApp {
         dialog.setContentView(root)
         dialog.setOnShowListener { scanner.start() }
         dialog.setOnDismissListener { scanner.stop() }
-        dialog.show()
+        val shown = runCatching { dialog.show() }.isSuccess
+        if (!shown) {
+            runCatching { scanner.stop() }
+            return false
+        }
         onCreated(dialog)
+        return true
     }
 
     private fun decodeQrPicture(host: Activity, uri: Uri) {
@@ -1715,10 +1737,13 @@ object OeaCameraApp {
     ): File? {
         // A still from the sensor is stored sideways: the pixels are always in the
         // sensor's landscape frame and the EXIF tag is what turns them. Every pass
-        // below — night, portrait, document, the aspect crop, a selfie mirror —
-        // therefore runs on *upright* pixels. Before this, a portrait photo's
-        // Portrait pass blurred a horizontal band across a picture that a viewer
-        // then rotated, so the band was 90° away from the tap.
+        // that runs below — night, portrait, document, the aspect crop, a selfie
+        // mirror — therefore works on *upright* pixels. Before this, a portrait
+        // photo's Portrait pass blurred a horizontal band across a picture that a
+        // viewer then rotated, so the band was 90° away from the tap.
+        // When no pass is needed at all the file is written exactly as the camera
+        // delivered it and its own tag turns it, which is what keeps a portrait
+        // still at full resolution instead of the decoder's working size.
         // HALs may rotate pixels or write EXIF. Trust the delivered JPEG, never
         // apply a guessed rotation a second time.
         val deliveredTag = jpeg?.let { bytes -> runCatching {
@@ -1729,23 +1754,38 @@ object OeaCameraApp {
         val mirrorPixels = jpeg != null && (mirror xor OeaCameraOptics.orientationTagMirrors(deliveredTag))
         val needsTurn = rotation != 0 || mirrorPixels
         val uprightAspect = aspect
+        // The shape that was asked for, expressed in the buffer's own orientation:
+        // a portrait 3:4 photo is a 4:3 buffer turned 90°. Comparing the request
+        // against the upright shape while the buffer is still sideways is what used
+        // to force a decode of every portrait still.
+        val bufferAspect = if (uprightAspect <= 0f) 0f else OeaCameraOptics.displayAspect(uprightAspect, rotation)
         // The Camera2 reader already chooses the requested aspect when the device
         // offers it. Do not decode/re-encode a full-resolution JPEG just because an
         // aspect ratio is selected: that used to downsample otherwise untouched
         // photos to preview-ish dimensions. Only crop when the actual JPEG buffer
-        // does not match the requested upright shape.
-        val jpegMatchesAspect = if (jpeg != null && uprightAspect > 0f && !needsTurn) {
+        // does not match the requested shape.
+        val jpegMatchesAspect = if (jpeg != null && bufferAspect > 0f) {
             runCatching {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-                OeaCameraOptics.matchesAspect(bounds.outWidth, bounds.outHeight, uprightAspect,
-                    tolerance = 1f / (bounds.outHeight.coerceAtLeast(1) * uprightAspect))
+                OeaCameraOptics.bufferMatchesRequest(
+                    bufferAspect = OeaCameraOptics.aspectOf(bounds.outWidth, bounds.outHeight),
+                    uprightAspect = uprightAspect,
+                    rotationDegrees = rotation,
+                    tolerance = 1f / (bounds.outHeight.coerceAtLeast(1) * bufferAspect)
+                )
             }.getOrDefault(false)
         } else {
             false
         }
-        val needsCrop = uprightAspect > 0f && !jpegMatchesAspect
-        val needsPixels = filter != FilterMode.NONE || hdr || OeaCameraEffects.needed(mode, privacy) || needsCrop || needsTurn
+        val needsCrop = bufferAspect > 0f && !jpegMatchesAspect
+        // A rotation that lives only in the JPEG's own EXIF tag costs nothing: the
+        // file is already right, every viewer turns it, and decoding it here to write
+        // the same picture back at the decoder's working size is how a 12 MP still
+        // came out of this camera as a 5 MP one. A mirrored selfie is not expressible
+        // in the tag the HAL wrote, so that still costs pixels.
+        val needsPixels = filter != FilterMode.NONE || hdr ||
+            OeaCameraEffects.needed(mode, privacy) || needsCrop || mirrorPixels
         if (jpeg != null && !needsPixels) {
             // Nothing to develop: the camera's own JPEG is the best possible file.
             val file = newPhotoFile(host, filter)
@@ -1990,6 +2030,54 @@ object OeaCameraApp {
         }.getOrNull()
     }
 
+    /**
+     * The MediaStore row [publish] created for one saved file, if this phone has
+     * one. Names carry a millisecond stamp, so a display name is unique to a shot.
+     */
+    private fun publishedCopy(context: Context, name: String): Uri? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        return runCatching {
+            val selection = "${MediaStore.Images.Media.DISPLAY_NAME} = ? AND ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Images.Media._ID),
+                selection,
+                arrayOf(name, "Pictures/OEA%"),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(0))
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Removes a photo completely: the private file OEA develops *and* the copy
+     * [publish] put in the device's Pictures collection.
+     *
+     * Deleting only the private one left the picture in every other gallery, and
+     * EMAGE's merge (one picture from the two copies, keyed on the name) stopped
+     * matching, so the "deleted" photo came back on the next scan.
+     */
+    private fun deleteSavedPhoto(context: Context, file: File) {
+        val published = publishedCopy(context, file.name)
+        runCatching { file.delete() }
+        if (published != null) runCatching { context.contentResolver.delete(published, null, null) }
+    }
+
+    /** Keeps the published copy in step with a file a touch-up pass just rewrote. */
+    private fun syncPublishedCopy(context: Context, file: File) {
+        val published = publishedCopy(context, file.name) ?: return
+        runCatching {
+            context.contentResolver.openOutputStream(published, "wt")?.use { out ->
+                file.inputStream().use { it.copyTo(out) }
+            }
+        }
+    }
+
     /** Makes the file visible to EMAGE, the system gallery and other apps, once. */
     private fun publish(context: Context, file: File) {
         runCatching {
@@ -2018,6 +2106,40 @@ object OeaCameraApp {
         // The home-screen camera widget shows the newest photo, so it has to be
         // told that there is a new one.
         runCatching { OeaWidgetStudio.refreshWidgets(context, "camera") }
+    }
+
+    /**
+     * Makes a finished clip visible to the phone's gallery, the way stills are.
+     *
+     * Recordings used to be handed to MediaScanner from OEA's app-private
+     * `Android/data/…/Movies/OEA`, which Android 10+ does not index: the clip
+     * existed inside OEA and in no other gallery, while a photo taken a second
+     * later appeared everywhere. This is the same insert-then-publish dance
+     * [publish] does for stills, against the video collection.
+     */
+    private fun publishVideo(context: Context, file: File) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val resolver = context.contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/OEA")
+                    put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+                resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)?.let { uri ->
+                    resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                    resolver.update(
+                        uri,
+                        ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) },
+                        null,
+                        null
+                    )
+                }
+            }
+        }
+        MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), arrayOf("video/mp4"), null)
     }
 
     private fun toast(host: Activity, message: String) {
@@ -2092,7 +2214,7 @@ object OeaCameraApp {
                     kit.tonalButton("Delete") {
                         dialog.dismiss()
                         kit.confirm("Delete photo?", file.name, "Delete", destructive = true) {
-                            file.delete()
+                            deleteSavedPhoto(host, file)
                             runCatching { OeaThumbnails.invalidateAll() }
                             runCatching { OeaWidgetStudio.refreshWidgets(host, "camera") }
                         }
@@ -2121,6 +2243,9 @@ object OeaCameraApp {
     private fun applyEffectToFile(host: Activity, file: File, mode: CaptureMode, blurFaces: Boolean, preview: ImageView) {
         CAPTURE.execute {
             val done = runCatching { OeaCameraEffects.applyToFile(file, mode, blurFaces) }.getOrDefault(false)
+            // The file was rewritten: the copy in the device's collection still
+            // holds the old pixels, so the gallery would show the un-touched photo.
+            if (done) syncPublishedCopy(host, file)
             host.runOnUiThread {
                 if (host.isDestroyed) return@runOnUiThread
                 if (!done) {
@@ -2422,6 +2547,7 @@ object OeaCameraApp {
 
         private val captures = ArrayDeque<PendingCapture>()
         private var watchdog: Runnable? = null
+        private val teardownLock = Any()
 
         private var front: Boolean = initialFront
         private var zoomValue: Float = initialZoom.coerceIn(1f, 8f)
@@ -2431,19 +2557,21 @@ object OeaCameraApp {
 
         private var recorder: MediaRecorder? = null
         private var recordingFile: File? = null
-        private var recordPreviewSurface: Surface? = null
 
         private val surfaceListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                openIfReady()
+                // Opening and closing are queued on the camera thread so they keep
+                // their order relative to a pause/resume teardown that is waiting.
+                onCamera { openIfReady() }
             }
 
             override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                // setTransform is view state; this one is the UI thread's job.
                 applyPreviewTransform()
             }
 
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                closeCamera()
+                onCamera { closeCamera() }
                 return true
             }
 
@@ -2507,32 +2635,60 @@ object OeaCameraApp {
                 }
                 layoutTransformListenerInstalled = true
             }
-            if (textureView.isAvailable) openIfReady()
+            // Queued rather than called: after a pause the previous teardown may still
+            // be waiting on the camera thread, and it has to close the old device
+            // before this open asks for a new one.
+            if (textureView.isAvailable) onCamera { openIfReady() }
         }
 
         /** Called when something ends a recording the user did not stop themselves. */
         var onRecordingAbandoned: ((File) -> Unit)? = null
 
-        fun stop() {
-            running = false
-            val abandoned = endRecording(keepFile = true)
-            if (abandoned != null) main.post { onRecordingAbandoned?.invoke(abandoned) }
-            closeCamera()
-            deliverPending(null)
-            val finished = thread
-            thread = null
-            handler = null
-            runCatching { finished?.quitSafely() }
-            main.post { onStatus(null) }
-        }
+        /** Releases the sensor and retires the camera thread: the view is going away. */
+        fun stop() = release(quitThread = true)
 
-        /** Called when the screen goes to the background: release the sensor, keep the UI. */
-        fun pauseNow() {
-            stop()
-        }
+        /**
+         * Called when the screen goes to the background: release the sensor, keep the
+         * UI — and keep the camera thread.
+         *
+         * The teardown is posted onto that thread instead of being run here. Closing a
+         * session, a reader or a recorder from the UI thread happens *while* session
+         * callbacks are queued on the camera thread, which is how a camera comes back
+         * as "another app is using the camera" after a pause, or a clip is lost. With
+         * one thread owning the objects and the queue, a resume's open is ordered
+         * behind the pause's close and the two can no longer overlap.
+         */
+        fun pauseNow() = release(quitThread = false)
 
         fun resumeNow() {
             start()
+        }
+
+        private fun release(quitThread: Boolean) {
+            running = false
+            val activeHandler = handler
+            val finished = if (quitThread) thread else null
+            if (quitThread) {
+                // No new work may be queued on the thread that is about to go.
+                handler = null
+                thread = null
+            }
+            val teardown = Runnable {
+                // The recorder first: it is the only thing holding a file the user
+                // asked for, and the callback has to run even if the close fails.
+                val abandoned = endRecording(keepFile = true)
+                closeCamera()
+                deliverPending(null)
+                if (abandoned != null) main.post { onRecordingAbandoned?.invoke(abandoned) }
+                if (quitThread) runCatching { finished?.quitSafely() }
+                main.post { onStatus(null) }
+            }
+            val target = activeHandler
+            if (target == null || Looper.myLooper() == target.looper) {
+                teardown.run()
+            } else {
+                target.post(teardown)
+            }
         }
 
         fun retry() {
@@ -2569,6 +2725,13 @@ object OeaCameraApp {
             }
         }
 
+        /**
+         * Flash AUTO/ON reach the preview as a metering mode (AE decides the
+         * exposure knowing a flash may fire), while the LED only lights for TORCH or
+         * for the still capture itself. This is what Google's Camera2 sample does;
+         * if a vendor HAL ever strobes on the repeating request, the fix is to leave
+         * this request at AE_MODE_ON and send the flash decision only with the still.
+         */
         fun setFlash(mode: FlashMode) {
             flashMode = mode
             onCamera {
@@ -2677,16 +2840,25 @@ object OeaCameraApp {
             }
         }
 
+        /**
+         * Closes everything the camera holds.
+         *
+         * Normally the camera thread's job, but a destroyed surface arrives on the UI
+         * thread while a queued teardown may still be running, so the body is guarded:
+         * two closes of the same objects must not interleave and leave the device open.
+         */
         private fun closeCamera() {
-            runCatching { session?.close() }
-            session = null
-            previewRequest = null
-            runCatching { device?.close() }
-            device = null
-            closeReader()
-            runCatching { previewSurface?.release() }
-            previewSurface = null
-            opening = false
+            synchronized(teardownLock) {
+                runCatching { session?.close() }
+                session = null
+                previewRequest = null
+                runCatching { device?.close() }
+                device = null
+                closeReader()
+                runCatching { previewSurface?.release() }
+                previewSurface = null
+                opening = false
+            }
         }
 
         private fun closeReader() {
@@ -2790,8 +2962,11 @@ object OeaCameraApp {
             val previewBuilder = builder
             set(previewBuilder, CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
             applyFocusDefaults(previewBuilder)
-            // AUTO/ON flash is a still-capture decision, never a repeating-preview
-            // decision. Only explicit TORCH mode may keep the LED continuously lit.
+            // The LED itself is decided per capture: this repeating request can ask
+            // for flash *metering* (the flash chip sets AE_MODE_ON_AUTO_FLASH or
+            // _ON_ALWAYS_FLASH through setFlash), and only TORCH, set below, keeps the
+            // light on. A still capture repeats the same decision, because that is
+            // the request that can actually fire.
             set(previewBuilder, CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
             set(previewBuilder, CaptureRequest.FLASH_MODE, if (flashMode == FlashMode.TORCH) CameraMetadata.FLASH_MODE_TORCH else CameraMetadata.FLASH_MODE_OFF)
             applyZoom(previewBuilder)
@@ -3174,9 +3349,15 @@ object OeaCameraApp {
          */
         private fun applyExposure(builder: CaptureRequest.Builder) {
             val steps = exposureSteps(activity)
-            if (steps == 0) return
             val chars = characteristics() ?: return
             val range = runCatching { chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) }.getOrNull() ?: return
+            if (steps == 0) {
+                // The builder outlives one frame: it is the repeating preview
+                // request. Returning early here left the previous compensation on
+                // it, so the chip said "EV 0" while the camera stayed at "+3".
+                set(builder, CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, 0.coerceIn(range.lower, range.upper))
+                return
+            }
             val step = runCatching { chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP) }.getOrNull() ?: return
             val denominator = step.denominator.toDouble()
             if (step.numerator == 0 || denominator == 0.0) return
@@ -3243,10 +3424,12 @@ object OeaCameraApp {
                 }
                 recorder = created
                 val recorderSurface = created.surface
-                texture.setDefaultBufferSize(size.width, size.height)
-                runCatching { recordPreviewSurface?.release() }
-                val previewSurfaceForRecording = Surface(texture)
-                recordPreviewSurface = previewSurfaceForRecording
+                // The record session previews through the viewfinder's own surface,
+                // at the viewfinder's own buffer size. Resizing the texture to the
+                // video size here left the preview stretched for the whole clip:
+                // setTransform had been computed for the old buffer dimensions and
+                // was only recomputed when the still session came back.
+                val previewSurfaceForRecording = previewSurface ?: Surface(texture).also { previewSurface = it }
                 runCatching { session?.close() }
                 session = null
                 val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
@@ -3313,8 +3496,6 @@ object OeaCameraApp {
             }
             runCatching { session?.close() }
             session = null
-            runCatching { recordPreviewSurface?.release() }
-            recordPreviewSurface = null
             val file = recordingFile
             recordingFile = null
             if (!keepFile) {

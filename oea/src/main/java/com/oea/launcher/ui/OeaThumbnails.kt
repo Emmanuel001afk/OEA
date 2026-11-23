@@ -294,7 +294,11 @@ object OeaThumbnails {
     }
 
     private fun decode(context: Context, uri: Uri, px: Int, video: Boolean): Bitmap? {
-        if (Build.VERSION.SDK_INT >= 29) {
+        // OEA's own files are handed out by its FileProvider exactly as stored, so a
+        // camera JPEG whose rotation lives in EXIF would come back sideways from a
+        // provider thumbnail. Those take the EXIF-aware decode below; everyone
+        // else's media keeps MediaStore's pre-rotated thumbnail.
+        if (Build.VERSION.SDK_INT >= 29 && !isOwnFile(context, uri)) {
             val thumbnail = runCatching {
                 context.contentResolver.loadThumbnail(uri, android.util.Size(px, px), null)
             }.getOrNull()
@@ -302,6 +306,10 @@ object OeaThumbnails {
         }
         return if (video) decodeFrame(context, uri, px) else decodeImage(context, uri, px)
     }
+
+    /** True for a file OEA published through its own FileProvider. */
+    private fun isOwnFile(context: Context, uri: Uri): Boolean =
+        uri.scheme == "content" && uri.authority == "${context.packageName}.fileprovider"
 
     /**
      * Full-view image decode. Unlike grid thumbnails this intentionally bypasses
@@ -325,7 +333,7 @@ object OeaThumbnails {
         context.contentResolver.openInputStream(uri)?.use { stream ->
             android.graphics.BitmapFactory.decodeStream(stream, null, options)
         }
-    }.getOrNull()
+    }.getOrNull()?.let { OeaPhotoDecode.upright(context, uri, it) }
 
     private fun decodeImage(context: Context, uri: Uri, px: Int): Bitmap? = runCatching {
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -342,7 +350,7 @@ object OeaThumbnails {
         context.contentResolver.openInputStream(uri)?.use { stream ->
             android.graphics.BitmapFactory.decodeStream(stream, null, options)
         }
-    }.getOrNull()
+    }.getOrNull()?.let { OeaPhotoDecode.upright(context, uri, it) }
 
     private fun decodeFrame(context: Context, uri: Uri, px: Int): Bitmap? = runCatching {
         val retriever = MediaMetadataRetriever()
