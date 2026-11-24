@@ -801,6 +801,60 @@ jobs:
           # A reply sent from the system UI is filed like any other.
           grep -Fq 'OeaMessagingApp.sendNow(applicationContext, address, body, -1)' "$SVC"
           ! grep -Fq 'SmsManager.getDefault()' "$SVC"
+      - name: Threat engine tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.security.OeaThreatEngineTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-threat.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-threat.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the console work
+        run: |
+          set -euo pipefail
+          CONSOLE=oea/src/main/java/com/oea/launcher/miniapps/OeaConsoleApp.kt
+          ENGINE=oea/src/main/java/com/oea/launcher/security/OeaThreatEngine.kt
+          AUDIT=oea/src/main/java/com/oea/launcher/security/OeaAppAudit.kt
+          WATCH=oea/src/main/java/com/oea/launcher/security/OeaSecurityMonitor.kt
+          # The antivirus is bundled: rules in the APK, not a service on the web.
+          grep -Fq 'object OeaThreatEngine' "$ENGINE"
+          grep -Fq 'val ruleCount: Int get() = RULES.size' "$ENGINE"
+          grep -Fq 'fun assess(facts: AppFacts): Assessment' "$ENGINE"
+          grep -Fq 'fun assessInstalled(' "$ENGINE"
+          grep -Fq 'fun verdictOf(findings: List<Finding>): Verdict' "$ENGINE"
+          grep -Fq 'enum class Severity' "$ENGINE"
+          grep -Fq 'enum class Verdict' "$ENGINE"
+          test "$(grep -Fc 'Finding(' "$ENGINE")" -ge 11
+          # The engine is pure Kotlin: no Android, no network, no I/O.
+          ! grep -Fq 'import android' "$ENGINE"
+          ! grep -Eq 'HttpURLConnection|java\.net\.URL|openConnection|OkHttp|WebView' "$ENGINE"
+          # The audit reads the phone, and only the phone.
+          grep -Fq 'fun scan(ctx: Context): ScanResult' "$AUDIT"
+          grep -Fq 'fun factsFor(ctx: Context, packageName: String)' "$AUDIT"
+          grep -Fq 'fun allowedPackages(ctx: Context)' "$AUDIT"
+          grep -Fq 'fun appCaches(ctx: Context, limit: Int = 8)' "$AUDIT"
+          grep -Fq 'fun bigFiles(' "$AUDIT"
+          grep -Fq 'fun deleteRequest(' "$AUDIT"
+          ! grep -Eq 'HttpURLConnection|java\.net\.URL|openConnection|OkHttp|WebView' "$AUDIT"
+          # The console no longer hands the job to the Play Store.
+          grep -Fq 'private fun showProtection(' "$CONSOLE"
+          grep -Fq 'private fun renderProtection(' "$CONSOLE"
+          grep -Fq 'private fun showAllowList(' "$CONSOLE"
+          grep -Fq 'private fun showOfflineNote(' "$CONSOLE"
+          grep -Fq 'private fun showAppCaches(' "$CONSOLE"
+          grep -Fq 'private fun showBigFiles(' "$CONSOLE"
+          grep -Fq '"Antivirus & app audit"' "$CONSOLE"
+          grep -Fq '"Watch new installs"' "$CONSOLE"
+          grep -Fq '"Offline by design"' "$CONSOLE"
+          ! grep -Fq 'com.android.vending' "$CONSOLE"
+          ! grep -Fq 'market://' "$CONSOLE"
+          ! grep -Fq 'getLaunchIntentForPackage' "$CONSOLE"
+          ! grep -Eq 'HttpURLConnection|java\.net\.URL|openConnection|OkHttp|WebView' "$CONSOLE"
+          ! grep -Fq 'usesCleartextTraffic="true"' oea/src/main/AndroidManifest.xml
+          # Install watch applies the rules with nothing imported from anywhere.
+          grep -Fq 'checkRules(pkg, stopped)' "$WATCH"
+          ! grep -Fq 'No malware signatures installed' "$WATCH"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail
