@@ -119,11 +119,13 @@ data class MenuItem(
     val value: String? = null,
     /** 0..100 for a [MenuKind.SLIDER] row; ignored otherwise. */
     val progress: Int = 0,
+    /** Grays the row out and refuses the tap — for a price you cannot afford. */
+    val disabled: Boolean = false,
 ) {
     companion object {
         fun header(title: String) = MenuItem("__header_$title", title, kind = MenuKind.HEADER)
-        fun choice(id: String, label: String, value: String, description: String? = null) =
-            MenuItem(id, label, description, kind = MenuKind.CHOICE, value = value)
+        fun choice(id: String, label: String, value: String, description: String? = null, disabled: Boolean = false) =
+            MenuItem(id, label, description, kind = MenuKind.CHOICE, value = value, disabled = disabled)
         fun slider(id: String, label: String, value: String, progress: Int, description: String? = null) =
             MenuItem(id, label, description, kind = MenuKind.SLIDER, value = value, progress = progress.coerceIn(0, 100))
         fun toggle(id: String, label: String, on: Boolean, description: String? = null) =

@@ -25,28 +25,85 @@ internal enum class Weapon(
     val moveSpeed: Float = 1f,
     /** Clash Squad shop price. */
     val price: Int = 0,
+    /** "pistol", "smg", "rifle", "shotgun", "sniper", "lmg", "launcher", "melee", "special". */
+    val family: String = "rifle",
+    /** One line an armory row shows under the name — what the gun is *for*. */
+    val role: String = "",
 ) {
-    PAN("Pan", "◍", 45f, 1.4f, 90f, 0, 0f, 0f, 0f, 2.2f, 1, false, -1, 1f, 0f, price = 100),
-    PISTOL("Pistol", "P", 26f, 1.8f, 380f, 12, 1.4f, 0.035f, 0.012f, 60f, 1, false, 0, 1.25f, 0.02f, price = 500),
-    SMG("SMG", "S", 17f, 1.6f, 820f, 30, 1.9f, 0.06f, 0.03f, 45f, 1, true, 0, 1.3f, 0.012f, price = 800),
-    RIFLE("Assault rifle", "A", 30f, 1.9f, 600f, 30, 2.3f, 0.045f, 0.012f, 110f, 1, true, 1, 1.6f, 0.018f, price = 1200),
-    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f, 0.96f, price = 900),
-    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f, price = 1600),
-    REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f, price = 1000),
-    MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f, price = 1300),
-    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500),
-    ROCKET("Rocket launcher", "◎", 140f, 1f, 24f, 1, 3.4f, 0.06f, 0.03f, 250f, 1, false, 4, 1.05f, 0.04f, 0.74f, price = 2200),
-    MISSILE("Guided missile", "☆", 120f, 1f, 18f, 1, 4.2f, 0.05f, 0.03f, 320f, 1, false, 4, 1.15f, 0.05f, 0.88f, price = 2600),
+    PAN("Pan", "◍", 45f, 1.4f, 90f, 0, 0f, 0f, 0f, 2.2f, 1, false, -1, 1f, 0f, price = 100, family = "melee",
+        role = "Melee finisher · the Gun Game ladder's last rung"),
+    PISTOL("Pistol", "P", 26f, 1.8f, 380f, 12, 1.4f, 0.035f, 0.012f, 60f, 1, false, 0, 1.25f, 0.02f, price = 500, family = "pistol",
+        role = "Starter sidearm · cheap, accurate, no reserve"),
+    SMG("SMG", "S", 17f, 1.6f, 820f, 30, 1.9f, 0.06f, 0.03f, 45f, 1, true, 0, 1.3f, 0.012f, price = 800, family = "smg",
+        role = "Close-quarters spray · melts inside 15 m"),
+    RIFLE("Assault rifle", "A", 30f, 1.9f, 600f, 30, 2.3f, 0.045f, 0.012f, 110f, 1, true, 1, 1.6f, 0.018f, price = 1200, family = "rifle",
+        role = "The all-rounder · good at every range"),
+    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f, 0.96f, price = 900, family = "shotgun",
+        role = "Nine pellets · room-clearer, useless past 20 m"),
+    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f, price = 1600, family = "sniper",
+        role = "One shot, one kill · scope, 260 m"),
+    REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f, price = 1000, family = "pistol",
+        role = "Hard-hitting hand cannon · rewards patience"),
+    MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f, price = 1300, family = "rifle",
+        role = "Semi-auto rifle · accurate follow-ups at range"),
+    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500, family = "lmg",
+        role = "75-round belt · suppress a lane, move slowly"),
+    /** Burst rifle: three rounds per trigger pull, the classic mid-range answer to the LMG. */
+    BURST("Burst rifle", "B", 26f, 1.9f, 900f, 24, 2.1f, 0.03f, 0.008f, 130f, 1, false, 1, 1.9f, 0.016f, price = 1150, family = "rifle",
+        role = "Three-round burst · tight groups, one trigger pull"),
+    /** Carbine: the light, fast rifle — quicker to aim and to swap than the AR. */
+    CARBINE("Carbine", "C", 25f, 1.85f, 720f, 25, 1.9f, 0.038f, 0.012f, 95f, 1, true, 1, 1.55f, 0.016f, price = 1100, family = "rifle",
+        role = "Light rifle · fast handling, low recoil"),
+    /** A double-barrel: two blasts, then it is a club. Cheap and brutal. */
+    DOUBLE_BARREL("Double barrel", "D", 19f, 1.5f, 90f, 2, 2.6f, 0.1f, 0.075f, 20f, 12, false, 2, 1.2f, 0.075f, 0.97f, price = 700, family = "shotgun",
+        role = "Two bursts of twelve pellets · a doorway ambush"),
+    ROCKET("Rocket launcher", "◎", 140f, 1f, 24f, 1, 3.4f, 0.06f, 0.03f, 250f, 1, false, 4, 1.05f, 0.04f, 0.74f, price = 2200, family = "launcher",
+        role = "Splash damage · vehicles and buildings"),
+    MISSILE("Guided missile", "☆", 120f, 1f, 18f, 1, 4.2f, 0.05f, 0.03f, 320f, 1, false, 4, 1.15f, 0.05f, 0.88f, price = 2600, family = "launcher",
+        role = "Locks onto what the reticle holds · long range"),
     /** Artillery: lobbed shells on a long fuse — area fire, not a gun. */
-    MORTAR("Mortar", "‡", 90f, 1f, 14f, 1, 3.6f, 0.09f, 0.01f, 190f, 1, false, 3, 3.4f, 0.05f, 0.62f, price = 2400),
-    HOWITZER("Howitzer", "✶", 130f, 1f, 9f, 1, 4.6f, 0.08f, 0.008f, 240f, 1, false, 4, 4.0f, 0.07f, 0.55f, price = 3000);
+    MORTAR("Mortar", "‡", 90f, 1f, 14f, 1, 3.6f, 0.09f, 0.01f, 190f, 1, false, 3, 3.4f, 0.05f, 0.62f, price = 2400, family = "launcher",
+        role = "Lobbed shell · fires over cover at a position"),
+    HOWITZER("Howitzer", "✶", 130f, 1f, 9f, 1, 4.6f, 0.08f, 0.008f, 240f, 1, false, 4, 4.0f, 0.07f, 0.55f, price = 3000, family = "launcher",
+        role = "Heavy artillery · slowest, biggest blast");
 
     val interval get() = 60f / rpm
 
     companion object {
         val AMMO_NAMES = arrayOf("Light ammo", "Rifle ammo", "Shells", "Heavy ammo", "Special ammo")
         val AMMO_PACK = intArrayOf(40, 40, 12, 10, 6)
-        val guns = entries.filter { it != PAN }
+        // The roster is presentation as well as simulation, so the front-end
+        // armory reads it through ArenaArmory. Nothing here is mutable state.
+        internal val guns = entries.filter { it != PAN }
+
+        /** Family display order: cheapest and most familiar first. */
+        internal val FAMILIES = listOf("pistol", "smg", "rifle", "shotgun", "sniper", "lmg", "launcher", "melee")
+
+        internal fun familyLabel(family: String): String = when (family) {
+            "pistol" -> "Pistols"
+            "smg" -> "SMGs"
+            "rifle" -> "Rifles"
+            "shotgun" -> "Shotguns"
+            "sniper" -> "Snipers"
+            "lmg" -> "Machine guns"
+            "launcher" -> "Launchers"
+            "melee" -> "Melee"
+            else -> family.replaceFirstChar { it.uppercase() }
+        }
+
+        /** Every gun in one family, cheapest first — how an armory lists them. */
+        fun inFamily(family: String): List<Weapon> =
+            guns.filter { it.family == family }.sortedBy { it.price }
+
+        /** Six bars an armory row can draw: how this gun stands on each axis, 0..1. */
+        internal fun statBars(w: Weapon): List<Pair<String, Float>> = listOf(
+            "Damage" to (w.damage * w.pellets / 140f).coerceIn(0.05f, 1f),
+            "Rate" to (w.rpm / 900f).coerceIn(0.05f, 1f),
+            "Range" to (w.range / 260f).coerceIn(0.05f, 1f),
+            "Accuracy" to (1f - w.spreadAds * 12f).coerceIn(0.05f, 1f),
+            "Handling" to (w.moveSpeed * 0.85f + (1f - w.reload / 5f) * 0.35f).coerceIn(0.05f, 1f),
+            "Magazine" to (w.mag / 75f).coerceIn(0.05f, 1f),
+        )
 
         /** Which guns the loot tables draw from for a loadout option. */
         fun lootPool(loadout: String): List<Weapon> = when (loadout) {
@@ -83,22 +140,36 @@ internal const val SHOP_SMOKE = 500
 internal const val SHOP_STUN = 450
 internal const val SHOP_VEST = 600
 internal const val SHOP_HELMET = 500
+/** Out-of-combat regeneration: seconds without damage, then HP per second. */
+internal const val REGEN_DELAY = 8f
+internal const val REGEN_RATE = 2.2f
 /** Weapon upgrade costs: base per level, up to UP_MAX levels per weapon. */
 internal const val UP_BASE = 250
 internal const val UP_MAX = 3
 
-internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Float, var y: Float, var z: Float) {
+internal class Loot(
+    val id: Int,
+    val kind: LootKind,
+    val value: Int,
+    var x: Float,
+    var y: Float,
+    var z: Float,
+    /** Stack size for consumables: how many medkits/grenades sit in this pile. */
+    val count: Int = 1,
+) {
     var taken = false
+    /** Grenade piles keep their type in [value], so the count is what stacks. */
+    val dropCount: Int get() = count
     val label: String get() = when (kind) {
         LootKind.WEAPON -> Weapon.entries[value].label
         LootKind.AMMO -> Weapon.AMMO_NAMES[value]
-        LootKind.MEDKIT -> "Medkit"
+        LootKind.MEDKIT -> if (count > 1) "Medkits x$count" else "Medkit"
         LootKind.ARMOR -> "Vest lv.$value"
         LootKind.HELMET -> "Helmet lv.$value"
         LootKind.GRENADE -> when (value) {
-            GRENADE_FRAG -> "Frag grenade"
-            GRENADE_SMOKE -> "Smoke grenade"
-            else -> "Stun grenade"
+            GRENADE_FRAG -> if (count > 1) "Frag x$count" else "Frag grenade"
+            GRENADE_SMOKE -> if (count > 1) "Smoke x$count" else "Smoke grenade"
+            else -> if (count > 1) "Stun x$count" else "Stun grenade"
         }
     }
 }
@@ -236,6 +307,12 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     /** Lying flat: slower than crouch, steadier aim, smaller than crouch. */
     var prone = false
     var healProgress = 0f
+    /** Rounds still owed to a burst trigger pull (burst rifle). */
+    var burstLeft = 0
+    /** Time since the last damage; drives out-of-combat regen. */
+    var calmTime = 0f
+    /** True when the last damage was a headshot — the HUD marks it. */
+    var lastHitHead = false
     var cooldown = 0f
     var reloadLeft = 0f
     var switchLeft = 0f
@@ -1250,14 +1327,32 @@ internal class ArenaSim(
         val target = (if (p.aiming) w.spreadAds else w.spreadHip) * (if (moving) 1.6f else 1f) * (if (!p.ctrl.grounded) 2.2f else 1f) * stance * (if (p.stunTimer > 0f) 1.8f else 1f)
         p.spread = MathX.damp(p.spread, target, 8f, dt)
         if (inp.fire && p.cooldown <= 0f && p.reloadLeft <= 0f && p.switchLeft <= 0f && p.stunTimer <= 0f) {
+            // A burst rifle fires three rounds per pull: this one now, two more
+            // from the queue below. A double barrel spends both barrels.
+            // The extra rounds of a burst/double-barrel ride the queue below,
+            // which fires on the weapon's own cadence and stops at an empty mag.
+            if (w == Weapon.BURST) p.burstLeft = 2
+            if (w == Weapon.DOUBLE_BARREL) p.burstLeft = 1
             if (w == Weapon.PAN || p.mags[p.active] > 0) fire(p)
             if (!w.auto) inp.fire = false
         }
-        // Healing: 3 seconds, interrupted by shooting.
+        // The rest of a burst keeps firing on the weapon's own cadence, so a
+        // burst is three aimed rounds and not three frames of one trigger pull.
+        if (p.burstLeft > 0 && p.cooldown <= 0f && p.reloadLeft <= 0f && p.stunTimer <= 0f) {
+            if (p.mags[p.active] > 0) { p.burstLeft--; fire(p) } else p.burstLeft = 0
+        }
+        // Healing: 3 seconds, interrupted by shooting. A medkit is a decision —
+        // you stand still and vulnerable for three seconds and get 65 HP back.
         if (inp.heal && p.medkits > 0 && p.health < 100f) {
             p.healProgress += dt / 3f
             if (p.healProgress >= 1f) { p.health = min(100f, p.health + 65f); p.medkits--; p.healProgress = 0f }
         } else p.healProgress = 0f
+        // Out of combat, health creeps back to 60 but never to full: the slow
+        // recovery that lets a survivor re-engage without trivialising medkits.
+        if (p.health < 60f && p.calmTime > REGEN_DELAY && p.healProgress <= 0f) {
+            p.health = min(60f, p.health + dt * REGEN_RATE)
+        }
+        if (p.spawnGuard > 0f) p.calmTime = 0f else p.calmTime += dt
         // Pick-ups.
         autoPickup(p)
         if (inp.pickup >= 0) { pickup(p, inp.pickup); inp.pickup = -1 }
@@ -1457,6 +1552,9 @@ internal class ArenaSim(
         }
         v.health -= dmg
         v.healProgress = 0f
+        v.calmTime = 0f
+        v.lastHitHead = head
+        if (v.burstLeft > 0 && v.health <= 0f) v.burstLeft = 0
         if (v.health <= 0f) {
             v.health = 0f
             v.alive = false
@@ -1497,15 +1595,22 @@ internal class ArenaSim(
     }
 
     private fun dropLoot(v: ArenaPlayer) {
-        fun drop(kind: LootKind, value: Int, ox: Float, oz: Float) {
-            val l = Loot(lootIds++, kind, value, v.pos.x + ox, v.pos.y + 0.3f, v.pos.z + oz)
+        fun drop(kind: LootKind, value: Int, ox: Float, oz: Float, count: Int = 1) {
+            val l = Loot(lootIds++, kind, value, v.pos.x + ox, v.pos.y + 0.3f, v.pos.z + oz, count)
             loot += l
             events?.onLootSpawned(l)
         }
+        // Everything the player was carrying goes back on the floor, because a
+        // death that silently eats a medkit or a helmet teaches the wrong
+        // lesson: loot is a thing you can lose and come back for.
         v.slots.forEachIndexed { i, w -> if (w != Weapon.PAN) drop(LootKind.WEAPON, w.ordinal, if (i == 0) -0.7f else 0.7f, 0f) }
         v.ammo.forEachIndexed { i, a -> if (a > 0) drop(LootKind.AMMO, i, -0.5f + i * 0.35f, 0.8f) }
-        if (v.medkits > 0) drop(LootKind.MEDKIT, 1, 0f, -0.8f)
+        if (v.medkits > 0) drop(LootKind.MEDKIT, 1, 0f, -0.8f, count = v.medkits)
+        if (v.grenades > 0) drop(LootKind.GRENADE, GRENADE_FRAG, 0.5f, -0.8f, count = v.grenades)
+        if (v.smokes > 0) drop(LootKind.GRENADE, GRENADE_SMOKE, 0.9f, -0.9f, count = v.smokes)
+        if (v.stuns > 0) drop(LootKind.GRENADE, GRENADE_STUN, 1.3f, -1.0f, count = v.stuns)
         if (v.armor > 0) drop(LootKind.ARMOR, v.armor, 0.8f, -0.6f)
+        if (v.helmet > 0) drop(LootKind.HELMET, v.helmet, 1.1f, -0.5f)
     }
 
     private fun autoPickup(p: ArenaPlayer) {
@@ -1546,16 +1651,20 @@ internal class ArenaSim(
     }
 
     private fun take(p: ArenaPlayer, l: Loot) {
+        // A dropped stack (a body's five medkits, say) arrives as one pile, so
+        // every consumable adds rather than counting one. Carrying limits still
+        // apply: you cannot walk away with more than you could hold.
         when (l.kind) {
             LootKind.AMMO -> p.ammo[l.value] += Weapon.AMMO_PACK[l.value]
-            LootKind.MEDKIT -> p.medkits++
-            LootKind.ARMOR -> p.armor = l.value
-            LootKind.HELMET -> p.helmet = l.value
+            LootKind.MEDKIT -> p.medkits = min(5, p.medkits + max(1, l.value))
+            LootKind.ARMOR -> p.armor = max(p.armor, l.value)
+            LootKind.HELMET -> p.helmet = max(p.helmet, l.value)
             LootKind.GRENADE -> when (l.value) {
-                GRENADE_FRAG -> p.grenades++
-                GRENADE_SMOKE -> p.smokes++
-                else -> p.stuns++
+                GRENADE_FRAG -> p.grenades = min(5, p.grenades + max(1, l.dropCount))
+                GRENADE_SMOKE -> p.smokes = min(5, p.smokes + max(1, l.dropCount))
+                else -> p.stuns = min(5, p.stuns + max(1, l.dropCount))
             }
+
             LootKind.WEAPON -> {
                 val slot = if (p.slots[0] == Weapon.PAN) 0 else 1
                 p.slots[slot] = Weapon.entries[l.value]
@@ -2065,8 +2174,9 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
             inp.crouch = rng.chance(if (personality == 2) 0.45f else 0.2f * skill)
         }
         val baseIdeal = when (w) {
-            Weapon.SHOTGUN -> 6f
-            Weapon.SMG -> 12f
+            Weapon.SHOTGUN, Weapon.DOUBLE_BARREL -> 6f
+            Weapon.SMG, Weapon.CARBINE -> 12f
+            Weapon.BURST -> 18f
             Weapon.SNIPER -> 45f
             Weapon.MARKSMAN -> 35f
             Weapon.REVOLVER -> 14f
@@ -2092,7 +2202,10 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
         Weapon.ROCKET -> 60f
         Weapon.MISSILE -> 70f
         Weapon.SHOTGUN -> 22f
+        Weapon.DOUBLE_BARREL -> 16f
         Weapon.SMG -> 38f
+        Weapon.CARBINE -> 60f
+        Weapon.BURST -> 95f
         Weapon.PISTOL -> 40f
         Weapon.RIFLE -> 90f
         Weapon.LMG -> 80f

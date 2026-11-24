@@ -93,6 +93,8 @@ class Graphics internal constructor(context: Context, private val perf: Performa
     private var sceneH = 1
     private var anyWorld = false
     private var composited = false
+    /** Environment of the last world pass, so the composite grades with it. */
+    private var gradedWith: Environment? = null
     private var inWorld = false
     private var inUi = false
     private var clearColor = 0xFF000000.toInt()
@@ -159,6 +161,7 @@ class Graphics internal constructor(context: Context, private val perf: Performa
         check(!inWorld && !inUi) { "Nested passes: end the current pass first" }
         inWorld = true
         val env = environment ?: this.environment
+        gradedWith = env
         startWorldTarget(viewport, env.clearColor, env.drawSky)
         camera.update(passViewport[2].toFloat() / max(1, passViewport[3]), viewport.rotate180)
         renderer.begin(camera, env)
@@ -249,18 +252,33 @@ class Graphics internal constructor(context: Context, private val perf: Performa
         composited = true
     }
 
+    /** Player's grade strength: 1 = as authored, 0 = raw render. */
+    private val gradeStrength: Float get() = OeaEngine.settings.colourGrade
+    private val vignetteOn: Boolean get() = OeaEngine.settings.vignette
+
+    /** Blend a grade parameter toward its neutral value by [gradeStrength]. */
+    private fun g(neutral: Float, value: Float): Float =
+        neutral + (value - neutral) * gradeStrength.coerceIn(0f, 1f)
+
     private fun composite() {
         composited = true
-        if (passToScreen || !postAvailable) return
+        if (!postAvailable) return
         val q = quality
         val hot = perf.thermalLimited
         post.composite(
             screenW = width, screenH = height, sceneW = sceneW, sceneH = sceneH,
             fxaa = q.fxaa,
             bloom = if (q.bloom && !hot) 0.55f else 0f,
-            vignette = if (q.vignette) 0.22f else 0f,
+            vignette = if (q.vignette && gradeStrength > 0.01f && vignetteOn) 0.22f else 0f,
             sharpen = if (scaleThisFrame < 0.92f) 0.35f else 0f,
             time = frameTime,
+            // Grade from the environment of the pass that was rendered, so a
+            // night level and a sunny island can look like different films —
+            // scaled by the player's own grade strength, which can be off.
+            contrast = if (passToScreen) 1f else g(1f, gradedWith?.contrast ?: 1f),
+            saturation = if (passToScreen) 1f else g(1f, gradedWith?.saturation ?: 1f),
+            warmth = if (passToScreen) 0f else g(0f, gradedWith?.warmth ?: 0f),
+            clarity = if (passToScreen) 0f else g(0f, gradedWith?.clarity ?: 0f),
         )
     }
 
@@ -358,7 +376,10 @@ internal class PostProcess {
 
     fun bindScene() { GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo) }
 
-    fun composite(screenW: Int, screenH: Int, sceneW: Int, sceneH: Int, fxaa: Boolean, bloom: Float, vignette: Float, sharpen: Float, time: Float) {
+    fun composite(
+        screenW: Int, screenH: Int, sceneW: Int, sceneH: Int, fxaa: Boolean, bloom: Float, vignette: Float, sharpen: Float, time: Float,
+        contrast: Float = 1f, saturation: Float = 1f, warmth: Float = 0f, clarity: Float = 0f,
+    ) {
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDisable(GLES30.GL_CULL_FACE)
         GLES30.glDisable(GLES30.GL_BLEND)
@@ -405,6 +426,7 @@ internal class PostProcess {
         compositeShader.set2f("u_texel", 1f / texW, 1f / texH)
         compositeShader.set2f("u_bloomUvScale", bu, bv)
         compositeShader.set4f("u_params", if (fxaa) 1f else 0f, if (useBloom) bloom else 0f, vignette, sharpen)
+        compositeShader.set4f("u_grade", contrast, saturation, warmth, clarity)
         compositeShader.set1f("u_time", time % 100f)
         compositeShader.set1i("u_scene", 0)
         compositeShader.set1i("u_bloom", 1)

@@ -96,6 +96,10 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
         )
         val actions = LinearLayout(kit.context).apply { orientation = LinearLayout.HORIZONTAL }
         actions.addView(
+            kit.tonalButton("Armory") { armorySheet() },
+            LinearLayout.LayoutParams(0, kit.dp(42), 1f).apply { rightMargin = kit.dp(8) }
+        )
+        actions.addView(
             kit.tonalButton("Randomise") { randomise() },
             LinearLayout.LayoutParams(0, kit.dp(42), 1f).apply { rightMargin = kit.dp(8) }
         )
@@ -104,6 +108,18 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
             LinearLayout.LayoutParams(0, kit.dp(42), 1f)
         )
         texts.addView(actions, LinearLayout.LayoutParams(-1, kit.dp(42)).apply { topMargin = kit.dp(10) })
+
+        // Weapon pool: named by what it actually contains, not just a chip.
+        val pool = option("loadout")
+        if (pool != null) {
+            val pick = pool.choices.indexOfFirst { it.value == value("loadout") }.coerceAtLeast(0)
+            val family = poolFamily(pool.choices[pick].value)
+            texts.addView(
+                kit.text("Pool: ${pool.choices[pick].label} · ${family.size} guns", 11.5f, palette.textTertiary)
+                    .apply { setPadding(0, kit.dp(8), 0, 0) },
+                LinearLayout.LayoutParams(-1, -2)
+            )
+        }
         row.addView(texts, LinearLayout.LayoutParams(0, -2, 1.5f).apply { leftMargin = kit.dp(14) })
         loadout.addView(row, LinearLayout.LayoutParams(-1, -2))
 
@@ -451,6 +467,103 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
         }
         saveSpec(spec)
         host.frontToast("Outfit set")
+    }
+
+    // ----------------------------------------------------------------- armory
+
+    /** Which weapons a loadout pool draws from, as the sim does. */
+    private fun poolFamily(pool: String): List<String> = when (pool) {
+        "snipers" -> listOf("sniper", "rifle")
+        "shotguns" -> listOf("shotgun", "smg", "pistol")
+        "close" -> listOf("pistol", "smg")
+        "rifles" -> listOf("rifle", "smg", "lmg")
+        else -> listOf("pistol", "smg", "rifle", "shotgun", "sniper", "lmg", "launcher")
+    }
+
+    /** The gun roster as the sim declares it, read through the armory view. */
+    private val armory: List<com.oea.games.arena.WeaponInfo> by lazy { com.oea.games.arena.ArenaArmory.all() }
+
+    /**
+     * The armory: every gun in the game, grouped by family, with six bars that
+     * say how it behaves. A shooter's front screen is where a player decides
+     * what to pick up; a chip labelled "Rifles & autos" does not do that job.
+     */
+    private fun armorySheet() {
+        val poolLabel = label("loadout")
+        kit.sheet("Armory", "${armory.size} weapons · pool: $poolLabel") { panel, dialog ->
+            val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+            val poolNow = value("loadout")
+            val families = poolFamily(poolNow)
+            for (fam in families) {
+                val guns = armory.filter { it.family == fam }
+                if (guns.isEmpty()) continue
+                kit.sectionTitle(body, com.oea.games.arena.ArenaArmory.familyLabel(fam))
+                for (g in guns) kit.group(body).addView(gunCard(g))
+            }
+            kit.note(body, "Bars run off fixed ceilings, not the roster: damage counts pellets against 140, rate against 900 rpm, range against 260 m, magazine against 75 rounds. Accuracy is the aimed cone and handling is weight plus reload speed, so a heavy gun can be accurate and still feel slow.")
+            panel.addView(kit.boundedScroll(body, 0.74f))
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Weapon pool") {
+                    dialog.dismiss()
+                    option("loadout")?.let { opt ->
+                        val current = opt.choices.indexOfFirst { it.value == poolNow }.coerceAtLeast(0)
+                        pickChoice(opt, current)
+                    }
+                },
+                kit.primaryButton("Done") { dialog.dismiss(); host.frontRebuild() }
+            ))
+        }
+    }
+
+    /** One gun: name, role, price, and the six bars. */
+    private fun gunCard(g: com.oea.games.arena.WeaponInfo): View {
+        val row = LinearLayout(kit.context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(kit.dp(12), kit.dp(10), kit.dp(12), kit.dp(10))
+            background = kit.rounded(palette.card, 12, palette.stroke, 1)
+        }
+        val head = LinearLayout(kit.context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(
+            kit.text(g.glyph, 20f, palette.signal, GameType.black).apply {
+                gravity = Gravity.CENTER
+                background = kit.rounded(GameColors.alpha(palette.signal, 0x1F), 10)
+            },
+            LinearLayout.LayoutParams(kit.dp(34), kit.dp(34)).apply { rightMargin = kit.dp(10) }
+        )
+        val names = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+        names.addView(kit.text(g.label, 14.5f, palette.text, GameType.medium))
+        if (g.role.isNotBlank()) names.addView(kit.text(g.role, 11.5f, palette.textTertiary))
+        head.addView(names, LinearLayout.LayoutParams(0, -2, 1f))
+        if (g.price > 0) head.addView(kit.text("$${g.price}", 13f, palette.accent, GameType.mono))
+        row.addView(head, LinearLayout.LayoutParams(-1, -2))
+
+        val bars = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+        for ((barLabel, v) in listOf(
+            "Damage" to g.damage, "Rate" to g.rate, "Range" to g.range,
+            "Accuracy" to g.accuracy, "Handling" to g.handling, "Magazine" to g.magazine,
+        )) {
+            val line = LinearLayout(kit.context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            line.addView(
+                kit.text(barLabel, 10.5f, palette.textTertiary).apply { setPadding(0, kit.dp(3), 0, kit.dp(3)) },
+                LinearLayout.LayoutParams(kit.dp(72), -2)
+            )
+            val track = FrameLayout(kit.context).apply {
+                background = kit.rounded(GameColors.alpha(palette.text, 0x14), 3)
+                addView(View(kit.context).apply {
+                    background = kit.rounded(if (v > 0.72f) palette.signal else palette.accent, 3)
+                }, FrameLayout.LayoutParams(0, -1).also { it.width = 0 })
+            }
+            line.addView(track, LinearLayout.LayoutParams(0, kit.dp(6), 1f))
+            bars.addView(line, LinearLayout.LayoutParams(-1, -2))
+            // Fill after layout so the bar is a fraction of the real width.
+            track.post {
+                val w = (track.width * v.coerceIn(0.05f, 1f)).toInt()
+                (track.getChildAt(0).layoutParams as FrameLayout.LayoutParams).width = w
+                track.getChildAt(0).requestLayout()
+            }
+        }
+        row.addView(bars, LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(6) })
+        return row
     }
 
     // --------------------------------------------------------------- settings

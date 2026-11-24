@@ -53,6 +53,7 @@ import com.oea.engine.ui.ButtonStyle
 import com.oea.engine.ui.Hud
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -523,6 +524,10 @@ class OeaArena : OeaGame() {
     /** The blinking warning light near the end of the fuse. */
     private val grenadeBlinkMat = Material(color = 0x66FF3B3B.toInt(), emissive = 0xFFFF3B3B.toInt(), emissiveStrength = 1.6f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
     private val rocketMat = Material(color = 0xFFE0E0E0.toInt(), emissive = 0xFFFF7043.toInt(), emissiveStrength = 1.2f, specular = 0.6f)
+    /** Streaks that read as air being cut — sprint lines and skydive wind. */
+    private val speedLineMat = Material(color = 0x0FFFFFFF, emissive = 0xFFFFFFFF.toInt(), emissiveStrength = 0.35f, specular = 0f)
+    private val healRingMat = Material(color = 0x0F66BB6A, emissive = 0xFF66BB6A.toInt(), emissiveStrength = 0.9f, specular = 0f)
+    private val shieldRingMat = Material(color = 0x0F8AB4F8, emissive = 0xFF8AB4F8.toInt(), emissiveStrength = 0.8f, specular = 0f)
     private val rocketTrailMat = Material(color = 0x88FFFFFF.toInt(), emissive = 0xFFFFFFFF.toInt(), emissiveStrength = 0.8f, unlit = true, transparent = true, additive = true, depthWrite = false, castShadows = false, fog = false)
     /** A smoke grenade's lasting cloud: a soft grey volume standing over where the air went thick. */
     private val smokeCloudMat = Material(color = 0x99909090.toInt(), unlit = true, transparent = true, doubleSided = true, depthWrite = false, castShadows = false)
@@ -1230,6 +1235,9 @@ class OeaArena : OeaGame() {
         Weapon.PISTOL -> 1.1f
         Weapon.REVOLVER -> 0.78f
         Weapon.MARKSMAN -> 0.95f
+        Weapon.BURST -> 1.0f
+        Weapon.CARBINE -> 1.12f
+        Weapon.DOUBLE_BARREL -> 0.7f
         Weapon.SNIPER -> 0.9f
         Weapon.LMG -> 1.05f
         else -> 1f
@@ -2260,29 +2268,52 @@ class OeaArena : OeaGame() {
         } else openShop()
     }
 
-    /** The Clash Squad shop: buy weapons and consumables with the round's cash. */
+    /**
+     * The Clash Squad shop: buy weapons and consumables with the round's cash.
+     *
+     * Grouped the way a player thinks — one section per weapon family with the
+     * price, what the gun is *for*, and whether it is affordable — instead of a
+     * flat alphabetical list of thirteen things that all look alike.
+     */
     private fun openShop() {
         val me = local ?: return
         val items = ArrayList<MenuItem>()
-        for (w in Weapon.entries) {
-            if (w == Weapon.PAN) continue
-            items += MenuItem("buy${w.ordinal}", "${w.label} · $${w.price}${if (w.price <= me.cash) "" else " · can't afford"}")
+        items += MenuItem.header("Cash")
+        items += MenuItem("cash", "Cash: $${me.cash}", "Kills and round wins pay")
+        for (fam in Weapon.FAMILIES) {
+            val guns = Weapon.inFamily(fam).filter { it.price > 0 }
+            if (guns.isEmpty()) continue
+            items += MenuItem.header(Weapon.familyLabel(fam))
+            for (w in guns) {
+                val afford = w.price <= me.cash
+                items += MenuItem.choice(
+                    "buy${w.ordinal}",
+                    w.label,
+                    if (afford) "$${w.price}" else "$${w.price} · can't afford",
+                    w.role,
+                    disabled = !afford,
+                )
+            }
         }
-        items += MenuItem("medkit", "Medkit · $SHOP_MEDKIT")
-        items += MenuItem("frag", "Frag grenade · $SHOP_FRAG")
-        items += MenuItem("smoke", "Smoke grenade · $SHOP_SMOKE")
-        items += MenuItem("stun", "Stun grenade · $SHOP_STUN")
-        items += MenuItem("vest", "Vest upgrade · $SHOP_VEST (lv ${me.armor}/3)")
-        items += MenuItem("helmet", "Helmet upgrade · $SHOP_HELMET (lv ${me.helmet}/3)")
+        items += MenuItem.header("Gear")
+        items += MenuItem.choice("medkit", "Medkit", "$$SHOP_MEDKIT", "65 HP over three seconds", disabled = me.cash < SHOP_MEDKIT)
+        items += MenuItem.choice("vest", "Vest upgrade", "$$SHOP_VEST", "Level ${me.armor} of 3", disabled = me.cash < SHOP_VEST)
+        items += MenuItem.choice("helmet", "Helmet upgrade", "$$SHOP_HELMET", "Level ${me.helmet} of 3", disabled = me.cash < SHOP_HELMET)
+        items += MenuItem.header("Throwables")
+        items += MenuItem.choice("frag", "Frag grenade", "$$SHOP_FRAG", "Cook it, then throw", disabled = me.cash < SHOP_FRAG)
+        items += MenuItem.choice("smoke", "Smoke grenade", "$$SHOP_SMOKE", "Break a sight line", disabled = me.cash < SHOP_SMOKE)
+        items += MenuItem.choice("stun", "Stun grenade", "$$SHOP_STUN", "Flash and slow", disabled = me.cash < SHOP_STUN)
         // Weapon upgrades: spend cash to make the gun hit harder, hold more, reload faster.
+        items += MenuItem.header("Upgrades")
         for (slot in 0..1) {
             val w = me.slots[slot]
             if (w == Weapon.PAN) continue
             val lv = me.upLevels[w.ordinal]
-            items += if (lv >= UP_MAX) MenuItem("up$slot", "${w.label} · fully upgraded (lv $lv/$UP_MAX)")
-            else MenuItem("up$slot", "Upgrade ${w.label} · lv ${lv}→${lv + 1}/$UP_MAX · $${sim.upgradeCost(me, w)}")
+            items += if (lv >= UP_MAX) MenuItem.choice("up$slot", w.label, "Maxed · lv $lv/$UP_MAX", "Fully upgraded")
+            else MenuItem.choice("up$slot", "Upgrade ${w.label}", "$${sim.upgradeCost(me, w)}", "Level $lv → ${lv + 1} of $UP_MAX · +damage, +mag, faster reload", disabled = me.cash < sim.upgradeCost(me, w))
         }
-        items += MenuItem("deploy", "Deploy to round ${sim.round}")
+        items += MenuItem.header("Ready")
+        items += MenuItem("deploy", "Deploy to round ${sim.round}", "Take this kit into the round")
         ctx.ui.menu("Send Off · Shop", "Cash ${me.cash} · round ${sim.round}", items) { id ->
             if (id == null) return@menu
             when (id) {
@@ -2311,7 +2342,8 @@ class OeaArena : OeaGame() {
             if (w == Weapon.PAN) continue
             items += MenuItem("pick${w.ordinal}", "${w.label} · ${w.glyph}")
         }
-        items += MenuItem("deploy", "Deploy to round ${sim.round}")
+        items += MenuItem.header("Ready")
+        items += MenuItem("deploy", "Deploy to round ${sim.round}", "Take this kit into the round")
         ctx.ui.menu("Send Off · Lone Wolf", "Choose your weapon (rounds ${sim.round}, ${sim.round + 1})", items) { id ->
             if (id == null) return@menu
             when (id) {
@@ -2531,6 +2563,7 @@ class OeaArena : OeaGame() {
             r.draw(zoneRing, zoneRingMat, z.cx, g + 0.06f, z.cz, 0f, 0f, 0f, z.radius, 1f, z.radius)
             if (z.shrinking) r.draw(zoneRing, zoneTargetMat, z.toX, g + 0.05f, z.toZ, 0f, 0f, 0f, z.toR, 1f, z.toR)
         }
+        drawBodyFx(r)
         for (tr in tracers) r.drawLine(tr[0], tr[1], tr[2], tr[3], tr[4], tr[5], 0.025f, tracerMat, Colors.withAlpha(Colors.WHITE, 1f - tr[6] / 0.09f))
         r.particles(puffs)
         r.particles(sparks)
@@ -2621,6 +2654,15 @@ class OeaArena : OeaGame() {
                 mb.box(0f, -0.05f, -0.25f, 0.07f, 0.15f, 0.3f) }
             Weapon.REVOLVER -> { mb.box(0f, 0f, 0.05f, 0.055f, 0.09f, 0.26f); mb.withTransform(Mat4().setTRS(0f, 0.02f, 0.12f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.05f, 0.1f, 10) }
                 mb.box(0f, -0.09f, -0.02f, 0.045f, 0.12f, 0.07f); mb.box(0f, 0.02f, 0.22f, 0.03f, 0.03f, 0.12f) }
+            Weapon.BURST -> { mb.box(0f, 0f, 0.17f, 0.075f, 0.11f, 0.6f); mb.withTransform(Mat4().setTRS(0f, 0.02f, 0.52f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.026f, 0.34f, 8) }
+                mb.box(0f, 0.1f, 0.16f, 0.05f, 0.04f, 0.26f); mb.box(0f, -0.12f, 0.2f, 0.055f, 0.18f, 0.08f)
+                mb.box(0f, -0.04f, -0.2f, 0.065f, 0.13f, 0.22f) }
+            Weapon.CARBINE -> { mb.box(0f, 0f, 0.15f, 0.07f, 0.1f, 0.5f); mb.withTransform(Mat4().setTRS(0f, 0.01f, 0.44f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.023f, 0.28f, 8) }
+                mb.box(0f, -0.1f, 0.14f, 0.05f, 0.15f, 0.07f); mb.box(0f, -0.03f, -0.17f, 0.06f, 0.11f, 0.2f)
+                mb.box(0f, 0.07f, 0.12f, 0.04f, 0.035f, 0.2f) }
+            Weapon.DOUBLE_BARREL -> { mb.withTransform(Mat4().setTRS(-0.036f, 0f, 0.26f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.026f, 0.7f, 10) }
+                mb.withTransform(Mat4().setTRS(0.036f, 0f, 0.26f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.026f, 0.7f, 10) }
+                mb.box(0f, -0.045f, 0.28f, 0.1f, 0.07f, 0.3f); mb.box(0f, -0.05f, -0.16f, 0.08f, 0.15f, 0.3f) }
             Weapon.MARKSMAN -> { mb.box(0f, 0f, 0.18f, 0.07f, 0.11f, 0.62f); mb.withTransform(Mat4().setTRS(0f, 0.01f, 0.5f, pitch = MathX.HALF_PI)) { cylinder(0f, 0f, 0f, 0.022f, 0.3f, 8) }
                 mb.withTransform(Mat4().setTRS(0f, 0.12f, 0.12f, pitch = MathX.HALF_PI)) { cylinder(0f, -0.12f, 0f, 0.032f, 0.22f, 10) }
                 mb.box(0f, -0.13f, 0.22f, 0.06f, 0.2f, 0.08f); mb.box(0f, -0.05f, -0.22f, 0.07f, 0.15f, 0.28f) }
@@ -2785,6 +2827,57 @@ class OeaArena : OeaGame() {
         val gm = m.copy()
         r.draw(gunMesh(weapon), gunMaterial(weapon), gm.translate(-0.05f, 0.02f, 0.12f))
         if (!r.shadowMapsActive) r.blobShadow(x, map.physics.groundHeight(x, z, y + 0.5f), z, 0.45f, 0.35f)
+    }
+
+    // ------------------------------------------------------------ body effects
+
+    /**
+     * The body's own state, drawn in the world: a green ring and rising motes
+     * while a medkit is working, a blue shield ring on a fresh spawn, and
+     * wind streaks around a sprinting or falling soldier. These are the cues a
+     * player reads *before* the HUD, because they sit where the action is.
+     */
+    private fun drawBodyFx(r: Renderer3D) {
+        val me = local ?: return
+        if (!me.alive) return
+        val t = ctx.time.elapsed.toFloat()
+        val gy = map.physics.groundHeight(me.pos.x, me.pos.z, me.pos.y + 1f)
+        // Healing: a ring that turns and a soft column of light.
+        if (me.healProgress > 0f) {
+            val rr = 0.85f + 0.1f * sin(t * 4f)
+            r.draw(captureRing, healRingMat, me.pos.x, gy + 0.06f, me.pos.z, t * 0.9f, MathX.HALF_PI, 0f, rr, 1f, rr)
+            r.draw(captureBeam, healRingMat, me.pos.x, gy + 0.4f + me.healProgress * 0.8f, me.pos.z, 0f, 0f, 0f, 0.45f, 1.6f + me.healProgress, 0.45f)
+            if (ctx.time.frame % 3 == 0L) vfx.sparksAt(me.pos.x, gy + 0.3f, me.pos.z, 2, hot = 0xFF8BC34A.toInt())
+        }
+        // Spawn shield: a ring at the soldier's feet that fades as the guard does.
+        if (me.spawnGuard > 0f) {
+            val k = (me.spawnGuard / 3f).coerceIn(0f, 1f)
+            val rr = 1.05f + (1f - k) * 0.25f
+            r.draw(zoneRing, shieldRingMat, me.pos.x, gy + 0.08f, me.pos.z, 0f, 0f, 0f, rr, 1f, rr)
+        }
+        // Speed: streak lines behind the body, scaled by how fast it is actually
+        // moving. On foot past a sprint, and hard while skydiving.
+        val speed = MathX.length(me.velX, me.velZ)
+        val sky = me.skydiving
+        val intensity = if (sky) 1f else ((speed - 7.2f) / 3.2f).coerceIn(0f, 1f)
+        if (intensity > 0.02f) {
+            val fx = sin(me.yaw); val fz = cos(me.yaw)
+            val rx = -fz; val rz = fx
+            val headY = me.pos.y + 1.35f
+            for (i in 0 until 7) {
+                val ph = i * 0.9f
+                val side = if (i % 2 == 0) 1f else -1f
+                val off = (0.35f + 0.3f * ((i % 3) + 1)) * side
+                val jitter = sin(t * 9f + ph) * 0.18f
+                val len = (0.5f + 1.6f * intensity) * (0.6f + 0.4f * sin(t * 7f + ph))
+                val y = headY + (i - 3) * 0.26f + jitter
+                val ax = me.pos.x + rx * off - fx * 0.4f
+                val az = me.pos.z + rz * off - fz * 0.4f
+                val bx2 = ax - fx * len
+                val bz2 = az - fz * len
+                r.drawLine(ax, y, az, bx2, y, bz2, 0.012f, speedLineMat, Colors.withAlpha(Colors.WHITE, 0.16f * intensity))
+            }
+        }
     }
 
     // ---------------------------------------------------------------- HUD
@@ -3111,11 +3204,33 @@ class OeaArena : OeaGame() {
                 cx, cy + 17f * d, 13f, if (z.shrinking) 0xFF64B5F6.toInt() else 0xDDFFFFFF.toInt(), Align.CENTER)
             if (me.alive && z.outside(me.pos.x, me.pos.z) && !me.skydiving) hud.text("Outside the zone!", cx, cy + 38f * d, 16f, 0xFF64B5F6.toInt(), Align.CENTER, bold = true)
         }
+        // The status strip: everything the body is currently doing, stacked in
+        // one place above the weapon slots, so healing, reloading, a shield and
+        // an out-of-combat regen never fight for the same pixel.
+        var stripY = h * 0.60f
         if (me.healProgress > 0f) {
-            hud.text("Healing…", w / 2f, h * 0.6f, 15f, Colors.WHITE, Align.CENTER, bold = true)
-            hud.bar(w / 2f - 70f * d, h * 0.6f + 24f * d, 140f * d, 6f * d, me.healProgress, 0xFF66BB6A.toInt())
+            hud.text("Healing…", w / 2f, stripY, 15f, Colors.WHITE, Align.CENTER, bold = true)
+            hud.bar(w / 2f - 70f * d, stripY + 22f * d, 140f * d, 6f * d, me.healProgress, 0xFF66BB6A.toInt())
+            stripY += 38f * d
+        } else if (me.alive && me.health < 60f && me.calmTime > 8f) {
+            // Out of combat: say so, and how far the slow regen has got.
+            hud.text("Regenerating", w / 2f, stripY, 12.5f, 0xFF9CCC8A.toInt(), Align.CENTER, bold = true)
+            hud.bar(w / 2f - 52f * d, stripY + 18f * d, 104f * d, 4f * d, MathX.clamp01(me.health / 60f), 0xCC9CCC8A.toInt())
+            stripY += 30f * d
         }
-        if (me.reloadLeft > 0f) hud.text("Reloading", w / 2f, h * 0.56f, 14f, 0xDDFFFFFF.toInt(), Align.CENTER)
+        if (me.reloadLeft > 0f) {
+            hud.text("Reloading", w / 2f, stripY, 14f, 0xDDFFFFFF.toInt(), Align.CENTER)
+            stripY += 22f * d
+        }
+        if (me.spawnGuard > 0f && me.alive) {
+            // Spawn shield: a countdown, because a player must know exactly how
+            // long they cannot be shot for.
+            hud.text("Spawn shield ${ceil(me.spawnGuard).toInt()}s", w / 2f, stripY, 12.5f, 0xFF8AB4F8.toInt(), Align.CENTER, bold = true)
+            stripY += 22f * d
+        }
+        if (me.burstLeft > 0 && me.weapon == Weapon.BURST) {
+            hud.text("BURST", w / 2f, stripY, 11.5f, 0xCCFFD54F.toInt(), Align.CENTER, bold = true)
+        }
         if (net == null && hud.iconButton("menu", "☰", w - hud.safeRight - 150f * d, y + 20f * d, 18f)) onBack()
     }
 

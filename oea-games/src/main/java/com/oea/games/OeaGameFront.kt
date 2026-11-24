@@ -293,6 +293,17 @@ abstract class GameFront(protected val host: GameFrontHost) {
                 }
             }
             kit.switchRow(body, "Adaptive resolution", "Trades sharpness for a steady frame rate", settings.adaptiveResolution) { settings.adaptiveResolution = it }
+            kit.sectionTitle(body, "Picture")
+            kit.slider(body, "Colour grade", settings.colourGrade, 0f, 1.5f, {
+                when {
+                    it < 0.02f -> "Off (raw render)"
+                    it < 0.6f -> "Subtle · ${(it * 100).toInt()}%"
+                    it < 1.05f -> "Filmic · ${(it * 100).toInt()}%"
+                    else -> "Punchy · ${(it * 100).toInt()}%"
+                }
+            }) { settings.colourGrade = it }
+            kit.switchRow(body, "Vignette", "Darkened corners — off for a flat, clinical image", settings.vignette) { settings.vignette = it }
+            kit.note(body, "Each world carries its own grade — night is cooler and softer, noon is punchier, a haunted night is nearly monochrome. The slider scales that look; it does not replace it, so turning it down keeps the time of day readable.")
             kit.sectionTitle(body, "On-screen")
             kit.slider(body, "HUD opacity", settings.hudOpacity, 0.4f, 1f, { "${(it * 100f).toInt()}%" }) { settings.hudOpacity = it }
             kit.slider(body, "Button opacity", settings.buttonOpacity, 0.35f, 1f, { "${(it * 100f).toInt()}%" }) { settings.buttonOpacity = it }

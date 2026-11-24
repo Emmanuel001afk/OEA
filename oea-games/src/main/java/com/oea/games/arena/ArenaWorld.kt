@@ -146,6 +146,40 @@ internal class ArenaWorld(
         env.skyGround = Colors.lerp(workDay.skyGround, workNight.skyGround, d)
         env.fogColor = Colors.lerp(Colors.lerp(workDay.fogColor, workNight.fogColor, d), 0xFFE2A47E.toInt(), warmth * 0.5f)
 
+        // The grade moves with the light: day is punched and saturated, night
+        // is cooler and softer, and dusk leans into the split tone. A fixed
+        // grade would fight the time of day instead of describing it.
+        val dayContrast = 1.07f; val nightContrast = 1.03f
+        var contrast = MathX.lerp(dayContrast, nightContrast, d)
+        var saturation = MathX.lerp(1.10f, 0.92f, d) + warmth * 0.08f
+        var gradeWarmth = MathX.lerp(0.16f, -0.10f, d) + warmth * 0.30f
+        var clarity = MathX.lerp(0.12f, 0.20f, d)
+
+        // Modes get a grade of their own on top of the time of day. A competitive
+        // match wants flat, readable light; a survival night wants crushed,
+        // grimy colour. Without this a night match and a haunted match render
+        // identically, which is the surest way to make two modes feel like one.
+        when (rules) {
+            "tdm", "gun", "cs", "wolf", "warfare", "warfare_koth", "warfare_ad" -> {
+                contrast += 0.03f; saturation += 0.04f; clarity += 0.03f; gradeWarmth -= 0.03f
+            }
+            "last_day" -> {
+                // Dawn-to-night survival: a slow bleed from warm to cold already
+                // comes from `d`; just deepen it.
+                saturation -= 0.05f; clarity += 0.02f
+            }
+            "lights_out" -> {
+                contrast += 0.09f; saturation -= 0.22f; gradeWarmth -= 0.10f; clarity += 0.14f
+            }
+            "haunted" -> {
+                saturation -= 0.30f; gradeWarmth -= 0.26f; contrast += 0.06f; clarity += 0.10f
+            }
+        }
+        env.contrast = contrast
+        env.saturation = saturation
+        env.warmth = gradeWarmth
+        env.clarity = clarity
+
         // Sun sweeps an arc; after it sets, the moon takes over as the key light.
         val a = (time - 0.25f) * MathX.TAU
         val sx = sin(a) * 0.9f

@@ -1299,27 +1299,26 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
                     }
                     val value = item.value
                     val label = labels[index]
-                    if (value.isNullOrBlank()) {
-                        list.addView(
-                            k.optionRow(label, descriptions.getOrNull(index), false) {
-                                picked = true
-                                dialog.dismiss()
-                                onPick(item.id)
-                            },
-                            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
-                        )
+                    val row: android.view.View = if (value.isNullOrBlank()) {
+                        k.optionRow(label, descriptions.getOrNull(index), false) {
+                            if (item.disabled) return@optionRow
+                            picked = true
+                            dialog.dismiss()
+                            onPick(item.id)
+                        }
                     } else {
                         // A live-valued row: the setting name and its current
                         // value on one line, so the page reads at a glance.
-                        list.addView(
-                            k.valueRow(label, value, descriptions.getOrNull(index), item.kind == MenuKind.CHOICE) {
-                                picked = true
-                                dialog.dismiss()
-                                onPick(item.id)
-                            },
-                            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
-                        )
+                        k.valueRow(label, value, descriptions.getOrNull(index), item.kind == MenuKind.CHOICE && !item.disabled) {
+                            if (item.disabled) return@valueRow
+                            picked = true
+                            dialog.dismiss()
+                            onPick(item.id)
+                        }
                     }
+                    // A disabled row stays visible but reads as unavailable.
+                    if (item.disabled) row.alpha = 0.45f
+                    list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) })
                 }
                 if (host != null && descriptor?.id == "arena" && items.any { it.id == "resume" }) {
                     val cur = frontOrientationMode()

@@ -251,6 +251,21 @@ class EngineSettings internal constructor(context: Context) {
         get() = prefs.getFloat("hud_opacity", 1f).coerceIn(0.4f, 1f)
         set(v) = prefs.edit().putFloat("hud_opacity", v.coerceIn(0.4f, 1f)).apply()
 
+    /**
+     * How strongly the scene is film-graded, 0..1.5. 1 is the look the
+     * environment presets intend; 0 is the raw render, for players who want the
+     * flat image and a couple of extra frames; above 1 is a stylised, punchier
+     * picture for screenshots.
+     */
+    var colourGrade: Float
+        get() = prefs.getFloat("colour_grade", 1f).coerceIn(0f, 1.5f)
+        set(v) = prefs.edit().putFloat("colour_grade", v.coerceIn(0f, 1.5f)).apply()
+
+    /** Full-screen vignette on top of the grade. Some players hate it; make it a choice. */
+    var vignette: Boolean
+        get() = prefs.getBoolean("vignette", true)
+        set(v) = prefs.edit().putBoolean("vignette", v).apply()
+
     /** "cross", "dot", "t", "circle" — the shape of the aim reticle. */
     var crosshairStyle: String
         get() = prefs.getString("crosshair_style", "cross").takeIf { it in CROSSHAIR_STYLES } ?: "cross"
