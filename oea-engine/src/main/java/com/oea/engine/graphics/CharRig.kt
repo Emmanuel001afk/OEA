@@ -44,12 +44,15 @@ class CharRig(
     val spec: CharSpec? = null,
     /** Armor vest material (game-owned; defaults to the outer layer). */
     val vest: Material? = null,
+    /** Offline-converted GLB character. When set, its meshes replace [HumanBody]. */
+    val imported: CharacterAsset? = null,
 ) {
 
     // ---- skinned pipeline: a real skeleton driving procedurally generated
     // body parts. Legacy rigs (no spec) get a default body; spec rigs rebuild
-    // on revision change in [ensureForm].
-    val skeleton = Skeleton()
+    // on revision change in [ensureForm]. Imported rigs supply their own
+    // inverse-bind matrices so the same procedural pose drives their mesh.
+    val skeleton = Skeleton(imported?.inverseBind)
     var human: HumanBody? = null
     private val tmp = Mat4()
     private val tmp2 = Mat4()
@@ -110,7 +113,7 @@ class CharRig(
     // SSS term on the skinned path so it reads as flesh, not plastic. Spec rigs
     // rebuild their materials in ensureForm instead.
     init {
-        if (spec == null) {
+        if (spec == null && imported == null) {
             human = HumanBody(null, feminine, hairStyle)
             mSkin = Material(color = skin.color, texture = skin.texture, specular = skin.specular,
                 shininess = skin.shininess, rim = skin.rim, subsurface = skin.color)
@@ -145,7 +148,8 @@ class CharRig(
         baseOuterShine = mOuter.shininess; baseShoesShine = mShoes.shininess; baseHeadShine = mHead.shininess; baseBackShine = mBack.shininess
         weatherApplied = -1f
         // Rebuild the skinned body whenever the spec changes (studio sliders).
-        human = HumanBody(sp, f.feminine || feminine, f.hairStyle)
+        // Imported meshes have fixed topology: studio sliders only retint them.
+        if (imported == null) human = HumanBody(sp, f.feminine || feminine, f.hairStyle)
     }
 
     // ---------------------------------------------------------------- draw
@@ -564,9 +568,10 @@ class CharRig(
         vest: Boolean = false, helmet: Boolean = false, pack: Boolean = false, vestMat: Material? = null,
         lod: Int = 0,
     ) {
-        val h = human ?: return
         if (spec != null) ensureForm()
-        applyWeather(fx)
+        val h = human
+        if (imported == null && h == null) return
+        if (imported == null) applyWeather(fx)
         // Pose → skeleton. The pelvis rides the crouch/bob offset in local units;
         // the draw scale stretches it with the body.
         val crouchK = if (p.crouch) 0.22f else 0f
@@ -574,8 +579,18 @@ class CharRig(
         skeleton.update(p.phase, p.speed, p.airborne, p.crouch, p.lean, p.aimHold, p.aimPitch, p.headYaw, bob - crouchK, p.reload)
         tmp.setPosYaw(x, y, z, yaw, scale)
         val bones = skeleton.matrices
-        r.drawSkinned(h.body, mSkin, bones, tmp)
-        r.drawSkinned(h.shirt, mTop, bones, tmp)
+        // Imported characters keep their authored shape; their inverse-bind
+        // matrices came from the GLB, so the same pose/skeleton drives them.
+        val model = imported
+        if (model != null) {
+            for (part in model.parts) {
+                if (lod >= 2 && part.detail) continue
+                r.drawSkinned(part.mesh, part.material, bones, tmp)
+            }
+            return
+        }
+        r.drawSkinned(h!!.body, mSkin, bones, tmp)
+        r.drawSkinned(h!!.shirt, mTop, bones, tmp)
         if (lod < 2 && spec != null && form?.outer != "none") r.drawSkinned(h.outer, mOuter, bones, windTmp(x, y, z, yaw, scale, fx))
         r.drawSkinned(h.pants, mBottom, bones, tmp)
         if (lod < 2 && (spec != null || hair != null)) r.drawSkinned(h.hair, mHair, bones, windTmp(x, y, z, yaw, scale, fx))
@@ -586,12 +601,12 @@ class CharRig(
         // Eyes: own skinned mesh on the HEAD bone; the blink squashes it in Y.
         // The mesh is centered on the eye line (y = 0), so it draws at head height.
         // The small extra yaw/pitch makes the eyes glance toward the aim.
-        if (lod < 1 && h.face.vertexCount > 0) {
+        if (lod < 1 && h!!.face.vertexCount > 0) {
             tmp2.setTRS(x, y + 1.632f * scale, z, yaw + p.headYaw * 0.08f, p.aimPitch * 0.12f, 0f, scale, scale * blinkK, scale)
             r.drawSkinned(h.face, mEye, bones, tmp2)
         }
         // Brows: own mesh, flattened in Y with aiming/running tension (furrow).
-        if (lod < 1 && h.brows.vertexCount > 0) {
+        if (lod < 1 && h!!.brows.vertexCount > 0) {
             val tension = (0.25f + abs(p.aimPitch) * 0.5f + p.speed * 0.35f + if (p.crouch) 0.15f else 0f).coerceAtMost(1f)
             tmp2.setTRS(x, y + 1.632f * scale, z, yaw, 0f, 0f, scale, scale * (1f - 0.5f * tension), scale)
             r.drawSkinned(h.brows, mHair, bones, tmp2)

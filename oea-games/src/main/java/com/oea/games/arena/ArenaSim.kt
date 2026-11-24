@@ -25,48 +25,143 @@ internal enum class Weapon(
     val moveSpeed: Float = 1f,
     /** Clash Squad shop price. */
     val price: Int = 0,
+    /** "pistol", "smg", "rifle", "shotgun", "sniper", "lmg", "launcher", "melee", "special". */
+    val family: String = "rifle",
+    /** One line an armory row shows under the name — what the gun is *for*. */
+    val role: String = "",
 ) {
-    PAN("Pan", "◍", 45f, 1.4f, 90f, 0, 0f, 0f, 0f, 2.2f, 1, false, -1, 1f, 0f, price = 100),
-    PISTOL("Pistol", "P", 26f, 1.8f, 380f, 12, 1.4f, 0.035f, 0.012f, 60f, 1, false, 0, 1.25f, 0.02f, price = 500),
-    SMG("SMG", "S", 17f, 1.6f, 820f, 30, 1.9f, 0.06f, 0.03f, 45f, 1, true, 0, 1.3f, 0.012f, price = 800),
-    RIFLE("Assault rifle", "A", 30f, 1.9f, 600f, 30, 2.3f, 0.045f, 0.012f, 110f, 1, true, 1, 1.6f, 0.018f, price = 1200),
-    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f, 0.96f, price = 900),
-    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f, price = 1600),
-    REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f, price = 1000),
-    MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f, price = 1300),
-    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500),
-    ROCKET("Rocket launcher", "◎", 140f, 1f, 24f, 1, 3.4f, 0.06f, 0.03f, 250f, 1, false, 4, 1.05f, 0.04f, 0.74f, price = 2200),
-    MISSILE("Guided missile", "☆", 120f, 1f, 18f, 1, 4.2f, 0.05f, 0.03f, 320f, 1, false, 4, 1.15f, 0.05f, 0.88f, price = 2600),
+    PAN("Pan", "◍", 45f, 1.4f, 90f, 0, 0f, 0f, 0f, 2.2f, 1, false, -1, 1f, 0f, price = 100, family = "melee",
+        role = "Melee finisher · the Gun Game ladder's last rung"),
+    PISTOL("Pistol", "P", 26f, 1.8f, 380f, 12, 1.4f, 0.035f, 0.012f, 60f, 1, false, 0, 1.25f, 0.02f, price = 500, family = "pistol",
+        role = "Starter sidearm · cheap, accurate, no reserve"),
+    SMG("SMG", "S", 17f, 1.6f, 820f, 30, 1.9f, 0.06f, 0.03f, 45f, 1, true, 0, 1.3f, 0.012f, price = 800, family = "smg",
+        role = "Close-quarters spray · melts inside 15 m"),
+    RIFLE("Assault rifle", "A", 30f, 1.9f, 600f, 30, 2.3f, 0.045f, 0.012f, 110f, 1, true, 1, 1.6f, 0.018f, price = 1200, family = "rifle",
+        role = "The all-rounder · good at every range"),
+    SHOTGUN("Shotgun", "G", 13f, 1.4f, 70f, 5, 2.8f, 0.12f, 0.085f, 24f, 9, false, 2, 1.2f, 0.06f, 0.96f, price = 900, family = "shotgun",
+        role = "Nine pellets · room-clearer, useless past 20 m"),
+    SNIPER("Sniper", "R", 105f, 2.2f, 42f, 5, 3.0f, 0.08f, 0.0015f, 260f, 1, false, 3, 4f, 0.09f, 0.92f, price = 1600, family = "sniper",
+        role = "One shot, one kill · scope, 260 m"),
+    REVOLVER("Revolver", "V", 58f, 2.0f, 150f, 6, 2.2f, 0.05f, 0.008f, 90f, 1, false, 3, 1.9f, 0.055f, 0.97f, price = 1000, family = "pistol",
+        role = "Hard-hitting hand cannon · rewards patience"),
+    MARKSMAN("Marksman", "M", 44f, 2.0f, 260f, 12, 2.4f, 0.05f, 0.002f, 170f, 1, false, 1, 2.8f, 0.045f, 0.95f, price = 1300, family = "rifle",
+        role = "Semi-auto rifle · accurate follow-ups at range"),
+    LMG("LMG", "L", 24f, 1.55f, 700f, 75, 4.2f, 0.065f, 0.03f, 130f, 1, true, 1, 1.45f, 0.022f, 0.90f, price = 1500, family = "lmg",
+        role = "75-round belt · suppress a lane, move slowly"),
+    /** Burst rifle: three rounds per trigger pull, the classic mid-range answer to the LMG. */
+    BURST("Burst rifle", "B", 26f, 1.9f, 900f, 24, 2.1f, 0.03f, 0.008f, 130f, 1, false, 1, 1.9f, 0.016f, price = 1150, family = "rifle",
+        role = "Three-round burst · tight groups, one trigger pull"),
+    /** Carbine: the light, fast rifle — quicker to aim and to swap than the AR. */
+    CARBINE("Carbine", "C", 25f, 1.85f, 720f, 25, 1.9f, 0.038f, 0.012f, 95f, 1, true, 1, 1.55f, 0.016f, price = 1100, family = "rifle",
+        role = "Light rifle · fast handling, low recoil"),
+    /** A double-barrel: two blasts, then it is a club. Cheap and brutal. */
+    DOUBLE_BARREL("Double barrel", "D", 19f, 1.5f, 90f, 2, 2.6f, 0.1f, 0.075f, 20f, 12, false, 2, 1.2f, 0.075f, 0.97f, price = 700, family = "shotgun",
+        role = "Two bursts of twelve pellets · a doorway ambush"),
+    ROCKET("Rocket launcher", "◎", 140f, 1f, 24f, 1, 3.4f, 0.06f, 0.03f, 250f, 1, false, 4, 1.05f, 0.04f, 0.74f, price = 2200, family = "launcher",
+        role = "Splash damage · vehicles and buildings"),
+    MISSILE("Guided missile", "☆", 120f, 1f, 18f, 1, 4.2f, 0.05f, 0.03f, 320f, 1, false, 4, 1.15f, 0.05f, 0.88f, price = 2600, family = "launcher",
+        role = "Locks onto what the reticle holds · long range"),
     /** Artillery: lobbed shells on a long fuse — area fire, not a gun. */
-    MORTAR("Mortar", "‡", 90f, 1f, 14f, 1, 3.6f, 0.09f, 0.01f, 190f, 1, false, 3, 3.4f, 0.05f, 0.62f, price = 2400),
-    HOWITZER("Howitzer", "✶", 130f, 1f, 9f, 1, 4.6f, 0.08f, 0.008f, 240f, 1, false, 4, 4.0f, 0.07f, 0.55f, price = 3000);
+    MORTAR("Mortar", "‡", 90f, 1f, 14f, 1, 3.6f, 0.09f, 0.01f, 190f, 1, false, 3, 3.4f, 0.05f, 0.62f, price = 2400, family = "launcher",
+        role = "Lobbed shell · fires over cover at a position"),
+    HOWITZER("Howitzer", "✶", 130f, 1f, 9f, 1, 4.6f, 0.08f, 0.008f, 240f, 1, false, 4, 4.0f, 0.07f, 0.55f, price = 3000, family = "launcher",
+        role = "Heavy artillery · slowest, biggest blast");
 
     val interval get() = 60f / rpm
 
     companion object {
         val AMMO_NAMES = arrayOf("Light ammo", "Rifle ammo", "Shells", "Heavy ammo", "Special ammo")
         val AMMO_PACK = intArrayOf(40, 40, 12, 10, 6)
-        val guns = entries.filter { it != PAN }
+        // The roster is presentation as well as simulation, so the front-end
+        // armory reads it through ArenaArmory. Nothing here is mutable state.
+        internal val guns = entries.filter { it != PAN }
+
+        /** Family display order: cheapest and most familiar first. */
+        internal val FAMILIES = listOf("pistol", "smg", "rifle", "shotgun", "sniper", "lmg", "launcher", "melee")
+
+        internal fun familyLabel(family: String): String = when (family) {
+            "pistol" -> "Pistols"
+            "smg" -> "SMGs"
+            "rifle" -> "Rifles"
+            "shotgun" -> "Shotguns"
+            "sniper" -> "Snipers"
+            "lmg" -> "Machine guns"
+            "launcher" -> "Launchers"
+            "melee" -> "Melee"
+            else -> family.replaceFirstChar { it.uppercase() }
+        }
+
+        /** Every gun in one family, cheapest first — how an armory lists them. */
+        fun inFamily(family: String): List<Weapon> =
+            guns.filter { it.family == family }.sortedBy { it.price }
+
+        /** Six bars an armory row can draw: how this gun stands on each axis, 0..1. */
+        internal fun statBars(w: Weapon): List<Pair<String, Float>> = listOf(
+            "Damage" to (w.damage * w.pellets / 140f).coerceIn(0.05f, 1f),
+            "Rate" to (w.rpm / 900f).coerceIn(0.05f, 1f),
+            "Range" to (w.range / 260f).coerceIn(0.05f, 1f),
+            "Accuracy" to (1f - w.spreadAds * 12f).coerceIn(0.05f, 1f),
+            "Handling" to (w.moveSpeed * 0.85f + (1f - w.reload / 5f) * 0.35f).coerceIn(0.05f, 1f),
+            "Magazine" to (w.mag / 75f).coerceIn(0.05f, 1f),
+        )
+
+        /** Magazine size after [level] upgrades — the one place this is computed. */
+        fun magNow(w: Weapon, level: Int): Int = ceil(w.mag * (1f + 0.1f * level)).toInt()
+
+        /** Reload time after [level] upgrades. */
+        fun reloadNow(w: Weapon, level: Int): Float = w.reload * (1f - 0.08f * level)
+
+        /**
+         * What each loadout pool *means*: a list of families, not a hand-written
+         * list of guns.
+         *
+         * This used to be a second, independent table (`lootPool`) listing
+         * specific guns while the front-end armory listed families — so the two
+         * disagreed, and the Carbine, Burst rifle and Double barrel were
+         * buyable in the shop but **could never spawn as loot on the island**.
+         * A family-shaped answer means a new gun joins its pool the moment it
+         * declares a family, with no second edit to remember.
+         */
+        val POOL_FAMILIES: Map<String, List<String>> = mapOf(
+            "snipers" to listOf("sniper", "rifle"),
+            "shotguns" to listOf("shotgun", "smg", "pistol"),
+            "close" to listOf("pistol", "smg"),
+            "rifles" to listOf("rifle", "smg", "lmg"),
+            "all" to FAMILIES.filter { it != "melee" },
+        )
+
+        /** The pool an unknown or empty loadout falls back to. */
+        const val POOL_DEFAULT = "all"
 
         /** Which guns the loot tables draw from for a loadout option. */
-        fun lootPool(loadout: String): List<Weapon> = when (loadout) {
-            "snipers" -> listOf(SNIPER, MARKSMAN, REVOLVER)
-            "shotguns" -> listOf(SHOTGUN, SMG, PISTOL)
-            "close" -> listOf(PISTOL, SMG, REVOLVER)
-            "rifles" -> listOf(RIFLE, SMG, LMG, MARKSMAN)
-            else -> guns
+        fun lootPool(loadout: String): List<Weapon> {
+            val families = POOL_FAMILIES[loadout] ?: POOL_FAMILIES.getValue(POOL_DEFAULT)
+            // FAMILIES ends with melee, which holds only the pan. A pan is never
+            // a loot-table gun: it is the thing you are left with.
+            return guns.filter { it.family in families }
         }
+
+        /** The families a loadout option draws from, for display. */
+        fun poolFamilies(loadout: String): List<String> =
+            POOL_FAMILIES[loadout] ?: POOL_FAMILIES.getValue(POOL_DEFAULT)
     }
 }
 
 /** Gun Game ladder: one kill advances a stage; a kill with the final stage wins. */
+/**
+ * Gun Game ladder: roughly ascending in lethality, ending on the pan.
+ *
+ * The new rifles and the double barrel are in here because a Gun Game that
+ * never shows you half the arsenal is a tutorial for the old half. Built from
+ * the roster so the stage list cannot drift from the guns that exist.
+ */
 internal val GUN_LADDER = listOf(
-    Weapon.PISTOL, Weapon.SMG, Weapon.RIFLE, Weapon.SHOTGUN,
-    Weapon.REVOLVER, Weapon.MARKSMAN, Weapon.SNIPER, Weapon.LMG, Weapon.PAN,
+    Weapon.PISTOL, Weapon.DOUBLE_BARREL, Weapon.SMG, Weapon.CARBINE, Weapon.RIFLE,
+    Weapon.BURST, Weapon.SHOTGUN, Weapon.REVOLVER, Weapon.MARKSMAN, Weapon.SNIPER,
+    Weapon.LMG, Weapon.PAN,
 )
 
 /** Kills needed to win Team Deathmatch. */
-private const val TEAM_SCORE_WIN = 40
 
 internal enum class LootKind { WEAPON, AMMO, MEDKIT, ARMOR, HELMET, GRENADE }
 
@@ -82,24 +177,63 @@ internal const val SHOP_MEDKIT = 300
 internal const val SHOP_FRAG = 400
 internal const val SHOP_SMOKE = 500
 internal const val SHOP_STUN = 450
+/** Carry limits. One place, so HUD, pickup and shop all agree. */
+internal const val MEDKIT_CAP = 5
+internal const val GRENADE_CAP = 5
 internal const val SHOP_VEST = 600
 internal const val SHOP_HELMET = 500
+/** Out-of-combat regeneration: seconds without damage, then HP per second. */
+internal const val REGEN_DELAY = 8f
+/** Length of the post-spawn invulnerability window, in seconds. */
+internal const val SPAWN_GUARD = 3f
+internal const val REGEN_RATE = 2.2f
 /** Weapon upgrade costs: base per level, up to UP_MAX levels per weapon. */
 internal const val UP_BASE = 250
 internal const val UP_MAX = 3
 
-internal class Loot(val id: Int, val kind: LootKind, val value: Int, var x: Float, var y: Float, var z: Float) {
+internal class Loot(
+    val id: Int,
+    val kind: LootKind,
+    val value: Int,
+    var x: Float,
+    var y: Float,
+    var z: Float,
+    /** Stack size for consumables: how many medkits/grenades sit in this pile. */
+    val count: Int = 1,
+) {
     var taken = false
+    /** Grenade piles keep their type in [value], so the count is what stacks. */
+    val dropCount: Int get() = remaining
+
+    /**
+     * Take [n] out of the pile. Returns true when the pile is now empty.
+     * A partially drained pile keeps its id and position, so every client that
+     * was told about it stays in sync — only the count changes.
+     */
+    fun remove(n: Int): Boolean {
+        remaining = (remaining - n).coerceAtLeast(0)
+        return remaining <= 0
+    }
+
+    /** How many are still in this pile. */
+    var remaining: Int = count
+        private set
+
+    /** Client-side sync: adopt the host's remaining count for this pile. */
+    fun setRemaining(n: Int) {
+        remaining = n.coerceAtLeast(0)
+        if (remaining == 0) taken = true
+    }
     val label: String get() = when (kind) {
         LootKind.WEAPON -> Weapon.entries[value].label
         LootKind.AMMO -> Weapon.AMMO_NAMES[value]
-        LootKind.MEDKIT -> "Medkit"
+        LootKind.MEDKIT -> if (remaining > 1) "Medkits x$remaining" else "Medkit"
         LootKind.ARMOR -> "Vest lv.$value"
         LootKind.HELMET -> "Helmet lv.$value"
         LootKind.GRENADE -> when (value) {
-            GRENADE_FRAG -> "Frag grenade"
-            GRENADE_SMOKE -> "Smoke grenade"
-            else -> "Stun grenade"
+            GRENADE_FRAG -> if (remaining > 1) "Frag x$remaining" else "Frag grenade"
+            GRENADE_SMOKE -> if (remaining > 1) "Smoke x$remaining" else "Smoke grenade"
+            else -> if (remaining > 1) "Stun x$remaining" else "Stun grenade"
         }
     }
 }
@@ -237,6 +371,12 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     /** Lying flat: slower than crouch, steadier aim, smaller than crouch. */
     var prone = false
     var healProgress = 0f
+    /** Rounds still owed to a burst trigger pull (burst rifle). */
+    var burstLeft = 0
+    /** Time since the last damage; drives out-of-combat regen. */
+    var calmTime = 0f
+    /** True when the last damage was a headshot — the HUD marks it. */
+    var lastHitHead = false
     var cooldown = 0f
     var reloadLeft = 0f
     var switchLeft = 0f
@@ -266,6 +406,17 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     var lastDamageTime = -10f
     val history = PositionHistory(48)
     var lastAck = 0
+    /** Smoothed locomotion: current horizontal velocity, ramped instead of snapped. */
+    var velX = 0f
+    var velZ = 0f
+    /** Surface under the feet (for footsteps, dust and grip). */
+    var surface = ArenaMap.Surface.GRASS
+    /** Seconds since the feet last touched ground — drives the landing squash. */
+    var airTime = 0f
+    /** Landing impact 0..1, decays; the HUD/camera/animation read it. */
+    var landImpact = 0f
+    /** True while sliding on a steep slope beyond control. */
+    var sliding = false
     /** Bot brain. */
     var bot: BotBrain? = null
 
@@ -279,8 +430,15 @@ internal interface ArenaEvents {
     fun onShot(p: ArenaPlayer, hitX: Float, hitY: Float, hitZ: Float, hitPlayer: Boolean) {}
     fun onHit(shooter: ArenaPlayer, victim: ArenaPlayer, damage: Float, headshot: Boolean) {}
     fun onKill(killer: ArenaPlayer?, victim: ArenaPlayer, weapon: Weapon, headshot: Boolean) {}
+    /**
+     * A pile changed. [loot] carries its live [Loot.remaining] count, and
+     * `taken` is true when the pile is now empty. Partial pickups report here
+     * too, so clients do not show a five-medkit pile that is actually empty.
+     */
     fun onLootTaken(p: ArenaPlayer, loot: Loot) {}
     fun onLootSpawned(loot: Loot) {}
+    /** A pile's contents changed without the pile disappearing. */
+    fun onLootChanged(loot: Loot) {}
     fun onZone(phase: Int, shrinking: Boolean) {}
     fun onMatchOver(winner: ArenaPlayer?) {}
     /** A grenade went off: type 0 = frag burst with damage, 1 = smoke cloud, 2 = stun flash. */
@@ -374,33 +532,40 @@ internal class ArenaSim(
         private set
     var winner: ArenaPlayer? = null
         private set
+    /** Data-driven mode definition: limits and clocks come from one place. */
+    val modeRules: ArenaRules.Mode = ArenaRules.of(rules)
+    /** Seconds left before the match clock decides the winner (0 = no clock). */
+    var matchTimeLeft: Float = modeRules.timeLimit
+        internal set
+    /** Seconds left in the current round (round modes only). */
+    var roundTimeLeft: Float = modeRules.roundTime
+        internal set
     /** Team scores for [rules] == "tdm" (index 0/1). */
     val teamScore = IntArray(2)
-    /** Warfare: capture events per team (first to [WARFARE_WIN] takes the match). */
+    /** Warfare: capture events per team (first to [modeRules].scoreLimit wins). */
     val captures = IntArray(2)
-    private val WARFARE_WIN = 5
     /** King of the Hill: score accumulated while holding the single hill. */
     val kothScore = FloatArray(2)
-    private val KOTH_WIN = 200
-    private val KOTH_RATE = 1.2f
-    val teams = rules == "tdm" || rules == "cs" || rules == "warfare" || rules == "wolf" || rules == "warfare_koth" || rules == "warfare_ad"
+    private val KOTH_RATE = if (modeRules.hillRate > 0f) modeRules.hillRate else 1.2f
+    val teams = modeRules.teams
     val gunGame = rules == "gun"
     /** Respawn after death — except the round-based duels, which respawn at round start. */
-    val respawnMode = rules == "tdm" || rules == "gun" || rules == "warfare" || rules == "br_res" || rules == "warfare_koth" || rules == "warfare_ad"
-    val survival = rules == "last_day" || rules == "lights_out" || rules == "haunted"
+    val respawnMode = modeRules.respawn
+    val survival = modeRules.survival
     /** Round-based modes (Clash Squad, Lone Wolf): best-of-N, shop/pick between rounds. */
-    val roundMode = rules == "cs" || rules == "wolf"
+    val roundMode = modeRules.roundBased
     /** Delta Force-style objective warfare: respawn with kit, capture the points. */
-    val warfare = rules == "warfare" || rules == "warfare_koth" || rules == "warfare_ad"
+    val warfare = modeRules.objective == ArenaRules.Objective.CAPTURE ||
+        modeRules.objective == ArenaRules.Objective.HILL || modeRules.objective == ArenaRules.Objective.TICKETS
     /** Warfare variant: one hill, score while you hold it. */
-    val koth = rules == "warfare_koth"
+    val koth = modeRules.objective == ArenaRules.Objective.HILL
     /** Attack & Defend: team 0 assaults, team 1 defends with finite tickets. */
-    val ad = rules == "warfare_ad"
+    val ad = modeRules.objective == ArenaRules.Objective.TICKETS
     /** Defender tickets — attackers drain them by capturing sectors. */
-    var adTickets = 300
+    var adTickets = modeRules.scoreLimit
     /** Attack time limit: defenders win when it runs out. */
-    var adTimer = 600f
-    private val AD_DRAIN = 50
+    var adTimer = if (modeRules.timeLimit > 0f) modeRules.timeLimit else 600f
+    private val AD_DRAIN = if (modeRules.captureDrain > 0) modeRules.captureDrain else 50
     /** CoD-style royale: the zone closes, but you come back. */
     val resurgence = rules == "br_res"
     var round = 1
@@ -408,9 +573,15 @@ internal class ArenaSim(
     var roundPhase = 0
     val roundsWon = IntArray(2)
     /** First to this many round wins takes the match (4 = best of 7, 3 = best of 5). */
-    val roundsToWin = if (rules == "wolf") 3 else 4
+    val roundsToWin = modeRules.scoreLimit
     /** Warfare capture points: three objectives spread across the map. */
     val points = ArrayList<CapturePoint>(3)
+
+    /** Scratch buffers for per-tick ground and wind queries (no allocation). */
+    private val slopeTmp = FloatArray(3)
+    private val windTmp = FloatArray(2)
+    /** Wind right now (m/s), for grenades, VFX and bots. */
+    fun wind(out: FloatArray) = map.windAt(time, out)
 
     /** A warfare objective: who holds it, and how full the capture bar is. */
     class CapturePoint(val x: Float, val z: Float, val r: Float = 4.5f) {
@@ -522,7 +693,7 @@ internal class ArenaSim(
             p.ctrl.teleport(s[0], s[1], s[2])
             p.skydiving = false
             p.parachute = false
-            p.spawnGuard = 3f
+            p.spawnGuard = SPAWN_GUARD
             if (roundMode) p.cash = 1000
             if (gunGame) equipGunGameLoadout(p)
             else if (roundMode) equipRoundKit(p)
@@ -536,12 +707,23 @@ internal class ArenaSim(
         }
         p.yaw = rng.range(0f, MathX.TAU)
         p.input.yaw = p.yaw
-        if (bot) p.bot = BotBrain(p, Rng(seed xor id.toLong() * 7919L), botSkill).also { it.attach(map.physics) }
+        if (bot) {
+            val rng = Rng(seed xor id.toLong() * 7919L)
+            // No two bots are equally good: spread skill ±0.08 around the
+            // difficulty so a lobby has a mix of aimers and sprayers.
+            val skill = (botSkill + rng.range(-0.08f, 0.08f)).coerceIn(0.05f, 0.98f)
+            p.bot = BotBrain(p, rng, skill).also { it.attach(map.physics) }
+        }
         players[id] = p
         return p
     }
 
-    /** Ground spawn point: the team's town in TDM, a random town otherwise. */
+    /**
+     * Ground spawn point: the team's town in TDM, a random town otherwise.
+     * Candidates are scored by ground rather than dropped blind — a spawn on
+     * a riverbank or a cliff face is a slide or a fall the instant the player
+     * takes control, which reads as the movement system fighting them.
+     */
     private fun spawnSpot(p: ArenaPlayer): FloatArray {
         val towns = map.towns
         val t = when {
@@ -549,8 +731,22 @@ internal class ArenaSim(
             teams -> towns[p.team % towns.size]
             else -> towns[rng.nextInt(towns.size)]
         }
-        val x = t[0] + rng.range(-6f, 6f); val z = t[1] + rng.range(-6f, 6f)
-        return floatArrayOf(x, map.heightAt(x, z) + 0.1f, z)
+        var bestX = t[0]; var bestZ = t[1]; var bestScore = -Float.MAX_VALUE
+        repeat(10) {
+            val x = t[0] + rng.range(-7f, 7f); val z = t[1] + rng.range(-7f, 7f)
+            val h = map.heightAt(x, z)
+            val surf = map.surfaceAt(x, z)
+            // Dry, flat, out of the sea — and not inside a house wall.
+            val score = h * 0.5f - map.slopeAt(x, z) * 14f +
+                when (surf) {
+                    ArenaMap.Surface.WATER -> -40f
+                    ArenaMap.Surface.SNOW -> -2f
+                    ArenaMap.Surface.ROCK -> -3f
+                    else -> 2f
+                }
+            if (score > bestScore) { bestScore = score; bestX = x; bestZ = z }
+        }
+        return floatArrayOf(bestX, map.heightAt(bestX, bestZ) + 0.1f, bestZ)
     }
 
     private fun equipGunGameLoadout(p: ArenaPlayer) {
@@ -600,6 +796,7 @@ internal class ArenaSim(
     /** Start (or restart) a round: everyone respawns at their team's area, kit applied. */
     fun startRound() {
         roundPhase = 0
+        roundTimeLeft = modeRules.roundTime
         for (p in players.values) {
             p.alive = true
             p.health = 100f
@@ -614,7 +811,7 @@ internal class ArenaSim(
             p.recoil = 0f
             val s = spawnSpot(p)
             p.ctrl.teleport(s[0], s[1], s[2])
-            p.ctrl.velocity.setZero()
+            p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
         }
         if (roundMode) events?.onRoundStart(round)
     }
@@ -626,11 +823,15 @@ internal class ArenaSim(
             // Wolf picks are free (the duel is about the gun, not the budget).
             if (w != null && w != Weapon.PAN && (w.price <= p.cash || rules == "wolf")) {
                 p.cash -= w.price
+                // A bought gun arrives at its *upgraded* magazine if the player
+                // has already paid for that gun's upgrades, and starts with three
+                // magazines of reserve rather than one.
+                val mag = Weapon.magNow(w, p.upLevels[w.ordinal])
                 p.slots[0] = w
-                p.mags[0] = w.mag
+                p.mags[0] = mag
                 p.active = 0
                 p.ammo.fill(0)
-                if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 3
+                if (w.ammo >= 0) p.ammo[w.ammo] = mag * 3
             }
             inp.buySlot = -1
         }
@@ -642,22 +843,35 @@ internal class ArenaSim(
         if (inp.buyHelmet > 0 && p.helmet < 3 && p.cash >= SHOP_HELMET) { p.helmet++; p.cash -= SHOP_HELMET; inp.buyHelmet = 0 }
     }
 
-    /** The bots' shop run: a gun the budget allows, then support items — once per prep. */
+    /**
+     * Round-shop shopping for bots. Humans buy in an order — armour if they are
+     * broke, a weapon for their role, then utility — so bots do the same
+     * instead of rolling a random gun and dumping cash on gear.
+     */
     private fun botBuy(p: ArenaPlayer) {
         if (p.slots[0] != Weapon.PISTOL) return // already shopped this prep
+        val role = p.bot?.roleArchetype ?: 0
+        if (p.cash >= 300 && p.armor < 2) { p.armor = min(3, p.armor + 1); p.cash -= 300 }
         val pool = Weapon.lootPool(loadout)
-        val affordable = pool.filter { it.price <= p.cash }
-        val w = affordable.let { if (it.isEmpty()) return else it[rng.nextInt(it.size)] }
-        p.cash -= w.price
-        p.slots[0] = w
-        p.mags[0] = w.mag
-        p.ammo.fill(0)
-        if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 3
-        if (p.cash > 500) { p.medkits++; p.cash -= SHOP_MEDKIT }
-        if (p.cash > 700) { p.grenades++; p.cash -= SHOP_FRAG }
-        if (p.cash > 900) { p.smokes++; p.cash -= SHOP_SMOKE }
-        p.armor = min(3, p.armor + 1)
-        p.helmet = min(3, p.helmet + 1)
+        val wanted = when (role) {
+            1 -> listOf(Weapon.SMG, Weapon.SHOTGUN, Weapon.RIFLE)
+            2 -> listOf(Weapon.SNIPER, Weapon.MARKSMAN, Weapon.RIFLE)
+            else -> listOf(Weapon.RIFLE, Weapon.SMG, Weapon.MARKSMAN)
+        }
+        val pick = wanted.mapNotNull { w -> pool.firstOrNull { it == w && it.price <= p.cash } }.firstOrNull()
+            ?: pool.filter { it.price <= p.cash }.maxByOrNull { it.price }
+        if (pick != null) {
+            p.cash -= pick.price
+            p.slots[0] = pick
+            p.mags[0] = pick.mag
+            p.ammo.fill(0)
+            if (pick.ammo >= 0) p.ammo[pick.ammo] = pick.mag * 3
+        }
+        // Utility last: a kit that cannot shoot is worse than one without smoke.
+        if (p.cash > SHOP_MEDKIT * 2) { p.medkits++; p.cash -= SHOP_MEDKIT }
+        if (p.cash > SHOP_FRAG * 3) { p.grenades++; p.cash -= SHOP_FRAG }
+        if (role == 2 && p.cash > SHOP_SMOKE * 3) { p.smokes++; p.cash -= SHOP_SMOKE }
+        if (role == 1 && p.cash > SHOP_STUN * 3) { p.stuns++; p.cash -= SHOP_STUN }
     }
 
     private fun respawn(p: ArenaPlayer) {
@@ -665,7 +879,7 @@ internal class ArenaSim(
             // Royale resurgence: the kit survives the death; only position and health change.
             val s = spawnSpot(p)
             p.ctrl.teleport(s[0], s[1], s[2])
-            p.ctrl.velocity.setZero()
+            p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
             p.health = 100f
             p.alive = true
             p.skydiving = false
@@ -675,14 +889,14 @@ internal class ArenaSim(
             p.cooldown = 0f
             p.switchLeft = 0f
             p.respawnAt = 0f
-            p.spawnGuard = 3f
+            p.spawnGuard = SPAWN_GUARD
             p.spread = 0f
             p.recoil = 0f
             return
         }
         val s = spawnSpot(p)
         p.ctrl.teleport(s[0], s[1], s[2])
-        p.ctrl.velocity.setZero()
+        p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
         p.health = 100f
         p.armor = if (teams) 1 else 0
         p.helmet = 0
@@ -694,7 +908,7 @@ internal class ArenaSim(
         p.cooldown = 0f
         p.switchLeft = 0f
         p.respawnAt = 0f
-        p.spawnGuard = 3f
+        p.spawnGuard = SPAWN_GUARD
         p.spread = 0f
         p.recoil = 0f
         if (gunGame) equipGunGameLoadout(p) else equipTeamLoadout(p)
@@ -703,6 +917,17 @@ internal class ArenaSim(
     fun step(dt: Float) {
         if (over) return
         time += dt
+        // Mode clocks. An objective reached early still wins; if the clock
+        // expires the leader is decided by the rule set instead of stalemating.
+        if (modeRules.timeLimit > 0f && matchTimeLeft > 0f) {
+            matchTimeLeft -= dt
+            if (matchTimeLeft <= 0f) { matchTimeLeft = 0f; finishOnTime() }
+        }
+        if (over) return
+        if (roundMode && roundPhase == 0 && modeRules.roundTime > 0f) {
+            roundTimeLeft -= dt
+            if (roundTimeLeft <= 0f) finishRoundOnTime()
+        }
         for (p in players.values) {
             if (p.spawnGuard > 0f) p.spawnGuard -= dt
             if (p.stunTimer > 0f) p.stunTimer -= dt
@@ -717,18 +942,9 @@ internal class ArenaSim(
         }
         if (zone.enabled && zone.update(dt)) events?.onZone(zone.phase, zone.shrinking)
         if (zone.enabled) for (p in players.values) if (p.alive && !p.skydiving && zone.outside(p.pos.x, p.pos.z)) damage(p, null, zone.dps * dt, Weapon.PAN, false, true)
-        // Attack & Defend: the attack clock runs down; at zero the defenders hold.
-        if (ad && !over) {
-            adTimer -= dt
-            if (adTimer <= 0f) {
-                adTimer = 0f
-                over = true
-                val w = players.values.maxByOrNull { it.kills + (if (it.team == 1) 1000 else 0) } ?: players.values.first()
-                w.place = 1
-                winner = w
-                events?.onMatchOver(w)
-            }
-        }
+        // Attack & Defend shares the match clock: the HUD shows the same
+        // countdown that ends the match, so the two can never disagree.
+        if (ad) adTimer = matchTimeLeft
         // Grenades: arc on gravity, bounce once off the terrain, then go off on the fuse.
         // Rockets and guided missiles fly straight (or steer) instead of arcing.
         for (g in grenades) {
@@ -782,6 +998,13 @@ internal class ArenaSim(
                 continue
             }
             g.vy -= 21f * dt
+            // Thrown grenades ride the same wind the soldiers feel, so a gust
+            // visibly drifts a frag — the air is one physical system, not a
+            // screen effect.
+            map.windAt(time, windTmp)
+            val drag = if (g.bounces > 0) 0.15f else 0.9f
+            g.vx += windTmp[0] * 0.28f * drag * dt
+            g.vz += windTmp[1] * 0.28f * drag * dt
             g.x += g.vx * dt; g.y += g.vy * dt; g.z += g.vz * dt
             val gy = map.heightAt(g.x, g.z)
             if (g.y < gy) {
@@ -851,21 +1074,7 @@ internal class ArenaSim(
         if (roundMode && !over && roundPhase == 0) {
             val t0 = players.values.count { it.alive && it.team == 0 }
             val t1 = players.values.count { it.alive && it.team == 1 }
-            if (t0 == 0 || t1 == 0) {
-                val winTeam = if (t0 == 0) 1 else 0
-                roundsWon[winTeam]++
-                roundPhase = 1
-                round++
-                events?.onRoundOver(winTeam, round)
-                for (p in players.values) p.cash += if (p.team == winTeam) 300 else 100
-                if (roundsWon[winTeam] >= roundsToWin || round > 7) {
-                    over = true
-                    val w = players.values.maxByOrNull { it.kills + (if (it.team == winTeam) 1000 else 0) } ?: players.values.first()
-                    w.place = 1
-                    winner = w
-                    events?.onMatchOver(w)
-                }
-            }
+            if (t0 == 0 || t1 == 0) finishRound(if (t0 == 0) 1 else 0)
         }
         // Warfare: standing on an objective fills the capture bar for your team.
         if (warfare && !over) {
@@ -898,7 +1107,7 @@ internal class ArenaSim(
                                 events?.onMatchOver(w)
                             }
                         }
-                        if (!koth && !ad && captures[attackTeam] >= WARFARE_WIN) {
+                        if (!koth && !ad && captures[attackTeam] >= modeRules.scoreLimit) {
                             over = true
                             val w = players.values.maxByOrNull { it.kills + (if (it.team == attackTeam) 1000 else 0) } ?: players.values.first()
                             w.place = 1
@@ -914,7 +1123,7 @@ internal class ArenaSim(
                 // capture bar decides who takes the hill.
                 if (koth && holders > 0) {
                     kothScore[pt.owner] += dt * KOTH_RATE
-                    if (kothScore[pt.owner] >= KOTH_WIN) {
+                    if (kothScore[pt.owner] >= modeRules.scoreLimit) {
                         over = true
                         val w = players.values.maxByOrNull { it.kills + (if (it.team == pt.owner) 1000 else 0) } ?: players.values.first()
                         w.place = 1
@@ -924,7 +1133,11 @@ internal class ArenaSim(
                 }
             }
         }
-        if (!over && teams && !ad && (teamScore[0] >= TEAM_SCORE_WIN || teamScore[1] >= TEAM_SCORE_WIN)) {
+        // Kill-score check applies only to score modes (TDM); capture, hill and
+        // ticket modes resolve through their own objective, never off kills.
+        if (!over && modeRules.objective == ArenaRules.Objective.SCORE &&
+            (teamScore[0] >= modeRules.scoreLimit || teamScore[1] >= modeRules.scoreLimit)
+        ) {
             over = true
             val winning = if (teamScore[0] >= teamScore[1]) 0 else 1
             winner = players.values.filter { it.team == winning }.maxByOrNull { it.kills }
@@ -941,6 +1154,65 @@ internal class ArenaSim(
             winner = players.values.filter { it.alive }.maxByOrNull { it.kills }
             events?.onMatchOver(winner)
         }
+    }
+
+    /** Award a round, pay both sides and end the match if somebody reached the target. */
+    private fun finishRound(winTeam: Int) {
+        if (over || roundPhase != 0) return
+        roundsWon[winTeam]++
+        roundPhase = 1
+        round++
+        roundTimeLeft = modeRules.roundTime
+        events?.onRoundOver(winTeam, round)
+        for (p in players.values) p.cash += if (p.team == winTeam) 300 else 100
+        // round already advanced past the game just played, so the maximum number
+        // of games is 2 * roundsToWin - 1 and we stop only after that game.
+        if (roundsWon[winTeam] >= roundsToWin || round > roundsToWin * 2 - 1) {
+            over = true
+            val w = players.values.maxByOrNull { it.kills + (if (it.team == winTeam) 1000 else 0) } ?: players.values.first()
+            w.place = 1
+            winner = w
+            events?.onMatchOver(w)
+        }
+    }
+
+    /** Round timer expired: alive count, then remaining health, decides. */
+    private fun finishRoundOnTime() {
+        if (over || !roundMode || roundPhase != 0) return
+        fun alive(team: Int) = players.values.count { it.alive && it.team == team }
+        fun health(team: Int) = players.values.filter { it.alive && it.team == team }.sumOf { it.health.toDouble() + it.armor }
+        val t0 = alive(0); val t1 = alive(1)
+        val team = when {
+            t0 > t1 -> 0
+            t1 > t0 -> 1
+            else -> if (health(0) >= health(1)) 0 else 1
+        }
+        finishRound(team)
+    }
+
+    /** Overall clock expired: compare the mode's actual score, then kills. */
+    private fun finishOnTime() {
+        if (over) return
+        val winnerTeam: Int? = when (modeRules.objective) {
+            ArenaRules.Objective.SCORE, ArenaRules.Objective.CAPTURE -> if (teamScore[0] != teamScore[1]) if (teamScore[0] > teamScore[1]) 0 else 1 else null
+            ArenaRules.Objective.HILL -> if (kothScore[0] != kothScore[1]) if (kothScore[0] > kothScore[1]) 0 else 1 else null
+            ArenaRules.Objective.TICKETS -> 1 // the defenders held the clock
+            ArenaRules.Objective.ROUNDS -> if (roundsWon[0] != roundsWon[1]) if (roundsWon[0] > roundsWon[1]) 0 else 1 else null
+            else -> null
+        }
+        val w = if (winnerTeam != null) {
+            players.values.filter { it.team == winnerTeam }.maxByOrNull { it.kills }
+        } else {
+            when (modeRules.objective) {
+                ArenaRules.Objective.LADDER -> players.values.maxByOrNull { it.gunLevel * 1000 + it.kills }
+                ArenaRules.Objective.SURVIVE -> players.values.filter { it.alive }.maxByOrNull { it.kills }
+                else -> players.values.filter { it.alive }.maxByOrNull { it.kills }
+            }
+        } ?: players.values.maxByOrNull { it.kills }
+        over = true
+        w?.place = 1
+        winner = w
+        events?.onMatchOver(w)
     }
 
     /** Movement only (also used by clients to predict their own player). Returns false while skydiving. */
@@ -966,7 +1238,8 @@ internal class ArenaSim(
             if (p.ctrl.position.y <= ground + 0.05f) {
                 p.ctrl.position.y = ground
                 p.skydiving = false; p.parachute = false
-                p.ctrl.velocity.setZero()
+                p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
+                p.landImpact = 0.55f
             }
             return false
         }
@@ -983,7 +1256,11 @@ internal class ArenaSim(
         // Walk and run are a wide, readable split (4.8 vs 8.4 m/s) — a jog reads as
         // a jog, not a slightly-faster walk.
         val sprinting = sprint && !p.aiming && !p.crouching && !p.prone
-        val speed = when {
+        // The ground answers back: snow and wet grass reduce traction, slopes
+        // cost speed uphill and add it downhill, and water drags hard.
+        p.surface = map.surfaceAt(p.pos.x, p.pos.z)
+        val grip = map.gripAt(p.surface)
+        val wanted = when {
             p.stunTimer > 0f -> (if (p.crouching) 2.6f else 4.8f) * weight * 0.45f
             p.prone -> 1.8f * weight
             p.crouching -> 2.6f * weight
@@ -991,6 +1268,52 @@ internal class ArenaSim(
             sprinting -> 8.4f * weight
             else -> 4.8f * weight
         }
+        map.downhillAt(p.pos.x, p.pos.z, slopeTmp)
+        val slope = slopeTmp[2]
+        // Walking along the fall line is downhill (fast); fighting it is uphill.
+        val withSlope = dirX * slopeTmp[0] + dirZ * slopeTmp[1]
+        val slopeFactor = if (p.ctrl.grounded) MathX.clamp(1f + withSlope * slope * 0.5f, 0.62f, 1.06f) else 1f
+        // Grip already carries the water penalty (0.62) — multiplying by it a
+        // second time would make wading a crawl.
+        val speed = wanted * grip * slopeFactor
+        // Smoothed locomotion: the input asks for a velocity, the body ramps to
+        // it. Snapping straight to full speed is what made movement look robotic
+        // and made bots jitter at the edge of every strafe.
+        val accel = if (p.ctrl.grounded) MathX.lerp(15f, 11f, slope) else 4.5f
+        val targetVX = dirX * speed
+        val targetVZ = dirZ * speed
+        val k = 1f - kotlin.math.exp(-accel * dt)
+        p.velX += (targetVX - p.velX) * k
+        p.velZ += (targetVZ - p.velZ) * k
+        // A hard stop bleeds off faster than a direction change, so releasing
+        // the stick stops crisply while strafing stays fluid.
+        if (dirX == 0f && dirZ == 0f) {
+            val brake = 1f - kotlin.math.exp(-24f * dt)
+            p.velX -= p.velX * brake
+            p.velZ -= p.velZ * brake
+        }
+        // Steep ground: once the slope is past what a boot can hold, gravity
+        // wins and the player slides down the fall line until it flattens.
+        p.sliding = p.ctrl.grounded && slope > 0.5f && !p.prone
+        if (p.sliding) {
+            val pull = (slope - 0.4f) * 12f * dt
+            p.velX += slopeTmp[0] * pull
+            p.velZ += slopeTmp[1] * pull
+        }
+        // Wind shoves you a little: a gale on an exposed ridge is felt, and it
+        // makes smoke and foliage agree with the body instead of lying.
+        if (p.ctrl.grounded && !p.prone) {
+            map.windAt(time, windTmp)
+            val exposure = MathX.clamp01(1.2f - map.heightAt(p.pos.x, p.pos.z) * 0.04f)
+            p.velX += windTmp[0] * 0.055f * exposure * dt * 4f
+            p.velZ += windTmp[1] * 0.055f * exposure * dt * 4f
+        }
+        // Cap so accumulated wind/slide never launches anyone.
+        val vlen = sqrt(p.velX * p.velX + p.velZ * p.velZ)
+        val vcap = 9.6f * weight
+        if (vlen > vcap) { p.velX = p.velX / vlen * vcap; p.velZ = p.velZ / vlen * vcap }
+        val wasGrounded = p.ctrl.grounded
+        val fallSpeed = -p.ctrl.velocity.y
         p.ctrl.height = when {
             p.prone -> 0.65f
             p.crouching -> 1.2f
@@ -1002,7 +1325,25 @@ internal class ArenaSim(
         // climbable rather than decorative. Only applies from the ground, so
         // it cannot be chained into an infinite climb.
         val vaultBoost = if (p.ctrl.hitWall && p.ctrl.grounded) 2.6f else 0f
-        p.ctrl.move(map.physics, dirX * speed, dirZ * speed, if (inp.jump && !p.crouching) 7.4f + vaultBoost else 0f, dt)
+        p.ctrl.move(map.physics, p.velX, p.velZ, if (inp.jump && !p.crouching) 7.4f + vaultBoost else 0f, dt)
+        // Wall contact kills the into-wall component so the ramp doesn't keep
+        // pushing against concrete (which read as a stutter).
+        if (p.ctrl.hitWall) {
+            p.velX *= 0.86f
+            p.velZ *= 0.86f
+        }
+        // Airborne / landing state, shared with the camera and soldier pose.
+        if (p.ctrl.grounded) {
+            if (!wasGrounded) {
+                p.airTime = 0f
+                // Landing impact scales with how hard we came down.
+                p.landImpact = MathX.clamp01(fallSpeed / 11f)
+            }
+            p.airTime = 0f
+        } else {
+            p.airTime += dt
+        }
+        p.landImpact = MathX.damp(p.landImpact, 0f, 6f, dt)
         return true
     }
 
@@ -1047,13 +1388,13 @@ internal class ArenaSim(
         if (p.reloadLeft > 0f) {
             p.reloadLeft -= dt
             if (p.reloadLeft <= 0f && w.ammo >= 0) {
-                val emag = ceil(w.mag * (1f + 0.1f * p.upLevels[w.ordinal])).toInt()
+                val emag = Weapon.magNow(w, p.upLevels[w.ordinal])
                 val need = emag - p.mags[p.active]
                 val take = min(need, p.ammo[w.ammo])
                 p.mags[p.active] += take; p.ammo[w.ammo] -= take
             }
-        } else if (w.ammo >= 0 && (inp.reload || p.mags[p.active] == 0 && inp.fire) && p.mags[p.active] < ceil(w.mag * (1f + 0.1f * p.upLevels[w.ordinal])) && p.ammo[w.ammo] > 0) {
-            p.reloadLeft = w.reload * (1f - 0.08f * p.upLevels[w.ordinal]) // upgrades reload faster
+        } else if (w.ammo >= 0 && (inp.reload || p.mags[p.active] == 0 && inp.fire) && p.mags[p.active] < Weapon.magNow(w, p.upLevels[w.ordinal]) && p.ammo[w.ammo] > 0) {
+            p.reloadLeft = Weapon.reloadNow(w, p.upLevels[w.ordinal]) // upgrades reload faster
         }
         val moving = len > 0.2f
         // Prone is the steadiest stance; a stun opens the spread right up.
@@ -1061,14 +1402,34 @@ internal class ArenaSim(
         val target = (if (p.aiming) w.spreadAds else w.spreadHip) * (if (moving) 1.6f else 1f) * (if (!p.ctrl.grounded) 2.2f else 1f) * stance * (if (p.stunTimer > 0f) 1.8f else 1f)
         p.spread = MathX.damp(p.spread, target, 8f, dt)
         if (inp.fire && p.cooldown <= 0f && p.reloadLeft <= 0f && p.switchLeft <= 0f && p.stunTimer <= 0f) {
+            // A burst rifle owes three rounds per pull and a double barrel owes
+            // two barrels; this one fires now and the rest ride the queue below
+            // on the weapon's own cadence, so a burst is three aimed rounds and
+            // not three frames of one trigger pull.
+            if (w == Weapon.BURST) p.burstLeft = 2
+            if (w == Weapon.DOUBLE_BARREL) p.burstLeft = 1
             if (w == Weapon.PAN || p.mags[p.active] > 0) fire(p)
             if (!w.auto) inp.fire = false
         }
-        // Healing: 3 seconds, interrupted by shooting.
+        if (p.burstLeft > 0 && p.cooldown <= 0f && p.reloadLeft <= 0f && p.stunTimer <= 0f) {
+            if (p.mags[p.active] > 0) { p.burstLeft--; fire(p) } else p.burstLeft = 0
+        }
+        // A burst is a promise: switching guns, reloading or being stunned
+        // cancels what is owed rather than silently firing it later from a
+        // different weapon — that was a free ambush round out of the pan.
+        if (p.burstLeft > 0 && (p.reloadLeft > 0f || p.switchLeft > 0f || p.stunTimer > 0f)) p.burstLeft = 0
+        // Healing: 3 seconds, interrupted by shooting. A medkit is a decision —
+        // you stand still and vulnerable for three seconds and get 65 HP back.
         if (inp.heal && p.medkits > 0 && p.health < 100f) {
             p.healProgress += dt / 3f
             if (p.healProgress >= 1f) { p.health = min(100f, p.health + 65f); p.medkits--; p.healProgress = 0f }
         } else p.healProgress = 0f
+        if (p.spawnGuard > 0f) p.calmTime = 0f else p.calmTime += dt
+        // Out of combat, health creeps back to 60 but never to full: the slow
+        // recovery that lets a survivor re-engage without trivialising medkits.
+        if (p.health < 60f && p.calmTime > REGEN_DELAY && p.healProgress <= 0f) {
+            p.health = min(60f, p.health + dt * REGEN_RATE)
+        }
         // Pick-ups.
         autoPickup(p)
         if (inp.pickup >= 0) { pickup(p, inp.pickup); inp.pickup = -1 }
@@ -1149,10 +1510,24 @@ internal class ArenaSim(
         val bx = sin(p.yaw) * cp; val by = sin(p.pitch); val bz = cos(p.yaw) * cp
         val shotTime = (time * 1000f).toLong()
         val upMul = 1f + 0.1f * p.upLevels[w.ordinal] // weapon upgrade damage bonus
+        // Aim assist bends the *centre* of the cone toward a body already near
+        // the line — it never invents a hit. The offered angle is at most a few
+        // degrees, only inside the weapon's range, and only for a human.
+        val assist = if (p.isBot) 0f else aimAssist
+        var abx = bx; var aby = by; var abz = bz
+        if (assist > 0f) {
+            val offer = assistTarget(p, ex, ey, ez, bx, by, bz, w.range)
+            if (offer != null) {
+                val k = MathX.clamp01(assist * (1f - offer[0] / w.range.coerceAtLeast(1f)) * 0.6f + assist * 0.4f)
+                abx = MathX.lerp(bx, offer[1], k); aby = MathX.lerp(by, offer[2], k); abz = MathX.lerp(bz, offer[3], k)
+                val l = sqrt(abx * abx + aby * aby + abz * abz)
+                if (l > 1e-4f) { abx /= l; aby /= l; abz /= l }
+            }
+        }
         for (k in 0 until w.pellets) {
-            var dx = bx + rng.gaussian() * p.spread * 0.5f
-            var dy = by + rng.gaussian() * p.spread * 0.5f
-            var dz = bz + rng.gaussian() * p.spread * 0.5f
+            var dx = abx + rng.gaussian() * p.spread * 0.5f
+            var dy = aby + rng.gaussian() * p.spread * 0.5f
+            var dz = abz + rng.gaussian() * p.spread * 0.5f
             val l = sqrt(dx * dx + dy * dy + dz * dz); dx /= l; dy /= l; dz /= l
             var dist = w.range
             var hitWorld = false
@@ -1209,6 +1584,37 @@ internal class ArenaSim(
     /** How far back to rewind for a human shooter (their latency + interpolation delay). */
     var compensation: (ArenaPlayer) -> Long = { 0L }
 
+    /**
+     * Soft aim assist, 0..1. Zero turns it off entirely; the max is a gentle
+     * pull, never a lock. Bots ignore it — they already have their own aim.
+     */
+    var aimAssist: Float = 0.35f
+
+    /** Closest enemy near the aim line within a few degrees. Returns [dist, dx, dy, dz] or null. */
+    private fun assistTarget(p: ArenaPlayer, ex: Float, ey: Float, ez: Float, bx: Float, by: Float, bz: Float, range: Float): FloatArray? {
+        val cone = 0.16f // about 9 degrees of half-angle: a thumb's width away
+        var best: FloatArray? = null
+        var bestScore = Float.MAX_VALUE
+        for (o in players.values) {
+            if (o === p || !o.alive || o.skydiving) continue
+            if (teams && o.team == p.team) continue
+            val oy = if (o.crouching) 1.05f else 1.35f
+            val tx = o.pos.x - ex; val ty = (o.pos.y + oy) - ey; val tz = o.pos.z - ez
+            val d = sqrt(tx * tx + ty * ty + tz * tz)
+            if (d < 0.5f || d > range) continue
+            val cosang = (tx * bx + ty * by + tz * bz) / d
+            if (cosang < 1f - cone) continue
+            // Prefer the target nearest the line, then the nearest in space, so a
+            // close body behind another body never steals the pull.
+            val score = (1f - cosang) * 40f + d * 0.01f
+            if (score < bestScore) {
+                bestScore = score
+                best = floatArrayOf(d, tx / d, ty / d, tz / d)
+            }
+        }
+        return best
+    }
+
     fun damage(v: ArenaPlayer, from: ArenaPlayer?, amount: Float, w: Weapon, head: Boolean, zoneDamage: Boolean = false, cause: Int = -1) {
         if (!v.alive) return
         // Spawn protection: freshly respawned players get a few honest seconds.
@@ -1223,6 +1629,9 @@ internal class ArenaSim(
         }
         v.health -= dmg
         v.healProgress = 0f
+        v.calmTime = 0f
+        v.lastHitHead = head
+        if (v.burstLeft > 0 && v.health <= 0f) v.burstLeft = 0
         if (v.health <= 0f) {
             v.health = 0f
             v.alive = false
@@ -1232,26 +1641,28 @@ internal class ArenaSim(
             if (teams && from != null && from.team != v.team) teamScore[from.team]++
             if (gunGame) {
                 if (from != null) {
-                    if (from.gunLevel >= GUN_LADDER.size - 1 && !over) {
+                    if (from.gunLevel >= modeRules.scoreLimit - 1 && !over) {
                         // A kill with the final stage (the pan) wins the ladder.
                         over = true
                         winner = from
                         from.place = 1
                         events?.onMatchOver(from)
                     } else {
-                        from.gunLevel = (from.gunLevel + 1).coerceAtMost(GUN_LADDER.size - 1)
+                        from.gunLevel = (from.gunLevel + 1).coerceAtMost(modeRules.scoreLimit - 1)
                     }
                 }
                 v.gunLevel = (v.gunLevel - 1).coerceAtLeast(0)
                 v.respawnAt = time + 1.5f
             } else if (teams) {
                 v.place = 0
-                v.respawnAt = time + 4f
+                val base = if (modeRules.respawnDelay > 0f) modeRules.respawnDelay else 4f
+                // Wave spawns: a small stagger stops a whole squad arriving stacked.
+                v.respawnAt = time + base + rng.range(0f, 1.5f)
             } else if (resurgence) {
                 v.place = aliveCount + 1
                 dropLoot(v)
                 // CoD-style royale: a 20-second comeback window, then you're back on a town.
-                v.respawnAt = time + 20f
+                v.respawnAt = time + (if (modeRules.respawnDelay > 0f) modeRules.respawnDelay else 20f)
             } else {
                 v.place = aliveCount + 1
                 dropLoot(v)
@@ -1261,15 +1672,22 @@ internal class ArenaSim(
     }
 
     private fun dropLoot(v: ArenaPlayer) {
-        fun drop(kind: LootKind, value: Int, ox: Float, oz: Float) {
-            val l = Loot(lootIds++, kind, value, v.pos.x + ox, v.pos.y + 0.3f, v.pos.z + oz)
+        fun drop(kind: LootKind, value: Int, ox: Float, oz: Float, count: Int = 1) {
+            val l = Loot(lootIds++, kind, value, v.pos.x + ox, v.pos.y + 0.3f, v.pos.z + oz, count)
             loot += l
             events?.onLootSpawned(l)
         }
+        // Everything the player was carrying goes back on the floor, because a
+        // death that silently eats a medkit or a helmet teaches the wrong
+        // lesson: loot is a thing you can lose and come back for.
         v.slots.forEachIndexed { i, w -> if (w != Weapon.PAN) drop(LootKind.WEAPON, w.ordinal, if (i == 0) -0.7f else 0.7f, 0f) }
         v.ammo.forEachIndexed { i, a -> if (a > 0) drop(LootKind.AMMO, i, -0.5f + i * 0.35f, 0.8f) }
-        if (v.medkits > 0) drop(LootKind.MEDKIT, 1, 0f, -0.8f)
+        if (v.medkits > 0) drop(LootKind.MEDKIT, 1, 0f, -0.8f, count = v.medkits)
+        if (v.grenades > 0) drop(LootKind.GRENADE, GRENADE_FRAG, 0.5f, -0.8f, count = v.grenades)
+        if (v.smokes > 0) drop(LootKind.GRENADE, GRENADE_SMOKE, 0.9f, -0.9f, count = v.smokes)
+        if (v.stuns > 0) drop(LootKind.GRENADE, GRENADE_STUN, 1.3f, -1.0f, count = v.stuns)
         if (v.armor > 0) drop(LootKind.ARMOR, v.armor, 0.8f, -0.6f)
+        if (v.helmet > 0) drop(LootKind.HELMET, v.helmet, 1.1f, -0.5f)
     }
 
     private fun autoPickup(p: ArenaPlayer) {
@@ -1279,8 +1697,8 @@ internal class ArenaSim(
             if (dx * dx + dz * dz > 2.4f || abs(l.y - p.pos.y - 0.3f) > 1.6f) continue
             val wanted = when (l.kind) {
                 LootKind.AMMO -> true
-                LootKind.MEDKIT -> p.medkits < 5
-                LootKind.GRENADE -> p.grenades < 5
+                LootKind.MEDKIT -> p.medkits < MEDKIT_CAP
+                LootKind.GRENADE -> p.grenades < GRENADE_CAP
                 LootKind.ARMOR -> l.value > p.armor
                 LootKind.HELMET -> l.value > p.helmet
                 LootKind.WEAPON -> p.slots.any { it == Weapon.PAN } && p.slots.none { it.ordinal == l.value }
@@ -1294,40 +1712,79 @@ internal class ArenaSim(
         val l = loot.firstOrNull { it.id == lootId && !it.taken } ?: return
         val dx = l.x - p.pos.x; val dz = l.z - p.pos.z
         if (dx * dx + dz * dz > 6f) return
-        if (l.kind == LootKind.WEAPON) {
-            val old = p.slots[p.active]
-            if (old != Weapon.PAN) {
-                val drop = Loot(lootIds++, LootKind.WEAPON, old.ordinal, p.pos.x, p.pos.y + 0.3f, p.pos.z)
-                loot += drop
-                events?.onLootSpawned(drop)
-            }
-            p.slots[p.active] = Weapon.entries[l.value]
-            p.mags[p.active] = min(Weapon.entries[l.value].mag, 6)
-            p.reloadLeft = 0f
-            l.taken = true
-            events?.onLootTaken(p, l)
-        } else take(p, l)
+        // One path for every kind. Weapon swaps used to live here *and* in
+        // `take`, with slightly different rules (this one ignored upgrades and
+        // always used the active slot) — two answers to one question.
+        take(p, l)
     }
 
+    /**
+     * Take a pile — *as much of it as you can carry*.
+     *
+     * A body drops its whole loadout as stacks (five medkits, three frags), so a
+     * pickup is a transfer, not a toggle: you take up to your carrying limit and
+     * the rest stays on the floor for the next person. Marking the pile taken
+     * after a partial pickup was silently deleting loot that a host had told
+     * every client about.
+     */
     private fun take(p: ArenaPlayer, l: Loot) {
+        val room = l.remaining
         when (l.kind) {
-            LootKind.AMMO -> p.ammo[l.value] += Weapon.AMMO_PACK[l.value]
-            LootKind.MEDKIT -> p.medkits++
-            LootKind.ARMOR -> p.armor = l.value
-            LootKind.HELMET -> p.helmet = l.value
-            LootKind.GRENADE -> when (l.value) {
-                GRENADE_FRAG -> p.grenades++
-                GRENADE_SMOKE -> p.smokes++
-                else -> p.stuns++
+            LootKind.AMMO -> {
+                p.ammo[l.value] += Weapon.AMMO_PACK[l.value]
+                l.taken = true
+            }
+            LootKind.MEDKIT -> {
+                val moved = min(room, (MEDKIT_CAP - p.medkits).coerceAtLeast(0))
+                if (moved <= 0) return
+                p.medkits += moved
+                if (l.remove(moved)) l.taken = true else events?.onLootChanged(l)
+            }
+            LootKind.GRENADE -> {
+                val have = when (l.value) {
+                    GRENADE_FRAG -> p.grenades
+                    GRENADE_SMOKE -> p.smokes
+                    else -> p.stuns
+                }
+                val moved = min(room, (GRENADE_CAP - have).coerceAtLeast(0))
+                if (moved <= 0) return
+                when (l.value) {
+                    GRENADE_FRAG -> p.grenades += moved
+                    GRENADE_SMOKE -> p.smokes += moved
+                    else -> p.stuns += moved
+                }
+                if (l.remove(moved)) l.taken = true else events?.onLootChanged(l)
+            }
+            // Armour and helmets are single items with a level, not stacks: you
+            // take the better one and leave the worse one where it lies.
+            LootKind.ARMOR -> {
+                if (l.value <= p.armor) return
+                p.armor = l.value
+                l.taken = true
+            }
+            LootKind.HELMET -> {
+                if (l.value <= p.helmet) return
+                p.helmet = l.value
+                l.taken = true
             }
             LootKind.WEAPON -> {
-                val slot = if (p.slots[0] == Weapon.PAN) 0 else 1
-                p.slots[slot] = Weapon.entries[l.value]
-                p.mags[slot] = min(Weapon.entries[l.value].mag, 6)
+                val w = Weapon.entries[l.value]
+                // Swap into the empty slot, else replace what you are holding and
+                // drop that gun in this pile's place, so a swap never destroys a
+                // weapon the player might want back.
+                val slot = if (p.slots[0] == Weapon.PAN) 0 else if (p.slots[1] == Weapon.PAN) 1 else p.active
+                val old = p.slots[slot]
+                p.slots[slot] = w
+                p.mags[slot] = min(Weapon.magNow(w, p.upLevels[w.ordinal]), 6)
                 if (p.slots[p.active] == Weapon.PAN) p.active = slot
+                if (old != Weapon.PAN) {
+                    val back = Loot(lootIds++, LootKind.WEAPON, old.ordinal, l.x, l.y, l.z)
+                    loot += back
+                    events?.onLootSpawned(back)
+                }
+                l.taken = true
             }
         }
-        l.taken = true
         events?.onLootTaken(p, l)
     }
 
@@ -1490,8 +1947,7 @@ internal class ArenaSim(
         for (slot in 0..1) {
             val w = p.slots[slot]
             if (w == Weapon.PAN) continue
-            val lv = p.upLevels[w.ordinal]
-            p.mags[slot] = ceil(w.mag * (1f + 0.1f * lv)).toInt()
+            p.mags[slot] = Weapon.magNow(w, p.upLevels[w.ordinal])
         }
     }
 
@@ -1531,6 +1987,10 @@ internal class ArenaSim(
  * with human-like reaction time, aim error, strafing and crouching.
  */
 internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, private val skill: Float) {
+    /** 0 balanced, 1 aggressive, 2 cautious — stable per bot so they feel like people. */
+    private val personality = ((p.id * 7 + (skill * 10).toInt()) % 3 + 3) % 3
+    /** 0 balanced · 1 aggressive · 2 cautious — also drives the round shop. */
+    val roleArchetype: Int get() = personality
     private var target: ArenaPlayer? = null
     private var thinkTimer = 0f
     private var reaction = 0f
@@ -1544,17 +2004,27 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
     private var lastX = 0f
     private var lastZ = 0f
     private var burst = 0f
+    /** Last known enemy position: bots search, they don't see through walls. */
+    private var seenX = 0f
+    private var seenZ = 0f
+    private var seenAt = -10f
+    private var grenadeCooldown = 0f
+    /** Ground slope under the bot this tick (0 flat, 1 cliff). */
+    private var curSlope = 0f
     private val hit = RayHit()
 
     fun think(sim: ArenaSim, dt: Float) {
         val inp = p.input
+        grenadeCooldown -= dt
         inp.jump = false; inp.reload = false; inp.slot = -1; inp.pickup = -1
-        inp.grenade = false; inp.smoke = false; inp.stun = false; inp.mount = false; inp.prone = false
+        inp.grenade = false; inp.smoke = false; inp.stun = false; inp.mount = false; inp.prone = false; inp.cook = 0f
+        inp.heal = false; inp.sprint = false
         if (p.skydiving) {
             if (!hasGoal) pickGoal(sim)
             steerTo(goalX, goalZ, inp, 1f)
             return
         }
+        curSlope = sim.map.slopeAt(p.pos.x, p.pos.z)
         thinkTimer -= dt
         if (thinkTimer <= 0f) {
             thinkTimer = 0.25f
@@ -1570,7 +2040,6 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
         // Prefer a loaded weapon.
         val best = (0..1).maxByOrNull { i -> if (p.slots[i] == Weapon.PAN) -1 else p.mags[i] + p.ammo[p.slots[i].ammo.coerceAtLeast(0)] }!!
         if (best != p.active && p.slots[best] != Weapon.PAN) inp.slot = best
-        if (p.health < 55f && p.medkits > 0 && t == null) { inp.heal = true; inp.moveX = 0f; inp.moveY = 0f; inp.fire = false; return }
         inp.heal = false
         // A nearby empty vehicle is worth boarding — mounted weapons and speed.
         if (p.vehicle < 0 && p.slots.all { it == Weapon.PAN }) {
@@ -1579,11 +2048,58 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
                 if (MathX.length(v.x - p.pos.x, v.z - p.pos.z) < 3.2f) { inp.mount = true; break }
             }
         }
+        // Nobody wins a gunfight standing in the gas: if the zone is hurting
+        // us, disengage and run for the circle — firing only when cornered.
+        if (sim.zone.enabled && sim.zone.outside(p.pos.x, p.pos.z) && !p.skydiving) {
+            goalX = sim.zone.toX + rng.range(-4f, 4f); goalZ = sim.zone.toZ + rng.range(-4f, 4f)
+            hasGoal = true
+            steerTo(goalX, goalZ, inp, 1f)
+            inp.sprint = true
+            if (t != null && t.alive && hasGun && sim.lineOfSight(p, t)) fight(sim, t, inp, dt)
+            return
+        }
+        // No one to shoot: bandage up, but never while the gas is burning us.
+        if (p.health < 55f && p.medkits > 0 && t == null && sim.time - p.lastDamageTime > 2.5f) {
+            inp.heal = true; inp.moveX = 0f; inp.moveY = 0f; inp.fire = false; inp.ads = false
+            return
+        }
+        // Flashed: a human backs off and holds the trigger, they don't aim.
+        if (p.stunTimer > 0f) {
+            inp.fire = false; inp.ads = false
+            inp.moveX = strafe * 0.3f
+            inp.moveY = -0.7f
+            if (t != null) inp.yaw = MathX.lerpAngle(p.yaw, atan2(t.pos.x - p.pos.x, t.pos.z - p.pos.z), 0.05f)
+            return
+        }
         if (t != null && t.alive && hasGun) {
+            // Wounded bots break contact, smoke themselves off and only heal
+            // once the shooter has lost the trail — not in the open.
+            if (p.health < 38f && personality != 1) {
+                val dx = t.pos.x - p.pos.x; val dz = t.pos.z - p.pos.z
+                val away = atan2(-dx, -dz)
+                inp.yaw = MathX.lerpAngle(p.yaw, away, 0.3f)
+                inp.moveX = 0f; inp.moveY = 0.85f
+                inp.fire = false; inp.ads = false; inp.crouch = true
+                if (p.smokes > 0 && grenadeCooldown <= 0f && rng.chance(0.02f)) {
+                    inp.smoke = true; grenadeCooldown = 6f
+                }
+                if (sim.time - p.lastDamageTime > 1.2f && p.medkits > 0) inp.heal = true
+                return
+            }
             fight(sim, t, inp, dt)
             return
         }
         inp.fire = false; inp.ads = false; inp.crouch = false
+        // Fresh memory, no current target: pre-aim the last known spot and
+        // creep toward it. This is what makes bots look like they expect you.
+        if (sim.time - seenAt < 2.5f) {
+            val d = MathX.length(seenX - p.pos.x, seenZ - p.pos.z)
+            if (d > 2f) {
+                inp.yaw = MathX.lerpAngle(p.yaw, atan2(seenX - p.pos.x, seenZ - p.pos.z), 0.18f)
+                inp.ads = d > 14f
+                if (p.mags[p.active] == 0 && p.weapon != Weapon.PAN) inp.reload = true
+            }
+        }
         // Outside (or soon outside) the zone: head in.
         if (sim.zone.outside(p.pos.x, p.pos.z) || (sim.zone.shrinking && MathX.length(p.pos.x - sim.zone.toX, p.pos.z - sim.zone.toZ) > sim.zone.toR * 0.8f)) {
             goalX = sim.zone.toX + rng.range(-5f, 5f); goalZ = sim.zone.toZ + rng.range(-5f, 5f); hasGoal = true
@@ -1594,72 +2110,201 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
                 if (MathX.length(l.x - p.pos.x, l.z - p.pos.z) < 1.6f && l.kind == LootKind.WEAPON) inp.pickup = l.id
             }
         }
-        if (!hasGoal || MathX.length(goalX - p.pos.x, goalZ - p.pos.z) < 2f) pickGoal(sim)
-        steerTo(goalX, goalZ, inp, 0.9f)
+        // Objective modes: hold or take the point that needs the team most.
+        // This is re-evaluated every tick so a bot standing on its point stays
+        // there instead of wandering off to a random town.
+        if (sim.warfare && sim.points.isNotEmpty()) {
+            val pt = if (sim.koth) sim.points.first() else sim.points.minByOrNull { point ->
+                // Owned points only need one guard; unowned ones need a push.
+                val need = if (point.owner == p.team) 0.35f else 1f
+                val d2 = (point.x - p.pos.x) * (point.x - p.pos.x) + (point.z - p.pos.z) * (point.z - p.pos.z)
+                d2 * need
+            }
+            if (pt != null) {
+                goalX = pt.x; goalZ = pt.z; hasGoal = true
+                val d = MathX.length(pt.x - p.pos.x, pt.z - p.pos.z)
+                if (d < pt.r * 0.8f) {
+                    // On point: crouch on the edge and watch the approach.
+                    inp.moveY = 0f
+                    inp.moveX = if (strafeTimer > 0f) strafe * 0.25f else 0f
+                    inp.crouch = true
+                    if (p.mags[p.active] < p.weapon.mag / 2) inp.reload = true
+                    return
+                }
+            }
+        } else if (!hasGoal || MathX.length(goalX - p.pos.x, goalZ - p.pos.z) < 2f) pickGoal(sim)
+        steerTo(goalX, goalZ, inp, routeSpeed(sim))
+        // Sprint on long rotations; humans don't walk 60 m to the next hill.
+        inp.sprint = MathX.length(goalX - p.pos.x, goalZ - p.pos.z) > 24f
         if (p.mags[p.active] < p.weapon.mag / 2 && p.weapon != Weapon.PAN) inp.reload = true
+    }
+
+    /**
+     * Terrain-aware throttle. The old bot always asked for 0.9 speed, which
+     * on a slope or in snow meant the body never reached what the brain
+     * wanted and the controller ramp looked like stuttering. Bots now ask for
+     * a speed their feet can actually hold: slower uphill, faster downhill,
+     * slower on snow and water.
+     */
+    private fun routeSpeed(sim: ArenaSim): Float {
+        val surf = p.surface
+        val slope = sim.map.slopeAt(p.pos.x, p.pos.z)
+        val base = when (surf) {
+            ArenaMap.Surface.WATER -> 0.55f
+            ArenaMap.Surface.SNOW -> 0.8f
+            ArenaMap.Surface.SAND -> 0.86f
+            ArenaMap.Surface.ROCK -> 0.82f
+            else -> 0.9f
+        }
+        val sloped = MathX.clamp(base - slope * 0.35f, 0.45f, 1f)
+        // Downhill is free speed; let them use it rather than fighting the ramp.
+        return if (slope > 0.3f && p.ctrl.velocity.y < 0.5f) MathX.clamp(sloped + 0.1f, 0.45f, 1f) else sloped
     }
 
     private fun perceive(sim: ArenaSim) {
         var best: ArenaPlayer? = null
-        val baseD = if (sim.gunGame) 80f else 60f
-        var bestD = baseD + skill * 30f
+        var bestScore = Float.MAX_VALUE
+        val baseD = if (sim.gunGame) 80f else 62f
+        val maxD = baseD + skill * 34f
         for (o in sim.players.values) {
             if (o === p || !o.alive || o.skydiving) continue
             if (sim.teams && o.team == p.team) continue
             val dx = o.pos.x - p.pos.x; val dz = o.pos.z - p.pos.z
             val d = sqrt(dx * dx + dz * dz)
-            if (d > bestD) continue
+            if (d > maxD) continue
             val ang = abs(MathX.angleDelta(p.yaw, atan2(dx, dz)))
-            val heard = d < 14f || (sim.time - o.lastShotTime < 1f && d < 45f) || (p.lastDamageFrom == o.id && sim.time - p.lastDamageTime < 2f)
+            val heard = d < 14f || (sim.time - o.lastShotTime < 1f && d < 45f) ||
+                (p.lastDamageFrom == o.id && sim.time - p.lastDamageTime < 2f)
             if (ang > 1.2f && !heard) continue
-            if (!sim.lineOfSight(p, o)) continue
-            best = o; bestD = d
+            // Sound gives a rough bearing; only sight gives a confirmed target.
+            if (!sim.lineOfSight(p, o) && !heard) continue
+            // Wounded enemies and people a teammate is already shooting are
+            // the same callouts a human makes in voice chat.
+            val score = d - (if (o.health < 45f) 14f else 0f) -
+                (if (sim.teams && o.lastDamageFrom >= 0 && o.lastDamageFrom != p.id && sim.time - o.lastDamageTime < 2f) 10f else 0f) -
+                (if (heard) 4f else 0f)
+            if (score < bestScore) { bestScore = score; best = o }
         }
-        if (best != null && best !== target) {
-            val extra = if (sim.gunGame) -0.08f else 0f
-            reaction = MathX.lerp(0.75f, 0.18f, skill) + rng.range(0f, 0.2f) + extra
-            aimError = MathX.lerp(0.45f, 0.12f, skill)
-        }
-        target = best
+        if (best != null) {
+            seenX = best.pos.x; seenZ = best.pos.z; seenAt = sim.time
+            if (best !== target) {
+                val extra = if (sim.gunGame) -0.08f else 0f
+                reaction = MathX.lerp(0.75f, 0.18f, skill) + rng.range(0f, 0.2f) + extra
+                aimError = MathX.lerp(0.45f, 0.12f, skill)
+            }
+            target = best
+        } else if (target != null && target!!.alive && sim.time - seenAt < 4.5f) {
+            // Remember the last position for a few seconds, then give up.
+            // Cautious bots hold the angle longer; aggressive ones push it.
+            if (sim.time - seenAt < if (personality == 2) 6f else 4.5f) return
+            target = null
+        } else target = null
     }
 
     private fun fight(sim: ArenaSim, t: ArenaPlayer, inp: PlayerInput, dt: Float) {
         val dx = t.pos.x - p.pos.x; val dz = t.pos.z - p.pos.z
         val dist = sqrt(dx * dx + dz * dz)
-        val wantYaw = atan2(dx, dz)
+        val w = p.weapon
+        val los = sim.lineOfSight(p, t)
+        if (!los) {
+            // No wall hack: advance to the last heard/seen spot and search it.
+            inp.fire = false; inp.ads = false; inp.crouch = false
+            if (sqrt((seenX - p.pos.x) * (seenX - p.pos.x) + (seenZ - p.pos.z) * (seenZ - p.pos.z)) > 3f) {
+                steerTo(seenX, seenZ, inp, if (personality == 1) 1f else 0.75f)
+            } else {
+                inp.moveX = strafe * 0.35f; inp.moveY = 0f
+                inp.yaw = MathX.lerpAngle(p.yaw, atan2(dx, dz), 0.12f)
+            }
+            if (p.mags[p.active] == 0) inp.reload = true
+            return
+        }
+        // Lead a running target a little. The further away, the more useful it
+        // is; low-skill bots mostly shoot where they see him.
+        val lead = (dist / (fireRange(w) * 3f)).coerceIn(0f, 0.3f) * (0.25f + skill * 0.75f)
+        val aimX = dx + t.ctrl.velocity.x * lead
+        val aimZ = dz + t.ctrl.velocity.z * lead
+        val wantYaw = atan2(aimX, aimZ)
         val wantPitch = atan2(t.pos.y + (if (t.crouching) 0.8f else 1.25f) - (p.pos.y + p.eyeHeight), dist)
         val turn = MathX.lerp(2.5f, 7f, skill) * dt
         inp.yaw = p.yaw + MathX.clamp(MathX.angleDelta(p.yaw, wantYaw + aimError * 0.35f), -turn, turn)
         inp.pitch = MathX.lerp(inp.pitch, wantPitch + aimError * 0.1f, 0.25f)
         aimError = MathX.damp(aimError, 0.02f + (1f - skill) * 0.05f, 1.5f + skill * 2f, dt)
         reaction -= dt
-        val w = p.weapon
-        inp.ads = dist > 18f && w != Weapon.SHOTGUN
-        val aligned = abs(MathX.angleDelta(p.yaw, wantYaw)) < 0.12f
+        val scatter = w.pellets > 1
+        inp.ads = dist > 18f && !scatter
+        val aligned = abs(MathX.angleDelta(p.yaw, wantYaw)) < (if (scatter) 0.22f else 0.12f)
         burst -= dt
         if (reaction <= 0f && aligned && dist < fireRange(w)) {
-            if (w.auto) {
-                if (burst <= -0.35f) burst = rng.range(0.25f, 0.7f)
-                inp.fire = burst > 0f
-            } else inp.fire = rng.chance(0.5f)
+            when {
+                // The pan is a finisher: a bot should swing it, not stand there
+                // holding fire at a rifle 30 m away.
+                w == Weapon.PAN -> inp.fire = dist < 2.4f
+                // One-shot weapons are only worth a trigger pull when the shot
+                // can actually land: a double barrel at 25 m is two wasted
+                // shells and a free kill for whoever is holding the rifle.
+                w == Weapon.DOUBLE_BARREL -> inp.fire = dist < 11f
+                w == Weapon.SHOTGUN -> inp.fire = dist < 16f
+                w == Weapon.SNIPER || w == Weapon.REVOLVER -> inp.fire = dist > 8f && rng.chance(0.55f)
+                w.auto -> {
+                    // Burst discipline varies by personality: aggressive bots hold
+                    // longer, cautious bots tap and reset.
+                    val rest = if (personality == 1) 0.22f else if (personality == 2) 0.55f else 0.35f
+                    if (burst <= -rest) burst = rng.range(0.25f, if (personality == 1) 0.9f else 0.6f)
+                    inp.fire = burst > 0f
+                }
+                // A burst rifle pulls once per cycle and lets the queue fire the
+                // rest, so a bot must release the trigger between bursts or it
+                // re-arms the burst every cooldown and never stops firing.
+                w == Weapon.BURST -> inp.fire = p.burstLeft == 0 && reaction <= 0.15f && rng.chance(0.35f)
+                else -> inp.fire = rng.chance(0.5f)
+            }
         } else inp.fire = false
-        // Grenades: a target behind cover earns a frag; a bad trade earns a smoke screen.
-        val los = sim.lineOfSight(p, t)
-        if (!los && dist < 34f && p.grenades > 0 && rng.chance(0.02f + 0.03f * skill)) inp.grenade = true
-        if (p.health < 40f && dist > 30f && p.smokes > 0 && rng.chance(0.01f + 0.02f * skill)) inp.smoke = true
+        // Grenades: cook behind cover, smoke a bad trade, stun a close push.
+        // Never frag a target standing next to a teammate, and never at
+        // knife range where the blast would clip us too.
+        val safeThrow = dist in 9f..32f && sim.players.values.none {
+            it !== p && it.alive && sim.teams && it.team == p.team &&
+                MathX.length(it.pos.x - t.pos.x, it.pos.z - t.pos.z) < 6f
+        }
+        if (safeThrow && grenadeCooldown <= 0f && p.grenades > 0 && rng.chance(0.012f + 0.025f * skill)) {
+            inp.grenade = true; inp.cook = rng.range(0.5f, 1.2f); grenadeCooldown = rng.range(5f, 9f)
+        }
+        if (p.health < 45f && dist > 26f && p.smokes > 0 && grenadeCooldown <= 0f && rng.chance(0.02f)) {
+            inp.smoke = true; grenadeCooldown = 5f
+        }
+        if (dist < 13f && p.stuns > 0 && grenadeCooldown <= 0f && rng.chance(0.015f + 0.02f * skill)) {
+            inp.stun = true; grenadeCooldown = 6f
+        }
         // Movement: strafe, keep a good distance for the weapon — and take cover
         // when the shooter is already firing at us.
         strafeTimer -= dt
+        // Reloading in the open is how bots used to die: back off while the
+        // mag is empty unless the target is right on top of us.
+        if (p.mags[p.active] == 0) {
+            inp.reload = true
+            if (p.reloadLeft > 0f && dist > 10f) {
+                inp.fire = false
+                inp.moveY = -0.7f
+                inp.moveX = strafe * 0.5f
+                inp.crouch = true
+                return
+            }
+        }
         val underFire = sim.time - p.lastDamageTime < 2f && p.lastDamageFrom >= 0
         if (underFire && dist < 40f) {
             coverStrafe(inp, dt, dist)
             if (dist > 24f && rng.chance(0.02f)) inp.jump = true
             return
         }
-        if (strafeTimer <= 0f) { strafe = if (rng.chance(0.5f)) 1f else -1f; strafeTimer = rng.range(0.6f, 1.8f); inp.crouch = rng.chance(0.25f * skill) }
-        val ideal = when (w) {
-            Weapon.SHOTGUN -> 6f
-            Weapon.SMG -> 12f
+        if (strafeTimer <= 0f) {
+            strafe = if (rng.chance(0.5f)) 1f else -1f
+            strafeTimer = rng.range(0.6f, if (personality == 1) 1.1f else 1.9f)
+            inp.crouch = rng.chance(if (personality == 2) 0.45f else 0.2f * skill)
+        }
+        val baseIdeal = when (w) {
+            Weapon.SHOTGUN, Weapon.DOUBLE_BARREL -> 6f
+            Weapon.SMG, Weapon.CARBINE -> 12f
+            Weapon.BURST -> 18f
             Weapon.SNIPER -> 45f
             Weapon.MARKSMAN -> 35f
             Weapon.REVOLVER -> 14f
@@ -1670,7 +2315,8 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
             Weapon.HOWITZER -> 55f
             else -> 20f
         }
-        inp.moveX = strafe * 0.8f
+        val ideal = baseIdeal * (if (personality == 1) 0.82f else if (personality == 2) 1.22f else 1f)
+        inp.moveX = strafe * (if (w == Weapon.SNIPER) 0.35f else 0.8f)
         inp.moveY = if (dist > ideal * 1.3f) 0.8f else if (dist < ideal * 0.6f) -0.6f else 0f
         if (p.mags[p.active] == 0) inp.reload = true
         if (rng.chance(0.004f + 0.01f * skill)) inp.jump = true
@@ -1684,7 +2330,10 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
         Weapon.ROCKET -> 60f
         Weapon.MISSILE -> 70f
         Weapon.SHOTGUN -> 22f
+        Weapon.DOUBLE_BARREL -> 16f
         Weapon.SMG -> 38f
+        Weapon.CARBINE -> 60f
+        Weapon.BURST -> 95f
         Weapon.PISTOL -> 40f
         Weapon.RIFLE -> 90f
         Weapon.LMG -> 80f
@@ -1698,18 +2347,33 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
      *  from a kill zone — and drop to a lower profile at close range. */
     private fun coverStrafe(inp: PlayerInput, dt: Float, dist: Float) {
         strafeTimer -= dt
-        if (strafeTimer <= 0f) {
-            strafe = if (rng.chance(0.5f)) 1f else -1f
-            strafeTimer = rng.range(0.4f, 1.2f)
-        }
         val t = target
         val dir = atan2(p.pos.x - (t?.pos?.x ?: p.pos.x), p.pos.z - (t?.pos?.z ?: p.pos.z))
+        if (strafeTimer <= 0f) {
+            // Pick the side that is actually walkable, not just a coin flip.
+            val left = dir + MathX.HALF_PI
+            val right = dir - MathX.HALF_PI
+            val okL = !blockedToward(right + MathX.PI, 1.4f)
+            val okR = !blockedToward(left + MathX.PI, 1.4f)
+            strafe = when {
+                okL && !okR -> 1f
+                okR && !okL -> -1f
+                else -> if (rng.chance(0.5f)) 1f else -1f
+            }
+            strafeTimer = rng.range(0.5f, 1.3f)
+        }
         val side = dir + MathX.HALF_PI * strafe
         inp.moveX = 0f
         inp.moveY = 0.85f
         inp.yaw = MathX.lerpAngle(p.yaw, side, 0.25f)
-        inp.crouch = dist < 20f || rng.chance(0.3f)
+        // Drop the body only when the ground is not a slope: crouching on a
+        // slope is how bots used to slide out of their own cover.
+        inp.crouch = (dist < 20f || rng.chance(0.3f)) && curSlope < 0.35f
     }
+
+    /** True if a wall is within [dist] along a compass bearing from the bot. */
+    private fun blockedToward(bearing: Float, dist: Float): Boolean =
+        physicsRef?.raycast(p.pos.x, p.pos.y + 0.9f, p.pos.z, sin(bearing), 0f, cos(bearing), dist, hit, Layers.WORLD or Layers.PROPS) == true
 
     private fun nearestUseful(sim: ArenaSim): Loot? {
         var best: Loot? = null; var bd = 35f * 35f
@@ -1721,7 +2385,7 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
                 LootKind.ARMOR -> l.value > p.armor
                 LootKind.HELMET -> l.value > p.helmet
                 LootKind.MEDKIT -> p.medkits < 3
-                LootKind.GRENADE -> p.grenades < 5
+                LootKind.GRENADE -> p.grenades < GRENADE_CAP
             }
             if (!useful) continue
             val dx = l.x - p.pos.x; val dz = l.z - p.pos.z

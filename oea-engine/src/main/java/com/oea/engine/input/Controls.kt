@@ -12,6 +12,7 @@ import com.oea.engine.graphics.SpriteBatch
 import com.oea.engine.math.Colors
 import com.oea.engine.math.MathX
 import com.oea.engine.math.Vec2
+import kotlin.math.exp
 import kotlin.math.hypot
 
 /**
@@ -43,7 +44,8 @@ class VirtualJoystick(
     /** When true the control stands down: no touches claimed, value reads zero (UI overlays). */
     var paused = false
 
-    fun update(input: Input, width: Float, height: Float, density: Float) {
+    fun update(input: Input, width: Float, height: Float, density: Float, dt: Float = 0f) {
+        stepMs = if (dt > 0f) (dt * 1000f).coerceIn(4f, 60f) else 16.7f
         if (paused) {
             input.pointer(pointerId)?.owner = null
             pointerId = -1
@@ -81,8 +83,25 @@ class VirtualJoystick(
         knobX = baseX + nx * clamped; knobY = baseY + ny * clamped
         var m = clamped / radius
         m = if (m < deadZone) 0f else (m - deadZone) / (1f - deadZone)
-        value.set(nx * m, -ny * m)
+        // Soft response curve: the outer 40% of the stick still adds speed, but
+        // small deflections give fine control instead of a snappy full step.
+        // Linear below the knee keeps a deliberate walk walkable.
+        if (m > 0f) {
+            val knee = 0.45f
+            m = if (m <= knee) m else knee + (m - knee) * (1f - (m - knee) * 0.35f) * 1.15f
+            m = m.coerceIn(0f, 1f)
+        }
+        val rawX = nx * m; val rawY = -ny * m
+        // Feather the vector so a released or reversed stick eases instead of
+        // snapping the body to a stop; quick flicks still arrive in ~80 ms.
+        val k = 1f - exp(-response * 0.001f * stepMs)
+        value.set(value.x + (rawX - value.x) * k, value.y + (rawY - value.y) * k)
     }
+
+    /** Response sharpness: higher follows the finger faster. */
+    var response = 26f
+    /** Milliseconds since the last update, used to keep the smoothing frame-rate independent. */
+    private var stepMs = 16.7f
 
     private fun inRegion(nx: Float, ny: Float) = nx >= region[0] && ny >= region[1] && nx <= region[2] && ny <= region[3]
 
@@ -127,6 +146,12 @@ class VirtualButton(
     /** When true the button stands down: no touches claimed (UI overlays). */
     var paused = false
 
+    /** Drawn opacity of the button, 0.2..1, set from the player's own setting. */
+    var opacity: Float = 1f
+
+    /** True while the layout editor owns the button: drawn with a drag handle. */
+    var editing = false
+
     fun update(input: Input, width: Float, height: Float, density: Float, safeLeft: Float = 0f, safeRight: Float = 0f) {
         if (paused) {
             input.pointer(pointerId)?.owner = null
@@ -166,7 +191,8 @@ class VirtualButton(
 
     fun draw(batch: SpriteBatch, font: BitmapFont, density: Float) {
         if (!visible) return
-        val a = if (!enabled) 0.35f else if (pressed) 1f else 0.78f
+        val base = if (!enabled) 0.35f else if (pressed) 1f else 0.78f
+        val a = base * opacity.coerceIn(0.2f, 1f)
         val fill = if (pressed || highlight) Colors.withAlpha(color, 0.55f * a) else Colors.withAlpha(0xFF101318.toInt(), 0.45f * a)
         batch.circle(cx, cy, radius * (if (pressed) 0.94f else 1f), fill)
         batch.ring(cx, cy, radius, maxOf(1.5f, radius * 0.06f), Colors.withAlpha(color, 0.9f * a))
@@ -174,6 +200,16 @@ class VirtualButton(
         if (label.isNotEmpty()) {
             val size = radius * (if (label.length <= 2) 0.72f else 0.42f)
             font.draw(batch, label, cx, cy - font.lineHeight(size) / 2f, size, Colors.withAlpha(Colors.WHITE, a), Align.CENTER)
+        }
+        // Layout editor: a dashed outer ring and a two-headed handle, so it is
+        // obvious every circle on screen is a thing that can be picked up.
+        if (editing) {
+            batch.ring(cx, cy, radius + 5f * density, maxOf(1f, radius * 0.04f), Colors.withAlpha(Colors.WHITE, 0.45f * a))
+            val h = radius * 0.72f
+            batch.line(cx - h, cy, cx - h * 0.6f, cy, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
+            batch.line(cx + h, cy, cx + h * 0.6f, cy, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
+            batch.line(cx, cy - h, cx, cy - h * 0.6f, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
+            batch.line(cx, cy + h, cx, cy + h * 0.6f, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
         }
     }
 }
@@ -197,7 +233,7 @@ class LookPad(var region: FloatArray = floatArrayOf(0.45f, 0f, 1f, 1f)) {
     /** When true the pad stands down: no touches claimed (UI overlays). */
     var paused = false
 
-    fun update(input: Input, width: Float, height: Float) {
+    fun update(input: Input, width: Float, height: Float, dt: Float = 0f) {
         if (paused) {
             input.pointer(pointerId)?.owner = null
             pointerId = -1
@@ -231,7 +267,28 @@ class LookPad(var region: FloatArray = floatArrayOf(0.45f, 0f, 1f, 1f)) {
                 }
             }
         }
+        // Ease the reported drag so the camera turns in a clean arc instead of
+        // tracking every micro-jump of a finger. Flicks still land the same
+        // total rotation, just spread over a couple of frames.
+        if (smoothing > 0f) {
+            // Frame-rate independent ease: at 120 Hz it filters less per frame,
+            // at 30 Hz more, so the camera feels identical on both.
+            val step = if (dt > 0f) (dt * 1000f).coerceIn(4f, 60f) else 16.7f
+            val k = 1f - exp(-(1f - smoothing).coerceIn(0.03f, 1f) * step * 0.22f)
+            smoothedX += (deltaX - smoothedX) * k
+            smoothedY += (deltaY - smoothedY) * k
+            deltaX = smoothedX
+            deltaY = smoothedY
+        } else {
+            smoothedX = deltaX; smoothedY = deltaY
+        }
+        if (!active) { smoothedX = 0f; smoothedY = 0f }
     }
+
+    /** 0 = raw finger (fastest), 0.6 = silky. Default keeps aim responsive. */
+    var smoothing = 0.35f
+    private var smoothedX = 0f
+    private var smoothedY = 0f
 }
 
 /** Short vibration cues tuned for games. Respects the engine's haptics setting. */
@@ -248,21 +305,29 @@ class Haptics internal constructor(context: Context, private val settings: Engin
     fun heavy() = predefined(if (Build.VERSION.SDK_INT >= 29) VibrationEffect.EFFECT_HEAVY_CLICK else -1, 30, 255)
     fun double() = predefined(if (Build.VERSION.SDK_INT >= 29) VibrationEffect.EFFECT_DOUBLE_CLICK else -1, 24, 180)
 
-    /** Custom buzz: [ms] duration, [amplitude] 1..255. */
+    /** Custom buzz: [ms] duration, [amplitude] 1..255 before the strength setting. */
     fun buzz(ms: Long, amplitude: Int = 160) {
         val v = vibrator ?: return
         if (!settings.haptics || !rateOk()) return
-        runCatching { v.vibrate(VibrationEffect.createOneShot(ms, amplitude.coerceIn(1, 255))) }
+        runCatching { v.vibrate(VibrationEffect.createOneShot(ms, scaled(amplitude))) }
     }
 
     private fun predefined(effect: Int, fallbackMs: Long, amplitude: Int) {
         val v = vibrator ?: return
         if (!settings.haptics || !rateOk()) return
+        // A predefined effect carries its own waveform, so on API 29+ the
+        // strength setting cannot scale it; only the fallback path (and the
+        // custom buzzes) take the multiplier, which is where games feel it.
+        val strength = settings.hapticStrength
         runCatching {
-            if (Build.VERSION.SDK_INT >= 29 && effect >= 0) v.vibrate(VibrationEffect.createPredefined(effect))
-            else v.vibrate(VibrationEffect.createOneShot(fallbackMs, amplitude))
+            if (Build.VERSION.SDK_INT >= 29 && effect >= 0 && strength >= 0.99f) v.vibrate(VibrationEffect.createPredefined(effect))
+            else v.vibrate(VibrationEffect.createOneShot(fallbackMs, scaled(amplitude)))
         }
     }
+
+    /** Applies the player's haptic strength to an amplitude, never below 1. */
+    private fun scaled(amplitude: Int): Int =
+        (amplitude * settings.hapticStrength.coerceIn(0.25f, 1f)).toInt().coerceIn(1, 255)
 
     /** Avoids a buzzing mess when many events fire at once. */
     private fun rateOk(): Boolean {

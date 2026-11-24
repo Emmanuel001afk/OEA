@@ -18,11 +18,20 @@ import kotlin.math.sin
  * the forearm and upper-arm bones, so rotating the elbow bends the skin
  * with it.
  *
+ * [matrices] are **bind-relative**: `poseWorld × inverseBind`. This is what
+ * `SKIN_VERT` needs, and it means a vertex authored at the bind pose is left
+ * alone when the skeleton is at rest. An imported character supplies its own
+ * inverse-bind matrices through [inverseBindMatrices] so the same procedural
+ * pose drives an AI-generated mesh with different joint positions.
+ *
  * Bind pose (character local space, feet at y ≈ 0, facing +Z):
  * pelvis 0.90, spine 1.08, chest 1.36, neck 1.52, head 1.64, shoulders ±0.18
  * at 1.40, elbows 1.14, wrists 0.88, hips ±0.10 at 0.88, knees 0.44, ankles 0.02.
  */
-class Skeleton {
+class Skeleton(
+    /** Optional 19×16 column-major inverse-bind matrices from an imported character. */
+    inverseBindMatrices: FloatArray? = null,
+) {
     enum class Bone {
         PELVIS, SPINE, CHEST, NECK, HEAD,
         SHOULDER_L, ARM_L, FORE_L, HAND_L,
@@ -59,7 +68,11 @@ class Skeleton {
 
     private val local = Array(count) { Mat4() }
     private val world = Array(count) { Mat4() }
-    /** Packed bone matrices (count × 16), ready for the vertex shader. */
+    private val inverseBind = Array(count) { Mat4() }
+    private val bindWorld = Array(count) { Mat4() }
+    /** Local joint offsets, derived from the bind pose (3 floats per bone). */
+    private val offsets = FloatArray(count * 3)
+    /** Packed bind-relative bone matrices (count × 16), ready for the vertex shader. */
     val matrices = FloatArray(count * 16)
 
     private val trans = Mat4()
@@ -68,6 +81,35 @@ class Skeleton {
     private val rz = Mat4()
     private val rot = Mat4()
     private val root = Mat4()
+    private val skinTmp = Mat4()
+    private val bindTmp = Mat4()
+    private val offsetTmp = Mat4()
+
+    init {
+        if (inverseBindMatrices != null && inverseBindMatrices.size == count * 16) {
+            for (i in 0 until count) {
+                inverseBind[i].set(inverseBindMatrices, i * 16)
+                bindWorld[i].invert(inverseBind[i])
+            }
+        } else {
+            bindWorld[0].setTranslation(defs[0].x, defs[0].y, defs[0].z)
+            for (i in 1 until count) {
+                bindTmp.setTranslation(defs[i].x, defs[i].y, defs[i].z)
+                bindWorld[i].mul(bindWorld[defs[i].parent], bindTmp)
+            }
+            for (i in 0 until count) inverseBind[i].invert(bindWorld[i])
+        }
+        // Local offsets are derived from the bind pose, not hard-coded: an
+        // imported rig can have different proportions and still animate here.
+        offsets[0] = bindWorld[0].m[12]; offsets[1] = bindWorld[0].m[13]; offsets[2] = bindWorld[0].m[14]
+        for (i in 1 until count) {
+            offsetTmp.invert(bindWorld[defs[i].parent])
+            offsetTmp.mul(offsetTmp, bindWorld[i])
+            offsets[i * 3] = offsetTmp.m[12]
+            offsets[i * 3 + 1] = offsetTmp.m[13]
+            offsets[i * 3 + 2] = offsetTmp.m[14]
+        }
+    }
 
     /**
      * Recomputes every bone from a pose.
@@ -101,23 +143,23 @@ class Skeleton {
         val ph = phase
 
         // ---- root: pelvis translates with the bob/crouch offset
-        root.setTranslation(0f, hipOffsetY, 0f)
+        root.setTranslation(offsets[0], offsets[1] + hipOffsetY, offsets[2])
         world[0].set(root.m)
 
         // ---- spine: forward lean with pace, deeper when crouching or falling
         val leanPitch = 0.10f * s + if (airborne) 0.18f else 0f + if (crouch) 0.30f else 0f
         val roll = lean * 0.35f + if (airborne) 0f else s * 0.07f * sin(ph)
-        setLocal(1, 0f, 0.18f, 0f, leanPitch, 0f, -roll)
+        setLocal(1, leanPitch, 0f, -roll)
 
         // ---- chest: breathing sway rides the spine
         val breath = sin(ph * 2.2f) * 0.012f
-        setLocal(2, 0f, 0.28f, 0f, 0f, 0f, breath)
+        setLocal(2, 0f, 0f, breath)
 
         // ---- neck: head lags the aim slightly
-        setLocal(3, 0f, 0.16f, 0f, -leanPitch * 0.3f, 0f, 0f)
+        setLocal(3, -leanPitch * 0.3f, 0f, 0f)
 
         // ---- head: the glance turn plus a small aim follow
-        setLocal(4, 0f, 0.12f, 0f, aimPitch * 0.3f, headYaw, 0f)
+        setLocal(4, aimPitch * 0.3f, headYaw, 0f)
 
         // ---- arms
         for (side in intArrayOf(-1, 1)) {
@@ -145,10 +187,10 @@ class Skeleton {
                 ua = MathX.lerp(ua, 0.45f, reload)
                 el = MathX.lerp(el, 0.85f, reload)
             }
-            setLocal(sho, side * 0.18f, 0.04f, 0f, 0f, 0f, 0f)
-            setLocal(arm, 0f, -0.26f, 0f, -ua, 0f, 0f)
-            setLocal(fore, 0f, -0.26f, 0f, el, 0f, 0f)
-            setLocal(hand, 0f, -0.07f, 0.01f, 0f, 0f, 0f)
+            setLocal(sho, 0f, 0f, 0f)
+            setLocal(arm, -ua, 0f, 0f)
+            setLocal(fore, el, 0f, 0f)
+            setLocal(hand, 0f, 0f, 0f)
         }
 
         // ---- legs
@@ -171,30 +213,30 @@ class Skeleton {
                 thighA = s * 0.85f * sin(0.2f * ph)
                 kneeB = 0f
             }
-            setLocal(thigh, side * 0.10f, -0.02f, 0f, -thighA, 0f, 0f)
-            setLocal(shin, 0f, -0.44f, 0f, kneeB, 0f, 0f)
-            setLocal(foot, 0f, -0.42f, 0f, 0f, 0f, 0f)
+            setLocal(thigh, -thighA, 0f, 0f)
+            setLocal(shin, kneeB, 0f, 0f)
+            setLocal(foot, 0f, 0f, 0f)
         }
 
-        // ---- flatten the hierarchy into world matrices
+        // ---- flatten the hierarchy into world matrices, then remove bind pose
         for (i in 1 until count) {
             val p = defs[i].parent
             world[i].mul(world[p], local[i])
         }
-        // Pack for the shader.
         for (i in 0 until count) {
-            System.arraycopy(world[i].m, 0, matrices, i * 16, 16)
+            skinTmp.mul(world[i], inverseBind[i])
+            System.arraycopy(skinTmp.m, 0, matrices, i * 16, 16)
         }
     }
 
-    /** Local transform = translation(def) · Rz(rz) · Ry(ry) · Rx(rx). */
-    private fun setLocal(i: Int, x: Float, y: Float, z: Float, rxA: Float, ryA: Float, rzA: Float) {
+    /** Local transform = translation(bind offset) · Rz(rz) · Ry(ry) · Rx(rx). */
+    private fun setLocal(i: Int, rxA: Float, ryA: Float, rzA: Float) {
         rotX(rxA, rx)
         rotY(ryA, ry)
         rotZ(rzA, rz)
         ry.mul(rx)          // R = Y·X
         rz.mul(ry)          // R = Z·(Y·X)
-        trans.setTranslation(x, y, z)
+        trans.setTranslation(offsets[i * 3], offsets[i * 3 + 1], offsets[i * 3 + 2])
         local[i].set(trans.m)
         local[i].mul(rz)    // local = T·R
     }

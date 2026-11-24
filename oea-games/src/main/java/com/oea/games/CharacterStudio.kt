@@ -6,6 +6,7 @@ import com.oea.engine.graphics.CharGender
 import com.oea.engine.graphics.CharParts
 import com.oea.engine.graphics.CharSpec
 import com.oea.engine.graphics.CharRig
+import com.oea.engine.graphics.CharacterAsset
 import com.oea.engine.graphics.Material
 import com.oea.engine.ui.ButtonStyle
 import com.oea.engine.ui.Hud
@@ -34,11 +35,14 @@ class CharacterStudio(private val storage: GameStorage) {
     private var outfitPage = 0
     private val rng = Rng(0xC4A7)
 
-    /** Builds the rig for this character (call once; it tracks spec.revision). */
-    fun rig(): CharRig = CharRig(
+    /** Builds the rig for this character (call once; it tracks spec.revision).
+     *  [asset] optionally replaces the procedural body with an offline-converted
+     *  Tripo3D character; sliders then only retint that fixed mesh. */
+    fun rig(asset: CharacterAsset? = null): CharRig = CharRig(
         body = Material(color = 0xFF3E5A78.toInt()), pants = Material(color = 0xFF2C3440.toInt()),
         skin = Material(color = 0xFFE0B48C.toInt()), shoes = Material(color = 0xFF1B1E24.toInt()),
         spec = spec,
+        imported = asset,
     )
 
     fun save() {

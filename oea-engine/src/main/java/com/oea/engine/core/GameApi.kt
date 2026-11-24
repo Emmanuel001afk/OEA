@@ -101,8 +101,40 @@ class GameLaunch(
 /** Result reported back to the hub when a game exits. */
 data class GameResult(val summary: String, val score: Long = 0, val won: Boolean? = null)
 
-/** A native menu entry (pause menus and similar), shown by the host activity. */
-data class MenuItem(val id: String, val label: String, val description: String? = null, val destructive: Boolean = false)
+/**
+ * A native menu entry (pause menus and similar), shown by the host activity.
+ *
+ * A menu is not one list. [kind] lets a game hand the host a *grouped* menu —
+ * a header over the controls block, a header over audio — instead of a wall of
+ * rows where "Resume" and "Turn limit" sit at the same weight. A header is not
+ * tappable and carries its section name in [label].
+ */
+data class MenuItem(
+    val id: String,
+    val label: String,
+    val description: String? = null,
+    val destructive: Boolean = false,
+    val kind: MenuKind = MenuKind.ACTION,
+    /** Live value a [MenuKind.CHOICE] row shows on its right (e.g. "1.2×"). */
+    val value: String? = null,
+    /** 0..100 for a [MenuKind.SLIDER] row; ignored otherwise. */
+    val progress: Int = 0,
+    /** Grays the row out and refuses the tap — for a price you cannot afford. */
+    val disabled: Boolean = false,
+) {
+    companion object {
+        fun header(title: String) = MenuItem("__header_$title", title, kind = MenuKind.HEADER)
+        fun choice(id: String, label: String, value: String, description: String? = null, disabled: Boolean = false) =
+            MenuItem(id, label, description, kind = MenuKind.CHOICE, value = value, disabled = disabled)
+        fun slider(id: String, label: String, value: String, progress: Int, description: String? = null) =
+            MenuItem(id, label, description, kind = MenuKind.SLIDER, value = value, progress = progress.coerceIn(0, 100))
+        fun toggle(id: String, label: String, on: Boolean, description: String? = null) =
+            MenuItem(id, label, description, kind = MenuKind.TOGGLE, value = if (on) "On" else "Off")
+    }
+}
+
+/** What a [MenuItem] row is: a header, a plain action, or a live-valued row. */
+enum class MenuKind { HEADER, ACTION, CHOICE, TOGGLE, SLIDER }
 
 /**
  * Services the host activity provides. Every callback is delivered on the
