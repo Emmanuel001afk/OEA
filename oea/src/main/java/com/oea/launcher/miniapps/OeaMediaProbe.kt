@@ -79,11 +79,14 @@ object OeaMediaProbe {
     ) {
         val hasCamera: Boolean get() = make.isNotBlank() || model.isNotBlank()
         val hasLocation: Boolean get() = latitude != null && longitude != null
+        /** Copyable coordinates: always a dot, never the device locale's comma. */
         val locationLabel: String get() = if (latitude != null && longitude != null) {
-            "%.5f, %.5f".format(latitude, longitude)
+            OeaEmageFacts.coordinates(latitude, longitude)
         } else {
             "Not tagged"
         }
+        /** The one line the details sheet shows for camera settings. */
+        val exposureLabel: String get() = OeaEmageFacts.exposureLine(exposureSeconds, aperture, iso)
         val takenLabel: String get() = if (takenAt > 0L)
             SimpleDateFormat("d MMMM yyyy • HH:mm:ss", Locale.getDefault()).format(Date(takenAt)) else "Not recorded"
     }
@@ -197,32 +200,23 @@ object OeaMediaProbe {
                     SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(raw)?.time
                 }
             }.getOrNull() ?: 0L,
-            exposureSeconds = when {
-                exposure.isBlank() -> "—"
-                exposure.toDoubleOrNull()?.let { it < 1 } == true -> "1/${(1.0 / exposure.toDouble()).toInt()} s"
-                else -> exposure
-            },
-            aperture = if (fNumber.isBlank()) "—" else "f/$fNumber",
-            iso = exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS).orEmpty().ifBlank { "—" },
-            focalLength = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM).orEmpty()
-                .ifBlank { exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH).orEmpty().ifBlank { "—" } }
-                .let { if (it.isBlank()) "—" else "$it mm" },
+            exposureSeconds = OeaEmageFacts.shutter(exposure),
+            aperture = OeaEmageFacts.aperture(fNumber),
+            // Many phones write only the modern sensitivity tag, so the old sheet said
+            // "—" for the ISO of a picture taken on the phone showing it.
+            iso = OeaEmageFacts.iso(
+                exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS).orEmpty()
+                    // Read by its EXIF name: the constant's spelling differs between the
+                    // framework reader and the AndroidX copy, the tag name does not.
+                    .ifBlank { exif.getAttribute("PhotographicSensitivity").orEmpty() }
+            ),
+            focalLength = OeaEmageFacts.focalLength(
+                exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM).orEmpty(),
+                exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH).orEmpty()
+            ),
             flash = (exif.getAttributeInt(ExifInterface.TAG_FLASH, 0) and 1) == 1,
-            metering = when (exif.getAttributeInt(ExifInterface.TAG_METERING_MODE, -1)) {
-                1 -> "Average"
-                2 -> "Centre weighted"
-                3 -> "Spot"
-                5 -> "Pattern"
-                else -> "—"
-            },
-            whiteBalance = when (exif.getAttributeInt(ExifInterface.TAG_WHITE_BALANCE, -1)) {
-                1 -> "Auto"
-                2 -> "Fluorescent"
-                3 -> "Tungsten"
-                4 -> "Daylight"
-                9 -> "Fluorescent"
-                else -> "—"
-            },
+            metering = OeaEmageFacts.metering(exif.getAttributeInt(ExifInterface.TAG_METERING_MODE, -1)),
+            whiteBalance = OeaEmageFacts.whiteBalance(exif.getAttributeInt(ExifInterface.TAG_WHITE_BALANCE, -1)),
             orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL),
             width = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0),
             height = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0),

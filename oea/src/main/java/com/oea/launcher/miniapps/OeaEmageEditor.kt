@@ -159,10 +159,16 @@ internal object OeaEmageEditor {
                         BitmapFactory.decodeStream(it, null, bounds)
                     }
                     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("Picture could not be read")
-                    var sample = 1
-                    while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 4096) sample *= 2
+                    // The old rule divided before comparing, so its own 4096 ceiling
+                    // really allowed 8192: an 8000×6000 photo became a 192 MB bitmap and
+                    // the editor answered "Could not load picture" on the phones that
+                    // take such photos.
                     val options = BitmapFactory.Options().apply {
-                        inSampleSize = sample
+                        inSampleSize = OeaEmageFacts.sampleSize(
+                            bounds.outWidth,
+                            bounds.outHeight,
+                            OeaEmageFacts.EDIT_EDGE
+                        )
                         inPreferredConfig = Bitmap.Config.ARGB_8888
                     }
                     val decoded = host.contentResolver.openInputStream(item.uri)?.use {
@@ -181,7 +187,13 @@ internal object OeaEmageEditor {
                         { bitmap ->
                             source = bitmap
                             editorView.setBitmap(bitmap)
-                            status("Crop area ready. Drag a rectangle, rotate, mirror, or choose a filter.", announce = true)
+                            // Say what resolution the edit is being made at: a 48 MP photo
+                            // is edited as a reduced copy, and that should be visible
+                            // rather than discovered in the saved file.
+                            status(
+                                "Crop area ready at ${bitmap.width}×${bitmap.height}. Drag a rectangle, rotate, mirror, or choose a filter.",
+                                announce = true
+                            )
                         },
                         { err -> status("Could not load picture: ${err.message ?: "unknown error"}", announce = true) }
                     )

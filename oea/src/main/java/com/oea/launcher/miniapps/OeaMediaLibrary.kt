@@ -888,14 +888,12 @@ object OeaMediaLibrary {
 
     // ------------------------------------------------------------- human strings
 
-    fun formatSize(bytes: Long): String {
-        if (bytes <= 0L) return "—"
-        val kb = bytes / 1024.0
-        if (kb < 1024) return "%.0f KB".format(kb)
-        val mb = kb / 1024
-        if (mb < 1024) return "%.1f MB".format(mb)
-        return "%.2f GB".format(mb / 1024)
-    }
+    /**
+     * One size formatter for the whole app. It frames by the *rounded* value, so
+     * 1 048 500 bytes reads "1.0 MB" rather than "1024 KB", and a file smaller than a
+     * kilobyte is counted in bytes instead of rounding to "0 KB".
+     */
+    fun formatSize(bytes: Long): String = OeaEmageFacts.size(bytes)
 
     fun formatDuration(ms: Long): String {
         if (ms <= 0L) return "—"
