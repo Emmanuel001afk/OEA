@@ -880,7 +880,13 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         }
     }
 
-    fun field(hint: String, value: String = "", numeric: Boolean = false, password: Boolean = false): EditText = EditText(context).apply {
+    /**
+     * A one-line input. [numeric] gives a number keyboard; add [decimal] when the value
+     * may have a fraction — without it the keyboard has no `.` and the field silently
+     * cannot hold 1.5, which is what the unit converter and the currency rate editor
+     * both need.
+     */
+    fun field(hint: String, value: String = "", numeric: Boolean = false, password: Boolean = false, decimal: Boolean = false): EditText = EditText(context).apply {
         this.hint = hint
         setText(value)
         setSelection(text.length)
@@ -892,6 +898,7 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         setPadding(dp(16), dp(14), dp(16), dp(14))
         inputType = when {
             numeric && password -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            numeric && decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             numeric -> InputType.TYPE_CLASS_NUMBER
             password -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -899,9 +906,9 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
     }
 
     /** Text / PIN entry sheet. [onSubmit] returns an error message to keep the sheet open, or null. */
-    fun prompt(title: String, subtitle: String?, hint: String, initial: String = "", numeric: Boolean = false, password: Boolean = false, confirmLabel: String = "Save", onSubmit: (String) -> String?) {
+    fun prompt(title: String, subtitle: String?, hint: String, initial: String = "", numeric: Boolean = false, password: Boolean = false, confirmLabel: String = "Save", decimal: Boolean = false, onSubmit: (String) -> String?) {
         sheet(title, subtitle) { panel, dialog ->
-            val input = field(hint, initial, numeric, password)
+            val input = field(hint, initial, numeric, password, decimal)
             val error = text("", 12.5f, palette.danger).apply { visibility = View.GONE; setPadding(dp(6), dp(6), 0, 0) }
             panel.addView(input, LinearLayout.LayoutParams(-1, -2))
             panel.addView(error)

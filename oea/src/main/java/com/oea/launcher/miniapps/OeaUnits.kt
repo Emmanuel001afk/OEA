@@ -244,12 +244,19 @@ internal object OeaUnits {
         prefs(context).edit().putString(KEY_BASE, code).apply()
     }
 
+    /**
+     * Stores one rate. The figures are written and read with `.` as the decimal mark
+     * and no grouping whatever the phone's locale is: the stored string is parsed back
+     * with `toDoubleOrNull`, so on a comma-decimal phone this used to write `1550,5`,
+     * read it back as null, and silently fall back to the seed rate — the user's edit
+     * vanished on the next open.
+     */
     fun setRate(context: Context, code: String, value: Double) {
         val current = rates(context).toMutableMap()
         current[code] = value
         prefs(context).edit().putString(
             KEY_RATES,
-            current.entries.joinToString(";") { "${it.key}:${"%.6f".format(it.value).trimEnd('0').trimEnd('.')}" }
+            current.entries.joinToString(";") { "${it.key}:${OeaCalcEngine.format(it.value)}" }
         ).apply()
     }
 
@@ -260,15 +267,16 @@ internal object OeaUnits {
         return value / fromRate * toRate
     }
 
-    /** Trims the trailing zero soup a double can produce, keeping significant digits. */
+    /**
+     * One formatter for the converter too, for two reasons it used to get wrong: the
+     * old one used the device locale, so on a comma-decimal phone the converter printed
+     * `1,609344` — and "Send to Calculator" then handed the calculator a string its
+     * parser could not read; and it switched to exponent notation, which the calculator
+     * cannot read at all (`e+24` was evaluated as 2.718… × 24). [OeaCalcEngine.format]
+     * emits plain digits with `.`, which both the screen and the parser accept.
+     */
     fun show(value: Double): String {
         if (value.isNaN() || value.isInfinite()) return "—"
-        val magnitude = kotlin.math.abs(value)
-        val text = when {
-            magnitude >= 1_000_000.0 || (magnitude > 0.0 && magnitude < 0.001) -> "%.6e".format(value)
-            magnitude >= 100.0 -> "%.2f".format(value).trimEnd('0').trimEnd('.')
-            else -> "%.6f".format(value).trimEnd('0').trimEnd('.')
-        }
-        return text.ifBlank { "0" }
+        return OeaCalcEngine.format(value)
     }
 }

@@ -631,6 +631,76 @@ jobs:
           # The widget and the app share one unit.
           grep -Fq 'fun weatherUsesFahrenheit(context: Context): Boolean {' "$STUDIO"
           grep -Fq 'getSharedPreferences("oea_weather", Context.MODE_PRIVATE)' "$STUDIO"
+      - name: Calculator engine tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaCalcEngineTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-calculator.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-calculator.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the calculator work
+        run: |
+          set -euo pipefail
+          CAL=oea/src/main/java/com/oea/launcher/miniapps/OeaCalculatorApp.kt
+          ENG=oea/src/main/java/com/oea/launcher/miniapps/OeaCalcEngine.kt
+          UNT=oea/src/main/java/com/oea/launcher/miniapps/OeaUnits.kt
+          WID=oea/src/main/java/com/oea/launcher/widgets/OeaMiniAppWidgets.kt
+          KIT=oea/src/main/java/com/oea/launcher/ui/OeaKit.kt
+          SRC=oea/src/main/java/com/oea/launcher/search/OeaSearchController.kt
+          LAY=oea/src/main/res/layout/oea_widget_calculator.xml
+          # One evaluator, one formatter: the screen and the launcher's search both ask
+          # the engine, and the app's private copies are gone.
+          grep -Fq 'internal object OeaCalcEngine' "$ENG"
+          grep -Fq 'fun format(value: Double): String' "$ENG"
+          grep -Fq 'fun evaluate(raw: String, isDeg: Boolean = true): Double?' "$ENG"
+          grep -Fq 'fun programmer(raw: String): Long?' "$ENG"
+          grep -Fq 'fun bases(value: Long): List<Base>' "$ENG"
+          grep -Fq 'fun backspace(text: String): String' "$ENG"
+          grep -Fq 'fun tapeLines(' "$ENG"
+          ! grep -Fq 'internal object Evaluator' "$CAL"
+          ! grep -Fq 'internal object ProgrammerEvaluator' "$CAL"
+          grep -Fq 'private fun format(value: Double): String = OeaCalcEngine.format(value)' "$CAL"
+          grep -Fq 'val value = OeaCalcEngine.evaluate(expr) ?: return null' "$SRC"
+          ! grep -Fq 'private class Parser(private val s: String)' "$SRC"
+          # Numbers are locale independent and never printed as an exponent, and a
+          # formatted result can always be read back as the next expression.
+          grep -Fq 'MathContext(12, RoundingMode.HALF_UP)' "$ENG"
+          grep -Fq 'BigDecimal(value).round(SIGNIFICANT).stripTrailingZeros()' "$ENG"
+          grep -Fq 'fun reusable(text: String): Boolean' "$ENG"
+          ! grep -Fq '%.8f".format(' "$CAL"
+          ! grep -Fq '%.6f".format(' "$UNT"
+          grep -Fq 'return OeaCalcEngine.format(value)' "$UNT"
+          # The precedence rules the old parser got wrong.
+          grep -Fq 'private fun power(): Double? {' "$ENG"
+          grep -Fq 'val operand = if (barePercent) value * right else right' "$ENG"
+          grep -Fq 'if (factors > 1) barePercent = false' "$ENG"
+          grep -Fq 'if (abs(cos(angle)) < OeaCalcEngine.DUST) null else tan(angle)' "$ENG"
+          grep -Fq 'if (!parser.atEnd()) return null' "$ENG"
+          # Programmer mode is integers, in four bases, and it says so on screen.
+          grep -Fq 'fun programmerBases(): String' "$CAL"
+          grep -Fq 'OeaCalcEngine.bases(value)' "$CAL"
+          grep -Fq 'fun nibbles(bits: String): String' "$ENG"
+          ! grep -Fq 'listOf("0", ".", "+", "−", "%", "=")' "$CAL"
+          # The tape is searchable and shareable, and the widget shows the answer.
+          grep -Fq 'kit.field("Search history", "")' "$CAL"
+          grep -Fq 'fun shareTape(' "$CAL"
+          grep -Fq 'OeaCalcEngine.tapeLines(stored, "", TAPE_LIMIT)' "$CAL"
+          ! grep -Fq 'lines.take(30)' "$CAL"
+          grep -Fq 'putString(KEY_LAST_RESULT, formatted)' "$CAL"
+          grep -Fq 'refreshWidgets(host, "calculator")' "$CAL"
+          grep -Fq 'getSharedPreferences("oea_calc_v2", Context.MODE_PRIVATE)' "$WID"
+          ! grep -Fq 'getSharedPreferences("oea_calculator"' "$WID"
+          grep -Fq '@+id/widget_root' "$LAY"
+          # A number field that can hold a fraction; a graph that plots radians and
+          # can be pinched.
+          grep -Fq 'InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL' "$KIT"
+          grep -Fq 'kit.field("Enter value", "1", numeric = true, decimal = true)' "$CAL"
+          grep -Fq 'OeaCalcEngine.sample(function, x.toDouble())' "$CAL"
+          grep -Fq 'private val scaler = android.view.ScaleGestureDetector(' "$CAL"
+          grep -Fq 'fun onTouchEvent(event: android.view.MotionEvent): Boolean' "$CAL"
+          ! grep -Fq 'Evaluator.evaluate(expr, true)' "$CAL"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

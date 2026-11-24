@@ -185,16 +185,32 @@ class OeaVideoWidgetProvider : AppWidgetProvider() {
     }
 }
 
+/**
+ * The calculator widget: the last answer, big, over the expression that produced it.
+ *
+ * It read `oea_calculator`/`last_result`, a preference file and key that nothing in the
+ * app ever wrote, so the headline was the literal word "Calculator" on every phone
+ * forever. It reads the app's own store now, and the app refreshes the widget when an
+ * answer is completed.
+ */
 class OeaCalculatorWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        val prefs = context.getSharedPreferences("oea_calc_v2", Context.MODE_PRIVATE)
+        val answer = prefs.getString("last_result", null)
+        val recent = prefs.getString("calculator_tape", "")
+            .orEmpty()
+            .lineSequence()
+            .firstOrNull { it.isNotBlank() }
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.oea_widget_clock)
-            val prefs = context.getSharedPreferences("oea_calculator", Context.MODE_PRIVATE)
-            val last = prefs.getString("last_result", "Calculator")
-            views.setTextViewText(R.id.clock_time, last ?: "0")
-            views.setTextViewText(R.id.clock_date, "Tap to open • Scientific, Programmer, Converter, Graphing • Tape 100")
+            val views = RemoteViews(context.packageName, R.layout.oea_widget_calculator)
+            views.setTextViewText(R.id.clock_time, answer ?: "0")
+            views.setTextViewText(
+                R.id.clock_date,
+                recent ?: "Tap to calculate · scientific, programmer, converter, graph"
+            )
             val intent = OeaMiniApps.launchIntent(context, "calculator")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            views.setOnClickPendingIntent(R.id.widget_root, pi)
             views.setOnClickPendingIntent(R.id.clock_time, pi)
             views.setOnClickPendingIntent(R.id.clock_date, pi)
             OeaWidgetStudio.apply(views, context, "calculator", R.id.widget_root, intArrayOf(R.id.clock_time), intArrayOf(R.id.clock_date), intArrayOf())
