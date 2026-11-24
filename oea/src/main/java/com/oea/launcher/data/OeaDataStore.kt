@@ -385,7 +385,7 @@ class OeaDataStore private constructor(context: Context) {
     fun lowModeThreshold() = prefs.getInt(KEY_LOW_MODE_THRESHOLD, 15).coerceIn(5, 50)
     fun setLowModeThreshold(v: Int) { prefs.edit().putInt(KEY_LOW_MODE_THRESHOLD, v.coerceIn(5, 50)).apply() }
 
-    /** Leave Low mode once the battery is back above this percent, or the phone is charging. */
+    /** Leave Low mode once the battery is back above this percent, or the phone is plugged in. */
     fun lowModeExit() = prefs.getInt(KEY_LOW_MODE_EXIT, 25).coerceIn(10, 80)
     fun setLowModeExit(v: Int) { prefs.edit().putInt(KEY_LOW_MODE_EXIT, v.coerceIn(10, 80)).apply() }
 

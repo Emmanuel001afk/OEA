@@ -12,7 +12,6 @@ import android.content.IntentFilter
 import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
-import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -181,8 +180,10 @@ class OeaGlanceView(context: Context) : LinearLayout(context) {
         nextAlarm()?.let { (label, pending) -> addChip(R.drawable.oic_alarm, label) {
             if (pending == null || !OeaPendingIntents.send(context, pending)) start(Intent(AlarmClock.ACTION_SHOW_ALARMS))
         } }
-        battery.level?.let { level ->
-            val label = if (battery.status == BatteryManager.BATTERY_STATUS_DISCHARGING && !battery.plugged) "$level% battery" else "$level% · ${battery.description}"
+        battery.percent?.let { level ->
+            // "82% battery" while draining, "82% · Charging" on the cable — said from
+            // the shared reading, so the chip cannot disagree with the phone.
+            val label = battery.chargingNote?.let { "$level% · $it" } ?: "$level% battery"
             addChip(if (battery.isCharging) R.drawable.oic_battery_charging_full else R.drawable.oic_battery_full, label) {
                 start(Intent(Intent.ACTION_POWER_USAGE_SUMMARY))
             }

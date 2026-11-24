@@ -8,7 +8,6 @@ import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
@@ -17,7 +16,6 @@ import android.graphics.RectF
 import android.graphics.SweepGradient
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -37,6 +35,7 @@ import android.widget.Toast
 import com.oea.launcher.privilege.OeaPrivileges
 import com.oea.launcher.privilege.Privilege
 import com.oea.launcher.R
+import com.oea.launcher.power.OeaBatteryState
 import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.icons.OeaIconController
 import com.oea.launcher.model.OeaAppInfo
@@ -48,6 +47,7 @@ import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaScreenFailure
 import com.oea.launcher.ui.OeaTheme
 import com.oea.launcher.ui.OeaType
+import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
@@ -93,6 +93,8 @@ class OeaGameBoostActivity : Activity() {
             setContentView(rootHost)
             render()
             loadApps()
+            // A plug or unplug must show immediately, not at the next two-second tick.
+            OeaBatteryState.observe(rootHost) { runCatching { updateStats() } }
         } catch (error: Exception) {
             OeaScreenFailure.show(this, "Game Boost", error)
         }
@@ -452,19 +454,15 @@ class OeaGameBoostActivity : Activity() {
             ramCaption?.text = String.format("%.1f of %.1f GB used", used / 1e9, info.totalMem / 1e9)
             ramBar?.progress = percent / 100f
         }
-        val battery = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        if (battery != null) {
-            val level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-            val temp = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
-            val status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
-            if (level >= 0) batteryValue?.text = "${level * 100 / scale}%"
-            batteryCaption?.text = buildString {
-                if (temp != Int.MIN_VALUE) append(String.format("%.1f °C", temp / 10f))
-                if (charging) append(if (isEmpty()) "Charging" else " • charging")
-            }
-        }
+        // The same reading the in-game strip uses: rounded and clamped rather than
+        // `level * 100 / scale`, "—" when the phone cannot say (never 0%), and a
+        // caption that knows the difference between charging, full and plugged-in.
+        val reading = OeaBatteryState.read(this)
+        batteryValue?.text = reading.label
+        batteryCaption?.text = listOfNotNull(
+            reading.temperatureCelsius?.let { String.format(Locale.US, "%.1f °C", it) },
+            reading.chargingNote
+        ).joinToString(" • ")
     }
 
     private fun gamesSection() {

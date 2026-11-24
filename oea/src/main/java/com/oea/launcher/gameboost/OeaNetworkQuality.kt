@@ -284,8 +284,10 @@ internal class OeaGameStatusStripView(context: Context) : View(context) {
         contentDescription = "Network quality and battery"
     }
 
-    fun update(network: OeaNetworkQuality, batteryText: String, charging: Boolean, showNetworkQuality: Boolean, mode: String) {
-        val nextCaption = if (charging) "CHARGING" else "BATTERY"
+    fun update(network: OeaNetworkQuality, batteryText: String, caption: String, showNetworkQuality: Boolean, mode: String) {
+        // The caption is decided by the battery reading itself — CHARGING only while
+        // the phone is taking charge, PLUGGED while it is on a cable and holding.
+        val nextCaption = caption.uppercase(Locale.US)
         if (network == quality && batteryText == battery && nextCaption == batteryCaption && showNetworkQuality == showNetwork && mode == networkMode) return
         quality = network
         battery = batteryText

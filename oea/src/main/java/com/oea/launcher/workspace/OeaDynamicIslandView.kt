@@ -17,7 +17,6 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
-import android.os.BatteryManager
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
@@ -43,6 +42,7 @@ import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.games.OeaGameLiveState
 import com.oea.launcher.notifications.OeaNotificationState
 import com.oea.launcher.phone.OeaCallState
+import com.oea.launcher.power.OeaBatteryState
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaTheme
 
@@ -507,12 +507,12 @@ class OeaDynamicIslandView(
         when (intent.action) {
             Intent.ACTION_POWER_CONNECTED -> charging = true
             Intent.ACTION_POWER_DISCONNECTED -> charging = false
+            // The same reading every other surface uses: rounded, clamped, and -1
+            // (nothing drawn) when the phone does not report a level — never 0%.
             Intent.ACTION_BATTERY_CHANGED, null -> {
-                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-                batteryPercent = if (level >= 0) (level * 100 / scale).coerceIn(0, 100) else -1
-                val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-                charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+                val state = OeaBatteryState.from(intent)
+                batteryPercent = state.percent ?: -1
+                charging = state.plugged || state.isCharging
             }
         }
     }
