@@ -96,8 +96,8 @@ class OeaCalendarRecurrenceTest {
     }
 
     @Test fun theAnchorOfAMonthIsReportedOnce() {
-        // A monthly event whose anchor is in the range is both the anchor and a repeat.
-        val e = event(2026, 2, 10, recurrence = "MONTHLY")
+        // Month index 1 is February, so the anchor and its repeat are both in range.
+        val e = event(2026, 1, 10, recurrence = "MONTHLY")
         val found = OeaCalendarRecurrence.occurrences(listOf(e), LocalDate.of(2026, 2, 1), LocalDate.of(2026, 4, 1))
         assertEquals(listOf(LocalDate.of(2026, 2, 10), LocalDate.of(2026, 3, 10)), found.map { it.date })
         assertEquals(listOf(true, false), found.map { it.anchor })
@@ -114,7 +114,7 @@ class OeaCalendarRecurrenceTest {
 
     @Test fun theLimitIsRespectedForAnEndlessSeries() {
         val e = event(2020, 0, 1, recurrence = "DAILY")
-        val found = OeaCalendarRecurrence.occurrences(listOf(e), LocalDate.of(2026, 0, 1), LocalDate.of(2030, 0, 1), limit = 25)
+        val found = OeaCalendarRecurrence.occurrences(listOf(e), LocalDate.of(2026, 1, 1), LocalDate.of(2030, 1, 1), limit = 25)
         assertEquals(25, found.size)
     }
 

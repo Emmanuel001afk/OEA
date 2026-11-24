@@ -163,8 +163,10 @@ class OeaCalendarIcsTest {
     }
 
     @Test fun aFoldedSummaryFromAnotherCalendarIsUnfolded() {
+        // A fold drops the newline and the continuation's single space, so a space
+        // that belongs to the text has to be written before the fold.
         val ics = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20260505T090000Z\n" +
-            "SUMMARY:Review with the platform team and the\n" +
+            "SUMMARY:Review with the platform team and the \n" +
             " security reviewers about the next release\n" +
             "END:VEVENT\nEND:VCALENDAR"
         val back = OeaCalendarIcs.fromIcs(ics).single()
