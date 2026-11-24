@@ -534,6 +534,55 @@ jobs:
           grep -Fq 'private val refreshTask = Runnable { reload() }' "$MSG"
           grep -Fq 'handler.removeCallbacks(refreshTask)' "$MSG"
           ! grep -Fq 'handler.postDelayed({ reload() }, 600L)' "$MSG"
+      - name: Calendar regression tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaCalendarRecurrenceTest' --tests 'com.oea.launcher.miniapps.OeaCalendarIcsTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-calendar.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-calendar.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the calendar work
+        run: |
+          set -euo pipefail
+          CAL=oea/src/main/java/com/oea/launcher/miniapps/OeaCalendarApp.kt
+          REC=oea/src/main/java/com/oea/launcher/miniapps/OeaCalendarRecurrence.kt
+          ICS=oea/src/main/java/com/oea/launcher/miniapps/OeaCalendarIcs.kt
+          REM=oea/src/main/java/com/oea/launcher/miniapps/OeaCalendarReminders.kt
+          WID=oea/src/main/java/com/oea/launcher/widgets/OeaMiniAppWidgets.kt
+          MAN=oea/src/main/AndroidManifest.xml
+          # Repeating events are expanded, not stored, and every view asks for the range.
+          grep -Fq 'fun occurrences(' "$REC"
+          grep -Fq 'fun nextStart(' "$REC"
+          grep -Fq 'fun clampedDay(' "$REC"
+          grep -Fq 'OeaCalendarRecurrence.occurrences(filteredEvents, from, toExclusive)' "$CAL"
+          grep -Fq 'OeaCalendarRecurrence.occurrences(events, today, today.plusDays(14))' "$WID"
+          ! grep -Fq 'val dayEvents = filteredEvents.filter {' "$CAL"
+          # Reminders actually ring, and survive a reboot.
+          grep -Fq 'internal object OeaCalendarReminders' "$REM"
+          grep -Fq 'setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP' "$REM"
+          grep -Fq 'class OeaCalendarReminderReceiver' "$REM"
+          grep -Fq 'class OeaCalendarRestoreReceiver' "$REM"
+          grep -Fq 'com.oea.launcher.miniapps.OeaCalendarReminderReceiver' "$MAN"
+          grep -Fq 'com.oea.launcher.miniapps.OeaCalendarRestoreReceiver' "$MAN"
+          grep -Fq 'OeaCalendarReminders.sync(host)' "$CAL"
+          # The store is decoded once per change and written through one door.
+          grep -Fq 'internal fun events(ctx: Context)' "$CAL"
+          grep -Fq 'internal fun saveEvents(ctx: Context' "$CAL"
+          grep -Fq 'internal fun freshEventId(' "$CAL"
+          ! grep -Fq 'decode(prefs(host).getString(KEY_EVENTS' "$CAL"
+          ! grep -Fq 'it.copy(id = System.nanoTime()' "$CAL"
+          [ "$(grep -Fc 'putString(KEY_EVENTS' "$CAL")" = "1" ]
+          # Calendar files interoperate with the other calendars.
+          grep -Fq 'internal object OeaCalendarIcs' "$ICS"
+          grep -Fq 'format.timeZone = TimeZone.getTimeZone("UTC")' "$ICS"
+          grep -Fq 'DTEND;VALUE=DATE:' "$ICS"
+          grep -Fq 'fun fold(line: String): String' "$ICS"
+          grep -Fq 'internal fun toIcs(events: List<Event>): String = OeaCalendarIcs.toIcs(events)' "$CAL"
+          # A day can be changed without deleting and retyping the event.
+          grep -Fq 'private fun pickDate(' "$CAL"
+          grep -Fq '"Date", null,' "$CAL"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail
