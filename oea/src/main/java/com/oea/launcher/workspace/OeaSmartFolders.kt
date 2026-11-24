@@ -1,80 +1,42 @@
 package com.oea.launcher.workspace
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.model.OeaAppInfo
 
 /**
  * Automatic app-family folders ("smart folders").
  *
- * Families are recognised from reliable package identifiers — a curated
- * catalogue of package-name prefixes and exact package names — never from
- * display names, labels or icons, which any app can fake or localise.
+ * Families are worked out from the phone, not from a list: apps that share an
+ * Android uid, a signing certificate or a publisher namespace belong together (see
+ * [OeaAppFamilies]). Nothing is read from a display name to decide membership, and
+ * nothing has to be typed in — not the family, not the title. A folder names itself
+ * from its apps ("Google Maps" + "Google Photos" → **Google**, `com.transsion.*` →
+ * **Transsion**) and keeps that name up to date as members come and go, unless you
+ * renamed it yourself, in which case your name wins for ever.
  *
  * Rules the reconcile follows:
  *  - a family folder is created only when **two or more** of its apps are
  *    installed and launchable, so unrelated phones never gain stray folders;
+ *  - a title OEA wrote is replaced when the family changes; a title you wrote is
+ *    never touched;
  *  - apps the user moves out of a family folder are remembered and never
  *    re-added automatically;
  *  - deleting a family folder turns that family off; it can be re-enabled in
  *    Settings › Home screen › Smart folders;
- *  - existing folders are only ever touched by member list — a user's title,
- *    position, and any unrelated apps they dragged in are preserved;
+ *  - existing folders are only ever touched by member list and by OEA's own title —
+ *    position, and any unrelated apps dragged in, are preserved;
  *  - ordinary apps that belong to no family always stay normal icons.
  *
- * All state lives in its own preferences file, separate from the workspace
- * layout and from every other OEA feature.
+ * All state lives in its own preferences file, separate from the workspace layout
+ * and from every other OEA feature.
  */
 object OeaSmartFolders {
 
-    /** A recognised app family. */
-    data class Family(
-        val id: String,
-        val title: String,
-        val prefixes: List<String> = emptyList(),
-        val packages: Set<String> = emptySet(),
-        /** Packages that match a prefix but are not consumer apps of this family. */
-        val excludePackages: Set<String> = emptySet(),
-    )
-
-    /**
-     * The catalogue. Prefixes are only used where the prefix is a protected
-     * developer namespace (com.google., com.microsoft., …); app families with
-     * scattered package names (Meta) are listed package by package.
-     */
-    val CATALOGUE = listOf(
-        Family(
-            "google", "Google",
-            prefixes = listOf("com.google."),
-            excludePackages = setOf(
-                // Support components that sometimes expose launcher entries
-                // but are not part of the app family a user expects.
-                "com.google.android.webview",
-                "com.google.android.trichromelibrary",
-                "com.google.android.tts",
-                "com.google.android.gms",
-                "com.google.android.gsf",
-                "com.google.android.partnersetup"
-            )
-        ),
-        Family("microsoft", "Microsoft", prefixes = listOf("com.microsoft.")),
-        Family(
-            "meta", "Meta",
-            packages = setOf(
-                "com.facebook.katana", "com.facebook.lite",
-                "com.facebook.orca", "com.facebook.orca.lite",
-                "com.instagram.android", "com.instagram.lite",
-                "com.whatsapp", "com.whatsapp.w4b"
-            )
-        ),
-        Family("adobe", "Adobe", prefixes = listOf("com.adobe.")),
-        Family(
-            "amazon", "Amazon",
-            prefixes = listOf("com.amazon."),
-            packages = setOf("com.audible.application", "com.amazon.kindle.fcreader")
-        ),
-        Family("transsion", "Transsion", prefixes = listOf("com.transsion.")),
-    )
+    /** A family folder that exists in the layout. */
+    data class Family(val id: String, val title: String)
 
     /** Result of a reconcile pass: the folder list to keep, plus icons to materialise. */
     data class Result(
@@ -87,12 +49,16 @@ object OeaSmartFolders {
     private const val PREFS = "oea_smart_folders"
     private const val KEY_ENABLED = "enabled_"
     private const val KEY_EXCLUDED = "excluded_"
+    private const val KEY_WRITTEN_TITLE = "written_title_"
+    private const val KEY_DISCOVERED = "discovered"
     private const val FOLDER_PREFIX = "smart_"
 
     fun folderId(familyId: String) = "$FOLDER_PREFIX$familyId"
+
+    /** The family id behind a smart folder id, or null for any other folder. */
     fun familyIdOf(folderId: String): String? =
         folderId.takeIf { it.startsWith(FOLDER_PREFIX) }?.removePrefix(FOLDER_PREFIX)
-            ?.takeIf { id -> CATALOGUE.any { it.id == id } }
+            ?.takeIf { it.isNotBlank() }
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -111,9 +77,19 @@ object OeaSmartFolders {
         invalidate()
     }
 
-    /** Settings listing: family catalogue with live enabled state. */
+    /**
+     * The families this phone was found to have on the last reconcile, with their
+     * live enabled state — the Settings list, built from what exists here rather than
+     * from a catalogue of family names.
+     */
     fun families(context: Context): List<Pair<Family, Boolean>> =
-        CATALOGUE.map { it to isEnabled(context, it.id) }
+        prefs(context).getStringSet(KEY_DISCOVERED, emptySet()).orEmpty()
+            .mapNotNull { row ->
+                val id = row.substringBefore('\t')
+                val title = row.substringAfter('\t', "")
+                if (id.isBlank()) null else Family(id, title.ifBlank { id }) to isEnabled(context, id)
+            }
+            .sortedBy { it.first.title.lowercase() }
 
     /** Called when the user removes one app from a family folder by hand. */
     fun onMemberRemoved(context: Context, folderId: String, memberKey: String) {
@@ -133,10 +109,10 @@ object OeaSmartFolders {
     }
 
     /**
-     * Brings family folders in line with the installed apps. Cheap when
-     * nothing changed: the family membership signature is compared first and
-     * the pass is skipped entirely when it is unchanged — every manual edit
-     * path (rename, move, add, remove) already keeps folders consistent.
+     * Brings family folders in line with the installed apps. Cheap when nothing
+     * changed: the membership signature is compared first and the pass is skipped
+     * entirely when it is unchanged — every manual edit path (rename, move, add,
+     * remove) already keeps folders consistent.
      */
     fun reconcile(
         context: Context,
@@ -145,15 +121,23 @@ object OeaSmartFolders {
         homeGrid: Pair<Int, Int>
     ): Result {
         val store = OeaDataStore.get(context)
-        val membersByFamily = LinkedHashMap<String, MutableList<String>>()
-        apps.forEach { app ->
-            val family = familyOf(app.packageName) ?: return@forEach
-            if (store.isHidden(app.packageName, app.className)) return@forEach
-            membersByFamily.getOrPut(family.id) { mutableListOf() }
-                .add(OeaWorkspaceStore.key(app.packageName, app.className))
-        }
-        val signature = membersByFamily.entries.joinToString("|") { (id, keys) ->
-            "$id=${keys.sorted().joinToString(",")}"
+        val visible = apps.filterNot { store.isHidden(it.packageName, it.className) }
+        if (visible.size < 2) return Result(foldersIn, emptyList(), changed = false)
+
+        val discovered = OeaAppFamilies.discover(
+            facts = visible.map { app ->
+                OeaAppFamilies.Fact(
+                    key = OeaWorkspaceStore.key(app.packageName, app.className),
+                    packageName = app.packageName,
+                    label = app.label,
+                    uid = app.uid
+                )
+            },
+            signatureOf = { packageName -> signatureOf(context, packageName) }
+        )
+
+        val signature = discovered.joinToString("|") { family ->
+            "${family.id}:${family.title}=${family.members.sorted().joinToString(",")}"
         }
         if (signature == cachedSignature) {
             // Signature unchanged: folder edits since the last pass were made
@@ -168,12 +152,18 @@ object OeaSmartFolders {
         var changed = false
         val (cols, rows) = homeGrid
 
-        CATALOGUE.forEach { family ->
+        // The Settings list is this pass's own result: the families found here.
+        val summary = discovered.map { "${it.id}\t${it.title}" }.toSet()
+        if (p.getStringSet(KEY_DISCOVERED, emptySet()).orEmpty() != summary) {
+            p.edit().putStringSet(KEY_DISCOVERED, summary).apply()
+        }
+
+        discovered.forEach { family ->
             val fid = folderId(family.id)
             val index = folders.indexOfFirst { it.id == fid }
             val enabled = p.getBoolean(KEY_ENABLED + family.id, true)
-            val desired = membersByFamily[family.id].orEmpty()
             val excluded = p.getStringSet(KEY_EXCLUDED + family.id, emptySet()).orEmpty()
+            val desired = family.members.filterNot { it in excluded }
 
             if (!enabled) {
                 if (index >= 0) {
@@ -192,12 +182,12 @@ object OeaSmartFolders {
                 return@forEach
             }
 
-            val desiredKeys = desired.filterNot { it in excluded }
             if (index < 0) {
-                if (desiredKeys.size >= 2) {
+                if (desired.size >= 2) {
                     // Bottom of the first page; normalization moves the folder
                     // to a nearby free cell when this one is taken.
-                    folders += OeaWorkspaceStore.Folder(fid, family.title, 0, (rows - 1) * cols, desiredKeys)
+                    folders += OeaWorkspaceStore.Folder(fid, family.title, 0, (rows - 1) * cols, desired)
+                    prefs(context).edit().putString(KEY_WRITTEN_TITLE + fid, family.title).apply()
                     changed = true
                 }
                 return@forEach
@@ -213,7 +203,7 @@ object OeaSmartFolders {
                     !store.isHidden(memberKey.substringBefore('/'), memberKey.substringAfter('/', ""))
             }
             val keptSet = kept.toSet()
-            val merged = (kept + desiredKeys.filterNot { it in keptSet }).distinct()
+            val merged = (kept + desired.filterNot { it in keptSet }).distinct()
             when {
                 merged.size < 2 -> {
                     folders.removeAt(index)
@@ -229,7 +219,37 @@ object OeaSmartFolders {
                     changed = true
                 }
             }
+
+            // The title maintains itself: OEA replaces the name it wrote, never one
+            // you wrote. Renaming a family folder keeps your name for good.
+            val current = folders.firstOrNull { it.id == fid } ?: return@forEach
+            val written = p.getString(KEY_WRITTEN_TITLE + fid, null)
+            if (current.title != family.title && (written == null || current.title == written)) {
+                folders[folders.indexOfFirst { it.id == fid }] = current.copy(title = family.title)
+                p.edit().putString(KEY_WRITTEN_TITLE + fid, family.title).apply()
+                changed = true
+            }
         }
+
+        // Families that are gone (apps uninstalled, or recognised differently now)
+        // leave no folder behind — but their members must stay on Home, so they are
+        // materialised as icons first and the layout normalizer finds them cells.
+        folders.filter { it.id.startsWith(FOLDER_PREFIX) }
+            .toList()
+            .forEach { folder ->
+                val familyId = familyIdOf(folder.id) ?: return@forEach
+                if (discovered.any { it.id == familyId }) return@forEach
+                val index = folders.indexOfFirst { it.id == folder.id }
+                if (index < 0) return@forEach
+                folders.removeAt(index)
+                folder.members.forEach { key ->
+                    appByKey[key]?.let { app ->
+                        extraItems += OeaWorkspaceStore.Item(key, app.packageName, app.className, folder.page, folder.cell)
+                    }
+                }
+                prefs(context).edit().remove(KEY_WRITTEN_TITLE + folder.id).apply()
+                changed = true
+            }
 
         cachedSignature = signature
         return Result(folders, extraItems, changed)
@@ -242,9 +262,36 @@ object OeaSmartFolders {
 
     @Volatile private var cachedSignature: String? = null
 
-    /** The family a package belongs to, by identifier only; null when none. */
-    fun familyOf(packageName: String): Family? = CATALOGUE.firstOrNull { family ->
-        packageName in family.packages ||
-            (family.prefixes.any { packageName.startsWith(it) } && packageName !in family.excludePackages)
+    private val signatures = HashMap<String, String>()
+
+    /**
+     * An app's signing certificate, shortened to a stable digest.
+     *
+     * Read once per process per package and only for apps the uid and namespace
+     * passes could not place, so a phone whose families share a uid never pays for it.
+     */
+    @Suppress("DEPRECATION")
+    private fun signatureOf(context: Context, packageName: String): String? {
+        val cached = synchronized(signatures) { signatures[packageName] }
+        if (cached != null) return if (cached.isBlank()) null else cached
+        val digest = runCatching {
+            val pm = context.packageManager
+            val bytes = when {
+                Build.VERSION.SDK_INT >= 28 ->
+                    pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                        .signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+                else ->
+                    pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+                        .signatures?.firstOrNull()?.toByteArray()
+            }
+            if (bytes == null) {
+                ""
+            } else {
+                java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+                    .joinToString("") { "%02x".format(it) }
+            }
+        }.getOrDefault("")
+        synchronized(signatures) { signatures[packageName] = digest }
+        return if (digest.isBlank()) null else digest
     }
 }

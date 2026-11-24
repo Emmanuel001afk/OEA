@@ -587,10 +587,10 @@ open class OeaSystemToolsActivity : Activity() {
         val box = page.content
         kit.note(
             box,
-            "OEA recognises app families by their package identifiers — never by their names or icons. " +
-                "A family folder appears once two or more of its apps are installed, and follows installs and uninstalls. " +
-                "Everything you do by hand wins: renamed folders stay renamed, moved folders stay moved, apps you take out are never re-added, " +
-                "and deleting a family folder turns that family off."
+            "Families are worked out from the phone itself — apps that share an app id, a signing key or a " +
+                "publisher namespace. Nothing to write down. A folder appears once two or more of its apps are " +
+                "installed and follows installs and uninstalls; its name is derived from its apps and keeps itself up " +
+                "to date, unless you rename it. Moving, adding and removing apps by hand always wins."
         )
         OeaSmartFolders.families(this).forEach { (family, enabled) ->
             kit.sectionTitle(box, family.title)

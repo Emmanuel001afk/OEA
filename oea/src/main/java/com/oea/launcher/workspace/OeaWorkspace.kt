@@ -3024,20 +3024,18 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         ws.setCurrentPage(page)
     }
 
-    internal fun suggestFolderName(members: List<OeaAppInfo>): String {
-        val category = members.map { it.category }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: -1
-        return when (category) {
-            android.content.pm.ApplicationInfo.CATEGORY_GAME -> "Games"
-            android.content.pm.ApplicationInfo.CATEGORY_SOCIAL -> "Social"
-            android.content.pm.ApplicationInfo.CATEGORY_AUDIO -> "Music"
-            android.content.pm.ApplicationInfo.CATEGORY_VIDEO -> "Entertainment"
-            android.content.pm.ApplicationInfo.CATEGORY_IMAGE -> "Photos"
-            android.content.pm.ApplicationInfo.CATEGORY_NEWS -> "News"
-            android.content.pm.ApplicationInfo.CATEGORY_MAPS -> "Travel"
-            android.content.pm.ApplicationInfo.CATEGORY_PRODUCTIVITY -> "Productivity"
-            else -> if (members.all { it.packageName == context.packageName }) "OEA" else "Folder"
-        }
-    }
+    /**
+     * The name a folder gets when you make one by dropping an app on another.
+     *
+     * A plain "Folder", or "OEA" when it only holds OEA's own apps. Deliberately not
+     * a guess at what the apps are: a folder's identity comes from what is inside it,
+     * so no category word is invented and written into the layout (an app whose
+     * category is "Social" is not necessarily a social app, and a guessed name is
+     * then stale the moment you swap a member). Rename it yourself and your name is
+     * kept — folder titles are only ever offered, never required.
+     */
+    internal fun suggestFolderName(members: List<OeaAppInfo>): String =
+        if (members.isNotEmpty() && members.all { it.packageName == context.packageName }) "OEA" else "Folder"
 
     // ========================================================= layout edits
 
