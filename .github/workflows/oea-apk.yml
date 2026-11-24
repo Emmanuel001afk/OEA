@@ -490,6 +490,50 @@ jobs:
           grep -Fq 'removePrefix("\uFEFF")' "$SUBS"
           ! grep -Fq 'CUE_ID' "$SUBS"
           grep -Fq 'lines.drop(timeAt + 1)' "$SUBS"
+      - name: Clock formatting regression tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaClockFormatTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-clock.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-clock.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the mini-app response work
+        run: |
+          set -euo pipefail
+          SRC=oea/src/main/java/com/oea/launcher
+          KIT=$SRC/ui/OeaAppKit.kt
+          CAL=$SRC/miniapps/OeaCalendarApp.kt
+          CLOCK=$SRC/miniapps/OeaClockApp.kt
+          CLOCKFMT=$SRC/miniapps/OeaClockFormat.kt
+          MSG=$SRC/miniapps/OeaMessagingApp.kt
+          # Every search field answers a keystroke once, not once per character.
+          grep -Fq 'SEARCH_DEBOUNCE_MS' "$KIT"
+          grep -Fq 'debounce.removeCallbacks(pending)' "$KIT"
+          grep -Fq 'debounce.postDelayed(pending, SEARCH_DEBOUNCE_MS)' "$KIT"
+          # The Calendar Provider is read off the UI thread, once per month.
+          grep -Fq 'private val DEVICE =' "$CAL"
+          grep -Fq 'DEVICE.execute {' "$CAL"
+          grep -Fq 'val deviceMonths = HashMap' "$CAL"
+          ! grep -Fq 'if (hasCalendarPermission(host)) loadDeviceEvents(host, currentCal)' "$CAL"
+          grep -Fq 'deviceMonths[deviceKey(currentCal)].orEmpty()' "$CAL"
+          grep -Fq 'host.miniResumeHook = {' "$CAL"
+          # One countdown ticker, owned by the screen, and a stopwatch that rests.
+          grep -Fq 'val timerTicker = object : Runnable' "$CLOCK"
+          ! grep -Fq 'timerHandler.post(object : Runnable' "$CLOCK"
+          grep -Fq 'host.miniPauseHook = { onHostPaused() }' "$CLOCK"
+          grep -Fq 'host.miniResumeHook = { onHostResumed() }' "$CLOCK"
+          grep -Fq 'swHandler.removeCallbacks(swTicker)' "$CLOCK"
+          # The face is only written when the text changes, and lives in one place.
+          grep -Fq 'timerText?.text?.toString() != label' "$CLOCK"
+          grep -Fq 'internal object OeaClockFormat' "$CLOCKFMT"
+          grep -Fq 'OeaClockFormat.countdown' "$CLOCK"
+          grep -Fq 'OeaClockFormat.stopwatch' "$CLOCK"
+          # A burst of messages queues one reload, not one per message.
+          grep -Fq 'private val refreshTask = Runnable { reload() }' "$MSG"
+          grep -Fq 'handler.removeCallbacks(refreshTask)' "$MSG"
+          ! grep -Fq 'handler.postDelayed({ reload() }, 600L)' "$MSG"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

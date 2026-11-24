@@ -64,6 +64,11 @@ object OeaCalendarApp {
         val allDay: Boolean
     )
 
+    /** One worker for provider reads; a single thread keeps them in order. */
+    private val DEVICE = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaCalendarDevice").apply { isDaemon = true }
+    }
+
     private fun hasCalendarPermission(host: Activity): Boolean = runCatching {
         host.checkSelfPermission("android.permission.READ_CALENDAR") == android.content.pm.PackageManager.PERMISSION_GRANTED
     }.getOrDefault(false)
@@ -342,6 +347,47 @@ object OeaCalendarApp {
         var searchQuery = ""
         var filterCategory: String? = null
         var refresh: () -> Unit = {}
+        // The phone's own calendar is a content provider: the Instances query walks
+        // every account's expansion of the month, which is hundreds of milliseconds
+        // on a busy calendar. It used to run inline in refresh(), so every keystroke
+        // in the search box, every month step and every day tap waited for it on the
+        // UI thread. Now a month is read once, off the main thread, and painted when
+        // it arrives; the second and later reads of the same month are free.
+        val deviceMonths = HashMap<String, List<Event>>()
+        var deviceLoading = ""
+        val deviceMain = android.os.Handler(android.os.Looper.getMainLooper())
+        fun deviceKey(cal: Calendar) = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.MONTH)}"
+        fun requestDeviceMonth(cal: Calendar) {
+            if (!hasCalendarPermission(host)) return
+            val key = deviceKey(cal)
+            if (deviceMonths.containsKey(key) || deviceLoading == key) return
+            deviceLoading = key
+            val month = cal.clone() as Calendar
+            DEVICE.execute {
+                val events = loadDeviceEvents(host, month)
+                deviceMain.post {
+                    if (host.isDestroyed || deviceLoading != key) return@post
+                    deviceMonths[key] = events
+                    deviceLoading = ""
+                    refresh()
+                }
+            }
+        }
+        host.miniPermissionHook = {
+            // A permission granted after the first paint has to be believed: the
+            // months cached while it was denied were all empty lists.
+            deviceMonths.clear()
+            deviceLoading = ""
+            refresh()
+        }
+        host.miniResumeHook = {
+            // An event added in another app is not in a month cached before the user
+            // left; a resume drops the cache and asks for the visible month again.
+            // The read is off the UI thread, so this costs the first frame nothing.
+            deviceMonths.clear()
+            deviceLoading = ""
+            refresh()
+        }
 
         val indexBack = host.miniIndexBack()
         val navItems = listOf(
@@ -625,7 +671,8 @@ object OeaCalendarApp {
             gridHost.removeAllViews()
             eventsHost.removeAllViews()
             deviceHost.removeAllViews()
-            val deviceEvents = if (hasCalendarPermission(host)) loadDeviceEvents(host, currentCal) else emptyList()
+            val deviceEvents = deviceMonths[deviceKey(currentCal)].orEmpty()
+            requestDeviceMonth(currentCal)
             if (!hasCalendarPermission(host)) {
                 kit.row(kit.group(deviceHost), R.drawable.oic_schedule, "Connect device calendar",
                     "Show events from Google, Exchange and CalDAV accounts", chevron = true) {

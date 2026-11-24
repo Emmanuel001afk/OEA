@@ -44,6 +44,11 @@ import com.oea.launcher.R
  *  * an action sheet with icons, a selection bar, and an in-window message bar.
  */
 class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette) {
+    private companion object {
+        /** Long enough to swallow a typed word, short enough to feel immediate. */
+        const val SEARCH_DEBOUNCE_MS = 140L
+    }
+
 
     /** A root that can hold a recycler, a floating bar and a message at once. */
     fun overlay(): FrameLayout = FrameLayout(context).apply {
@@ -642,6 +647,14 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
+        // One query per pause in typing, not per character. Every screen that uses
+        // this field rebuilds itself in onQuery — Calendar runs a Calendar Provider
+        // query and rebuilds the whole month grid, Notes re-filters every note,
+        // Pictures and Video re-scan their grids, Phone re-filters contacts — so a
+        // six-letter search used to be six rebuilds, five of which the user never saw. 140 ms is longer than a fast typist's gap between
+        // keys and shorter than a pause that feels like lag.
+        val debounce = android.os.Handler(android.os.Looper.getMainLooper())
+        val pending = Runnable { onQuery(editor.text?.toString().orEmpty()) }
         val clear = ImageView(context).apply {
             setImageDrawable(icon(R.drawable.oic_close, palette.textSecondary))
             layoutParams = FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER_VERTICAL or Gravity.END).apply {
@@ -653,6 +666,8 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             visibility = View.GONE
             contentDescription = "Clear search"
             setOnClickListener {
+                // Clearing is deliberate, so it is answered at once.
+                debounce.removeCallbacks(pending)
                 editor.setText("")
                 onQuery("")
             }
@@ -665,7 +680,8 @@ class OeaAppKit(context: Context, palette: OeaPalette) : OeaKit(context, palette
             }
 
             override fun afterTextChanged(s: Editable?) {
-                onQuery(s?.toString().orEmpty())
+                debounce.removeCallbacks(pending)
+                debounce.postDelayed(pending, SEARCH_DEBOUNCE_MS)
             }
         })
         editor.setOnEditorActionListener { _, actionId, event ->

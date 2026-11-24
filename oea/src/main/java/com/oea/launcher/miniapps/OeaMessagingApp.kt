@@ -2564,8 +2564,18 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
             if (!dismissed && dialog.isShowing) runCatching { dialog.dismiss() }
         }
 
+        /**
+         * One reload per burst of messages, not one per message.
+         *
+         * Every sent/delivered broadcast queued its own 600 ms timer, so receiving
+         * five messages in a second ran five conversation queries — four of which
+         * the generation guard then threw away. The timer is now reused.
+         */
+        private val refreshTask = Runnable { reload() }
+
         private fun scheduleRefresh() {
-            handler.postDelayed({ reload() }, 600L)
+            handler.removeCallbacks(refreshTask)
+            handler.postDelayed(refreshTask, 600L)
         }
 
         fun show() {
@@ -3100,7 +3110,7 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
             sendSms(address, message.body, retrySub) { ok ->
                 if (ok) {
                     OeaMessagingApp.io.execute { OeaMessagingApp.deleteMessageIfDefault(host, message.id) }
-                    handler.postDelayed({ reload() }, 600L)
+                    scheduleRefresh()
                 }
             }
         }
