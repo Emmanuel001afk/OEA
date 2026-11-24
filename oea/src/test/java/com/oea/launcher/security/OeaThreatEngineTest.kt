@@ -182,7 +182,9 @@ class OeaThreatEngineTest {
             ownPackage = "com.oea.launcher"
         )
         assertEquals(0, report.flagged)
-        assertEquals(2, report.skipped)
+        // One system app skipped; the second app was checked and had nothing to say.
+        assertEquals(1, report.skipped)
+        assertEquals(1, report.checked)
         assertEquals(OeaThreatEngine.Verdict.CLEAN, report.verdict)
     }
 
