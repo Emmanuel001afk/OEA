@@ -217,8 +217,21 @@ first one's read-modify-write of the store.
 
 Nothing here was compiled on this machine (no Android SDK, no Kotlin compiler in this
 workspace): the CI job is the compile signal, and every guard was run locally against
-the working tree first. The run that carries this change set is named in the pull
-request.
+the working tree first.
+
+**The run that carries this change set:** [`45302560745`](https://github.com/Emmanuel001afk/OEA/actions/runs/45302560745)
+went green for branch `arena/56f1ed88-oea`, with `214 tests` in the unit-test step (185
+before, plus the sixteen recurrence and thirteen iCalendar cases) and the new
+`Verify the calendar work` step among them. The first run of this branch
+([`45301870300`](https://github.com/Emmanuel001afk/OEA/actions/runs/45301870300))
+compiled every main source and failed three of the **new tests**, all three of them
+test-side mistakes worth naming because they are the kind a calendar review should
+catch in itself: two used Java months from zero (`LocalDate.of(y, 0, d)` throws — the
+app's own `Event.month` is 0-based, `java.time`'s is not), one anchored a "monthly"
+event in March while asserting February dates, and the hand-written folded `SUMMARY`
+left out the space that belongs to the text (a fold drops the newline *and* the
+continuation's single leading space, so a space in the text must be written before the
+fold). PR #158 merged as `64ed709` at 2026-11-24T01:16:38Z.
 
 ## 5. What to check on a device
 
