@@ -1003,6 +1003,20 @@
             <receiver
                 android:name="com.oea.launcher.miniapps.OeaClockAlarmReceiver"
             android:exported="false" />
+        <!-- Calendar reminders: one alarm per event with a reminder, every hour of the
+             day, with the app closed. The restore receiver re-arms them after a reboot,
+             a manual clock change or a timezone change, all of which drop every alarm. -->
+        <receiver
+            android:name="com.oea.launcher.miniapps.OeaCalendarReminderReceiver"
+            android:exported="false" />
+        <receiver android:name="com.oea.launcher.miniapps.OeaCalendarRestoreReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
         <!-- The alarm notification's Snooze and Stop buttons fire this; without the
              declaration both of them are dead taps. -->
         <service android:name="com.oea.launcher.miniapps.OeaClockRingService" android:exported="false" android:foregroundServiceType="mediaPlayback" />

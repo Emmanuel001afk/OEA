@@ -8,6 +8,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.widget.RemoteViews
 import com.oea.launcher.R
+import com.oea.launcher.miniapps.OeaCalendarApp
+import com.oea.launcher.miniapps.OeaCalendarRecurrence
 import com.oea.launcher.miniapps.OeaMiniApps
 import java.io.File
 import java.text.SimpleDateFormat
@@ -78,11 +80,29 @@ class OeaCalendarWidgetProvider : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.oea_widget_calendar)
             val now = Date()
             views.setTextViewText(R.id.calendar_month, SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(now))
-            val prefs = context.getSharedPreferences("oea_calendar", Context.MODE_PRIVATE)
-            val raw = prefs.getString("events_v2", "") ?: ""
-            val count = raw.split("\u001E").filter { it.isNotBlank() }.size
-            views.setTextViewText(R.id.calendar_events, if (count == 0) "No events" else "$count events")
-            views.setTextViewText(R.id.calendar_next, SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now))
+            // The month and the next thing in it, from the same recurrence the app
+            // uses. It used to count every event ever saved — "12 events" under a
+            // heading that said "November 2026" — and put today's date where the next
+            // event belongs.
+            val events = runCatching { OeaCalendarApp.events(context) }.getOrDefault(emptyList())
+            val today = java.time.LocalDate.now()
+            val monthStart = today.withDayOfMonth(1)
+            val count = OeaCalendarRecurrence.occurrences(events, monthStart, monthStart.plusMonths(1)).size
+            views.setTextViewText(R.id.calendar_events, when (count) {
+                0 -> "No events"
+                1 -> "1 event"
+                else -> "$count events"
+            })
+            val next = OeaCalendarRecurrence.occurrences(events, today, today.plusDays(14)).firstOrNull()
+            views.setTextViewText(
+                R.id.calendar_next,
+                next?.let { occ ->
+                    val time = if (occ.event.allDay || occ.event.time.isBlank()) "All day" else occ.event.time
+                    val day = if (occ.date == today) "Today" else SimpleDateFormat("EEE d MMM", Locale.getDefault())
+                        .format(java.util.Date(occ.date.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()))
+                    "$day · $time · ${occ.event.title}"
+                } ?: SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now)
+            )
             val intent = OeaMiniApps.launchIntent(context, "calendar")
             val pi = android.app.PendingIntent.getActivity(context, id, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.calendar_month, pi)

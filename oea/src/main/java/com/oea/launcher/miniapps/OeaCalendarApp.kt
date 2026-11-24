@@ -69,6 +69,11 @@ object OeaCalendarApp {
         Thread(task, "OeaCalendarDevice").apply { isDaemon = true }
     }
 
+    /** One worker for file imports; a second import waits its turn instead of racing. */
+    private val IMPORTER = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "OeaCalendarImport").apply { isDaemon = true }
+    }
+
     private fun hasCalendarPermission(host: Activity): Boolean = runCatching {
         host.checkSelfPermission("android.permission.READ_CALENDAR") == android.content.pm.PackageManager.PERMISSION_GRANTED
     }.getOrDefault(false)
@@ -142,21 +147,23 @@ object OeaCalendarApp {
         pendingImport = null
         if (resultCode != Activity.RESULT_OK) return true
         val uri = data?.data ?: return true
-        java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+        // One thread for every import (a new one per file leaked a thread each time),
+        // and the store write goes through the one place that keeps the reminders and
+        // the widget in step with it.
+        IMPORTER.execute {
             val text = runCatching {
                 host.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             }.getOrNull()
             val parsed = text?.let { if (it.contains("BEGIN:VCALENDAR")) fromIcs(it) else decode(it) } ?: emptyList()
-            val existing = decode(prefs(host).getString(KEY_EVENTS, ""))
+            val existing = events(host)
             val identity = { e: Event -> "${e.year}-${e.month}-${e.day}|${e.title.lowercase(Locale.getDefault())}|${e.time}" }
             val known = existing.map(identity).toSet()
             val fresh = parsed.filter { !known.contains(identity(it)) }
             val skipped = parsed.size - fresh.size
-            val withTimes = ArrayList(fresh)
             // Same title and day but a different time is a second occurrence, not a
             // duplicate; a clash on the id would corrupt the store, so re-stamp them.
-            withTimes.replaceAll { it.copy(id = System.nanoTime() + (it.hashCode().toLong() and 0xFFFF)) }
-            prefs(host).edit().putString(KEY_EVENTS, encode(existing + withTimes)).apply()
+            val withTimes = fresh.map { it.copy(id = freshEventId()) }
+            saveEvents(host, existing + withTimes)
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 runCatching { pending(withTimes.size, skipped) }
             }
@@ -164,122 +171,11 @@ object OeaCalendarApp {
         return true
     }
 
-    /** Writes the visible events out as an iCalendar file, other apps' format. */
-    internal fun toIcs(events: List<Event>): String = buildString {
-        appendLine("BEGIN:VCALENDAR")
-        appendLine("VERSION:2.0")
-        appendLine("PRODID:-//OEA//Calendar//EN")
-        appendLine("CALSCALE:GREGORIAN")
-        appendLine("METHOD:PUBLISH")
-        events.forEach { event ->
-            appendLine("BEGIN:VEVENT")
-            appendLine("UID:oea-${event.id}@local")
-            appendLine("DTSTAMP:${stamp()}")
-            val day = "%04d%02d%02d".format(event.year, event.month + 1, event.day)
-            if (event.allDay || event.time.isBlank()) {
-                appendLine("DTSTART;VALUE=DATE:$day")
-                appendLine("DTEND;VALUE=DATE:$day")
-            } else {
-                appendLine("DTSTART:${day}T${event.time.replace(":", "")}00")
-                appendLine(if (event.endTime.isBlank()) "DTEND:${day}T${event.time.replace(":", "")}00" else "DTEND:${day}T${event.endTime.replace(":", "")}00")
-            }
-            appendLine("SUMMARY:${escapeIcs(event.title)}")
-            if (event.location.isNotBlank()) appendLine("LOCATION:${escapeIcs(event.location)}")
-            if (event.desc.isNotBlank()) appendLine("DESCRIPTION:${escapeIcs(event.desc)}")
-            when (event.recurrence.uppercase(Locale.getDefault())) {
-                "DAILY" -> appendLine("RRULE:FREQ=DAILY")
-                "WEEKLY" -> appendLine("RRULE:FREQ=WEEKLY")
-                "MONTHLY" -> appendLine("RRULE:FREQ=MONTHLY")
-                "YEARLY" -> appendLine("RRULE:FREQ=YEARLY")
-                else -> Unit
-            }
-            if (event.reminderMin > 0) {
-                appendLine("BEGIN:VALARM")
-                appendLine("ACTION:DISPLAY")
-                appendLine("DESCRIPTION:${escapeIcs(event.title)}")
-                appendLine("TRIGGER:-PT${event.reminderMin}M")
-                appendLine("END:VALARM")
-            }
-            appendLine("END:VEVENT")
-        }
-        appendLine("END:VCALENDAR")
-    }
+    /** Writes the visible events out as an iCalendar file; see [OeaCalendarIcs]. */
+    internal fun toIcs(events: List<Event>): String = OeaCalendarIcs.toIcs(events)
 
-    /** Reads an iCalendar file. Only the properties OEA can actually show are taken. */
-    internal fun fromIcs(text: String): List<Event> {
-        val unfolded = text.replace("\r\n[ \t]".toRegex(), "").replace("\n[ \t]".toRegex(), "")
-        val out = ArrayList<Event>()
-        var block: Map<String, String>? = null
-        val builder = LinkedHashMap<String, String>()
-        unfolded.lineSequence().forEach { rawLine ->
-            val line = rawLine.trim()
-            when {
-                line == "BEGIN:VEVENT" -> builder.clear()
-                line == "END:VEVENT" -> {
-                    if (builder.containsKey("SUMMARY") || builder.containsKey("DTSTART")) out += toEvent(HashMap(builder))
-                    builder.clear()
-                }
-                line.contains(":") && builder.isNotEmpty() -> {
-                    val key = line.substringBefore(':').substringBefore(';').uppercase(Locale.getDefault())
-                    val value = line.substringAfter(':')
-                    if (builder[key] == null) builder[key] = value
-                }
-                line.startsWith("BEGIN:VTIMEZONE") -> builder.clear()
-            }
-        }
-        return out
-    }
-
-    private fun toEvent(parts: Map<String, String>): Event {
-        val start = parts["DTSTART"].orEmpty()
-        val datePart = start.substringBefore('T').filter { it.isDigit() }
-        val year = datePart.take(4).toIntOrNull() ?: 1970
-        val month = (datePart.drop(4).take(2).toIntOrNull() ?: 1) - 1
-        val day = datePart.drop(6).take(2).toIntOrNull() ?: 1
-        val allDay = !start.contains('T') || start.contains("VALUE=DATE")
-        val time = if (allDay) "" else start.substringAfter('T', "").take(4).let {
-            if (it.length == 4) "${it.substring(0, 2)}:${it.substring(2)}" else ""
-        }
-        val endTime = parts["DTEND"].orEmpty().substringAfter('T', "").take(4).let {
-            if (it.length == 4 && !allDay) "${it.substring(0, 2)}:${it.substring(2)}" else ""
-        }
-        val rrule = parts["RRULE"].orEmpty().uppercase(Locale.getDefault())
-        val recurrence = when {
-            "FREQ=DAILY" in rrule -> "DAILY"
-            "FREQ=WEEKLY" in rrule -> "WEEKLY"
-            "FREQ=MONTHLY" in rrule -> "MONTHLY"
-            "FREQ=YEARLY" in rrule -> "YEARLY"
-            else -> "NONE"
-        }
-        val trigger = parts["TRIGGER"].orEmpty()
-        val minutes = Regex("PT(\\d+)M").find(trigger)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-        return Event(
-            id = (parts["UID"].orEmpty().filter { it.isDigit() }.toLongOrNull() ?: System.nanoTime()) and Long.MAX_VALUE,
-            year = year, month = month, day = day,
-            title = unescapeIcs(parts["SUMMARY"].orEmpty().ifBlank { "Event" }),
-            time = time, endTime = endTime,
-            location = unescapeIcs(parts["LOCATION"].orEmpty()),
-            desc = unescapeIcs(parts["DESCRIPTION"].orEmpty()),
-            category = "OTHER", reminderMin = minutes, recurrence = recurrence, allDay = allDay
-        )
-    }
-
-    private fun escapeIcs(value: String): String = value
-        .replace("\\", "\\\\")
-        .replace(";", "\\;")
-        .replace(",", "\\,")
-        .replace("\n", "\\n")
-
-    private fun unescapeIcs(value: String): String = value
-        .replace("\\n", "\n")
-        .replace("\\,", ",")
-        .replace("\\;", ";")
-        .replace("\\\\", "\\")
-
-    private fun stamp(): String {
-        val format = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US)
-        return format.format(java.util.Date())
-    }
+    /** Reads an iCalendar file written by any calendar; see [OeaCalendarIcs]. */
+    internal fun fromIcs(text: String): List<Event> = OeaCalendarIcs.fromIcs(text)
 
     /**
      * The moon for one day, from the synodic cycle. It is arithmetic against a known
@@ -312,6 +208,8 @@ object OeaCalendarApp {
             .onFailure { android.widget.Toast.makeText(host, "Nothing here accepts text", android.widget.Toast.LENGTH_SHORT).show() }
     }
 
+    private val ORDER = compareBy<Event>({ it.year }, { it.month }, { it.day }, { it.time }, { it.title })
+
     private fun decode(raw: String?): List<Event> {
         if (raw.isNullOrBlank()) return emptyList()
         return raw.split(SEP_ROW).mapNotNull { row ->
@@ -325,17 +223,78 @@ object OeaCalendarApp {
                     p.getOrNull(11) ?: "NONE", p.getOrNull(12) == "1"
                 )
             } catch (_: Throwable) { null }
-        }.sortedWith(compareBy({ it.year }, { it.month }, { it.day }, { it.time }))
+        }.sortedWith(ORDER)
     }
 
-    private fun encode(list: List<Event>): String = list.joinToString(SEP_ROW) { e ->
+    /** One field can never contain a separator, or it would split a row in two. */
+    private fun clean(value: String): String =
+        value.replace(SEP_FIELD, " ").replace(SEP_ROW, " ").trim()
+
+    private fun encode(list: List<Event>): String = list.sortedWith(ORDER).joinToString(SEP_ROW) { e ->
         listOf(
             e.id.toString(), e.year.toString(), e.month.toString(), e.day.toString(),
-            e.title.replace(SEP_FIELD, " "), e.time.replace(SEP_FIELD, " "),
-            e.endTime.replace(SEP_FIELD, " "), e.location.replace(SEP_FIELD, " "),
-            e.desc.replace(SEP_FIELD, " ").replace(SEP_ROW, " "),
-            e.category, e.reminderMin.toString(), e.recurrence, if (e.allDay) "1" else "0"
+            clean(e.title), clean(e.time), clean(e.endTime), clean(e.location), clean(e.desc),
+            e.category.ifBlank { "OTHER" }, e.reminderMin.coerceAtLeast(0).toString(),
+            e.recurrence.ifBlank { "NONE" }, if (e.allDay) "1" else "0"
         ).joinToString(SEP_FIELD)
+    }
+
+    // ------------------------------------------------------------------- store
+
+    /**
+     * The store, decoded once per change.
+     *
+     * `refresh()` used to call `decode(prefs.getString(...))` on every paint: every day
+     * tap, every month step, every keystroke and every filter chip re-split the whole
+     * blob and allocated a fresh `Event` for every row. With a few hundred events that
+     * is milliseconds of garbage per finger. The raw string is the cache key, so any
+     * writer — this object, the importer, a restore — invalidates it by changing it.
+     */
+    private var cacheRaw: String? = null
+    private var cacheEvents: List<Event> = emptyList()
+
+    internal fun events(ctx: Context): List<Event> {
+        val raw = prefs(ctx).getString(KEY_EVENTS, "").orEmpty()
+        if (raw == cacheRaw) return cacheEvents
+        val parsed = decode(raw)
+        cacheRaw = raw
+        cacheEvents = parsed
+        return parsed
+    }
+
+    /**
+     * Writes OEA's own events, then keeps the two things that read the store behind its
+     * back in step: the reminder alarms and the home-screen widget.
+     */
+    internal fun saveEvents(ctx: Context, list: List<Event>) {
+        val encoded = encode(list)
+        prefs(ctx).edit().putString(KEY_EVENTS, encoded).apply()
+        cacheRaw = encoded
+        cacheEvents = decode(encoded)
+        runCatching { OeaCalendarReminders.sync(ctx) }
+        runCatching { com.oea.launcher.widgets.OeaWidgetStudio.refreshWidgets(ctx, "calendar") }
+    }
+
+    private val idLock = Any()
+    private var idCounter = 0L
+
+    /**
+     * A positive id no stored event can already have.
+     *
+     * New events took `System.currentTimeMillis()`, so two created in the same
+     * millisecond shared an id and deleting one deleted both. Imports used
+     * `System.nanoTime()`, which is allowed to be negative — a negative id means
+     * "device calendar event" to every view, so an imported event with one became
+     * read-only and was skipped by the export.
+     */
+    internal fun freshEventId(seed: Long? = null): Long = synchronized(idLock) {
+        val floor = maxOf(
+            seed ?: 0L,
+            System.currentTimeMillis(),
+            cacheEvents.maxOfOrNull { it.id }?.coerceAtLeast(0L) ?: 0L
+        )
+        idCounter = if (idCounter > floor) idCounter + 1 else floor + 1
+        idCounter
     }
 
     fun build(host: Activity, palette: OeaPalette): View {
@@ -387,6 +346,9 @@ object OeaCalendarApp {
             deviceMonths.clear()
             deviceLoading = ""
             refresh()
+            // Coming back is also the moment the alarm table is known to be current:
+            // another calendar app may have been the last thing to run.
+            runCatching { OeaCalendarReminders.sync(host) }
         }
 
         val indexBack = host.miniIndexBack()
@@ -427,13 +389,11 @@ object OeaCalendarApp {
                     val calEnd = Calendar.getInstance().apply { timeInMillis = if (end > begin) end else begin + 3_600_000L }
                     val time = if (allDay) "" else String.format(java.util.Locale.US, "%02d:%02d", calStart.get(Calendar.HOUR_OF_DAY), calStart.get(Calendar.MINUTE))
                     val endTime = if (allDay) "" else String.format(java.util.Locale.US, "%02d:%02d", calEnd.get(Calendar.HOUR_OF_DAY), calEnd.get(Calendar.MINUTE))
-                    val events = decode(prefs(host).getString(KEY_EVENTS, "")).toMutableList()
-                    events += Event(
-                        System.currentTimeMillis(),
+                    saveEvents(host, events(host) + Event(
+                        freshEventId(),
                         calStart.get(Calendar.YEAR), calStart.get(Calendar.MONTH), calStart.get(Calendar.DAY_OF_MONTH),
                         title, time, endTime, location, desc, "OTHER", 15, "NONE", allDay
-                    )
-                    prefs(host).edit().putString(KEY_EVENTS, encode(events)).apply()
+                    ))
                     selectedCal = calStart
                     currentCal = calStart
                 }
@@ -533,7 +493,7 @@ object OeaCalendarApp {
                     refresh()
                 },
                 OeaAppKit.Action(R.drawable.oic_file_download, "Backup & import", "Export or import .ics calendar files") {
-                    openBackupSheet(decode(prefs(host).getString(KEY_EVENTS, "")))
+                    openBackupSheet(events(host))
                 }
             ))
         }
@@ -621,13 +581,17 @@ object OeaCalendarApp {
             }
         }
 
-        fun eventSubtitle(ev: Event, includeDate: Boolean): String {
+        fun eventSubtitle(ev: Event, includeDate: Boolean, on: java.time.LocalDate? = null): String {
             val cat = runCatching { Category.valueOf(ev.category) }.getOrDefault(Category.OTHER)
             val rec = runCatching { Recurrence.valueOf(ev.recurrence) }.getOrDefault(Recurrence.NONE)
             val parts = ArrayList<String>()
             if (includeDate) {
-                val c = Calendar.getInstance().apply { set(ev.year, ev.month, ev.day) }
-                parts += SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(c.time)
+                // A repeated appearance has its own date; the event only knows its anchor.
+                val date = on ?: runCatching { java.time.LocalDate.of(ev.year, ev.month + 1, ev.day) }.getOrNull()
+                if (date != null) {
+                    val millis = date.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                    parts += SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(java.util.Date(millis))
+                }
             }
             parts += when {
                 ev.allDay || ev.time.isBlank() -> "All day"
@@ -681,11 +645,15 @@ object OeaCalendarApp {
                     }
                 }
             }
-            val allEvents = decode(prefs(host).getString(KEY_EVENTS, "")) + deviceEvents
+            val allEvents = events(host) + deviceEvents
             val filteredEvents = allEvents.filter { ev ->
                 (filterCategory == null || ev.category == filterCategory) &&
                 (searchQuery.isBlank() || ev.title.contains(searchQuery, true) || ev.location.contains(searchQuery, true) || ev.desc.contains(searchQuery, true))
             }
+            // Repeating events are expanded for the range on screen, never stored.
+            val todayDate = java.time.LocalDate.now()
+            fun appearances(from: java.time.LocalDate, toExclusive: java.time.LocalDate) =
+                OeaCalendarRecurrence.occurrences(filteredEvents, from, toExclusive)
             shell.bar.setSubtitle(
                 when {
                     searchQuery.isNotBlank() -> "${filteredEvents.size} matching ${if (filteredEvents.size == 1) "event" else "events"}"
@@ -714,17 +682,30 @@ object OeaCalendarApp {
                     val firstDay = Calendar.getInstance().apply { set(year, month, 1) }
                     var startOffset = firstDay.get(Calendar.DAY_OF_WEEK) - 1
                     if (weekStartMonday) startOffset = (startOffset + 6) % 7
-                    val daysInMonth = currentCal.getActualMaximum(Calendar.DAY_OF_MONTH)
-                    val today = Calendar.getInstance()
-                    var dayCounter = 1 - startOffset
-                    for (row in 0 until 6) {
+                    val firstOfMonth = java.time.LocalDate.of(year, month + 1, 1)
+                    val gridStart = firstOfMonth.minusDays(startOffset.toLong())
+                    val selectedDate = runCatching {
+                        java.time.LocalDate.of(
+                            selectedCal.get(Calendar.YEAR),
+                            selectedCal.get(Calendar.MONTH) + 1,
+                            selectedCal.get(Calendar.DAY_OF_MONTH)
+                        )
+                    }.getOrDefault(todayDate)
+                    // The dots come from the same expansion the other views use, so a
+                    // weekly event dots every week it actually happens.
+                    val byDay = appearances(gridStart, gridStart.plusDays(42)).groupBy { it.date }
+                    var rowIndex = 0
+                    while (rowIndex < 6) {
+                        val week = (0 until 7).map { gridStart.plusDays((rowIndex * 7 + it).toLong()) }
+                        // A row with no day of this month is not drawn: a five-week month
+                        // does not get a sixth, empty one.
+                        if (rowIndex >= 3 && week.none { it.year == year && it.monthValue - 1 == month }) break
                         val rowLayout = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-                        for (col in 0 until 7) {
-                            val cellCal = Calendar.getInstance().apply { set(year, month, dayCounter) }
-                            val inMonth = dayCounter in 1..daysInMonth
-                            val isSelected = inMonth && cellCal.get(Calendar.YEAR) == selectedCal.get(Calendar.YEAR) && cellCal.get(Calendar.MONTH) == selectedCal.get(Calendar.MONTH) && cellCal.get(Calendar.DAY_OF_MONTH) == selectedCal.get(Calendar.DAY_OF_MONTH)
-                            val isToday = inMonth && cellCal.get(Calendar.YEAR) == today.get(Calendar.YEAR) && cellCal.get(Calendar.MONTH) == today.get(Calendar.MONTH) && cellCal.get(Calendar.DAY_OF_MONTH) == today.get(Calendar.DAY_OF_MONTH)
-                            val dayEvs = if (inMonth) filteredEvents.filter { it.year == year && it.month == month && it.day == dayCounter } else emptyList()
+                        week.forEachIndexed { col, cellDate ->
+                            val inMonth = cellDate.year == year && cellDate.monthValue - 1 == month
+                            val isSelected = inMonth && cellDate == selectedDate
+                            val isToday = inMonth && cellDate == todayDate
+                            val dayEvs = if (inMonth) byDay[cellDate].orEmpty() else emptyList()
                             val cell = LinearLayout(host).apply {
                                 orientation = LinearLayout.VERTICAL
                                 gravity = Gravity.CENTER
@@ -739,11 +720,14 @@ object OeaCalendarApp {
                                 isFocusable = inMonth
                                 setOnClickListener {
                                     if (!inMonth) return@setOnClickListener
-                                    selectedCal = cellCal.clone() as Calendar
+                                    selectedCal = Calendar.getInstance().apply {
+                                        set(cellDate.year, cellDate.monthValue - 1, cellDate.dayOfMonth, 12, 0, 0)
+                                        set(Calendar.MILLISECOND, 0)
+                                    }
                                     refresh()
                                 }
                             }
-                            cell.addView(kit.text(if (inMonth) dayCounter.toString() else "", 14f, when {
+                            cell.addView(kit.text(if (inMonth) cellDate.dayOfMonth.toString() else "", 14f, when {
                                 !inMonth -> palette.textTertiary
                                 isSelected -> palette.onAccent
                                 isToday -> palette.onAccentSoft
@@ -754,22 +738,37 @@ object OeaCalendarApp {
                             rowLayout.addView(cell, LinearLayout.LayoutParams(0, -2, 1f).apply {
                                 if (col > 0) leftMargin = kit.dp(2)
                             })
-                            dayCounter++
                         }
                         calCard.addView(rowLayout, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(2) })
-                        if (dayCounter > daysInMonth && row >= 3) break
+                        rowIndex++
                     }
                     gridHost.addView(calCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
                 }
                 ViewMode.WEEK -> {
                     val startOfWeek = currentCal.clone() as Calendar
                     startOfWeek.set(Calendar.DAY_OF_WEEK, if (prefs(host).getBoolean(KEY_WEEK_START, false)) Calendar.MONDAY else Calendar.SUNDAY)
-                    val weekDays = (0 until 7).map { offset ->
-                        (startOfWeek.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, offset) }
-                    }
-                    weekDays.forEach { dayCal ->
-                        val isSelected = dayCal.get(Calendar.YEAR) == selectedCal.get(Calendar.YEAR) && dayCal.get(Calendar.MONTH) == selectedCal.get(Calendar.MONTH) && dayCal.get(Calendar.DAY_OF_MONTH) == selectedCal.get(Calendar.DAY_OF_MONTH)
-                        val dayEvents = filteredEvents.filter { it.year == dayCal.get(Calendar.YEAR) && it.month == dayCal.get(Calendar.MONTH) && it.day == dayCal.get(Calendar.DAY_OF_MONTH) }
+                    val weekStartDate = runCatching {
+                        java.time.LocalDate.of(
+                            startOfWeek.get(Calendar.YEAR),
+                            startOfWeek.get(Calendar.MONTH) + 1,
+                            startOfWeek.get(Calendar.DAY_OF_MONTH)
+                        )
+                    }.getOrDefault(todayDate)
+                    val weekByDay = appearances(weekStartDate, weekStartDate.plusDays(7)).groupBy { it.date }
+                    val selectedDate = runCatching {
+                        java.time.LocalDate.of(
+                            selectedCal.get(Calendar.YEAR),
+                            selectedCal.get(Calendar.MONTH) + 1,
+                            selectedCal.get(Calendar.DAY_OF_MONTH)
+                        )
+                    }.getOrDefault(todayDate)
+                    (0 until 7).map { weekStartDate.plusDays(it.toLong()) }.forEach { dayDate ->
+                        val dayCal = Calendar.getInstance().apply {
+                            set(dayDate.year, dayDate.monthValue - 1, dayDate.dayOfMonth, 12, 0, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        val isSelected = dayDate == selectedDate
+                        val dayEvents = weekByDay[dayDate].orEmpty().map { it.event }
                         val row = LinearLayout(host).apply {
                             orientation = LinearLayout.VERTICAL
                             setPadding(kit.dp(14), kit.dp(10), kit.dp(14), kit.dp(10))
@@ -795,9 +794,14 @@ object OeaCalendarApp {
                     }
                 }
                 ViewMode.DAY -> {
-                    val dayEvents = filteredEvents.filter {
-                        it.year == selectedCal.get(Calendar.YEAR) && it.month == selectedCal.get(Calendar.MONTH) && it.day == selectedCal.get(Calendar.DAY_OF_MONTH)
-                    }
+                    val dayDate = runCatching {
+                        java.time.LocalDate.of(
+                            selectedCal.get(Calendar.YEAR),
+                            selectedCal.get(Calendar.MONTH) + 1,
+                            selectedCal.get(Calendar.DAY_OF_MONTH)
+                        )
+                    }.getOrDefault(todayDate)
+                    val dayEvents = appearances(dayDate, dayDate.plusDays(1)).map { it.event }
                     val allDayEvents = dayEvents.filter { it.allDay || it.time.isBlank() }
                     if (allDayEvents.isNotEmpty()) {
                         val g = kit.group(gridHost)
@@ -850,7 +854,9 @@ object OeaCalendarApp {
                     gridHost.addView(timelineCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(6) })
                 }
                 ViewMode.AGENDA -> {
-                    val sorted = filteredEvents.sortedWith(compareBy({ it.year }, { it.month }, { it.day }, { it.time }))
+                    // A year of real appearances, not every stored event ever saved: a
+                    // weekly event belongs in an agenda twelve months of times over.
+                    val sorted = appearances(todayDate, todayDate.plusDays(366))
                     if (sorted.isEmpty()) {
                         gridHost.addView(
                             kit.emptyState(R.drawable.oic_schedule, "No scheduled events", "Add an event with start time, repeat rules and reminders.", "New event") {
@@ -860,10 +866,11 @@ object OeaCalendarApp {
                         )
                     } else {
                         val g = kit.group(gridHost)
-                        sorted.take(80).forEach { ev ->
+                        sorted.take(80).forEach { occ ->
+                            val ev = occ.event
                             val readOnly = ev.id < 0L
                             val action: (() -> Unit)? = if (readOnly) null else ({ editEvent(host, kit, ev) { refresh() } })
-                            kit.row(g, R.drawable.oic_schedule, ev.title, eventSubtitle(ev, includeDate = true), chevron = !readOnly, onClick = action)
+                            kit.row(g, R.drawable.oic_schedule, ev.title, eventSubtitle(ev, includeDate = true, on = occ.date), chevron = !readOnly, onClick = action)
                         }
                     }
                 }
@@ -871,7 +878,8 @@ object OeaCalendarApp {
                     val g = kit.group(gridHost)
                     for (m in 0 until 12) {
                         val cal = Calendar.getInstance().apply { set(currentCal.get(Calendar.YEAR), m, 1) }
-                        val count = filteredEvents.count { it.year == cal.get(Calendar.YEAR) && it.month == m }
+                        val monthStart = java.time.LocalDate.of(currentCal.get(Calendar.YEAR), m + 1, 1)
+                        val count = appearances(monthStart, monthStart.plusMonths(1)).size
                         kit.row(
                             g,
                             R.drawable.oic_grid_view,
@@ -889,9 +897,14 @@ object OeaCalendarApp {
             }
 
             if (viewMode == ViewMode.MONTH || viewMode == ViewMode.WEEK) {
-                val dayEvents = filteredEvents.filter {
-                    it.year == selectedCal.get(Calendar.YEAR) && it.month == selectedCal.get(Calendar.MONTH) && it.day == selectedCal.get(Calendar.DAY_OF_MONTH)
-                }
+                val selectedDate = runCatching {
+                    java.time.LocalDate.of(
+                        selectedCal.get(Calendar.YEAR),
+                        selectedCal.get(Calendar.MONTH) + 1,
+                        selectedCal.get(Calendar.DAY_OF_MONTH)
+                    )
+                }.getOrDefault(todayDate)
+                val dayEvents = appearances(selectedDate, selectedDate.plusDays(1)).map { it.event }
                 kit.sectionTitle(
                     eventsHost,
                     "${SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(selectedCal.time)} · ${moonPhase(selectedCal)}"
@@ -918,6 +931,8 @@ object OeaCalendarApp {
             }
         }
         refresh()
+        // Reminders outlive the screen, so they are armed every time it is opened.
+        runCatching { OeaCalendarReminders.sync(host) }
         return shell.root
     }
 
@@ -930,6 +945,61 @@ object OeaCalendarApp {
 
     private fun formatEventHm(h: Int, m: Int): String = String.format(Locale.US, "%02d:%02d", h.coerceIn(0, 23), m.coerceIn(0, 59))
 
+    /**
+     * A date, chosen with wheels.
+     *
+     * The editor could change an event's time but not its day: moving an event meant
+     * deleting it and typing it again. The day wheel is rebuilt against the chosen
+     * month, so 31 January → February becomes 28/29 rather than an invalid date.
+     */
+    private fun pickDate(
+        host: Activity,
+        kit: OeaAppKit,
+        year0: Int,
+        month0: Int,
+        day0: Int,
+        onPicked: (year: Int, month: Int, day: Int) -> Unit
+    ) {
+        val today = java.time.LocalDate.now()
+        val palette = kit.palette
+        kit.sheet("Date", "When this event happens") { panel, dialog ->
+            var year = year0
+            var month = month0
+            var day = day0
+            fun lengthOf(y: Int, m: Int) = runCatching { java.time.YearMonth.of(y, m + 1).lengthOfMonth() }.getOrDefault(31)
+            val dayWheel = com.oea.launcher.ui.OeaWheelPicker(host, palette, 1, lengthOf(year, month), day.coerceIn(1, lengthOf(year, month)), wrap = true, label = "Day")
+            val monthWheel = com.oea.launcher.ui.OeaWheelPicker(
+                host, palette, 0, 11, month.coerceIn(0, 11), wrap = true, label = "Month",
+                formatter = { java.time.Month.of(it + 1).getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault()) }
+            )
+            val yearWheel = com.oea.launcher.ui.OeaWheelPicker(
+                host, palette, today.year - 5, today.year + 10, year.coerceIn(today.year - 5, today.year + 10), wrap = false, label = "Year"
+            )
+            fun keepDayValid() {
+                val max = lengthOf(yearWheel.value, monthWheel.value)
+                dayWheel.maxValue = max
+                if (dayWheel.value > max) dayWheel.setValue(max, notify = false)
+            }
+            monthWheel.onValueChanged = { keepDayValid() }
+            yearWheel.onValueChanged = { keepDayValid() }
+            val row = LinearLayout(host).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(dayWheel, LinearLayout.LayoutParams(0, kit.dp(152), 0.8f))
+            row.addView(monthWheel, LinearLayout.LayoutParams(0, kit.dp(152), 1.2f))
+            row.addView(yearWheel, LinearLayout.LayoutParams(0, kit.dp(152), 1.2f))
+            panel.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Cancel") { dialog.dismiss() },
+                kit.primaryButton("Set date") {
+                    dialog.dismiss()
+                    onPicked(yearWheel.value, monthWheel.value, dayWheel.value)
+                }
+            ))
+        }
+    }
+
     private fun editEvent(
         host: Activity,
         kit: OeaAppKit,
@@ -941,9 +1011,10 @@ object OeaCalendarApp {
         val isNew = existing == null
         val palette = kit.palette
         val is24h = android.text.format.DateFormat.is24HourFormat(host)
-        val year = existing?.year ?: defaultCal.get(Calendar.YEAR)
-        val month = existing?.month ?: defaultCal.get(Calendar.MONTH)
-        val day = existing?.day ?: defaultCal.get(Calendar.DAY_OF_MONTH)
+        // The day is editable: moving an event used to mean deleting and retyping it.
+        var year = existing?.year ?: defaultCal.get(Calendar.YEAR)
+        var month = existing?.month ?: defaultCal.get(Calendar.MONTH)
+        var day = existing?.day ?: defaultCal.get(Calendar.DAY_OF_MONTH)
         val title = existing?.title ?: ""
         var (startH, startM) = parseEventHm(existing?.time.orEmpty(), defaultHour.coerceIn(0, 23))
         var (endH, endM) = parseEventHm(existing?.endTime.orEmpty(), (startH + 1).coerceAtMost(23), startM)
@@ -970,6 +1041,16 @@ object OeaCalendarApp {
             val timeGroup = kit.group(panel)
             fun paintTimeGroup() {
                 timeGroup.removeAllViews()
+                kit.row(timeGroup, R.drawable.oic_schedule, "Date", null,
+                    value = SimpleDateFormat("EEE, d MMM yyyy", Locale.getDefault()).format(dateCal.time), chevron = true) {
+                    pickDate(host, kit, year, month, day) { y, m, d ->
+                        year = y
+                        month = m
+                        day = d
+                        dateCal.set(y, m, d, 12, 0, 0)
+                        paintTimeGroup()
+                    }
+                }
                 kit.switchRow(timeGroup, R.drawable.oic_schedule, "All day", null, allDay) { value ->
                     allDay = value
                     paintTimeGroup()
@@ -1059,18 +1140,28 @@ object OeaCalendarApp {
                     }
                     val startStr = if (allDay) "" else formatEventHm(startH, startM)
                     val endStr = if (allDay) "" else formatEventHm(endH, endM)
-                    val events = decode(prefs(host).getString(KEY_EVENTS, "")).toMutableList()
+                    val store = events(host).toMutableList()
                     if (isNew) {
-                        events += Event(System.currentTimeMillis(), year, month, day, t, startStr, endStr, locField.text.toString().trim(), descField.text.toString().trim(), category, reminder, recurrence, allDay)
+                        store += Event(freshEventId(), year, month, day, t, startStr, endStr, locField.text.toString().trim(), descField.text.toString().trim(), category, reminder, recurrence, allDay)
                     } else {
-                        val updated = events.map {
-                            if (it.id == existing!!.id) it.copy(title = t, time = startStr, endTime = endStr, location = locField.text.toString().trim(), desc = descField.text.toString().trim(), category = category, reminderMin = reminder, recurrence = recurrence, allDay = allDay)
+                        val anchor = existing!!.id
+                        val updated = store.map {
+                            if (it.id == anchor) it.copy(title = t, time = startStr, endTime = endStr, location = locField.text.toString().trim(), desc = descField.text.toString().trim(), category = category, reminderMin = reminder, recurrence = recurrence, allDay = allDay)
                             else it
                         }
-                        events.clear()
-                        events.addAll(updated)
+                        store.clear()
+                        store.addAll(updated)
                     }
-                    prefs(host).edit().putString(KEY_EVENTS, encode(events)).apply()
+                    saveEvents(host, store)
+                    // A reminder that cannot post a notification is the bug this whole
+                    // change is about, so ask for that permission at the moment it is
+                    // first needed — the same way Clock does when an alarm is set.
+                    if (reminder > 0 && android.os.Build.VERSION.SDK_INT >= 33 &&
+                        host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        runCatching { host.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2102) }
+                    }
                     dialog.dismiss()
                     onDone()
                 }
@@ -1078,8 +1169,7 @@ object OeaCalendarApp {
             if (!isNew) {
                 panel.addView(
                     kit.button("Delete event", palette.cardHigh, palette.danger, R.drawable.oic_delete) {
-                        val events = decode(prefs(host).getString(KEY_EVENTS, "")).filterNot { it.id == existing!!.id }
-                        prefs(host).edit().putString(KEY_EVENTS, encode(events)).apply()
+                        saveEvents(host, events(host).filterNot { it.id == existing!!.id })
                         dialog.dismiss()
                         onDone()
                     },
