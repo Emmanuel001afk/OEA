@@ -1338,10 +1338,24 @@ internal class ArenaSim(
         val bx = sin(p.yaw) * cp; val by = sin(p.pitch); val bz = cos(p.yaw) * cp
         val shotTime = (time * 1000f).toLong()
         val upMul = 1f + 0.1f * p.upLevels[w.ordinal] // weapon upgrade damage bonus
+        // Aim assist bends the *centre* of the cone toward a body already near
+        // the line — it never invents a hit. The offered angle is at most a few
+        // degrees, only inside the weapon's range, and only for a human.
+        val assist = if (p.isBot) 0f else aimAssist
+        var abx = bx; var aby = by; var abz = bz
+        if (assist > 0f) {
+            val offer = assistTarget(p, ex, ey, ez, bx, by, bz, w.range)
+            if (offer != null) {
+                val k = MathX.clamp01(assist * (1f - offer[0] / w.range.coerceAtLeast(1f)) * 0.6f + assist * 0.4f)
+                abx = MathX.lerp(bx, offer[1], k); aby = MathX.lerp(by, offer[2], k); abz = MathX.lerp(bz, offer[3], k)
+                val l = sqrt(abx * abx + aby * aby + abz * abz)
+                if (l > 1e-4f) { abx /= l; aby /= l; abz /= l }
+            }
+        }
         for (k in 0 until w.pellets) {
-            var dx = bx + rng.gaussian() * p.spread * 0.5f
-            var dy = by + rng.gaussian() * p.spread * 0.5f
-            var dz = bz + rng.gaussian() * p.spread * 0.5f
+            var dx = abx + rng.gaussian() * p.spread * 0.5f
+            var dy = aby + rng.gaussian() * p.spread * 0.5f
+            var dz = abz + rng.gaussian() * p.spread * 0.5f
             val l = sqrt(dx * dx + dy * dy + dz * dz); dx /= l; dy /= l; dz /= l
             var dist = w.range
             var hitWorld = false
@@ -1397,6 +1411,37 @@ internal class ArenaSim(
 
     /** How far back to rewind for a human shooter (their latency + interpolation delay). */
     var compensation: (ArenaPlayer) -> Long = { 0L }
+
+    /**
+     * Soft aim assist, 0..1. Zero turns it off entirely; the max is a gentle
+     * pull, never a lock. Bots ignore it — they already have their own aim.
+     */
+    var aimAssist: Float = 0.35f
+
+    /** Closest enemy near the aim line within a few degrees. Returns [dist, dx, dy, dz] or null. */
+    private fun assistTarget(p: ArenaPlayer, ex: Float, ey: Float, ez: Float, bx: Float, by: Float, bz: Float, range: Float): FloatArray? {
+        val cone = 0.16f // about 9 degrees of half-angle: a thumb's width away
+        var best: FloatArray? = null
+        var bestScore = Float.MAX_VALUE
+        for (o in players.values) {
+            if (o === p || !o.alive || o.skydiving) continue
+            if (teams && o.team == p.team) continue
+            val oy = if (o.crouching) 1.05f else 1.35f
+            val tx = o.pos.x - ex; val ty = (o.pos.y + oy) - ey; val tz = o.pos.z - ez
+            val d = sqrt(tx * tx + ty * ty + tz * tz)
+            if (d < 0.5f || d > range) continue
+            val cosang = (tx * bx + ty * by + tz * bz) / d
+            if (cosang < 1f - cone) continue
+            // Prefer the target nearest the line, then the nearest in space, so a
+            // close body behind another body never steals the pull.
+            val score = (1f - cosang) * 40f + d * 0.01f
+            if (score < bestScore) {
+                bestScore = score
+                best = floatArrayOf(d, tx / d, ty / d, tz / d)
+            }
+        }
+        return best
+    }
 
     fun damage(v: ArenaPlayer, from: ArenaPlayer?, amount: Float, w: Weapon, head: Boolean, zoneDamage: Boolean = false, cause: Int = -1) {
         if (!v.alive) return

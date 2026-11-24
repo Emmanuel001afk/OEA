@@ -206,11 +206,7 @@ class RunnerFront(host: GameFrontHost) : GameFront(host) {
 
         // ------------------------------------------------------------ cabinet
         section(content, "Cabinet")
-        kit.valueRow(content, "Sound", if (settings.sound) "On" else "Off", "Coins, jumps, crashes — the arcade's own noises") { audioSheet("Endless Days audio") }
-        kit.valueRow(content, "Music", if (settings.music) "On" else "Off", "The yard's running theme") {
-            settings.music = !settings.music
-            host.frontRebuild()
-        }
+        kit.valueRow(content, "Sound", audioSummary(), "Coins, jumps, crashes — and the mix, channel by channel") { audioSheet("Endless Days audio") }
         kit.valueRow(content, "Graphics", qualityLabel(), "Quality, frame rate and the FPS counter") { graphicsSheet("Endless Days graphics") }
         kit.valueRow(content, "Screen & access", "Menu size, contrast, motion", "Every OEA game on this phone") { host.frontAccess() }
         kit.valueRow(content, "About Endless Days", "OEA Engine ${com.oea.engine.OeaEngine.VERSION}", "The yard, the trains and the rules") { aboutSheet() }

@@ -30,6 +30,7 @@ import com.oea.engine.core.GameResult
 import com.oea.engine.core.HostUi
 import com.oea.engine.core.LocalPlayer
 import com.oea.engine.core.MenuItem
+import com.oea.engine.core.MenuKind
 import com.oea.engine.core.PlayMode
 import com.oea.engine.net.lan.LanBrowser
 import com.oea.engine.net.lan.LanGame
@@ -1282,15 +1283,43 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
             val labels = items.map { it.label }
             k.sheet(title, subtitle) { panel, dialog ->
                 val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                labels.forEachIndexed { index, label ->
-                    list.addView(
-                        k.optionRow(label, descriptions.getOrNull(index), false) {
-                            picked = true
-                            dialog.dismiss()
-                            onPick(items[index].id)
-                        },
-                        LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
-                    )
+                items.forEachIndexed { index, item ->
+                    // A header is a section divider, not a row: the pause menu is
+                    // grouped into Controls / Audio / Display / Match / Account so
+                    // "Resume" no longer sits at the same weight as "Turn limit".
+                    if (item.kind == MenuKind.HEADER) {
+                        list.addView(
+                            k.text(item.label.uppercase(), 11f, k.palette.textTertiary, GameType.medium).apply {
+                                letterSpacing = 0.12f
+                                setPadding(k.dp(12), k.dp(14), k.dp(8), k.dp(6))
+                            },
+                            LinearLayout.LayoutParams(-1, -2)
+                        )
+                        return@forEachIndexed
+                    }
+                    val value = item.value
+                    val label = labels[index]
+                    if (value.isNullOrBlank()) {
+                        list.addView(
+                            k.optionRow(label, descriptions.getOrNull(index), false) {
+                                picked = true
+                                dialog.dismiss()
+                                onPick(item.id)
+                            },
+                            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
+                        )
+                    } else {
+                        // A live-valued row: the setting name and its current
+                        // value on one line, so the page reads at a glance.
+                        list.addView(
+                            k.valueRow(label, value, descriptions.getOrNull(index), item.kind == MenuKind.CHOICE) {
+                                picked = true
+                                dialog.dismiss()
+                                onPick(item.id)
+                            },
+                            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
+                        )
+                    }
                 }
                 if (host != null && descriptor?.id == "arena" && items.any { it.id == "resume" }) {
                     val cur = frontOrientationMode()

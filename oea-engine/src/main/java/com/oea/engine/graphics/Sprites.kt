@@ -141,6 +141,14 @@ class SpriteBatch internal constructor() {
     }
 
     /** Arbitrary textured quad (corners in order: top-left, top-right, bottom-right, bottom-left) with per-corner colours. */
+    /**
+     * Batch-wide opacity, 0..1, multiplied into every colour drawn while it is
+     * set. A HUD that fades as one piece needs this: tinting each call by hand
+     * is how half a minimap ends up at the wrong alpha when a new element is
+     * added later. Reset it to 1 when the group is finished.
+     */
+    var alpha: Float = 1f
+
     fun quad(
         tex: Texture,
         x0: Float, y0: Float, u0: Float, v0: Float, c0: Int,
@@ -150,11 +158,28 @@ class SpriteBatch internal constructor() {
     ) {
         use(tex)
         val o = quads * 20
-        put(x0, y0, u0, v0, abgr(c0), o)
-        put(x1, y1, u1, v1, abgr(c1), o + 5)
-        put(x2, y2, u2, v2, abgr(c2), o + 10)
-        put(x3, y3, u3, v3, abgr(c3), o + 15)
+        val a = alpha
+        if (a >= 0.999f) {
+            put(x0, y0, u0, v0, abgr(c0), o)
+            put(x1, y1, u1, v1, abgr(c1), o + 5)
+            put(x2, y2, u2, v2, abgr(c2), o + 10)
+            put(x3, y3, u3, v3, abgr(c3), o + 15)
+        } else {
+            put(x0, y0, u0, v0, abgr(fade(c0, a)), o)
+            put(x1, y1, u1, v1, abgr(fade(c1, a)), o + 5)
+            put(x2, y2, u2, v2, abgr(fade(c2, a)), o + 10)
+            put(x3, y3, u3, v3, abgr(fade(c3, a)), o + 15)
+        }
         quads++
+    }
+
+    /** [c] with its alpha scaled by [k]; premultiplied, so RGB scales with it. */
+    private fun fade(c: Int, k: Float): Int {
+        val a = ((c ushr 24 and 0xFF) * k).toInt().coerceIn(0, 255)
+        val r = ((c ushr 16 and 0xFF) * k).toInt().coerceIn(0, 255)
+        val g = ((c ushr 8 and 0xFF) * k).toInt().coerceIn(0, 255)
+        val b = ((c and 0xFF) * k).toInt().coerceIn(0, 255)
+        return (a shl 24) or (r shl 16) or (g shl 8) or b
     }
 
     fun draw(tex: Texture, x: Float, y: Float, w: Float, h: Float, color: Int = Colors.WHITE, u0: Float = 0f, v0: Float = 0f, u1: Float = 1f, v1: Float = 1f) =

@@ -125,7 +125,7 @@ class ChessFront(host: GameFrontHost) : GameFront(host) {
         section(content, "The club room")
         val settingsBlock = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
         content.addView(settingsBlock, LinearLayout.LayoutParams(-1, -2))
-        kit.valueRow(settingsBlock, "Sound", if (settings.sound) "On" else "Off", "Piece moves, captures, the clock") { audioSheet("Chess sound") }
+        kit.valueRow(settingsBlock, "Sound", audioSummary(), "Master, effects, music, announcer, haptics") { audioSheet("Chess sound") }
         kit.valueRow(settingsBlock, "Board & pieces", if (value("view") == "2d") "2D, flat" else "3D, wooden", "How the board is drawn") { piecesSheet() }
         kit.valueRow(settingsBlock, "Rules & controls", "Castling, en passant, promotion", "What the game enforces for you") { host.frontControls() }
         kit.valueRow(settingsBlock, "Screen & access", "Menu size, contrast, motion", "Every OEA game on this phone") { host.frontAccess() }

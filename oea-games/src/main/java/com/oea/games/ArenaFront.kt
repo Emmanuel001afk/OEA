@@ -177,28 +177,52 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
             host.frontFriends()
         }
 
-        section(right, "Shooter settings")
-        val tuning = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
-        right.addView(tuning, LinearLayout.LayoutParams(-1, -2))
-        valueRow(tuning, "Screen orientation", orientationLabel(host.frontOrientationMode()), "Play upright, widescreen, or follow phone rotation", true) {
-            orientationSheet()
-        }
-        valueRow(tuning, "Look & aim", "${sensitivity()} · ADS ${(settings.adsSensitivity * 100).toInt()}%", "Sensitivity, turn limit, invert-Y") {
+        // ------------------------------------------------------- settings deck
+        // The settings are a *display*, not a list: one section per kind of
+        // decision — the hands, the ears, the screen, the match — and each
+        // section states where it currently stands instead of just naming itself.
+        section(right, "Controls")
+        val controls = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+        right.addView(controls, LinearLayout.LayoutParams(-1, -2))
+        valueRow(controls, "Look & aim", "${sensitivity()} · ADS ${(settings.adsSensitivity * 100).toInt()}%", "Sensitivity, turn limit, smoothing, invert-Y", true) {
             aimSheet()
         }
-        valueRow(tuning, "Aim button", if (prefs.getInt(keyAdsHold, 0) == 1) "Hold to aim" else "Tap to toggle", "How ADS behaves on the button") {
+        valueRow(controls, "Button layout", layoutSummary(), "Drag, size and reset every on-screen button") {
+            layoutSheet()
+        }
+        valueRow(controls, "Aim button", if (prefs.getInt(keyAdsHold, 0) == 1) "Hold to aim" else "Tap to toggle", "How ADS behaves on the button") {
             val hold = prefs.getInt(keyAdsHold, 0) == 1
             prefs.edit().putInt(keyAdsHold, if (hold) 0 else 1).apply()
             host.frontRebuild()
         }
-        valueRow(
-            tuning,
-            "Buttons",
-            controlKeys.count { prefs.contains("btn_${it}_x") }.let { if (it == 0) "Factory layout" else "$it moved" },
-            "Drag buttons in-match; reset here"
-        ) { layoutSheet() }
-        valueRow(tuning, "Sound", if (settings.sound) "On" else "Off", "Effects, music, haptics") { audioSheet("Send Off audio") }
-        valueRow(tuning, "Graphics", qualityLabel(), "Quality and frame rate") { graphicsSheet("Send Off graphics") }
+        valueRow(controls, "Screen orientation", orientationLabel(host.frontOrientationMode()), "Upright, widescreen, or follow the phone", true) {
+            orientationSheet()
+        }
+
+        section(right, "Sound")
+        val audio = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+        right.addView(audio, LinearLayout.LayoutParams(-1, -2))
+        valueRow(audio, "Audio channels", audioSummary(), "Master, effects, music, announcer, haptics") { audioSheet("Send Off audio") }
+
+        section(right, "Display")
+        val display = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+        right.addView(display, LinearLayout.LayoutParams(-1, -2))
+        valueRow(display, "Graphics", "${qualityLabel()} · ${if (settings.fpsTarget <= 0) "max Hz" else "${settings.fpsTarget} fps"}", "Quality, frame rate, adaptive resolution") {
+            graphicsSheet("Send Off graphics")
+        }
+        valueRow(display, "HUD & reticle", "${(settings.hudOpacity * 100).toInt()}% HUD · ${settings.crosshairStyle}", "HUD opacity, crosshair shape and colour") {
+            hudSheet()
+        }
+
+        section(right, "Gameplay & access")
+        val gameplay = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+        right.addView(gameplay, LinearLayout.LayoutParams(-1, -2))
+        valueRow(gameplay, "Gameplay", "assist ${(settings.aimAssist * 100).toInt()}% · ${if (settings.autoSprint) "auto sprint" else "manual sprint"}", "Aim assist, sprint, damage numbers, shake") {
+            gameplaySheet()
+        }
+        valueRow(gameplay, "Screen & access", "menu ${(settings.uiScale * 100).toInt()}%", "Menu size, contrast, motion — shared with every OEA game") {
+            host.frontAccess()
+        }
 
         // ------------------------------------------------------------- bar
         deck.bar.addView(
@@ -449,47 +473,183 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
         }
     }
 
-    /** The layout reset: touch layout lives in the game's own save file. */
+    /** Where the button layout stands, in one line, for the settings row. */
+    private fun layoutSummary(): String {
+        val moved = controlKeys.count { key -> prefs.contains("btn_${key}_x") || prefs.contains("btn_p_${key}_x") }
+        val hand = if (prefs.getBoolean("left_handed", false)) "left-handed" else "right-handed"
+        return if (moved == 0) "Factory · $hand" else "$moved moved · $hand"
+    }
+
+    /**
+     * Button layout: the whole page, not one reset button.
+     *
+     * A touch layout is a column of decisions — where each circle sits, how big
+     * it is, which hand it belongs to, whether aim is a tap or a hold. This page
+     * names each one, says what it currently is, and resets position and size
+     * *separately* for each control, because a player who hates one button
+     * should not have to lose the other thirteen.
+     */
     private fun layoutSheet() {
-        kit.sheet("Buttons", "Drag any button in a match to move it. These reset the layout.") { panel, dialog ->
+        kit.sheet("Button layout", "Drag, size and reset each control. The match reads this on its next start.") { panel, dialog ->
             val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
-            val moved = controlKeys.count { prefs.contains("btn_${it}_x") || prefs.contains("btn_p_${it}_x") }
+
+            kit.sectionTitle(body, "Handedness")
+            kit.switchRow(
+                body,
+                "Left-handed layout",
+                "Mirrors the stick and the button cluster; each side keeps its own saved layout",
+                prefs.getBoolean("left_handed", false)
+            ) { left ->
+                prefs.edit().putBoolean("left_handed", left).apply()
+                dialog.dismiss()
+                host.frontToast(if (left) "Left-handed layout" else "Right-handed layout")
+                host.frontRebuild()
+            }
+
+            kit.sectionTitle(body, "Aim button")
             kit.valueRow(
                 body,
-                "Customised buttons",
-                if (moved == 0) "Factory" else "$moved of ${controlKeys.size}",
-                "Position and size, remembered for Send Off alone"
+                "Aim button",
+                if (prefs.getInt(keyAdsHold, 0) == 1) "Hold to aim" else "Tap to toggle",
+                if (prefs.getInt(keyAdsHold, 0) == 1) "Release to leave ADS" else "Tap again to leave ADS"
             ) {
-                val edit = prefs.edit()
-                controlKeys.forEach { key ->
-                    edit.remove("btn_${key}_x")
-                    edit.remove("btn_${key}_y")
-                    edit.remove("btn_${key}_r")
-                    edit.remove("btn_p_${key}_x")
-                    edit.remove("btn_p_${key}_y")
-                    edit.remove("btn_p_${key}_r")
+                val hold = prefs.getInt(keyAdsHold, 0) == 1
+                prefs.edit().putInt(keyAdsHold, if (hold) 0 else 1).apply()
+                dialog.dismiss()
+                host.frontRebuild()
+            }
+
+            kit.sectionTitle(body, "Buttons")
+            for ((key, name, hint) in controlTable()) {
+                val moved = buttonCustomised(key)
+                kit.valueRow(
+                    body,
+                    name,
+                    if (moved) "Moved · reset" else "Factory",
+                    hint
+                ) {
+                    if (moved) {
+                        clearLayout(key)
+                        dialog.dismiss()
+                        host.frontToast("$name restored")
+                        host.frontRebuild()
+                    } else {
+                        host.frontToast("$name is at the factory position — drag it in a match")
+                    }
                 }
-                edit.apply()
+            }
+
+            kit.sectionTitle(body, "Everything")
+            kit.valueRow(body, "Reset all buttons", layoutSummary(), "Position and size, back to the factory layout", true) {
+                controlKeys.forEach { clearLayout(it) }
                 dialog.dismiss()
                 host.frontToast("Controls are back to the factory layout")
                 host.frontRebuild()
             }
-            kit.valueRow(body, "Aim button", if (prefs.getInt(keyAdsHold, 0) == 1) "Hold to aim" else "Tap to toggle", "Back to tap-to-aim") {
-                prefs.edit().putInt(keyAdsHold, 0).apply()
-                dialog.dismiss()
-                host.frontRebuild()
-            }
-            kit.note(body, "The match reads these on its next start, so a layout you like survives every mode and every island.")
-            panel.addView(body)
+            kit.note(body, "The match's own CONTROLS screen lets you drag and resize with a finger on the live layout — this page is the overview and the reset.")
+            panel.addView(kit.boundedScroll(body, 0.68f))
             panel.addView(kit.buttonRow(kit.quietButton("Close") { dialog.dismiss() }))
         }
     }
 
-    /** Every control the match can have its layout saved for. */
-    private val controlKeys = listOf(
-        "fire", "fire2", "ads", "jump", "crouch", "reload", "heal", "pickup",
-        "stun", "frag", "smoke", "mount", "sprint", "prone"
+    /** HUD opacity and the reticle. */
+    private fun hudSheet() {
+        val colors = listOf(
+            "Mint" to 0xFFE9F7EF.toInt(), "White" to 0xFFFFFFFF.toInt(), "Amber" to 0xFFFFC857.toInt(),
+            "Cyan" to 0xFF4FE3E3.toInt(), "Lime" to 0xFFB6FF3D.toInt(), "Magenta" to 0xFFFF4FD8.toInt(),
+        )
+        kit.sheet("HUD & reticle", "How much of the screen the game draws on, and what you aim with.") { panel, dialog ->
+            val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+            kit.slider(body, "HUD opacity", settings.hudOpacity, 0.4f, 1f, { "${(it * 100).toInt()}%" }) { settings.hudOpacity = it }
+            kit.slider(body, "Button opacity", settings.buttonOpacity, 0.35f, 1f, { "${(it * 100).toInt()}%" }) { settings.buttonOpacity = it }
+
+            kit.sectionTitle(body, "Crosshair")
+            val styles = listOf("cross", "dot", "circle", "t")
+            val styleLabels = listOf("Cross", "Dot", "Circle", "T")
+            val styleIndex = styles.indexOf(settings.crosshairStyle).coerceAtLeast(0)
+            kit.chipRow(body, styleLabels, styleIndex, { pick -> settings.crosshairStyle = styles[pick]; host.frontRebuild() }, palette.signal)
+
+            kit.sectionTitle(body, "Crosshair colour")
+            val colorIndex = colors.indexOfFirst { it.second == settings.crosshairColor }.coerceAtLeast(0)
+            val strip = LinearLayout(kit.context).apply { orientation = LinearLayout.HORIZONTAL }
+            colors.forEachIndexed { index, (name, color) ->
+                strip.addView(
+                    kit.text(if (index == colorIndex) "● $name" else "○ $name", 12f, if (index == colorIndex) color else palette.textSecondary, GameType.medium).apply {
+                        setPadding(kit.dp(12), kit.dp(8), kit.dp(12), kit.dp(8))
+                        background = kit.ripple(
+                            kit.rounded(
+                                if (index == colorIndex) GameColors.alpha(color, 0x22) else palette.card,
+                                12,
+                                if (index == colorIndex) color else palette.stroke,
+                                1
+                            ),
+                            12
+                        )
+                        isClickable = true
+                        setOnClickListener { settings.crosshairColor = color; host.frontRebuild() }
+                    },
+                    LinearLayout.LayoutParams(-2, -2).apply { rightMargin = kit.dp(7) }
+                )
+            }
+            body.addView(kit.hscrollRow(strip), LinearLayout.LayoutParams(-1, -2))
+
+            kit.note(body, "The reticle keeps its own contrast at every HUD opacity — fading the map must not fade the thing you aim with.")
+            panel.addView(kit.boundedScroll(body, 0.66f))
+            panel.addView(kit.buttonRow(kit.primaryButton("Done") { dialog.dismiss(); host.frontRebuild() }))
+        }
+    }
+
+    /** Aim assist, sprint and readable feedback. */
+    private fun gameplaySheet() {
+        kit.sheet("Gameplay", "How the match feels in the hands — none of this changes who wins.") { panel, dialog ->
+            val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
+            kit.slider(body, "Aim assist", settings.aimAssist, 0f, 1f, { if (it <= 0.02f) "Off" else "${(it * 100).toInt()}%" }) { settings.aimAssist = it }
+            kit.note(body, "A gentle pull toward a body already under the reticle. It never invents a hit and bots ignore it.")
+            kit.switchRow(body, "Auto sprint", "Push the stick to its edge to run", settings.autoSprint) { settings.autoSprint = it }
+            kit.switchRow(body, "Tap to fire", "A tap fires a burst instead of holding the trigger", settings.tapFire) { settings.tapFire = it }
+            kit.switchRow(body, "Damage numbers", "The number over a body when a shot lands", settings.damageNumbers) { settings.damageNumbers = it }
+            kit.switchRow(body, "Camera shake", "Explosions and hard landings move the view", settings.cameraShake) { settings.cameraShake = it }
+            kit.switchRow(body, "Reduce motion", "Calmer HUD pulses and transitions", settings.reducedMotion) { settings.reducedMotion = it }
+            panel.addView(kit.boundedScroll(body, 0.68f))
+            panel.addView(kit.buttonRow(kit.primaryButton("Done") { dialog.dismiss(); host.frontRebuild() }))
+        }
+    }
+
+    /** Every control the match can have a layout saved for, with a display name. */
+    private fun controlTable(): List<Triple<String, String, String>> = listOf(
+        Triple("fire", "Fire", "Right thumb"),
+        Triple("fire2", "Left fire", "Left thumb"),
+        Triple("ads", "Aim", "Right"),
+        Triple("jump", "Jump", "Right edge"),
+        Triple("crouch", "Crouch / prone", "Bottom right"),
+        Triple("reload", "Reload", "Bottom right"),
+        Triple("heal", "Medkit", "Bottom centre"),
+        Triple("pickup", "Pick up", "Centre"),
+        Triple("stun", "Stun grenade", "Bottom left"),
+        Triple("frag", "Frag grenade", "Bottom left"),
+        Triple("smoke", "Smoke grenade", "Bottom left"),
+        Triple("mount", "Mount vehicle", "Bottom left"),
+        Triple("sprint", "Sprint", "Right edge"),
+        Triple("prone", "Prone", "Bottom right"),
     )
+
+    private fun buttonCustomised(key: String): Boolean =
+        prefs.contains("btn_${key}_x") || prefs.contains("btn_p_${key}_x") ||
+            prefs.contains("btn_l_${key}_x") || prefs.contains("btn_pl_${key}_x")
+
+    /** Clears one control's saved position and size in both orientations and both hands. */
+    private fun clearLayout(key: String) {
+        val edit = prefs.edit()
+        for (prefix in listOf("btn_", "btn_p_", "btn_l_", "btn_pl_")) {
+            edit.remove("${prefix}${key}_x")
+            edit.remove("${prefix}${key}_y")
+            edit.remove("${prefix}${key}_r")
+        }
+        edit.apply()
+    }
+
+    /** Every control the match can have its layout saved for — from the one table. */
+    private val controlKeys: List<String> get() = controlTable().map { it.first }
 
     private fun qualityLabel(): String = when (settings.quality) {
         "low" -> "Low"

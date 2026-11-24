@@ -149,6 +149,11 @@ class OeaArena : OeaGame() {
     private val ctrlDone = VirtualButton(0.74f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "DONE", color = 0xFF66BB6A.toInt())
     private val ctrlReset = VirtualButton(0.58f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "RESET", color = 0xFFFF7043.toInt())
     private val ctrlAds = VirtualButton(0.42f, 0.5f, offsetYDp = -150f, radiusDp = 30f, label = "ADS · TAP", color = 0xFFFFB300.toInt())
+    /** Layout editor: shrink / grow the selected button. Sits a row above the rest. */
+    private val ctrlSmaller = VirtualButton(0.30f, 0.5f, offsetYDp = -204f, radiusDp = 26f, label = "−", color = 0xFF42A5F5.toInt())
+    private val ctrlBigger = VirtualButton(0.42f, 0.5f, offsetYDp = -204f, radiusDp = 26f, label = "+", color = 0xFF42A5F5.toInt())
+    /** Which control the size keys act on; set by tapping a button in the editor. */
+    private var selectedKey: String? = null
     /** Every control button, in one place — the layout screen saves them all. */
     private val controlButtons: List<Pair<VirtualButton, String>> get() = listOf(
         fire to "fire", fire2 to "fire2", adsBtn to "ads", jumpBtn to "jump", crouchBtn to "crouch",
@@ -192,23 +197,44 @@ class OeaArena : OeaGame() {
     )
     private var appliedPortraitLayout: Boolean? = null
 
-    private fun layoutPrefix(portrait: Boolean = appliedPortraitLayout == true): String =
-        if (portrait) "btn_p_" else "btn_"
+    /** HUD & reticle settings, cached so the draw path never touches prefs. */
+    private var crosshairStyle = "cross"
+    private var crosshairColor = 0xFFE9F7EF.toInt()
+    private var showDamageNumbers = true
+    private var tapFireMode = false
+    private var autoSprintOn = false
+    private var shakeEnabled = true
+    private var hudAlpha = 1f
+
+    /**
+     * Save-key prefix for a layout. A left-handed player gets a *separate* set
+     * of keys, so flipping the setting restores the arrangement they had on
+     * each side instead of overwriting one with the other.
+     */
+    private fun layoutPrefix(portrait: Boolean = appliedPortraitLayout == true): String {
+        val hand = if (ctx.storage.getBoolean("left_handed", false)) "l_" else ""
+        return if (portrait) "btn_p${hand}_" else "btn_${hand}"
+    }
 
     private fun applyOrientationControls(portrait: Boolean) {
         if (appliedPortraitLayout == portrait) return
         appliedPortraitLayout = portrait
         val prefix = layoutPrefix(portrait)
+        val leftHanded = ctx.storage.getBoolean("left_handed", false)
         val defaults = if (portrait) btnPortraitDefaults else btnDefaults
         val radii = if (portrait) btnPortraitRadius else btnDefaultRadius
         for ((b, key) in controlButtons) {
             val d = defaults[key]
-            val defX = d?.get(0) ?: b.anchorX
+            var defX = d?.get(0) ?: b.anchorX
             val defY = d?.get(1) ?: b.anchorY
+            // Mirroring the factory X is what makes a left-handed default layout
+            // real rather than a mirror of whatever the player dragged.
+            if (leftHanded) defX = 1f - defX
             val defR = radii[key] ?: 26f
             b.anchorX = ctx.storage.getFloat("${prefix}${key}_x", defX)
             b.anchorY = ctx.storage.getFloat("${prefix}${key}_y", defY)
             b.radiusDp = ctx.storage.getFloat("${prefix}${key}_r", defR)
+            b.opacity = ctx.settings.buttonOpacity
         }
         if (portrait) {
             joystick.region = floatArrayOf(0f, 0.52f, 0.48f, 0.89f)
@@ -225,6 +251,37 @@ class OeaArena : OeaGame() {
             look.region = floatArrayOf(0.42f, 0.12f, 1f, 1f)
             ctrlAds.anchorX = 0.42f; ctrlReset.anchorX = 0.58f; ctrlDone.anchorX = 0.74f
         }
+        // Left-handed: the movement stick and the look area swap sides. The
+        // stick keeps its own home point mirrored, so the thumb lands where the
+        // player expects without relearning the screen.
+        if (leftHanded) {
+            val w = if (portrait) 0.48f else 0.42f
+            joystick.region = floatArrayOf(1f - w, joystick.region[1], 1f, joystick.region[3])
+            joystick.homeX = 1f - joystick.homeX
+            // The look area keeps the rest of the screen; the stick owns the
+            // slice it now sits in, so a drag there turns the body, not the view.
+            look.region = floatArrayOf(0f, look.region[1], 1f - (1f - joystick.region[0]), look.region[3])
+        }
+    }
+
+    /**
+     * Everything the HUD and reticle read, re-applied whenever the pause menu
+     * changes one — so a setting is visible on the next frame rather than at
+     * the next match.
+     */
+    private fun applyDisplaySettings() {
+        for ((b, _) in controlButtons) b.opacity = ctx.settings.buttonOpacity
+        crosshairStyle = ctx.settings.crosshairStyle
+        crosshairColor = ctx.settings.crosshairColor
+        showDamageNumbers = ctx.settings.damageNumbers
+        tapFireMode = ctx.settings.tapFire
+        autoSprintOn = ctx.settings.autoSprint
+        shakeEnabled = ctx.settings.cameraShake
+        hudAlpha = ctx.settings.hudOpacity
+        // A handedness flip changes which save keys the layout reads.
+        appliedPortraitLayout = null
+        val w = ctx.graphics.width.toFloat(); val h = ctx.graphics.height.toFloat()
+        if (w > 0f && h > 0f) applyOrientationControls(w < h)
     }
 
     private fun saveButtonLayout() {
@@ -237,19 +294,63 @@ class OeaArena : OeaGame() {
         ctx.storage.putInt("ads_hold", if (adsHoldMode) 1 else 0)
     }
 
-    private fun resetButtonLayout() {
+    /** Factory layout for one button, honouring the current handedness. */
+    private fun buttonDefault(key: String): FloatArray? {
         val portrait = appliedPortraitLayout == true
-        val defaults = if (portrait) btnPortraitDefaults else btnDefaults
-        val radii = if (portrait) btnPortraitRadius else btnDefaultRadius
+        val d = (if (portrait) btnPortraitDefaults else btnDefaults)[key] ?: return null
+        val leftHanded = ctx.storage.getBoolean("left_handed", false)
+        return if (leftHanded) floatArrayOf(1f - d[0], d[1]) else d
+    }
+
+    private fun buttonDefaultRadius(key: String): Float {
+        val portrait = appliedPortraitLayout == true
+        return (if (portrait) btnPortraitRadius else btnDefaultRadius)[key] ?: 28f
+    }
+
+    private fun resetButtonLayout() {
         for ((b, key) in controlButtons) {
-            val d = defaults[key]
-            if (d != null) {
-                b.anchorX = d[0]; b.anchorY = d[1]
-            }
-            b.radiusDp = radii[key] ?: 28f
+            val d = buttonDefault(key)
+            if (d != null) { b.anchorX = d[0]; b.anchorY = d[1] }
+            b.radiusDp = buttonDefaultRadius(key)
         }
         saveButtonLayout()
     }
+
+    /** Reset one control only — the row-by-row escape hatch when one button annoys you. */
+    private fun resetOneButton(key: String) {
+        val pair = controlButtons.firstOrNull { it.second == key } ?: return
+        val d = buttonDefault(key)
+        if (d != null) { pair.first.anchorX = d[0]; pair.first.anchorY = d[1] }
+        pair.first.radiusDp = buttonDefaultRadius(key)
+        saveButtonLayout()
+    }
+
+    /** True when this control's position or size differs from the factory layout. */
+    private fun buttonMoved(key: String): Boolean {
+        val pair = controlButtons.firstOrNull { it.second == key } ?: return false
+        val d = buttonDefault(key) ?: return false
+        return kotlin.math.abs(pair.first.anchorX - d[0]) > 0.004f ||
+            kotlin.math.abs(pair.first.anchorY - d[1]) > 0.004f ||
+            kotlin.math.abs(pair.first.radiusDp - buttonDefaultRadius(key)) > 0.6f
+    }
+
+    /** Every control, with its display name and factory position, for the layout page. */
+    private fun controlTable(): List<Triple<String, String, String>> = listOf(
+        Triple("fire", "Fire", "Right thumb"),
+        Triple("fire2", "Left fire", "Left thumb"),
+        Triple("ads", "Aim", "Right"),
+        Triple("jump", "Jump", "Right edge"),
+        Triple("crouch", "Crouch / prone", "Bottom right"),
+        Triple("reload", "Reload", "Bottom right"),
+        Triple("heal", "Medkit", "Bottom centre"),
+        Triple("pickup", "Pick up", "Centre"),
+        Triple("stun", "Stun grenade", "Bottom left"),
+        Triple("frag", "Frag grenade", "Bottom left"),
+        Triple("smoke", "Smoke grenade", "Bottom left"),
+        Triple("mount", "Mount vehicle", "Bottom left"),
+        Triple("sprint", "Sprint", "Right edge"),
+        Triple("prone", "Prone", "Bottom right"),
+    )
     private var lookYaw = 0f
     private var lookPitch = 0f
     private var adsOn = false
@@ -620,6 +721,9 @@ class OeaArena : OeaGame() {
             b.radiusDp = ctx.storage.getFloat("btn_${key}_r", b.radiusDp)
         }
         adsHoldMode = ctx.storage.getInt("ads_hold", 0) == 1
+        // Gameplay and accessibility preferences the match honours every frame.
+        sim.aimAssist = ctx.settings.aimAssist
+        applyDisplaySettings()
         xpTotal = ctx.storage.getInt("xp")
         levelBefore = levelFor(xpTotal)
         levelNow = levelBefore
@@ -703,7 +807,7 @@ class OeaArena : OeaGame() {
             }
         }
         override fun onRoundOver(winTeam: Int, round: Int) {
-            ctx.audio.play(sWin, 0.7f)
+            ctx.audio.playVoice(sWin, 1f)
             net?.broadcast(EV_ROUND_OVER) { it.u8(winTeam).u8(round) }
         }
         override fun onRoundStart(round: Int) {
@@ -848,7 +952,9 @@ class OeaArena : OeaGame() {
         if (me != null) aimAngles(me, aim) else { aim[0] = lookYaw; aim[1] = lookPitch }
         inp.yaw = aim[0]
         inp.pitch = aim[1]
-        inp.fire = fire.pressed || fire2.pressed
+        // Fire: hold for full auto, or (tap-to-fire) one pulse per tap. The
+        // pulse is a single frame of `fire`, so a tap is a burst, not a stream.
+        inp.fire = if (tapFireMode) (fire.justPressed || fire2.justPressed) else (fire.pressed || fire2.pressed)
         inp.ads = adsOn || (adsHoldMode && adsBtn.pressed)
         inp.jump = jumpLatch
         inp.crouch = crouchOn
@@ -863,7 +969,8 @@ class OeaArena : OeaGame() {
         inp.stun = grenadeLatch == 2
         inp.cook = cookAmount
         inp.prone = proneOn || proneBtn.pressed
-        inp.sprint = sprintBtn.pressed
+        // Auto sprint: pushing the stick past 86% runs, without a button.
+        inp.sprint = sprintBtn.pressed || (autoSprintOn && joystick.magnitude > 0.86f)
         inp.reloadAll = pendingReloadAll
         pendingReloadAll = false
         inp.buySlot = pendingBuySlot; inp.buyMedkits = pendingBuyMedkits; inp.buyFrags = pendingBuyFrags
@@ -1189,7 +1296,7 @@ class OeaArena : OeaGame() {
     private fun onLocalDeath() {
         val me = local ?: return
         if (!isAuthority) me.alive = false
-        ctx.audio.play(sLose)
+        ctx.audio.playVoice(sLose, 1f)
         ctx.haptics.heavy()
         spectate = -1
         respawnCountdown = if (sim.respawnMode) (if (sim.gunGame) 1.5f else 4f) else -1f
@@ -1202,7 +1309,7 @@ class OeaArena : OeaGame() {
         matchOver = true
         winnerName = name
         overAt = System.currentTimeMillis()
-        if (winnerId == localId) { ctx.audio.play(sWin); local?.place = 1 }
+        if (winnerId == localId) { ctx.audio.playVoice(sWin); local?.place = 1 }
         ctx.storage.putInt("matches", ctx.storage.getInt("matches") + 1)
         if (winnerId == localId) ctx.storage.putInt("wins", ctx.storage.getInt("wins") + 1)
         val survivalWave = if (sim.survival) waveNumber else 0
@@ -1271,25 +1378,49 @@ class OeaArena : OeaGame() {
         for ((b, _) in controlButtons) {
             b.enabled = alive || controlsOpen // the layout screen stays draggable while dead
             b.paused = controlsPaused && !controlsOpen
+            b.editing = controlsOpen
+            if (controlsOpen) b.progress = -1f
             b.update(ctx.input, w, h, d, sl, sr)
         }
         // Controls screen: screen buttons update first (justPressed), then the
         // drag handling reads the game buttons' per-frame drag delta (px).
-        for (b in listOf(ctrlDone, ctrlReset, ctrlAds)) {
+        for (b in listOf(ctrlDone, ctrlReset, ctrlAds, ctrlSmaller, ctrlBigger)) {
             b.paused = !controlsOpen
             b.visible = controlsOpen
             b.update(ctx.input, w, h, d, sl, sr)
         }
         if (controlsOpen) {
-            for ((b, _) in controlButtons) {
+            for (b in listOf(ctrlSmaller, ctrlBigger)) b.editing = false
+            for ((b, key) in controlButtons) {
+                if (b.justPressed) selectedKey = key
                 if (b.dragDx != 0f || b.dragDy != 0f) {
                     b.anchorX = (b.anchorX + b.dragDx / w).coerceIn(0.04f, 0.96f)
                     b.anchorY = (b.anchorY + b.dragDy / h).coerceIn(0.04f, 0.96f)
                     saveButtonLayout()
                 }
             }
-            if (ctrlDone.justPressed) controlsOpen = false
-            if (ctrlReset.justPressed) resetButtonLayout()
+            // Size: the two keys resize whichever control was last tapped, and a
+            // second tap on the same control steps it too, so one thumb can do it.
+            val sizeStep = if (ctrlSmaller.pressed || ctrlSmaller.justPressed) -1.5f else if (ctrlBigger.pressed || ctrlBigger.justPressed) 1.5f else 0f
+            if (sizeStep != 0f) {
+                selectedKey?.let { key ->
+                    controlButtons.firstOrNull { it.second == key }?.let { (button, _) ->
+                        button.radiusDp = (button.radiusDp + sizeStep).coerceIn(16f, 72f)
+                        saveButtonLayout()
+                        ctx.haptics.tick()
+                    }
+                }
+            }
+            if (ctrlDone.justPressed) {
+                controlsOpen = false
+                selectedKey = null
+                saveButtonLayout()
+                ctx.ui.toast("Layout saved")
+            }
+            if (ctrlReset.justPressed) {
+                resetButtonLayout()
+                selectedKey = null
+            }
             if (ctrlAds.justPressed) {
                 adsHoldMode = !adsHoldMode
                 ctrlAds.label = if (adsHoldMode) "ADS · HOLD" else "ADS · TAP"
@@ -1596,7 +1727,7 @@ class OeaArena : OeaGame() {
         }
         camPos.set(camPosSm.x, camPosSm.y, camPosSm.z)
         // Explosions near the player kick the view — the world wobbles, then settles.
-        if (shake > 0f) {
+        if (shake > 0f && shakeEnabled) {
             val s = shake * 0.14f
             camPos.x += (kotlin.random.Random.nextFloat() - 0.5f) * 2f * s
             camPos.y += (kotlin.random.Random.nextFloat() - 0.5f) * 2f * s
@@ -1662,65 +1793,61 @@ class OeaArena : OeaGame() {
         return true
     }
 
+    /**
+     * The pause screen: a grouped hub, not a list of eleven switches.
+     *
+     * A player pauses mid-fight, so the top of the page is the thing they came
+     * for — Resume, Pack, Studio — and everything that *changes the game* sits
+     * below it behind a named section: Controls, Audio, Display, Gameplay. Each
+     * of those opens a page of its own, so no screen is ever a wall of rows and
+     * every value is visible where it is changed.
+     */
     private fun openPauseMenu() {
-        val sensLabel = String.format(java.util.Locale.US, "Look sensitivity · %.1f×", ctx.settings.lookSensitivity)
-        val adsLabel = String.format(java.util.Locale.US, "ADS sensitivity · %.0f%%", adsSens * 100f)
-        val turnLabel = if (turnLimit <= 0f) "Turn limit · Off" else String.format(java.util.Locale.US, "Turn limit · %.0f°/s", ctx.settings.turnSpeedLimit)
-        val smoothLabel = String.format(java.util.Locale.US, "Look smoothing · %.0f%%", ctx.settings.lookSmoothing / 0.7f * 100f)
+        val settings = ctx.settings
         val items = listOf(
-            MenuItem("resume", "Resume"),
-            MenuItem("sens", sensLabel),
-            MenuItem("ads", adsLabel),
-            MenuItem("turn", turnLabel),
-            MenuItem("smooth", smoothLabel),
-            MenuItem("invert", "Invert look · " + if (invertY) "On" else "Off"),
-            MenuItem("studio", "Character studio"),
-            MenuItem("pack", "Pack · weapons & throwables"),
-            MenuItem("controls", "Controls · layout & buttons"),
-            MenuItem("info", "Match & controls"),
+            MenuItem.header("Match"),
+            MenuItem("resume", "Resume", "Back to the fight"),
+            MenuItem("pack", "Pack · weapons & throwables", "Magazines, medkits, grenades, reload all"),
+            MenuItem("studio", "Character studio", "Outfit, build and face on the live model"),
+            MenuItem.header("Controls"),
+            MenuItem.choice("aimPage", "Look & aim", aimSummary(), "Sensitivity, ADS, turn limit, smoothing, invert"),
+            MenuItem.choice("controls", "Button layout", layoutSummary(), "Drag and resize every button on screen"),
+            MenuItem.toggle("handed", "Left-handed layout", settings.leftHanded, "Stick on the right thumb, buttons on the left"),
+            MenuItem.toggle("adshold", "Hold to aim", adsHoldMode, "Off: tap the aim button to toggle"),
+            MenuItem.header("Audio"),
+            MenuItem.choice("audioPage", "Sound", audioSummary(), "Master, effects, music, announcer, haptics"),
+            MenuItem.header("Display"),
+            MenuItem.choice("displayPage", "Display", displaySummary(), "Quality, frame rate, HUD, reticle"),
+            MenuItem.header("Gameplay"),
+            MenuItem.choice("playPage", "Gameplay", playSummary(), "Aim assist, sprint, fire mode, feedback"),
+            MenuItem.header("This match"),
+            MenuItem("info", "Match & controls", modeBlurb() + clockLine()),
             MenuItem("exit", if (net != null) "Leave match" else "Quit match", destructive = true),
         )
         ctx.ui.menu("Send Off · Level $levelNow", if (net == null) "The match keeps running" else null, items) { id ->
             when (id) {
-                "sens" -> {
-                    val steps = floatArrayOf(0.4f, 0.6f, 0.8f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f)
-                    val idx = steps.indexOfFirst { it >= ctx.settings.lookSensitivity - 0.05f }.coerceAtLeast(0)
-                    ctx.settings.lookSensitivity = steps[(idx + 1) % steps.size]
+                "aimPage" -> openAimPage()
+                "controls" -> openLayoutPage()
+                "handed" -> {
+                    settings.leftHanded = !settings.leftHanded
+                    ctx.storage.putBoolean("left_handed", settings.leftHanded)
+                    dropHeldInput()
+                    applyDisplaySettings()
+                    ctx.ui.toast(if (settings.leftHanded) "Left-handed layout" else "Right-handed layout")
                     openPauseMenu()
                 }
-                "ads" -> {
-                    val steps = floatArrayOf(0.4f, 0.55f, 0.7f, 0.85f, 1f, 1.15f, 1.35f)
-                    val idx = steps.indexOfFirst { it >= adsSens - 0.03f }.coerceAtLeast(0)
-                    adsSens = steps[(idx + 1) % steps.size]
-                    ctx.settings.adsSensitivity = adsSens
+                "adshold" -> {
+                    adsHoldMode = !adsHoldMode
+                    saveButtonLayout()
                     openPauseMenu()
                 }
-                "turn" -> {
-                    val steps = floatArrayOf(0f, 90f, 140f, 180f, 240f, 320f)
-                    val idx = steps.indexOfFirst { it >= ctx.settings.turnSpeedLimit - 1f }.coerceAtLeast(0)
-                    ctx.settings.turnSpeedLimit = steps[(idx + 1) % steps.size]
-                    turnLimit = ctx.settings.turnSpeedLimit * MathX.DEG_TO_RAD
-                    openPauseMenu()
-                }
-                "smooth" -> {
-                    val steps = floatArrayOf(0f, 0.2f, 0.35f, 0.5f, 0.6f)
-                    val idx = steps.indexOfFirst { it >= ctx.settings.lookSmoothing - 0.02f }.coerceAtLeast(0)
-                    ctx.settings.lookSmoothing = steps[(idx + 1) % steps.size]
-                    look.smoothing = ctx.settings.lookSmoothing
-                    openPauseMenu()
-                }
-                "invert" -> {
-                    invertY = !invertY
-                    ctx.settings.invertLookY = invertY
-                    openPauseMenu()
-                }
+                "audioPage" -> openAudioPage()
+                "displayPage" -> openDisplayPage()
+                "playPage" -> openGameplayPage()
                 "studio" -> studio.open = true
                 "pack" -> openPackMenu()
-                "controls" -> {
-                    ctrlAds.label = if (adsHoldMode) "ADS · HOLD" else "ADS · TAP"
-                    controlsOpen = true
-                }
                 "info" -> ctx.ui.menu("Match & controls", modeBlurb() + clockLine(), listOf(MenuItem("back", "Back"))) { openPauseMenu() }
+                "resume" -> Unit
                 "exit" -> {
                     ctx.storage.putInt("xp", xpTotal)
                     ctx.ui.exit(GameResult("Left Send Off", local?.kills?.toLong() ?: 0))
@@ -1728,6 +1855,355 @@ class OeaArena : OeaGame() {
             }
         }
     }
+
+    /** One-line summaries so the hub tells you where every setting currently stands. */
+    private fun aimSummary(): String = String.format(
+        java.util.Locale.US, "%.1f× · ADS %.0f%% · %s",
+        ctx.settings.lookSensitivity, adsSens * 100f,
+        if (turnLimit <= 0f) "no turn cap" else "%.0f°/s cap".format(ctx.settings.turnSpeedLimit)
+    )
+
+    private fun layoutSummary(): String {
+        val moved = controlTable().count { buttonMoved(it.first) }
+        return if (moved == 0) "Factory layout" else "$moved of ${controlTable().size} moved"
+    }
+
+    private fun audioSummary(): String {
+        val s = ctx.settings
+        if (!s.sound) return "Muted"
+        val on = listOfNotNull(
+            if (s.sfx) "effects" else null,
+            if (s.music) "music" else null,
+            if (s.voice) "announcer" else null,
+            if (s.haptics) "haptics" else null,
+        )
+        return "${(s.volume * 100).toInt()}% · " + (if (on.isEmpty()) "all channels off" else on.joinToString(", "))
+    }
+
+    private fun displaySummary(): String {
+        val q = when (ctx.settings.quality) { "low" -> "Low"; "medium" -> "Medium"; "high" -> "High"; "ultra" -> "Ultra"; else -> "Auto" }
+        val fps = if (ctx.settings.fpsTarget <= 0) "max Hz" else "${ctx.settings.fpsTarget} fps"
+        return "$q · $fps · HUD ${(ctx.settings.hudOpacity * 100).toInt()}%"
+    }
+
+    private fun playSummary(): String {
+        val s = ctx.settings
+        return "assist ${(s.aimAssist * 100).toInt()}% · " + (if (s.autoSprint) "auto sprint" else "manual sprint") +
+            " · " + (if (s.damageNumbers) "numbers on" else "numbers off")
+    }
+
+    /** Drops any held button/finger state so a layout flip cannot leave a button stuck down. */
+    private fun dropHeldInput() {
+        adsOn = false; crouchOn = false; proneOn = false
+        jumpLatch = false; reloadLatch = false; mountLatch = false
+        grenadeLatch = -1; slotLatch = -1
+    }
+
+    /** Look & aim: the full camera page, every value live at once. */
+    private fun openAimPage() {
+        val settings = ctx.settings
+        val items = listOf(
+            MenuItem.header("Sensitivity"),
+            MenuItem.slider("look", "Look sensitivity", String.format(java.util.Locale.US, "%.2f×", settings.lookSensitivity), pct(settings.lookSensitivity, 0.2f, 3f), "How far one finger-drag turns the camera"),
+            MenuItem.slider("adsSens", "ADS sensitivity", "${(settings.adsSensitivity * 100).toInt()}%", pct(settings.adsSensitivity, 0.3f, 1.5f), "Multiplier while scoped — under 100% is finer"),
+            MenuItem.header("Turn & smoothing"),
+            MenuItem.choice("turnSpeed", "Turn speed limit", if (settings.turnSpeedLimit <= 0f) "Off" else "${settings.turnSpeedLimit.toInt()}°/s", "Caps how fast the view can spin in a second"),
+            MenuItem.choice("smoothing", "Look smoothing", "${(settings.lookSmoothing / 0.7f * 100).toInt()}%", "Eases the finger's jitter before it turns the camera"),
+            MenuItem.header("Orientation"),
+            MenuItem.toggle("invert", "Invert vertical look", invertY, "Drag up to look down — flight style"),
+            MenuItem("back", "Back"),
+        )
+        ctx.ui.menu("Look & aim", "Applied live — the camera changes as you set it", items) { id ->
+            when (id) {
+                "look" -> {
+                    val labels = LOOK_STEPS.map { String.format(java.util.Locale.US, "%.2f×", it) }
+                    val idx = LOOK_STEPS.indexOfFirst { it >= settings.lookSensitivity - 0.01f }.coerceAtLeast(0)
+                    chooseStep("Look sensitivity", labels, idx, "How far one finger-drag turns the camera") { pick ->
+                        settings.lookSensitivity = LOOK_STEPS[pick]; openAimPage()
+                    }
+                }
+                "adsSens" -> {
+                    val labels = ADS_STEPS.map { "${(it * 100).toInt()}%" }
+                    val idx = ADS_STEPS.indexOfFirst { it >= settings.adsSensitivity - 0.01f }.coerceAtLeast(0)
+                    chooseStep("ADS sensitivity", labels, idx, "A multiplier applied only while scoped") { pick ->
+                        settings.adsSensitivity = ADS_STEPS[pick]; adsSens = ADS_STEPS[pick]; openAimPage()
+                    }
+                }
+                "turnSpeed" -> {
+                    val steps = floatArrayOf(0f, 90f, 140f, 180f, 240f, 320f)
+                    val labels = steps.map { if (it <= 0f) "Off" else "${it.toInt()}°/s" }
+                    val idx = steps.indexOfFirst { it >= settings.turnSpeedLimit - 1f }.coerceAtLeast(0)
+                    chooseStep("Turn speed limit", labels, idx, "Off removes the cap entirely") { pick ->
+                        settings.turnSpeedLimit = steps[pick]
+                        turnLimit = steps[pick] * MathX.DEG_TO_RAD
+                        openAimPage()
+                    }
+                }
+                "smoothing" -> {
+                    val steps = floatArrayOf(0f, 0.2f, 0.35f, 0.5f, 0.6f)
+                    val labels = steps.map { "${(it / 0.7f * 100).toInt()}%" }
+                    val idx = steps.indexOfFirst { it >= settings.lookSmoothing - 0.02f }.coerceAtLeast(0)
+                    chooseStep("Look smoothing", labels, idx, "0% is raw finger tracking; higher is silkier") { pick ->
+                        settings.lookSmoothing = steps[pick]
+                        look.smoothing = steps[pick]
+                        openAimPage()
+                    }
+                }
+                "invert" -> {
+                    invertY = !invertY
+                    settings.invertLookY = invertY
+                    openAimPage()
+                }
+                else -> openPauseMenu()
+            }
+        }
+    }
+
+    /** Audio: every channel, with the master and the per-channel levels separate. */
+    private fun openAudioPage() {
+        val s = ctx.settings
+        val items = listOf(
+            MenuItem.header("Master"),
+            MenuItem.toggle("sound", "Sound", s.sound, "The master switch — off silences everything, mix kept"),
+            MenuItem.slider("volume", "Master volume", "${(s.volume * 100).toInt()}%", (s.volume * 100).toInt(), "Everything the game plays"),
+            MenuItem.header("Channels"),
+            MenuItem.toggle("sfx", "Sound effects", s.sfx, "Weapons, footsteps, impacts, pickups"),
+            MenuItem.slider("sfxVol", "Effects level", "${(s.sfxVolume * 100).toInt()}%", (s.sfxVolume * 100).toInt(), "Independent of the master so a loud fight can be tamed"),
+            MenuItem.toggle("music", "Music", s.music, "The soundtrack"),
+            MenuItem.slider("musicVol", "Music level", "${(s.musicVolume * 100).toInt()}%", (s.musicVolume * 100).toInt(), "Sits under the effects by default"),
+            MenuItem.toggle("voice", "Announcer", s.voice, "Round calls, kill callouts, match start"),
+            MenuItem.slider("voiceVol", "Announcer level", "${(s.voiceVolume * 100).toInt()}%", (s.voiceVolume * 100).toInt(), ""),
+            MenuItem.toggle("duck", "Duck music for the announcer", s.duckMusicForVoice, "The soundtrack steps back while a callout plays"),
+            MenuItem.header("Touch"),
+            MenuItem.toggle("haptics", "Haptics", s.haptics, "A tap for hits, jumps and moves"),
+            MenuItem.slider("hapticStrength", "Haptic strength", "${(s.hapticStrength * 100).toInt()}%", ((s.hapticStrength - 0.25f) / 0.75f * 100f).toInt(), "How hard the phone buzzes"),
+            MenuItem("back", "Back"),
+        )
+        ctx.ui.menu("Sound", "Channels are separate: quiet music under full effects is fine", items) { id ->
+            when (id) {
+                "sound" -> { s.sound = !s.sound; if (!s.sound) ctx.audio.stopMusic(); openAudioPage() }
+                "volume" -> sliderPage("Master volume", s.volume, { s.volume = it }, ::openAudioPage)
+                "sfx" -> { s.sfx = !s.sfx; openAudioPage() }
+                "sfxVol" -> sliderPage("Effects level", s.sfxVolume, { s.sfxVolume = it; playTestShot() }, ::openAudioPage)
+                "music" -> {
+                    s.music = !s.music
+                    if (s.music) resumeMusic() else ctx.audio.stopMusic()
+                    openAudioPage()
+                }
+                "musicVol" -> sliderPage("Music level", s.musicVolume, { s.musicVolume = it }, ::openAudioPage)
+                "voice" -> { s.voice = !s.voice; openAudioPage() }
+                "voiceVol" -> sliderPage("Announcer level", s.voiceVolume, { s.voiceVolume = it }, ::openAudioPage)
+                "duck" -> { s.duckMusicForVoice = !s.duckMusicForVoice; openAudioPage() }
+                "haptics" -> { s.haptics = !s.haptics; openAudioPage() }
+                "hapticStrength" -> sliderPage("Haptic strength", (s.hapticStrength - 0.25f) / 0.75f, {
+                    s.hapticStrength = 0.25f + it * 0.75f
+                    ctx.haptics.click()
+                }, ::openAudioPage)
+                else -> openPauseMenu()
+            }
+        }
+    }
+
+    /** Display: quality, frame rate and the HUD/reticle the player reads every second. */
+    private fun openDisplayPage() {
+        val s = ctx.settings
+        val device = com.oea.engine.OeaEngine.device
+        val qualities = listOf("auto", "low", "medium", "high", "ultra")
+        val qLabels = listOf("Auto (${device.recommendedTier.label})", "Low", "Medium", "High", "Ultra")
+        val qIndex = qualities.indexOf(s.quality).coerceAtLeast(0)
+        val rates = (listOf(0) + device.refreshRates.map { it.toInt() }.filter { it >= 30 }.distinct().sortedDescending() + listOf(60, 30)).distinct()
+        val rateLabels = rates.map { if (it == 0) "Max (${device.maxRefreshRate.toInt()} Hz)" else "$it fps" }
+        val rateIndex = rates.indexOf(s.fpsTarget).coerceAtLeast(0)
+        val crosshairLabels = listOf("Cross", "Dot", "Circle", "T")
+        val crosshairIndex = com.oea.engine.EngineSettings.CROSSHAIR_STYLES.indexOf(s.crosshairStyle).coerceAtLeast(0)
+        val items = listOf(
+            MenuItem.header("Performance"),
+            MenuItem.choice("quality", "Quality", qLabels[qIndex], "Geometry, shadows and effects"),
+            MenuItem.choice("fps", "Frame rate", rateLabels[rateIndex], "What the screen should hold"),
+            MenuItem.toggle("adaptive", "Adaptive resolution", s.adaptiveResolution, "Trades sharpness for a steady frame rate"),
+            MenuItem.toggle("fpsCounter", "FPS counter", s.showFps, "Frame rate and resolution scale, on screen"),
+            MenuItem.toggle("sustained", "Steady performance", s.sustainedPerformance, "Cooler and steadier, lower peaks"),
+            MenuItem.header("HUD"),
+            MenuItem.slider("hudOpacity", "HUD opacity", "${(s.hudOpacity * 100).toInt()}%", ((s.hudOpacity - 0.4f) / 0.6f * 100f).toInt(), "Bars, minimap, feed and hit markers together"),
+            MenuItem.slider("buttonOpacity", "Button opacity", "${(s.buttonOpacity * 100).toInt()}%", ((s.buttonOpacity - 0.35f) / 0.65f * 100f).toInt(), "The on-screen controls, without shrinking them"),
+            MenuItem.header("Reticle"),
+            MenuItem.choice("crosshair", "Crosshair", crosshairLabels[crosshairIndex], "The shape of the aim point"),
+            MenuItem.choice("crosshairColor", "Crosshair colour", crosshairName(s.crosshairColor), "Pick a tint that stands off the terrain"),
+            MenuItem("back", "Back"),
+        )
+        ctx.ui.menu("Display", "${device.recommendedTier.label} tier on this phone · ${device.maxRefreshRate.toInt()} Hz", items) { id ->
+            when (id) {
+                "quality" -> chooseStep("Quality", qLabels, qIndex,
+                    "Auto measures this phone once and stays there") { pick ->
+                    s.quality = qualities[pick]; openDisplayPage()
+                }
+                "fps" -> chooseStep("Frame rate", rateLabels, rateIndex, "Max follows the display's refresh rate") { pick ->
+                    s.fpsTarget = rates[pick]; openDisplayPage()
+                }
+                "adaptive" -> { s.adaptiveResolution = !s.adaptiveResolution; openDisplayPage() }
+                "fpsCounter" -> { s.showFps = !s.showFps; openDisplayPage() }
+                "sustained" -> { s.sustainedPerformance = !s.sustainedPerformance; openDisplayPage() }
+                "hudOpacity" -> sliderPage("HUD opacity", (s.hudOpacity - 0.4f) / 0.6f, {
+                    s.hudOpacity = 0.4f + it * 0.6f; hudAlpha = s.hudOpacity
+                }, ::openDisplayPage)
+                "buttonOpacity" -> sliderPage("Button opacity", (s.buttonOpacity - 0.35f) / 0.65f, {
+                    s.buttonOpacity = 0.35f + it * 0.65f
+                    for ((b, _) in controlButtons) b.opacity = s.buttonOpacity
+                }, ::openDisplayPage)
+                "crosshair" -> chooseStep("Crosshair", crosshairLabels, crosshairIndex, "Cross, dot, circle or T") { pick ->
+                    s.crosshairStyle = com.oea.engine.EngineSettings.CROSSHAIR_STYLES[pick]
+                    crosshairStyle = s.crosshairStyle
+                    openDisplayPage()
+                }
+                "crosshairColor" -> {
+                    val names = CROSSHAIR_COLORS.map { it.first }
+                    val idx = CROSSHAIR_COLORS.indexOfFirst { it.second == s.crosshairColor }.coerceAtLeast(0)
+                    chooseStep("Crosshair colour", names, idx, "Bright tones read best on dark terrain") { pick ->
+                        s.crosshairColor = CROSSHAIR_COLORS[pick].second
+                        crosshairColor = s.crosshairColor
+                        openDisplayPage()
+                    }
+                }
+                else -> openPauseMenu()
+            }
+        }
+    }
+
+    /** Gameplay: the rules of the hands — assist, sprint, fire mode and readable feedback. */
+    private fun openGameplayPage() {
+        val s = ctx.settings
+        val items = listOf(
+            MenuItem.header("Aim"),
+            MenuItem.slider("assist", "Aim assist", "${(s.aimAssist * 100).toInt()}%", (s.aimAssist * 100).toInt(), "Bends a shot toward a body already under the reticle — never invents a hit"),
+            MenuItem.toggle("tapFire", "Tap to fire", s.tapFire, "A tap fires a burst instead of holding the trigger"),
+            MenuItem.header("Movement"),
+            MenuItem.toggle("autoSprint", "Auto sprint", s.autoSprint, "Push the stick to its edge to run — no sprint button"),
+            MenuItem.header("Feedback"),
+            MenuItem.toggle("damageNumbers", "Damage numbers", s.damageNumbers, "The number over a body when a shot lands"),
+            MenuItem.toggle("shake", "Camera shake", s.cameraShake, "Explosions and hard landings move the view — off if it bothers you"),
+            MenuItem.toggle("reducedMotion", "Reduce motion", s.reducedMotion, "Calmer HUD pulses and transitions"),
+            MenuItem("back", "Back"),
+        )
+        ctx.ui.menu("Gameplay", "These change how the match feels, not who wins", items) { id ->
+            when (id) {
+                "assist" -> sliderPage("Aim assist", s.aimAssist, { s.aimAssist = it; sim.aimAssist = it }, ::openGameplayPage)
+                "tapFire" -> { s.tapFire = !s.tapFire; tapFireMode = s.tapFire; openGameplayPage() }
+                "autoSprint" -> { s.autoSprint = !s.autoSprint; autoSprintOn = s.autoSprint; openGameplayPage() }
+                "damageNumbers" -> { s.damageNumbers = !s.damageNumbers; showDamageNumbers = s.damageNumbers; openGameplayPage() }
+                "shake" -> { s.cameraShake = !s.cameraShake; shakeEnabled = s.cameraShake; openGameplayPage() }
+                "reducedMotion" -> { s.reducedMotion = !s.reducedMotion; openGameplayPage() }
+                else -> openPauseMenu()
+            }
+        }
+    }
+
+    /** The button layout page: per-control reset, size, and the live drag editor. */
+    private fun openLayoutPage() {
+        val items = ArrayList<MenuItem>()
+        items += MenuItem.header("Layout")
+        items += MenuItem.choice("editor", "Open drag editor", if (controlsOpen) "Open" else "Tap to open", "Move every button on the live screen, then DONE")
+        items += MenuItem.toggle("resetAll", "Reset all to factory", false, "Every button back to the default layout")
+        items += MenuItem.toggle("handed", "Left-handed", ctx.settings.leftHanded, "Mirrors the whole cluster")
+        items += MenuItem.header("Buttons")
+        for ((key, name, hint) in controlTable()) {
+            val moved = buttonMoved(key)
+            items += MenuItem.choice("b_$key", name, if (moved) "Moved · reset" else "Factory", "$hint · ${if (moved) "tap to restore" else "unchanged"}")
+        }
+        items += MenuItem("back", "Back")
+        ctx.ui.menu("Button layout", "${layoutSummary()} · sizes are per button", items) { id ->
+            when {
+                id == null -> openPauseMenu()
+                id == "editor" -> {
+                    ctrlAds.label = if (adsHoldMode) "ADS · HOLD" else "ADS · TAP"
+                    controlsOpen = true
+                }
+                id == "resetAll" -> {
+                    resetButtonLayout()
+                    dropHeldInput()
+                    ctx.ui.toast("Controls are back to the factory layout")
+                    openLayoutPage()
+                }
+                id == "handed" -> {
+                    val s = ctx.settings
+                    s.leftHanded = !s.leftHanded
+                    ctx.storage.putBoolean("left_handed", s.leftHanded)
+                    dropHeldInput()
+                    applyDisplaySettings()
+                    openLayoutPage()
+                }
+                id.startsWith("b_") -> {
+                    val key = id.removePrefix("b_")
+                    resetOneButton(key)
+                    ctx.ui.toast("${controlTable().firstOrNull { it.first == key }?.second ?: key} restored")
+                    openLayoutPage()
+                }
+                else -> openPauseMenu()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ menu helpers
+
+    private val LOOK_STEPS = floatArrayOf(0.2f, 0.4f, 0.6f, 0.8f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f)
+    private val ADS_STEPS = floatArrayOf(0.3f, 0.4f, 0.55f, 0.7f, 0.85f, 1f, 1.15f, 1.35f, 1.5f)
+    /** Tints that read on grass, snow, rock and water alike. */
+    private val CROSSHAIR_COLORS = listOf(
+        "Mint" to 0xFFE9F7EF.toInt(),
+        "White" to 0xFFFFFFFF.toInt(),
+        "Amber" to 0xFFFFC857.toInt(),
+        "Cyan" to 0xFF4FE3E3.toInt(),
+        "Lime" to 0xFFB6FF3D.toInt(),
+        "Magenta" to 0xFFFF4FD8.toInt(),
+    )
+
+    private fun pct(value: Float, min: Float, max: Float): Int =
+        (((value - min) / (max - min).coerceAtLeast(0.001f)) * 100f).toInt().coerceIn(0, 100)
+
+    /** A stepped choice with a picker, for values that read better as options than as a slider. */
+    private fun chooseStep(title: String, labels: List<String>, selected: Int, subtitle: String?, onPick: (Int) -> Unit) {
+        val items = labels.mapIndexed { i, label -> MenuItem("$i", label, if (i == selected) "Current" else null) }
+        items + MenuItem("back", "Back")
+        ctx.ui.menu(title, subtitle, items) { id ->
+            val pick = id?.toIntOrNull()
+            if (pick != null && pick in labels.indices) onPick(pick) else openPauseMenu()
+        }
+    }
+
+    /**
+     * A continuous value as a list of points, since the in-match menu is a list
+     * of rows. It returns to the page that opened it, not to the top of the
+     * pause menu, so a mix can be balanced without re-navigating each time.
+     */
+    private fun sliderPage(title: String, normalized: Float, onChange: (Float) -> Unit, back: () -> Unit = { openPauseMenu() }) {
+        val points = listOf(0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
+        val current = (normalized * 100f).toInt().coerceIn(0, 100)
+        val items = points.map { p ->
+            MenuItem("$p", "${p}%", if (kotlin.math.abs(p - current) <= 5) "Current" else null)
+        } + MenuItem("back", "Back")
+        ctx.ui.menu(title, "Pick a level — it applies as you choose", items) { id ->
+            val pick = id?.toIntOrNull()
+            if (pick != null) {
+                onChange(pick / 100f)
+                ctx.ui.toast("$title · $pick%")
+                // Stay on the value until the player taps Back: dragging a level
+                // usually takes several tries, and each one should not cost a page.
+                sliderPage(title, pick / 100f, onChange, back)
+            } else back()
+        }
+    }
+
+    /** A tiny audible confirmation when the player drags the effects level. */
+    private fun playTestShot() {
+        val s = sHit
+        if (ctx.audio.soundEnabled()) ctx.audio.play(s, 0.6f)
+    }
+
+    private fun resumeMusic() {
+        ctx.audio.playMusic("arena", MusicTrack(bpm = 96, bars = 8, root = 50, minor = true, progression = listOf(0, 3, 5, 4), drums = true, lead = false, pad = true, energy = 0.5f, seed = 3))
+    }
+
+    private fun crosshairName(color: Int): String =
+        CROSSHAIR_COLORS.firstOrNull { it.second == color }?.first ?: "Custom"
 
     /** The pack: the kit as it stands — weapons, ammo, consumables and throwables —
      *  with a reload-all for the next push. Mirrors the Free Fire bag / PUBG inventory. */
@@ -2336,12 +2812,16 @@ class OeaArena : OeaGame() {
             drawCrosshair(hud, me)
             drawControls(hud, me)
         }
+        // HUD opacity: the world-facing chrome (bars, map, feed) fades as one
+        // piece, while the reticle above keeps its own always-readable contrast.
+        hud.batch.alpha = hudAlpha
         drawTopBar(hud, me)
         drawMinimap(hud, me)
         drawKillFeed(hud)
         drawStatus(hud, me)
         drawTeammates(hud, me)
-        for (n in damageNumbers) {
+        hud.batch.alpha = 1f
+        if (showDamageNumbers) for (n in damageNumbers) {
             tmp.set(n[0], n[1], n[2])
             if (camera.worldToScreen(tmp, w, h, tmp)) {
                 val a = 1f - n[4] / 0.9f
@@ -2372,17 +2852,42 @@ class OeaArena : OeaGame() {
         }
     }
 
+    /**
+     * The reticle. A shooter player will change this before anything else, so
+     * the shape, the tint and the size are all the player's: a cross that blooms
+     * with spread, a plain dot, a ring, or a T. The hit marker keeps its own
+     * colour — a white/red flash is how you know the shot landed.
+     */
     private fun drawCrosshair(hud: Hud, me: ArenaPlayer) {
         val d = hud.density
         val cx = hud.width / 2f; val cy = hud.height / 2f
-        val gap = (6f + me.spread * 260f) * d
+        val gap = (5f + me.spread * 240f) * d
         val len = 7f * d
-        val col = if (hitMarker > 0f) (if (hitMarkerKill) 0xFFFF3B30.toInt() else Colors.WHITE) else 0xE6FFFFFF.toInt()
+        val hit = hitMarker > 0f
+        // Spread is information: the gap opens and the whole reticle dims a
+        // little, so a walking shot reads as less certain than a still one.
+        val steady = (1f - (me.spread * 2.2f).coerceIn(0f, 0.45f))
+        val base = if (hit) (if (hitMarkerKill) 0xFFFF3B30.toInt() else Colors.WHITE) else crosshairColor
+        val col = Colors.withAlpha(base, (0.85f * steady).coerceIn(0.3f, 0.95f))
         val b = hud.batch
-        b.line(cx - gap - len, cy, cx - gap, cy, 2f * d, col); b.line(cx + gap, cy, cx + gap + len, cy, 2f * d, col)
-        b.line(cx, cy - gap - len, cx, cy - gap, 2f * d, col); b.line(cx, cy + gap, cx, cy + gap + len, 2f * d, col)
-        b.circle(cx, cy, 1.6f * d, col)
-        if (hitMarker > 0f) {
+        when (crosshairStyle) {
+            "dot" -> b.circle(cx, cy, 2.2f * d, col)
+            "circle" -> {
+                b.ring(cx, cy, gap + len, 1.6f * d, Colors.withAlpha(base, 0.55f * steady))
+                b.circle(cx, cy, 1.6f * d, col)
+            }
+            "t" -> {
+                b.line(cx - gap - len, cy, cx - gap, cy, 2f * d, col); b.line(cx + gap, cy, cx + gap + len, cy, 2f * d, col)
+                b.line(cx, cy + gap, cx, cy + gap + len, 2f * d, col)
+                b.circle(cx, cy, 1.4f * d, col)
+            }
+            else -> {
+                b.line(cx - gap - len, cy, cx - gap, cy, 2f * d, col); b.line(cx + gap, cy, cx + gap + len, cy, 2f * d, col)
+                b.line(cx, cy - gap - len, cx, cy - gap, 2f * d, col); b.line(cx, cy + gap, cx, cy + gap + len, 2f * d, col)
+                b.circle(cx, cy, 1.6f * d, col)
+            }
+        }
+        if (hit) {
             val s = 9f * d
             b.line(cx - s, cy - s, cx - s / 2f, cy - s / 2f, 2.2f * d, col); b.line(cx + s, cy - s, cx + s / 2f, cy - s / 2f, 2.2f * d, col)
             b.line(cx - s, cy + s, cx - s / 2f, cy + s / 2f, 2.2f * d, col); b.line(cx + s, cy + s, cx + s / 2f, cy + s / 2f, 2.2f * d, col)
@@ -2417,9 +2922,24 @@ class OeaArena : OeaGame() {
         healBtn.label = "+${me.medkits}"
         for ((button, _) in controlButtons) button.draw(b, hud.fontBold, hud.density)
         if (controlsOpen) {
-            for (button in listOf(ctrlDone, ctrlReset, ctrlAds)) button.draw(b, hud.fontBold, hud.density)
-            hud.text("CONTROLS · drag any button to move it", hud.width / 2f, hud.safeTop + hud.dp(48f), 16f, 0xFFFFFFFF.toInt(), align = Align.CENTER, bold = true)
-            hud.text("RESET restores the factory layout · ADS sets tap or hold aim", hud.width / 2f, hud.safeTop + hud.dp(74f), 13f, 0xBFFFFFFFu.toInt(), align = Align.CENTER)
+            // The selected control gets a bright halo, so the size keys have an
+            // obvious subject and the player always knows what they are editing.
+            val sel = selectedKey
+            if (sel != null) {
+                controlButtons.firstOrNull { it.second == sel }?.let { (button, _) ->
+                    val hd = hud.density
+                    b.ring(button.cx, button.cy, button.radius + 9f * hd, 2f * hd, 0xFFFFD54F.toInt())
+                    b.ring(button.cx, button.cy, button.radius + 14f * hd, 1f * hd, 0x66FFD54F.toInt())
+                }
+            }
+            for (button in listOf(ctrlDone, ctrlReset, ctrlAds, ctrlSmaller, ctrlBigger)) button.draw(b, hud.fontBold, hud.density)
+            hud.text("CONTROLS · drag to move · tap to select · − + to size", hud.width / 2f, hud.safeTop + hud.dp(44f), 15f, 0xFFFFFFFF.toInt(), align = Align.CENTER, bold = true)
+            val selName = sel?.let { key -> controlTable().firstOrNull { it.first == key }?.second } ?: "nothing selected"
+            val selSize = sel?.let { key -> controlButtons.firstOrNull { it.second == key }?.first?.radiusDp?.toInt() } ?: 0
+            hud.text(
+                "Editing: $selName${if (sel != null) " · size ${selSize}dp" else ""} · RESET = factory · ADS = tap or hold",
+                hud.width / 2f, hud.safeTop + hud.dp(68f), 12.5f, 0xBFFFFFFFu.toInt(), align = Align.CENTER
+            )
         }
         // Weapon slots (tap to switch), bottom-right.
         val d = hud.density

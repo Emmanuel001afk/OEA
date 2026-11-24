@@ -208,16 +208,64 @@ abstract class GameFront(protected val host: GameFrontHost) {
 
     // ---------------------------------------------------------------- sheets
 
-    /** Sound, music, volume and haptics — named the way a game would name them. */
+    /** Which channels are up and how loud, in one line, for a front screen's Sound row. */
+    protected fun audioSummary(): String {
+        if (!settings.sound) return "Muted"
+        val on = listOfNotNull(
+            if (settings.sfx) "effects" else null,
+            if (settings.music) "music" else null,
+            if (settings.voice) "announcer" else null,
+            if (settings.haptics) "haptics" else null,
+        )
+        return "${(settings.volume * 100).toInt()}% · " + (if (on.isEmpty()) "all off" else on.joinToString(", "))
+    }
+
+    /**
+     * Every audio channel, one page — shared by every OEA game on this phone.
+     *
+     * A single "Sound on/off" is not a sound setting. A player wants the music
+     * quiet and the effects loud, the announcer off and the haptics hard, and
+     * those are six independent numbers. Each channel has its own switch and its
+     * own level under one master, and the mix survives the master being muted.
+     */
     protected fun audioSheet(title: String = "Sound") {
         kit.sheet(title, "Shared with every OEA game on this phone, and applied live.") { panel, dialog ->
             val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
-            kit.switchRow(body, "Sound effects", "Weapons, steps, coins — the game's own noises", settings.sound) { settings.sound = it }
+            kit.sectionTitle(body, "Master")
+            kit.switchRow(body, "Sound", "The master switch — off silences everything, mix kept", settings.sound) { settings.sound = it }
+            kit.slider(body, "Master volume", settings.volume, 0f, 1f, { "${(it * 100f).toInt()}%" }) { settings.volume = it }
+
+            kit.sectionTitle(body, "Channels")
+            kit.switchRow(body, "Sound effects", "Weapons, steps, coins — the game's own noises", settings.sfx) { settings.sfx = it }
+            kit.slider(body, "Effects level", settings.sfxVolume, 0f, 1f, { "${(it * 100f).toInt()}%" }) { settings.sfxVolume = it }
             kit.switchRow(body, "Music", "The game's own soundtrack", settings.music) { settings.music = it }
-            kit.slider(body, "Volume", settings.volume, 0f, 1f, { "${(it * 100f).toInt()}%" }) { settings.volume = it }
+            kit.slider(body, "Music level", settings.musicVolume, 0f, 1f, { "${(it * 100f).toInt()}%" }) { settings.musicVolume = it }
+            kit.switchRow(body, "Announcer", "Round calls, callouts, match start", settings.voice) { settings.voice = it }
+            kit.slider(body, "Announcer level", settings.voiceVolume, 0f, 1f, { "${(it * 100f).toInt()}%" }) { settings.voiceVolume = it }
+            kit.switchRow(body, "Duck music for the announcer", "The soundtrack steps back under a callout", settings.duckMusicForVoice) {
+                settings.duckMusicForVoice = it
+            }
+
+            kit.sectionTitle(body, "Touch")
             kit.switchRow(body, "Haptics", "A tap on the phone for hits, jumps and moves", settings.haptics) { settings.haptics = it }
-            panel.addView(kit.boundedScroll(body, 0.62f))
-            panel.addView(kit.buttonRow(kit.primaryButton("Done") { dialog.dismiss(); host.frontRebuild() }))
+            kit.slider(body, "Haptic strength", settings.hapticStrength, 0.25f, 1f, { "${(it * 100f).toInt()}%" }) {
+                settings.hapticStrength = it
+            }
+
+            kit.note(body, "Each channel is a fraction of the master, so muting with the master switch never loses the mix you set.")
+            panel.addView(kit.boundedScroll(body, 0.72f))
+            panel.addView(kit.buttonRow(
+                kit.quietButton("Reset mix") {
+                    settings.volume = 0.9f
+                    settings.sfxVolume = 1f
+                    settings.musicVolume = 0.45f
+                    settings.voiceVolume = 0.85f
+                    settings.hapticStrength = 1f
+                    dialog.dismiss()
+                    host.frontRebuild()
+                },
+                kit.primaryButton("Done") { dialog.dismiss(); host.frontRebuild() }
+            ))
         }
     }
 
@@ -245,6 +293,9 @@ abstract class GameFront(protected val host: GameFrontHost) {
                 }
             }
             kit.switchRow(body, "Adaptive resolution", "Trades sharpness for a steady frame rate", settings.adaptiveResolution) { settings.adaptiveResolution = it }
+            kit.sectionTitle(body, "On-screen")
+            kit.slider(body, "HUD opacity", settings.hudOpacity, 0.4f, 1f, { "${(it * 100f).toInt()}%" }) { settings.hudOpacity = it }
+            kit.slider(body, "Button opacity", settings.buttonOpacity, 0.35f, 1f, { "${(it * 100f).toInt()}%" }) { settings.buttonOpacity = it }
             kit.switchRow(body, "FPS counter", "Frame rate and resolution scale, on screen", settings.showFps) { settings.showFps = it }
             kit.switchRow(body, "Steady performance", "Cooler and steadier, lower peaks", settings.sustainedPerformance) { settings.sustainedPerformance = it }
             panel.addView(kit.boundedScroll(body, 0.66f))

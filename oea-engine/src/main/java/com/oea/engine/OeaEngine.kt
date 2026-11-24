@@ -119,17 +119,62 @@ class EngineSettings internal constructor(context: Context) {
         get() = prefs.getBoolean("haptics", true)
         set(v) = prefs.edit().putBoolean("haptics", v).apply()
 
+    /**
+     * Haptic strength, 0.25 to 1. A phone in a case on a table needs the top of
+     * the range; a phone held in a quiet room does not. Multiplied into every
+     * vibration amplitude, never into the duration — a weaker tap is still a tap.
+     */
+    var hapticStrength: Float
+        get() = prefs.getFloat("haptic_strength", 1f).coerceIn(0.25f, 1f)
+        set(v) = prefs.edit().putFloat("haptic_strength", v.coerceIn(0.25f, 1f)).apply()
+
+    /**
+     * Master mute. Every channel below is *also* gated on this, so one switch
+     * silences the phone without losing the mix the player set.
+     */
     var sound: Boolean
         get() = prefs.getBoolean("sound", true)
         set(v) = prefs.edit().putBoolean("sound", v).apply()
 
+    /** Effects channel: weapons, steps, impacts, UI clicks. */
+    var sfx: Boolean
+        get() = prefs.getBoolean("sfx", true)
+        set(v) = prefs.edit().putBoolean("sfx", v).apply()
+
+    /** Music channel: soundtracks and menu themes. */
     var music: Boolean
         get() = prefs.getBoolean("music", true)
         set(v) = prefs.edit().putBoolean("music", v).apply()
 
+    /** Announcer channel: round calls, kill callouts, match start. */
+    var voice: Boolean
+        get() = prefs.getBoolean("voice", true)
+        set(v) = prefs.edit().putBoolean("voice", v).apply()
+
+    /** Master volume, 0..1. Every channel is a fraction of this. */
     var volume: Float
         get() = prefs.getFloat("volume", 0.9f).coerceIn(0f, 1f)
         set(v) = prefs.edit().putFloat("volume", v.coerceIn(0f, 1f)).apply()
+
+    /** Effects level, 0..1. Independent of [volume] so a loud match can be tamed. */
+    var sfxVolume: Float
+        get() = prefs.getFloat("sfx_volume", 1f).coerceIn(0f, 1f)
+        set(v) = prefs.edit().putFloat("sfx_volume", v.coerceIn(0f, 1f)).apply()
+
+    /** Music level, 0..1. */
+    var musicVolume: Float
+        get() = prefs.getFloat("music_volume", 0.45f).coerceIn(0f, 1f)
+        set(v) = prefs.edit().putFloat("music_volume", v.coerceIn(0f, 1f)).apply()
+
+    /** Announcer level, 0..1. */
+    var voiceVolume: Float
+        get() = prefs.getFloat("voice_volume", 0.85f).coerceIn(0f, 1f)
+        set(v) = prefs.edit().putFloat("voice_volume", v.coerceIn(0f, 1f)).apply()
+
+    /** Duck music while the announcer is talking (or a kill callout plays). */
+    var duckMusicForVoice: Boolean
+        get() = prefs.getBoolean("duck_music", true)
+        set(v) = prefs.edit().putBoolean("duck_music", v).apply()
 
     /**
      * Menu and HUD scale, 0.85 to 1.5. Type, padding and touch targets grow
@@ -186,6 +231,61 @@ class EngineSettings internal constructor(context: Context) {
         get() = prefs.getFloat("look_sensitivity", 1f).coerceIn(0.2f, 3f)
         set(v) = prefs.edit().putFloat("look_sensitivity", v.coerceIn(0.2f, 3f)).apply()
 
+    /**
+     * Touch controls drawn for a left-handed grip: the movement stick moves to
+     * the right thumb and the button cluster mirrors to the left. Layouts are
+     * stored per handedness, so switching back restores the old arrangement
+     * instead of overwriting it.
+     */
+    var leftHanded: Boolean
+        get() = prefs.getBoolean("left_handed", false)
+        set(v) = prefs.edit().putBoolean("left_handed", v).apply()
+
+    /** Opacity of the on-screen buttons and stick, 0.35..1. */
+    var buttonOpacity: Float
+        get() = prefs.getFloat("button_opacity", 0.82f).coerceIn(0.35f, 1f)
+        set(v) = prefs.edit().putFloat("button_opacity", v.coerceIn(0.35f, 1f)).apply()
+
+    /** Opacity of the game HUD (health bar, minimap, kill feed), 0.4..1. */
+    var hudOpacity: Float
+        get() = prefs.getFloat("hud_opacity", 1f).coerceIn(0.4f, 1f)
+        set(v) = prefs.edit().putFloat("hud_opacity", v.coerceIn(0.4f, 1f)).apply()
+
+    /** "cross", "dot", "t", "circle" — the shape of the aim reticle. */
+    var crosshairStyle: String
+        get() = prefs.getString("crosshair_style", "cross").takeIf { it in CROSSHAIR_STYLES } ?: "cross"
+        set(v) = prefs.edit().putString("crosshair_style", v).apply()
+
+    /** Reticle tint as 0xAARRGGBB; a bright green reads best on most terrain. */
+    var crosshairColor: Int
+        get() = prefs.getInt("crosshair_color", 0xFFE9F7EF.toInt())
+        set(v) = prefs.edit().putInt("crosshair_color", v).apply()
+
+    /** Floating damage numbers over bodies. */
+    var damageNumbers: Boolean
+        get() = prefs.getBoolean("damage_numbers", true)
+        set(v) = prefs.edit().putBoolean("damage_numbers", v).apply()
+
+    /** Camera shake from explosions and hard landings. Off for sensitivity. */
+    var cameraShake: Boolean
+        get() = prefs.getBoolean("camera_shake", true)
+        set(v) = prefs.edit().putBoolean("camera_shake", v).apply()
+
+    /** Stick past its outer ring runs; no need to hold the sprint button. */
+    var autoSprint: Boolean
+        get() = prefs.getBoolean("auto_sprint", false)
+        set(v) = prefs.edit().putBoolean("auto_sprint", v).apply()
+
+    /** Keep the trigger held to fire, or tap once for a burst. */
+    var tapFire: Boolean
+        get() = prefs.getBoolean("tap_fire", false)
+        set(v) = prefs.edit().putBoolean("tap_fire", v).apply()
+
+    /** Soft aim assist strength, 0 = off. Bends the shot toward a body on the line. */
+    var aimAssist: Float
+        get() = prefs.getFloat("aim_assist", 0.35f).coerceIn(0f, 1f)
+        set(v) = prefs.edit().putFloat("aim_assist", v.coerceIn(0f, 1f)).apply()
+
     var playerName: String
         get() = prefs.getString("player_name", null)?.takeIf { it.isNotBlank() } ?: defaultName()
         set(v) = prefs.edit().putString("player_name", v.trim().take(MAX_NAME)).apply()
@@ -236,6 +336,7 @@ class EngineSettings internal constructor(context: Context) {
 
     companion object {
         val QUALITY_VALUES = listOf("auto", "low", "medium", "high", "ultra")
+        val CROSSHAIR_STYLES = listOf("cross", "dot", "circle", "t")
         const val MAX_NAME = 20
         val PLAYER_COLORS = intArrayOf(
             0xFF4FC3F7.toInt(), 0xFFFF7043.toInt(), 0xFF66BB6A.toInt(), 0xFFFFCA28.toInt(),

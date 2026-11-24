@@ -146,6 +146,12 @@ class VirtualButton(
     /** When true the button stands down: no touches claimed (UI overlays). */
     var paused = false
 
+    /** Drawn opacity of the button, 0.2..1, set from the player's own setting. */
+    var opacity: Float = 1f
+
+    /** True while the layout editor owns the button: drawn with a drag handle. */
+    var editing = false
+
     fun update(input: Input, width: Float, height: Float, density: Float, safeLeft: Float = 0f, safeRight: Float = 0f) {
         if (paused) {
             input.pointer(pointerId)?.owner = null
@@ -185,7 +191,8 @@ class VirtualButton(
 
     fun draw(batch: SpriteBatch, font: BitmapFont, density: Float) {
         if (!visible) return
-        val a = if (!enabled) 0.35f else if (pressed) 1f else 0.78f
+        val base = if (!enabled) 0.35f else if (pressed) 1f else 0.78f
+        val a = base * opacity.coerceIn(0.2f, 1f)
         val fill = if (pressed || highlight) Colors.withAlpha(color, 0.55f * a) else Colors.withAlpha(0xFF101318.toInt(), 0.45f * a)
         batch.circle(cx, cy, radius * (if (pressed) 0.94f else 1f), fill)
         batch.ring(cx, cy, radius, maxOf(1.5f, radius * 0.06f), Colors.withAlpha(color, 0.9f * a))
@@ -193,6 +200,16 @@ class VirtualButton(
         if (label.isNotEmpty()) {
             val size = radius * (if (label.length <= 2) 0.72f else 0.42f)
             font.draw(batch, label, cx, cy - font.lineHeight(size) / 2f, size, Colors.withAlpha(Colors.WHITE, a), Align.CENTER)
+        }
+        // Layout editor: a dashed outer ring and a two-headed handle, so it is
+        // obvious every circle on screen is a thing that can be picked up.
+        if (editing) {
+            batch.ring(cx, cy, radius + 5f * density, maxOf(1f, radius * 0.04f), Colors.withAlpha(Colors.WHITE, 0.45f * a))
+            val h = radius * 0.72f
+            batch.line(cx - h, cy, cx - h * 0.6f, cy, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
+            batch.line(cx + h, cy, cx + h * 0.6f, cy, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
+            batch.line(cx, cy - h, cx, cy - h * 0.6f, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
+            batch.line(cx, cy + h, cx, cy + h * 0.6f, 1.5f * density, Colors.withAlpha(Colors.WHITE, 0.7f * a))
         }
     }
 }
@@ -288,21 +305,29 @@ class Haptics internal constructor(context: Context, private val settings: Engin
     fun heavy() = predefined(if (Build.VERSION.SDK_INT >= 29) VibrationEffect.EFFECT_HEAVY_CLICK else -1, 30, 255)
     fun double() = predefined(if (Build.VERSION.SDK_INT >= 29) VibrationEffect.EFFECT_DOUBLE_CLICK else -1, 24, 180)
 
-    /** Custom buzz: [ms] duration, [amplitude] 1..255. */
+    /** Custom buzz: [ms] duration, [amplitude] 1..255 before the strength setting. */
     fun buzz(ms: Long, amplitude: Int = 160) {
         val v = vibrator ?: return
         if (!settings.haptics || !rateOk()) return
-        runCatching { v.vibrate(VibrationEffect.createOneShot(ms, amplitude.coerceIn(1, 255))) }
+        runCatching { v.vibrate(VibrationEffect.createOneShot(ms, scaled(amplitude))) }
     }
 
     private fun predefined(effect: Int, fallbackMs: Long, amplitude: Int) {
         val v = vibrator ?: return
         if (!settings.haptics || !rateOk()) return
+        // A predefined effect carries its own waveform, so on API 29+ the
+        // strength setting cannot scale it; only the fallback path (and the
+        // custom buzzes) take the multiplier, which is where games feel it.
+        val strength = settings.hapticStrength
         runCatching {
-            if (Build.VERSION.SDK_INT >= 29 && effect >= 0) v.vibrate(VibrationEffect.createPredefined(effect))
-            else v.vibrate(VibrationEffect.createOneShot(fallbackMs, amplitude))
+            if (Build.VERSION.SDK_INT >= 29 && effect >= 0 && strength >= 0.99f) v.vibrate(VibrationEffect.createPredefined(effect))
+            else v.vibrate(VibrationEffect.createOneShot(fallbackMs, scaled(amplitude)))
         }
     }
+
+    /** Applies the player's haptic strength to an amplitude, never below 1. */
+    private fun scaled(amplitude: Int): Int =
+        (amplitude * settings.hapticStrength.coerceIn(0.25f, 1f)).toInt().coerceIn(1, 255)
 
     /** Avoids a buzzing mess when many events fire at once. */
     private fun rateOk(): Boolean {

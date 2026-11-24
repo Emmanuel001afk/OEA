@@ -75,8 +75,39 @@ class Audio internal constructor(private val context: Context, private val setti
     private val tmp = Vec3()
     private val right = Vec3()
 
-    var musicVolume = 0.45f
-        set(v) { field = v.coerceIn(0f, 1f); music?.setVolume(field * settings.volume, field * settings.volume) }
+    /**
+     * The player's music channel level (0..1). Reading and writing this is the
+     * same as `settings.musicVolume` — the mix belongs to the player, not to a
+     * game. A game that wants its own soundtrack quieter sets [musicGain].
+     */
+    var musicVolume: Float
+        get() = settings.musicVolume
+        set(v) { settings.musicVolume = v; applyMusicVolume() }
+
+    /**
+     * Per-game music trim, 0..1, applied under the player's channel level. A
+     * game says "my theme is loud"; it never overrides the mix itself.
+     */
+    var musicGain: Float = 1f
+        set(v) { field = v.coerceIn(0f, 1f); applyMusicVolume() }
+
+    /**
+     * The music volume as it will actually be heard: channel level × master
+     * volume, ducked while the announcer speaks if the player asked for that.
+     */
+    private fun effectiveMusicVolume(): Float {
+        var v = settings.musicVolume * musicGain * settings.volume
+        if (settings.duckMusicForVoice && voiceActive > 0f) v *= 0.35f
+        return v.coerceIn(0f, 1f)
+    }
+
+    private fun applyMusicVolume() {
+        val v = effectiveMusicVolume()
+        synchronized(this) { runCatching { music?.setVolume(v, v) } }
+    }
+
+    /** Seconds left of an announcer line; music ducks while it is above zero. */
+    @Volatile private var voiceActive = 0f
 
     init {
         pool.setOnLoadCompleteListener { _, sampleId, status ->
@@ -118,8 +149,8 @@ class Audio internal constructor(private val context: Context, private val setti
 
     /** Plays [sound]; [pan] -1 (left) .. 1 (right); returns a stream id (0 if not played). */
     fun play(sound: Sound, volume: Float = 1f, pan: Float = 0f, pitch: Float = 1f, loop: Boolean = false, priority: Int = 1): Int {
-        if (!settings.sound || !sound.loaded || released) return 0
-        val v = (volume * settings.volume).coerceIn(0f, 1f)
+        if (!soundEnabled() || !sound.loaded || released) return 0
+        val v = (volume * settings.sfxVolume * settings.volume).coerceIn(0f, 1f)
         val p = MathX.clamp(pan, -1f, 1f)
         val angle = (p + 1f) * (PI.toFloat() / 4f)
         return pool.play(sound.poolId, v * cos(angle) * 1.41f, v * sin(angle) * 1.41f, priority, if (loop) -1 else 0, pitch.coerceIn(0.5f, 2f))
@@ -138,11 +169,44 @@ class Audio internal constructor(private val context: Context, private val setti
 
     fun stop(streamId: Int) { if (streamId != 0) pool.stop(streamId) }
     fun setRate(streamId: Int, rate: Float) { if (streamId != 0) pool.setRate(streamId, rate.coerceIn(0.5f, 2f)) }
-    fun setVolume(streamId: Int, volume: Float) { if (streamId != 0) { val v = volume * settings.volume; pool.setVolume(streamId, v, v) } }
+    fun setVolume(streamId: Int, volume: Float) { if (streamId != 0) { val v = (volume * settings.sfxVolume * settings.volume).coerceIn(0f, 1f); pool.setVolume(streamId, v, v) } }
+
+    /**
+     * Plays an announcer line or callout: gated on the voice channel and scaled
+     * by its own level, then ducks the music under it. Games route their
+     * callouts here so one switch silences the announcer without killing the
+     * weapons.
+     */
+    fun playVoice(sound: Sound, volume: Float = 1f, pitch: Float = 1f, duckSeconds: Float = 1.2f): Int {
+        if (!settings.sound || !settings.voice || settings.voiceVolume <= 0.001f) return 0
+        val stream = play(sound, volume * settings.voiceVolume, 0f, pitch)
+        if (settings.duckMusicForVoice) duckFor(duckSeconds)
+        return stream
+    }
+
+    /** True when effects should be heard at all: master sound on and the SFX channel up. */
+    fun soundEnabled(): Boolean = settings.sound && settings.sfx && settings.sfxVolume > 0.001f
+
+    /**
+     * A short announcer/music duck. Games call this when a callout starts so the
+     * soundtrack steps back under the voice instead of fighting it.
+     */
+    fun duckFor(seconds: Float) {
+        if (seconds <= 0f) return
+        voiceActive = maxOf(voiceActive, seconds)
+        applyMusicVolume()
+    }
+
+    /** Ticks the duck timer; call from the game loop (once a frame is fine). */
+    internal fun updateDuck(dt: Float) {
+        if (voiceActive <= 0f) return
+        voiceActive = maxOf(0f, voiceActive - dt)
+        applyMusicVolume()
+    }
 
     /** Starts looping [track] (synthesised once and cached). Replaces any playing music. */
     fun playMusic(name: String, track: MusicTrack) {
-        if (!settings.music || released) return
+        if (!settings.music || settings.musicVolume <= 0.001f || released) return
         if (musicName == name && music != null) { runCatching { music?.start() }; return }
         stopMusic()
         musicName = name
@@ -156,7 +220,8 @@ class Audio internal constructor(private val context: Context, private val setti
                 mp.setDataSource(file.absolutePath)
                 mp.isLooping = true
                 mp.prepare()
-                mp.setVolume(musicVolume * settings.volume, musicVolume * settings.volume)
+                val mv = effectiveMusicVolume()
+                mp.setVolume(mv, mv)
                 synchronized(this) {
                     if (released || musicName != name) { mp.release(); return@execute }
                     music = mp
