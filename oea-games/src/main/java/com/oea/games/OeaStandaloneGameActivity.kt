@@ -658,7 +658,9 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         if (lan) {
             s.startLan { info, warning ->
                 if (warning != null) toast(warning)
-                showLobby(joined = false, extra = info?.joinCode?.let { "Wi-Fi join code:\n$it" })
+                // The lobby's host card already shows the code and the addresses
+                // it can be reached on; the toast is only for the failure case.
+                showLobby(joined = false, extra = null)
             }
         } else {
             val invite = s.createOnlineInvite()
@@ -1015,6 +1017,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         }
         lobbyStatus = status
         val dialog = k.sheet(s.roomName.ifBlank { "Lobby" }, if (joined) "You are in." else "Waiting for players.") { panel, d ->
+            // The host's own network card, pinned above the scrolling status:
+            // the join code is the one thing a host reads aloud repeatedly, and
+            // it used to arrive as a string buried in a scrolling paragraph.
+            if (!joined && s.isHost) hostCard(panel, d)
             panel.addView(k.boundedScroll(status, 0.5f))
             val buttons = mutableListOf<View>()
             if (!joined && s.isHost) {
@@ -1039,6 +1045,64 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         }
         lobbyDialog = dialog
         refreshLobby(extra)
+    }
+
+    /**
+     * The host's network card: which networks this game is reachable on, the
+     * join code, and the two buttons that actually get someone connected —
+     * copy the code, or share the whole invitation. The addresses are listed by
+     * kind because "which one do I read out" is the only question a host has.
+     */
+    private fun hostCard(panel: LinearLayout, dialog: android.app.Dialog) {
+        val s = NetSession.current ?: return
+        val k = toolkit()
+        val info = s.lanInfo
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(k.dp(14), k.dp(12), k.dp(14), k.dp(12))
+            background = k.rounded(palette.card, 14, palette.accent, 1)
+        }
+        if (info == null) {
+            card.addView(k.text("Opening the game on your network…", 13f, palette.textSecondary))
+            card.addView(k.text("If this stays here, this phone is not on Wi-Fi or a hotspot.", 12f, palette.textTertiary)
+                .apply { setPadding(0, k.dp(4), 0, 0) })
+            panel.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) })
+            return
+        }
+        // Where the game lives, by network kind.
+        val where = if (info.addresses.isEmpty()) "No Wi-Fi or hotspot right now" else info.addresses.joinToString("\n") {
+            "${it.label} · ${it.address.hostAddress}:${info.port}"
+        }
+        card.addView(k.text("Players on this network", 11f, palette.textTertiary, GameType.medium)
+            .apply { letterSpacing = 0.1f })
+        card.addView(k.text(where, 13f, palette.text).apply { setLineSpacing(k.dpf(2f), 1f); setPadding(0, k.dp(3), 0, k.dp(10)) })
+        card.addView(k.text("JOIN CODE", 11f, palette.textTertiary, GameType.medium).apply { letterSpacing = 0.1f })
+        card.addView(
+            k.text(info.joinCode, 15f, palette.accent, GameType.mono).apply {
+                setTextIsSelectable(true)
+                setPadding(0, k.dp(3), 0, k.dp(10))
+            }
+        )
+        card.addView(
+            k.buttonRow(
+                k.quietButton("Copy code") {
+                    runCatching {
+                        getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                            android.content.ClipData.newPlainText("OEA join code", info.joinCode)
+                        )
+                    }.onSuccess { toast("Join code copied.") }.onFailure { toast("Couldn't copy on this phone.") }
+                },
+                k.quietButton("Refresh") {
+                    s.refreshLanAddresses()
+                    toast("Looking for networks again…")
+                }
+            )
+        )
+        if (info.addresses.isEmpty()) {
+            card.addView(k.text("Turn on Wi-Fi or a hotspot, then tap Refresh. Everyone on that network will see this game in Join nearby.", 12f, palette.textTertiary)
+                .apply { setPadding(0, k.dp(6), 0, 0) })
+        }
+        panel.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) })
     }
 
     private fun refreshLobby(extra: String? = null) {

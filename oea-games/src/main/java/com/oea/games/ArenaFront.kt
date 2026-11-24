@@ -115,7 +115,8 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
             val pick = pool.choices.indexOfFirst { it.value == value("loadout") }.coerceAtLeast(0)
             val family = poolFamily(pool.choices[pick].value)
             texts.addView(
-                kit.text("Pool: ${pool.choices[pick].label} · ${family.size} guns", 11.5f, palette.textTertiary)
+                val count = com.oea.games.arena.ArenaArmory.pool(pool.choices[pick].value).size
+                kit.text("Pool: ${pool.choices[pick].label} · $count guns", 11.5f, palette.textTertiary)
                     .apply { setPadding(0, kit.dp(8), 0, 0) },
                 LinearLayout.LayoutParams(-1, -2)
             )
@@ -472,13 +473,10 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
     // ----------------------------------------------------------------- armory
 
     /** Which weapons a loadout pool draws from, as the sim does. */
-    private fun poolFamily(pool: String): List<String> = when (pool) {
-        "snipers" -> listOf("sniper", "rifle")
-        "shotguns" -> listOf("shotgun", "smg", "pistol")
-        "close" -> listOf("pistol", "smg")
-        "rifles" -> listOf("rifle", "smg", "lmg")
-        else -> listOf("pistol", "smg", "rifle", "shotgun", "sniper", "lmg", "launcher")
-    }
+    /** Which families the current weapon pool draws from — asked of the armory,
+     *  which asks the simulation, so the sheet cannot describe a different pool
+     *  from the one the loot tables actually fill. */
+    private fun poolFamily(pool: String): List<String> = com.oea.games.arena.ArenaArmory.poolFamilies(pool)
 
     /** The gun roster as the sim declares it, read through the armory view. */
     private val armory: List<com.oea.games.arena.WeaponInfo> by lazy { com.oea.games.arena.ArenaArmory.all() }
@@ -490,16 +488,22 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
      */
     private fun armorySheet() {
         val poolLabel = label("loadout")
-        kit.sheet("Armory", "${armory.size} weapons · pool: $poolLabel") { panel, dialog ->
+        val poolCount = com.oea.games.arena.ArenaArmory.pool(value("loadout")).size
+        kit.sheet("Armory", "$poolCount weapons in this pool · $poolLabel") { panel, dialog ->
             val body = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
             val poolNow = value("loadout")
-            val families = poolFamily(poolNow)
-            for (fam in families) {
-                val guns = armory.filter { it.family == fam }
+            // The pool's guns laid out in family order, then a closing note on
+            // the pan: it is not in any pool, but a player should still know it
+            // is the thing they will be holding at the bottom of a Gun Game.
+            for (fam in poolFamily(poolNow)) {
+                val guns = com.oea.games.arena.ArenaArmory.pool(poolNow).filter { it.family == fam }
                 if (guns.isEmpty()) continue
                 kit.sectionTitle(body, com.oea.games.arena.ArenaArmory.familyLabel(fam))
                 for (g in guns) kit.group(body).addView(gunCard(g))
             }
+            kit.sectionTitle(body, "Melee")
+            kit.group(body).addView(gunCard(com.oea.games.arena.ArenaArmory.melee()))
+            kit.note(body, "Every pool still leaves you the pan: it is the last rung of the Gun Game ladder and what you keep when a slot is empty. It never spawns as loot.")
             kit.note(body, "Bars run off fixed ceilings, not the roster: damage counts pellets against 140, rate against 900 rpm, range against 260 m, magazine against 75 rounds. Accuracy is the aimed cone and handling is weight plus reload speed, so a heavy gun can be accurate and still feel slow.")
             panel.addView(kit.boundedScroll(body, 0.74f))
             panel.addView(kit.buttonRow(

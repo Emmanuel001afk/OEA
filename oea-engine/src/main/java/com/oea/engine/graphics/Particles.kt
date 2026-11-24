@@ -224,6 +224,11 @@ class ParticleSystem(
         sh.set1f("u_additive", if (additive) 1f else 0f)
         texture.bind(0)
         GLES30.glEnable(GLES30.GL_BLEND)
+        // Instanced particles are one draw call with no depth writes, so the
+        // depth *test* is the only thing keeping sparks out of walls. Enable it
+        // explicitly: a 2D pass earlier in the frame leaves GL_DEPTH_TEST off,
+        // and then every particle draws straight through the geometry.
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         GLES30.glDepthMask(false)
         GLES30.glDisable(GLES30.GL_CULL_FACE)

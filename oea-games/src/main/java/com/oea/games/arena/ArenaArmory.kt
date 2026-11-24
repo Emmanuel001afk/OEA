@@ -52,6 +52,30 @@ object ArenaArmory {
     /** The starter pan is melee, not a gun — the lobby shows it as a last resort. */
     fun melee(): WeaponInfo = info(Weapon.PAN)
 
+    /**
+     * The guns that can actually spawn for a given weapon pool, in the same
+     * family-then-price order as [all].
+     *
+     * This is the *loot table's* answer, not a second opinion: the armory used to
+     * filter by a hard-coded list of families while `Weapon.lootPool` decided
+     * what spawns, so the two could disagree — and did, hiding the new guns from
+     * the island while showing families the pool never draws from.
+     */
+    fun pool(loadout: String): List<WeaponInfo> {
+        // Ask the loot table itself rather than re-applying the family filter:
+        // `Weapon.lootPool` is the authority on what can spawn, and it filters
+        // out the pan (and anything else the tables exclude). Reading its answer
+        // is what guarantees the sheet lists exactly the guns you can find.
+        val ids = Weapon.lootPool(loadout).map { it.name }.toSet()
+        return all().filter { it.id in ids }
+    }
+
+    /** The families a pool draws from, in display order. */
+    fun poolFamilies(loadout: String): List<String> {
+        val allowed = Weapon.poolFamilies(loadout).toSet()
+        return families.filter { it in allowed }
+    }
+
     private fun info(w: Weapon): WeaponInfo {
         val bars = Weapon.statBars(w)
         fun bar(name: String): Float = bars.firstOrNull { it.first == name }?.second ?: 0f

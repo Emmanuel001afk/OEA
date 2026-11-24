@@ -105,21 +105,60 @@ internal enum class Weapon(
             "Magazine" to (w.mag / 75f).coerceIn(0.05f, 1f),
         )
 
+        /** Magazine size after [level] upgrades — the one place this is computed. */
+        fun magNow(w: Weapon, level: Int): Int = ceil(w.mag * (1f + 0.1f * level)).toInt()
+
+        /** Reload time after [level] upgrades. */
+        fun reloadNow(w: Weapon, level: Int): Float = w.reload * (1f - 0.08f * level)
+
+        /**
+         * What each loadout pool *means*: a list of families, not a hand-written
+         * list of guns.
+         *
+         * This used to be a second, independent table (`lootPool`) listing
+         * specific guns while the front-end armory listed families — so the two
+         * disagreed, and the Carbine, Burst rifle and Double barrel were
+         * buyable in the shop but **could never spawn as loot on the island**.
+         * A family-shaped answer means a new gun joins its pool the moment it
+         * declares a family, with no second edit to remember.
+         */
+        val POOL_FAMILIES: Map<String, List<String>> = mapOf(
+            "snipers" to listOf("sniper", "rifle"),
+            "shotguns" to listOf("shotgun", "smg", "pistol"),
+            "close" to listOf("pistol", "smg"),
+            "rifles" to listOf("rifle", "smg", "lmg"),
+            "all" to FAMILIES.filter { it != "melee" },
+        )
+
+        /** The pool an unknown or empty loadout falls back to. */
+        const val POOL_DEFAULT = "all"
+
         /** Which guns the loot tables draw from for a loadout option. */
-        fun lootPool(loadout: String): List<Weapon> = when (loadout) {
-            "snipers" -> listOf(SNIPER, MARKSMAN, REVOLVER)
-            "shotguns" -> listOf(SHOTGUN, SMG, PISTOL)
-            "close" -> listOf(PISTOL, SMG, REVOLVER)
-            "rifles" -> listOf(RIFLE, SMG, LMG, MARKSMAN)
-            else -> guns
+        fun lootPool(loadout: String): List<Weapon> {
+            val families = POOL_FAMILIES[loadout] ?: POOL_FAMILIES.getValue(POOL_DEFAULT)
+            // FAMILIES ends with melee, which holds only the pan. A pan is never
+            // a loot-table gun: it is the thing you are left with.
+            return guns.filter { it.family in families }
         }
+
+        /** The families a loadout option draws from, for display. */
+        fun poolFamilies(loadout: String): List<String> =
+            POOL_FAMILIES[loadout] ?: POOL_FAMILIES.getValue(POOL_DEFAULT)
     }
 }
 
 /** Gun Game ladder: one kill advances a stage; a kill with the final stage wins. */
+/**
+ * Gun Game ladder: roughly ascending in lethality, ending on the pan.
+ *
+ * The new rifles and the double barrel are in here because a Gun Game that
+ * never shows you half the arsenal is a tutorial for the old half. Built from
+ * the roster so the stage list cannot drift from the guns that exist.
+ */
 internal val GUN_LADDER = listOf(
-    Weapon.PISTOL, Weapon.SMG, Weapon.RIFLE, Weapon.SHOTGUN,
-    Weapon.REVOLVER, Weapon.MARKSMAN, Weapon.SNIPER, Weapon.LMG, Weapon.PAN,
+    Weapon.PISTOL, Weapon.DOUBLE_BARREL, Weapon.SMG, Weapon.CARBINE, Weapon.RIFLE,
+    Weapon.BURST, Weapon.SHOTGUN, Weapon.REVOLVER, Weapon.MARKSMAN, Weapon.SNIPER,
+    Weapon.LMG, Weapon.PAN,
 )
 
 /** Kills needed to win Team Deathmatch. */
@@ -138,10 +177,15 @@ internal const val SHOP_MEDKIT = 300
 internal const val SHOP_FRAG = 400
 internal const val SHOP_SMOKE = 500
 internal const val SHOP_STUN = 450
+/** Carry limits. One place, so HUD, pickup and shop all agree. */
+internal const val MEDKIT_CAP = 5
+internal const val GRENADE_CAP = 5
 internal const val SHOP_VEST = 600
 internal const val SHOP_HELMET = 500
 /** Out-of-combat regeneration: seconds without damage, then HP per second. */
 internal const val REGEN_DELAY = 8f
+/** Length of the post-spawn invulnerability window, in seconds. */
+internal const val SPAWN_GUARD = 3f
 internal const val REGEN_RATE = 2.2f
 /** Weapon upgrade costs: base per level, up to UP_MAX levels per weapon. */
 internal const val UP_BASE = 250
@@ -159,17 +203,37 @@ internal class Loot(
 ) {
     var taken = false
     /** Grenade piles keep their type in [value], so the count is what stacks. */
-    val dropCount: Int get() = count
+    val dropCount: Int get() = remaining
+
+    /**
+     * Take [n] out of the pile. Returns true when the pile is now empty.
+     * A partially drained pile keeps its id and position, so every client that
+     * was told about it stays in sync — only the count changes.
+     */
+    fun remove(n: Int): Boolean {
+        remaining = (remaining - n).coerceAtLeast(0)
+        return remaining <= 0
+    }
+
+    /** How many are still in this pile. */
+    var remaining: Int = count
+        private set
+
+    /** Client-side sync: adopt the host's remaining count for this pile. */
+    fun setRemaining(n: Int) {
+        remaining = n.coerceAtLeast(0)
+        if (remaining == 0) taken = true
+    }
     val label: String get() = when (kind) {
         LootKind.WEAPON -> Weapon.entries[value].label
         LootKind.AMMO -> Weapon.AMMO_NAMES[value]
-        LootKind.MEDKIT -> if (count > 1) "Medkits x$count" else "Medkit"
+        LootKind.MEDKIT -> if (remaining > 1) "Medkits x$remaining" else "Medkit"
         LootKind.ARMOR -> "Vest lv.$value"
         LootKind.HELMET -> "Helmet lv.$value"
         LootKind.GRENADE -> when (value) {
-            GRENADE_FRAG -> if (count > 1) "Frag x$count" else "Frag grenade"
-            GRENADE_SMOKE -> if (count > 1) "Smoke x$count" else "Smoke grenade"
-            else -> if (count > 1) "Stun x$count" else "Stun grenade"
+            GRENADE_FRAG -> if (remaining > 1) "Frag x$remaining" else "Frag grenade"
+            GRENADE_SMOKE -> if (remaining > 1) "Smoke x$remaining" else "Smoke grenade"
+            else -> if (remaining > 1) "Stun x$remaining" else "Stun grenade"
         }
     }
 }
@@ -366,8 +430,15 @@ internal interface ArenaEvents {
     fun onShot(p: ArenaPlayer, hitX: Float, hitY: Float, hitZ: Float, hitPlayer: Boolean) {}
     fun onHit(shooter: ArenaPlayer, victim: ArenaPlayer, damage: Float, headshot: Boolean) {}
     fun onKill(killer: ArenaPlayer?, victim: ArenaPlayer, weapon: Weapon, headshot: Boolean) {}
+    /**
+     * A pile changed. [loot] carries its live [Loot.remaining] count, and
+     * `taken` is true when the pile is now empty. Partial pickups report here
+     * too, so clients do not show a five-medkit pile that is actually empty.
+     */
     fun onLootTaken(p: ArenaPlayer, loot: Loot) {}
     fun onLootSpawned(loot: Loot) {}
+    /** A pile's contents changed without the pile disappearing. */
+    fun onLootChanged(loot: Loot) {}
     fun onZone(phase: Int, shrinking: Boolean) {}
     fun onMatchOver(winner: ArenaPlayer?) {}
     /** A grenade went off: type 0 = frag burst with damage, 1 = smoke cloud, 2 = stun flash. */
@@ -622,7 +693,7 @@ internal class ArenaSim(
             p.ctrl.teleport(s[0], s[1], s[2])
             p.skydiving = false
             p.parachute = false
-            p.spawnGuard = 3f
+            p.spawnGuard = SPAWN_GUARD
             if (roundMode) p.cash = 1000
             if (gunGame) equipGunGameLoadout(p)
             else if (roundMode) equipRoundKit(p)
@@ -752,11 +823,15 @@ internal class ArenaSim(
             // Wolf picks are free (the duel is about the gun, not the budget).
             if (w != null && w != Weapon.PAN && (w.price <= p.cash || rules == "wolf")) {
                 p.cash -= w.price
+                // A bought gun arrives at its *upgraded* magazine if the player
+                // has already paid for that gun's upgrades, and starts with three
+                // magazines of reserve rather than one.
+                val mag = Weapon.magNow(w, p.upLevels[w.ordinal])
                 p.slots[0] = w
-                p.mags[0] = w.mag
+                p.mags[0] = mag
                 p.active = 0
                 p.ammo.fill(0)
-                if (w.ammo >= 0) p.ammo[w.ammo] = w.mag * 3
+                if (w.ammo >= 0) p.ammo[w.ammo] = mag * 3
             }
             inp.buySlot = -1
         }
@@ -814,7 +889,7 @@ internal class ArenaSim(
             p.cooldown = 0f
             p.switchLeft = 0f
             p.respawnAt = 0f
-            p.spawnGuard = 3f
+            p.spawnGuard = SPAWN_GUARD
             p.spread = 0f
             p.recoil = 0f
             return
@@ -833,7 +908,7 @@ internal class ArenaSim(
         p.cooldown = 0f
         p.switchLeft = 0f
         p.respawnAt = 0f
-        p.spawnGuard = 3f
+        p.spawnGuard = SPAWN_GUARD
         p.spread = 0f
         p.recoil = 0f
         if (gunGame) equipGunGameLoadout(p) else equipTeamLoadout(p)
@@ -1313,13 +1388,13 @@ internal class ArenaSim(
         if (p.reloadLeft > 0f) {
             p.reloadLeft -= dt
             if (p.reloadLeft <= 0f && w.ammo >= 0) {
-                val emag = ceil(w.mag * (1f + 0.1f * p.upLevels[w.ordinal])).toInt()
+                val emag = Weapon.magNow(w, p.upLevels[w.ordinal])
                 val need = emag - p.mags[p.active]
                 val take = min(need, p.ammo[w.ammo])
                 p.mags[p.active] += take; p.ammo[w.ammo] -= take
             }
-        } else if (w.ammo >= 0 && (inp.reload || p.mags[p.active] == 0 && inp.fire) && p.mags[p.active] < ceil(w.mag * (1f + 0.1f * p.upLevels[w.ordinal])) && p.ammo[w.ammo] > 0) {
-            p.reloadLeft = w.reload * (1f - 0.08f * p.upLevels[w.ordinal]) // upgrades reload faster
+        } else if (w.ammo >= 0 && (inp.reload || p.mags[p.active] == 0 && inp.fire) && p.mags[p.active] < Weapon.magNow(w, p.upLevels[w.ordinal]) && p.ammo[w.ammo] > 0) {
+            p.reloadLeft = Weapon.reloadNow(w, p.upLevels[w.ordinal]) // upgrades reload faster
         }
         val moving = len > 0.2f
         // Prone is the steadiest stance; a stun opens the spread right up.
@@ -1327,32 +1402,34 @@ internal class ArenaSim(
         val target = (if (p.aiming) w.spreadAds else w.spreadHip) * (if (moving) 1.6f else 1f) * (if (!p.ctrl.grounded) 2.2f else 1f) * stance * (if (p.stunTimer > 0f) 1.8f else 1f)
         p.spread = MathX.damp(p.spread, target, 8f, dt)
         if (inp.fire && p.cooldown <= 0f && p.reloadLeft <= 0f && p.switchLeft <= 0f && p.stunTimer <= 0f) {
-            // A burst rifle fires three rounds per pull: this one now, two more
-            // from the queue below. A double barrel spends both barrels.
-            // The extra rounds of a burst/double-barrel ride the queue below,
-            // which fires on the weapon's own cadence and stops at an empty mag.
+            // A burst rifle owes three rounds per pull and a double barrel owes
+            // two barrels; this one fires now and the rest ride the queue below
+            // on the weapon's own cadence, so a burst is three aimed rounds and
+            // not three frames of one trigger pull.
             if (w == Weapon.BURST) p.burstLeft = 2
             if (w == Weapon.DOUBLE_BARREL) p.burstLeft = 1
             if (w == Weapon.PAN || p.mags[p.active] > 0) fire(p)
             if (!w.auto) inp.fire = false
         }
-        // The rest of a burst keeps firing on the weapon's own cadence, so a
-        // burst is three aimed rounds and not three frames of one trigger pull.
         if (p.burstLeft > 0 && p.cooldown <= 0f && p.reloadLeft <= 0f && p.stunTimer <= 0f) {
             if (p.mags[p.active] > 0) { p.burstLeft--; fire(p) } else p.burstLeft = 0
         }
+        // A burst is a promise: switching guns, reloading or being stunned
+        // cancels what is owed rather than silently firing it later from a
+        // different weapon — that was a free ambush round out of the pan.
+        if (p.burstLeft > 0 && (p.reloadLeft > 0f || p.switchLeft > 0f || p.stunTimer > 0f)) p.burstLeft = 0
         // Healing: 3 seconds, interrupted by shooting. A medkit is a decision —
         // you stand still and vulnerable for three seconds and get 65 HP back.
         if (inp.heal && p.medkits > 0 && p.health < 100f) {
             p.healProgress += dt / 3f
             if (p.healProgress >= 1f) { p.health = min(100f, p.health + 65f); p.medkits--; p.healProgress = 0f }
         } else p.healProgress = 0f
+        if (p.spawnGuard > 0f) p.calmTime = 0f else p.calmTime += dt
         // Out of combat, health creeps back to 60 but never to full: the slow
         // recovery that lets a survivor re-engage without trivialising medkits.
         if (p.health < 60f && p.calmTime > REGEN_DELAY && p.healProgress <= 0f) {
             p.health = min(60f, p.health + dt * REGEN_RATE)
         }
-        if (p.spawnGuard > 0f) p.calmTime = 0f else p.calmTime += dt
         // Pick-ups.
         autoPickup(p)
         if (inp.pickup >= 0) { pickup(p, inp.pickup); inp.pickup = -1 }
@@ -1620,8 +1697,8 @@ internal class ArenaSim(
             if (dx * dx + dz * dz > 2.4f || abs(l.y - p.pos.y - 0.3f) > 1.6f) continue
             val wanted = when (l.kind) {
                 LootKind.AMMO -> true
-                LootKind.MEDKIT -> p.medkits < 5
-                LootKind.GRENADE -> p.grenades < 5
+                LootKind.MEDKIT -> p.medkits < MEDKIT_CAP
+                LootKind.GRENADE -> p.grenades < GRENADE_CAP
                 LootKind.ARMOR -> l.value > p.armor
                 LootKind.HELMET -> l.value > p.helmet
                 LootKind.WEAPON -> p.slots.any { it == Weapon.PAN } && p.slots.none { it.ordinal == l.value }
@@ -1635,44 +1712,79 @@ internal class ArenaSim(
         val l = loot.firstOrNull { it.id == lootId && !it.taken } ?: return
         val dx = l.x - p.pos.x; val dz = l.z - p.pos.z
         if (dx * dx + dz * dz > 6f) return
-        if (l.kind == LootKind.WEAPON) {
-            val old = p.slots[p.active]
-            if (old != Weapon.PAN) {
-                val drop = Loot(lootIds++, LootKind.WEAPON, old.ordinal, p.pos.x, p.pos.y + 0.3f, p.pos.z)
-                loot += drop
-                events?.onLootSpawned(drop)
-            }
-            p.slots[p.active] = Weapon.entries[l.value]
-            p.mags[p.active] = min(Weapon.entries[l.value].mag, 6)
-            p.reloadLeft = 0f
-            l.taken = true
-            events?.onLootTaken(p, l)
-        } else take(p, l)
+        // One path for every kind. Weapon swaps used to live here *and* in
+        // `take`, with slightly different rules (this one ignored upgrades and
+        // always used the active slot) — two answers to one question.
+        take(p, l)
     }
 
+    /**
+     * Take a pile — *as much of it as you can carry*.
+     *
+     * A body drops its whole loadout as stacks (five medkits, three frags), so a
+     * pickup is a transfer, not a toggle: you take up to your carrying limit and
+     * the rest stays on the floor for the next person. Marking the pile taken
+     * after a partial pickup was silently deleting loot that a host had told
+     * every client about.
+     */
     private fun take(p: ArenaPlayer, l: Loot) {
-        // A dropped stack (a body's five medkits, say) arrives as one pile, so
-        // every consumable adds rather than counting one. Carrying limits still
-        // apply: you cannot walk away with more than you could hold.
+        val room = l.remaining
         when (l.kind) {
-            LootKind.AMMO -> p.ammo[l.value] += Weapon.AMMO_PACK[l.value]
-            LootKind.MEDKIT -> p.medkits = min(5, p.medkits + max(1, l.value))
-            LootKind.ARMOR -> p.armor = max(p.armor, l.value)
-            LootKind.HELMET -> p.helmet = max(p.helmet, l.value)
-            LootKind.GRENADE -> when (l.value) {
-                GRENADE_FRAG -> p.grenades = min(5, p.grenades + max(1, l.dropCount))
-                GRENADE_SMOKE -> p.smokes = min(5, p.smokes + max(1, l.dropCount))
-                else -> p.stuns = min(5, p.stuns + max(1, l.dropCount))
+            LootKind.AMMO -> {
+                p.ammo[l.value] += Weapon.AMMO_PACK[l.value]
+                l.taken = true
             }
-
+            LootKind.MEDKIT -> {
+                val moved = min(room, (MEDKIT_CAP - p.medkits).coerceAtLeast(0))
+                if (moved <= 0) return
+                p.medkits += moved
+                if (l.remove(moved)) l.taken = true else events?.onLootChanged(l)
+            }
+            LootKind.GRENADE -> {
+                val have = when (l.value) {
+                    GRENADE_FRAG -> p.grenades
+                    GRENADE_SMOKE -> p.smokes
+                    else -> p.stuns
+                }
+                val moved = min(room, (GRENADE_CAP - have).coerceAtLeast(0))
+                if (moved <= 0) return
+                when (l.value) {
+                    GRENADE_FRAG -> p.grenades += moved
+                    GRENADE_SMOKE -> p.smokes += moved
+                    else -> p.stuns += moved
+                }
+                if (l.remove(moved)) l.taken = true else events?.onLootChanged(l)
+            }
+            // Armour and helmets are single items with a level, not stacks: you
+            // take the better one and leave the worse one where it lies.
+            LootKind.ARMOR -> {
+                if (l.value <= p.armor) return
+                p.armor = l.value
+                l.taken = true
+            }
+            LootKind.HELMET -> {
+                if (l.value <= p.helmet) return
+                p.helmet = l.value
+                l.taken = true
+            }
             LootKind.WEAPON -> {
-                val slot = if (p.slots[0] == Weapon.PAN) 0 else 1
-                p.slots[slot] = Weapon.entries[l.value]
-                p.mags[slot] = min(Weapon.entries[l.value].mag, 6)
+                val w = Weapon.entries[l.value]
+                // Swap into the empty slot, else replace what you are holding and
+                // drop that gun in this pile's place, so a swap never destroys a
+                // weapon the player might want back.
+                val slot = if (p.slots[0] == Weapon.PAN) 0 else if (p.slots[1] == Weapon.PAN) 1 else p.active
+                val old = p.slots[slot]
+                p.slots[slot] = w
+                p.mags[slot] = min(Weapon.magNow(w, p.upLevels[w.ordinal]), 6)
                 if (p.slots[p.active] == Weapon.PAN) p.active = slot
+                if (old != Weapon.PAN) {
+                    val back = Loot(lootIds++, LootKind.WEAPON, old.ordinal, l.x, l.y, l.z)
+                    loot += back
+                    events?.onLootSpawned(back)
+                }
+                l.taken = true
             }
         }
-        l.taken = true
         events?.onLootTaken(p, l)
     }
 
@@ -1835,8 +1947,7 @@ internal class ArenaSim(
         for (slot in 0..1) {
             val w = p.slots[slot]
             if (w == Weapon.PAN) continue
-            val lv = p.upLevels[w.ordinal]
-            p.mags[slot] = ceil(w.mag * (1f + 0.1f * lv)).toInt()
+            p.mags[slot] = Weapon.magNow(w, p.upLevels[w.ordinal])
         }
     }
 
@@ -2119,17 +2230,34 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
         inp.pitch = MathX.lerp(inp.pitch, wantPitch + aimError * 0.1f, 0.25f)
         aimError = MathX.damp(aimError, 0.02f + (1f - skill) * 0.05f, 1.5f + skill * 2f, dt)
         reaction -= dt
-        inp.ads = dist > 18f && w != Weapon.SHOTGUN
-        val aligned = abs(MathX.angleDelta(p.yaw, wantYaw)) < 0.12f
+        val scatter = w.pellets > 1
+        inp.ads = dist > 18f && !scatter
+        val aligned = abs(MathX.angleDelta(p.yaw, wantYaw)) < (if (scatter) 0.22f else 0.12f)
         burst -= dt
         if (reaction <= 0f && aligned && dist < fireRange(w)) {
-            if (w.auto) {
-                // Burst discipline varies by personality: aggressive bots hold
-                // longer, cautious bots tap and reset.
-                val rest = if (personality == 1) 0.22f else if (personality == 2) 0.55f else 0.35f
-                if (burst <= -rest) burst = rng.range(0.25f, if (personality == 1) 0.9f else 0.6f)
-                inp.fire = burst > 0f
-            } else inp.fire = rng.chance(0.5f)
+            when {
+                // The pan is a finisher: a bot should swing it, not stand there
+                // holding fire at a rifle 30 m away.
+                w == Weapon.PAN -> inp.fire = dist < 2.4f
+                // One-shot weapons are only worth a trigger pull when the shot
+                // can actually land: a double barrel at 25 m is two wasted
+                // shells and a free kill for whoever is holding the rifle.
+                w == Weapon.DOUBLE_BARREL -> inp.fire = dist < 11f
+                w == Weapon.SHOTGUN -> inp.fire = dist < 16f
+                w == Weapon.SNIPER || w == Weapon.REVOLVER -> inp.fire = dist > 8f && rng.chance(0.55f)
+                w.auto -> {
+                    // Burst discipline varies by personality: aggressive bots hold
+                    // longer, cautious bots tap and reset.
+                    val rest = if (personality == 1) 0.22f else if (personality == 2) 0.55f else 0.35f
+                    if (burst <= -rest) burst = rng.range(0.25f, if (personality == 1) 0.9f else 0.6f)
+                    inp.fire = burst > 0f
+                }
+                // A burst rifle pulls once per cycle and lets the queue fire the
+                // rest, so a bot must release the trigger between bursts or it
+                // re-arms the burst every cooldown and never stops firing.
+                w == Weapon.BURST -> inp.fire = p.burstLeft == 0 && reaction <= 0.15f && rng.chance(0.35f)
+                else -> inp.fire = rng.chance(0.5f)
+            }
         } else inp.fire = false
         // Grenades: cook behind cover, smoke a bad trade, stun a close push.
         // Never frag a target standing next to a teammate, and never at
@@ -2257,7 +2385,7 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
                 LootKind.ARMOR -> l.value > p.armor
                 LootKind.HELMET -> l.value > p.helmet
                 LootKind.MEDKIT -> p.medkits < 3
-                LootKind.GRENADE -> p.grenades < 5
+                LootKind.GRENADE -> p.grenades < GRENADE_CAP
             }
             if (!useful) continue
             val dx = l.x - p.pos.x; val dz = l.z - p.pos.z

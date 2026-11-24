@@ -99,6 +99,10 @@ class OeaArena : OeaGame() {
     private var local: ArenaPlayer? = null
     private val actors = LinkedHashMap<Int, Actor>()
     private val prev = HashMap<Int, FloatArray>()
+    /** Where the local soldier was drawn this frame, for body-attached FX. */
+    private val localDrawPos = Vec3()
+    /** True when the local body was actually drawn this frame (skipped in ADS). */
+    private var localDrawn = false
     private val history = InputHistory<FloatArray>(128)
     private var seq = 0
     private val sentCmds = ArrayDeque<ByteArray>()
@@ -356,6 +360,16 @@ class OeaArena : OeaGame() {
     private var lookPitch = 0f
     private var adsOn = false
     private var crouchOn = false
+    /**
+     * Healing is a latch, not a hold: one tap starts the three-second channel,
+     * another tap (or taking a hit) cancels it.
+     *
+     * Hold-to-heal meant the thumb was pinned to a button in the corner while
+     * the other thumb had to drive both aiming and moving — and letting go by
+     * accident threw away the whole kit's progress. A channel you can start and
+     * then *play around* is the same decision without the handcuff.
+     */
+    private var healLatch = false
     private var jumpLatch = false
     private var reloadLatch = false
     private var mountLatch = false
@@ -524,10 +538,25 @@ class OeaArena : OeaGame() {
     /** The blinking warning light near the end of the fuse. */
     private val grenadeBlinkMat = Material(color = 0x66FF3B3B.toInt(), emissive = 0xFFFF3B3B.toInt(), emissiveStrength = 1.6f, unlit = true, transparent = true, additive = true, doubleSided = true, depthWrite = false, castShadows = false, fog = false)
     private val rocketMat = Material(color = 0xFFE0E0E0.toInt(), emissive = 0xFFFF7043.toInt(), emissiveStrength = 1.2f, specular = 0.6f)
-    /** Streaks that read as air being cut — sprint lines and skydive wind. */
-    private val speedLineMat = Material(color = 0x0FFFFFFF, emissive = 0xFFFFFFFF.toInt(), emissiveStrength = 0.35f, specular = 0f)
-    private val healRingMat = Material(color = 0x0F66BB6A, emissive = 0xFF66BB6A.toInt(), emissiveStrength = 0.9f, specular = 0f)
-    private val shieldRingMat = Material(color = 0x0F8AB4F8, emissive = 0xFF8AB4F8.toInt(), emissiveStrength = 0.8f, specular = 0f)
+    // Body FX are additive glows, not solid plates: additive + transparent +
+    // no depth write means they layer over the world without occluding it or
+    // casting shadows. Without `transparent` the solver treats them as opaque
+    // and the alpha in `color` does nothing — a grey disc at the player's feet.
+    private val speedLineMat = Material(
+        color = 0x33FFFFFF, emissive = 0xFFFFFFFF.toInt(), emissiveStrength = 0.35f, specular = 0f,
+        unlit = true, transparent = true, additive = true, doubleSided = true,
+        depthWrite = false, castShadows = false, fog = false,
+    )
+    private val healRingMat = Material(
+        color = 0x5566BB6A, emissive = 0xFF66BB6A.toInt(), emissiveStrength = 0.9f, specular = 0f,
+        unlit = true, transparent = true, additive = true, doubleSided = true,
+        depthWrite = false, castShadows = false, fog = false,
+    )
+    private val shieldRingMat = Material(
+        color = 0x558AB4F8, emissive = 0xFF8AB4F8.toInt(), emissiveStrength = 0.8f, specular = 0f,
+        unlit = true, transparent = true, additive = true, doubleSided = true,
+        depthWrite = false, castShadows = false, fog = false,
+    )
     private val rocketTrailMat = Material(color = 0x88FFFFFF.toInt(), emissive = 0xFFFFFFFF.toInt(), emissiveStrength = 0.8f, unlit = true, transparent = true, additive = true, depthWrite = false, castShadows = false, fog = false)
     /** A smoke grenade's lasting cloud: a soft grey volume standing over where the air went thick. */
     private val smokeCloudMat = Material(color = 0x99909090.toInt(), unlit = true, transparent = true, doubleSided = true, depthWrite = false, castShadows = false)
@@ -772,8 +801,20 @@ class OeaArena : OeaGame() {
             if (p.id == localId) ctx.audio.play(sPick, 0.6f)
             net?.broadcast(EV_LOOT_TAKEN) { it.varint(loot.id) }
         }
+        override fun onLootChanged(loot: Loot) {
+            // A pile was partly taken: tell everyone what is left. Without this
+            // a client keeps drawing "Medkits x5" over a pile that is empty,
+            // and the automatic pickup keeps offering it.
+            net?.broadcast(EV_LOOT_CHANGED) { it.varint(loot.id).u8(loot.remaining.coerceIn(0, 255)) }
+        }
         override fun onLootSpawned(loot: Loot) {
-            net?.broadcast(EV_LOOT_SPAWN) { w -> w.varint(loot.id).u8(loot.kind.ordinal).u8(loot.value).f32(loot.x).f32(loot.y).f32(loot.z) }
+            // The count travels with the pile: a body's five medkits must read as
+            // five on every client, or a remote player picks up one and the
+            // other four vanish from their screen but not from the host's.
+            net?.broadcast(EV_LOOT_SPAWN) { w ->
+                w.varint(loot.id).u8(loot.kind.ordinal).u8(loot.value).u8(loot.count.coerceIn(1, 255))
+                    .f32(loot.x).f32(loot.y).f32(loot.z)
+            }
         }
         override fun onZone(phase: Int, shrinking: Boolean) {
             ctx.island.event(if (shrinking) "The zone is closing in" else "Zone ${phase + 1} reached", "◎", 2500)
@@ -967,7 +1008,19 @@ class OeaArena : OeaGame() {
         inp.mount = mountLatch
         mountLatch = false
         inp.slot = slotLatch
-        inp.heal = healBtn.pressed
+        if (healBtn.justPressed) healLatch = !healLatch
+        // Firing, swapping or dying ends the channel — those are the actions that
+        // already interrupt a medkit in the simulation.
+        val meNow = local
+        if (meNow != null) {
+            // Out of kits, dead, or shot? The channel ends. Taking damage is
+            // handled in the sim (it resets healProgress), so the latch follows
+            // the progress rather than duplicating the damage check here.
+            if (inp.fire || inp.slot >= 0 || !meNow.alive) healLatch = false
+            else if (healLatch && meNow.medkits <= 0 && meNow.healProgress <= 0f) healLatch = false
+            else if (healLatch && meNow.health >= 100f) healLatch = false
+        }
+        inp.heal = healLatch
         inp.pickup = pickupLatch
         inp.grenade = grenadeLatch == 0
         inp.smoke = grenadeLatch == 1
@@ -1022,7 +1075,11 @@ class OeaArena : OeaGame() {
                 w.u8(p.medkits).u8(p.grenades).u8(p.smokes).u8(p.stuns).u16(p.cash).u8(p.shots and 0xFF).u8(p.kills).u16(p.lastAck and 0xFFFF)
                     .q8(p.healProgress, 0f, 1f).q8(p.reloadLeft, 0f, 4f)
                 w.u8(p.team).u8(p.gunLevel).u8(if (p.vehicle >= 0) p.vehicle else 255)
-                for (k in 0 until 11) w.u8(p.upLevels[k])
+                // One upgrade level per weapon in the roster, sent in enum order.
+                // The count is the roster size, not a constant: a hard-coded 11
+                // silently truncated the array once the gun count grew, and the
+                // reader below would have read the next field as an upgrade.
+                p.upLevels.forEach { w.u8(it) }
             }
             w.u8(sim.teamScore[0].coerceIn(0, 255)).u8(sim.teamScore[1].coerceIn(0, 255))
             // Warfare scores (captures / King of the Hill points) — synced so
@@ -1093,9 +1150,18 @@ class OeaArena : OeaGame() {
                     onKillFeed(if (killer == 255) -1 else killer, victim, weapon, head)
                 }
                 EV_LOOT_TAKEN -> if (!isAuthority) { val id = r.varint(); sim.loot.firstOrNull { it.id == id }?.taken = true }
+                EV_LOOT_CHANGED -> if (!isAuthority) {
+                    val id = r.varint(); val left = r.u8()
+                    sim.loot.firstOrNull { it.id == id }?.setRemaining(left)
+                }
                 EV_LOOT_SPAWN -> if (!isAuthority) {
-                    val id = r.varint(); val kind = LootKind.entries[r.u8()]; val value = r.u8()
-                    sim.loot += Loot(id, kind, value, r.f32(), r.f32(), r.f32())
+                    val id = r.varint()
+                    val kind = LootKind.entries.getOrElse(r.u8()) { LootKind.AMMO }
+                    val value = r.u8(); val count = r.u8()
+                    // Positions are read after the count even if the pile is a
+                    // single item, so the packet shape never changes per kind.
+                    val x = r.f32(); val y = r.f32(); val z = r.f32()
+                    sim.loot += Loot(id, kind, value, x, y, z, count.coerceAtLeast(1))
                 }
                 EV_OVER -> if (!isAuthority) { val w = r.u8(); endMatch(if (w == 255) -1 else w, actors[w]?.name) }
                 EV_ROUND_OVER -> if (!isAuthority) {
@@ -1128,7 +1194,7 @@ class OeaArena : OeaGame() {
             val heal = r.q8(0f, 1f); val reload = r.q8(0f, 4f)
             val team = r.u8(); val gunLevel = r.u8()
             val veh = r.u8().let { if (it == 255) -1 else it }
-            val ups = IntArray(11) { r.u8() }
+            val ups = IntArray(Weapon.entries.size) { r.u8() }
             val a = actors.getOrPut(id) { Actor(id, "Player $id", EngineColors[id % EngineColors.size]) }
             if (id != localId && a.shots != shots && a.alive) onRemoteShots(a, (shots - a.shots) and 0xFF)
             if (id == localId && a.shots != shots) local?.let { me ->
@@ -1143,7 +1209,10 @@ class OeaArena : OeaGame() {
             a.team = team; a.gunLevel = gunLevel
             a.buffer.push(now, floatArrayOf(x, y, z, yaw, pitch))
             if (id == localId) {
-                local?.let { it.team = team; it.gunLevel = gunLevel; it.vehicle = veh; for (k in 0 until 11) it.upLevels[k] = ups[k] }
+                local?.let {
+                    it.team = team; it.gunLevel = gunLevel; it.vehicle = veh
+                    for (k in ups.indices) if (k < it.upLevels.size) it.upLevels[k] = ups[k]
+                }
                 reconcile(x, y, z, flags, health, armor, helmet, s0, s1, active, m0, m1, ammo, meds, kills, ack, heal, reload, grens, smokes, stuns, cash)
             }
         }
@@ -1169,7 +1238,13 @@ class OeaArena : OeaGame() {
                           m0: Int, m1: Int, ammo: IntArray, meds: Int, kills: Int, ack: Int, heal: Float, reload: Float, grens: Int, smokes: Int, stuns: Int, cash: Int) {
         val me = local ?: return
         me.health = health.toFloat(); me.armor = armor; me.helmet = helmet
-        me.slots[0] = Weapon.entries[s0]; me.slots[1] = Weapon.entries[s1]; me.active = active; me.mags[0] = m0; me.mags[1] = m1
+        // A snapshot from a host on a newer build can name a weapon this build
+        // does not have; fall back to the pan rather than throwing inside the
+        // receive loop and killing the whole match.
+        me.slots[0] = Weapon.entries.getOrElse(s0) { Weapon.PAN }
+        me.slots[1] = Weapon.entries.getOrElse(s1) { Weapon.PAN }
+        me.active = if (active in 0..1) active else 0
+        me.mags[0] = m0; me.mags[1] = m1
         ammo.copyInto(me.ammo); me.medkits = meds; me.kills = kills; me.healProgress = heal; me.reloadLeft = reload
         me.grenades = grens; me.smokes = smokes; me.stuns = stuns; me.cash = cash
         me.prone = flags and 64 != 0
@@ -1378,7 +1453,12 @@ class OeaArena : OeaGame() {
         val near = me?.let { sim.nearestLoot(it, LootKind.WEAPON) ?: sim.nearestLoot(it, LootKind.GRENADE) }
         pickupBtn.visible = alive && near != null && !(me?.skydiving ?: true)
         pickupBtn.label = near?.let { Weapon.entries[it.value].glyph } ?: "PICK"
-        healBtn.visible = alive && (me?.medkits ?: 0) > 0
+        // The heal button stays put while a medkit is working even at zero
+        // medkits (the kit is being spent) and even at full health, so the
+        // progress ring has somewhere to live and the button does not vanish
+        // out from under the thumb that is holding it.
+        val healingNow = (me?.healProgress ?: 0f) > 0f
+        healBtn.visible = alive && ((me?.medkits ?: 0) > 0 || healingNow) && (me?.health ?: 0f) < 100f
         healBtn.progress = me?.healProgress?.takeIf { it > 0f } ?: -1f
         // In the Character Studio the game controls stand down completely so
         // every tap lands on the studio overlay instead of the fire button.
@@ -2280,7 +2360,12 @@ class OeaArena : OeaGame() {
         val items = ArrayList<MenuItem>()
         items += MenuItem.header("Cash")
         items += MenuItem("cash", "Cash: $${me.cash}", "Kills and round wins pay")
+        // Only the families this match's weapon pool actually draws from. A
+        // shop that sells a launcher in a pistol duel is noise, and the pool is
+        // the one place the mode says what it is about.
+        val poolFamilies = Weapon.poolFamilies(sim.loadout).toSet()
         for (fam in Weapon.FAMILIES) {
+            if (fam !in poolFamilies) continue
             val guns = Weapon.inFamily(fam).filter { it.price > 0 }
             if (guns.isEmpty()) continue
             items += MenuItem.header(Weapon.familyLabel(fam))
@@ -2406,6 +2491,7 @@ class OeaArena : OeaGame() {
     }
 
     private fun drawWorld(r: Renderer3D) {
+        localDrawn = false
         // Hand this frame's dynamic light (fire, sparks, magic) to the scene
         // and register the physics-driven particle systems.
         vfx.register(r, env)
@@ -2479,6 +2565,11 @@ class OeaArena : OeaGame() {
                 val x = if (pr != null) MathX.lerp(pr[0], p.pos.x, alpha) else p.pos.x
                 val y = if (pr != null) MathX.lerp(pr[1], p.pos.y, alpha) else p.pos.y
                 val z = if (pr != null) MathX.lerp(pr[2], p.pos.z, alpha) else p.pos.z
+                // Remember where the local body was actually *drawn*. The body FX
+                // (heal ring, shield ring, wind streaks) hang off the same point,
+                // or they trail a frame behind the soldier at sprint speed —
+                // exactly when a player is looking at them.
+                        if (p.id == localId) { localDrawPos.set(x, y, z); localDrawn = true }
                 val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or (if (p.parachute) 16 else 0) or (if (p.prone) 64 else 0)
                 val bodyY = if (p.id == localId) visualBodyYaw(lookYaw, renderDt) else p.yaw
                 drawSoldier(r, x, y, z, bodyY, p.pitch, p.color, flags, p.weapon, p.armor, p.helmet, walkPhase(p), smoothedSpeed(p), team = p.team, id = p.id,
@@ -2839,40 +2930,54 @@ class OeaArena : OeaGame() {
      */
     private fun drawBodyFx(r: Renderer3D) {
         val me = local ?: return
-        if (!me.alive) return
+        // In a scoped view the body is not drawn at all; a ring floating in front
+        // of the lens is worse than no ring, so stand the FX down with it.
+        if (!me.alive || !localDrawn) return
         val t = ctx.time.elapsed.toFloat()
-        val gy = map.physics.groundHeight(me.pos.x, me.pos.z, me.pos.y + 1f)
+        // Position the body was drawn at this frame (interpolated), not the raw
+        // simulation position — see the note where localDrawPos is set.
+        val cx = localDrawPos.x
+        val cy = localDrawPos.y
+        val cz = localDrawPos.z
+        val gy = map.physics.groundHeight(cx, cz, cy + 1f)
         // Healing: a ring that turns and a soft column of light.
         if (me.healProgress > 0f) {
             val rr = 0.85f + 0.1f * sin(t * 4f)
-            r.draw(captureRing, healRingMat, me.pos.x, gy + 0.06f, me.pos.z, t * 0.9f, MathX.HALF_PI, 0f, rr, 1f, rr)
-            r.draw(captureBeam, healRingMat, me.pos.x, gy + 0.4f + me.healProgress * 0.8f, me.pos.z, 0f, 0f, 0f, 0.45f, 1.6f + me.healProgress, 0.45f)
-            if (ctx.time.frame % 3 == 0L) vfx.sparksAt(me.pos.x, gy + 0.3f, me.pos.z, 2, hot = 0xFF8BC34A.toInt())
+            r.draw(captureRing, healRingMat, cx, gy + 0.06f, cz, t * 0.9f, MathX.HALF_PI, 0f, rr, 1f, rr)
+            r.draw(captureBeam, healRingMat, cx, gy + 0.4f + me.healProgress * 0.8f, cz, 0f, 0f, 0f, 0.45f, 1.6f + me.healProgress, 0.45f)
+            if (ctx.time.frame % 3 == 0L) vfx.sparksAt(cx, gy + 0.3f, cz, 2, hot = 0xFF8BC34A.toInt())
         }
         // Spawn shield: a ring at the soldier's feet that fades as the guard does.
         if (me.spawnGuard > 0f) {
-            val k = (me.spawnGuard / 3f).coerceIn(0f, 1f)
+            val k = (me.spawnGuard / SPAWN_GUARD).coerceIn(0f, 1f)
             val rr = 1.05f + (1f - k) * 0.25f
-            r.draw(zoneRing, shieldRingMat, me.pos.x, gy + 0.08f, me.pos.z, 0f, 0f, 0f, rr, 1f, rr)
+            r.draw(zoneRing, shieldRingMat, cx, gy + 0.08f, cz, 0f, 0f, 0f, rr, 1f, rr)
         }
         // Speed: streak lines behind the body, scaled by how fast it is actually
-        // moving. On foot past a sprint, and hard while skydiving.
+        // moving. On foot, only *past a sprint* — and the threshold is derived
+        // from the real sprint speed and the held weapon's weight, so carrying
+        // an LMG (which slows you below a sprinting rifleman) does not spray
+        // wind lines at a walk.
         val speed = MathX.length(me.velX, me.velZ)
         val sky = me.skydiving
-        val intensity = if (sky) 1f else ((speed - 7.2f) / 3.2f).coerceIn(0f, 1f)
+        val sprintSpeed = 8.4f * me.weapon.moveSpeed
+        val intensity = if (sky) 1f else ((speed - sprintSpeed * 0.92f) / 2.2f).coerceIn(0f, 1f)
         if (intensity > 0.02f) {
             val fx = sin(me.yaw); val fz = cos(me.yaw)
             val rx = -fz; val rz = fx
-            val headY = me.pos.y + 1.35f
-            for (i in 0 until 7) {
+            val headY = cy + 1.35f
+            // Seven lines is a lot of tiny draws for a cosmetic cue, so the count
+            // follows the quality tier: low-end phones see three, high-end seven.
+            val lines = if (ctx.graphics.quality.particleDensity < 0.6f) 3 else 7
+            for (i in 0 until lines) {
                 val ph = i * 0.9f
                 val side = if (i % 2 == 0) 1f else -1f
                 val off = (0.35f + 0.3f * ((i % 3) + 1)) * side
                 val jitter = sin(t * 9f + ph) * 0.18f
                 val len = (0.5f + 1.6f * intensity) * (0.6f + 0.4f * sin(t * 7f + ph))
                 val y = headY + (i - 3) * 0.26f + jitter
-                val ax = me.pos.x + rx * off - fx * 0.4f
-                val az = me.pos.z + rz * off - fz * 0.4f
+                val ax = cx + rx * off - fx * 0.4f
+                val az = cz + rz * off - fz * 0.4f
                 val bx2 = ax - fx * len
                 val bz2 = az - fz * len
                 r.drawLine(ax, y, az, bx2, y, bz2, 0.012f, speedLineMat, Colors.withAlpha(Colors.WHITE, 0.16f * intensity))
@@ -3012,7 +3117,8 @@ class OeaArena : OeaGame() {
         joystick.draw(b, ACCENT)
         adsBtn.highlight = adsOn; crouchBtn.highlight = crouchOn
         reloadBtn.progress = if (me.reloadLeft > 0f) 1f - me.reloadLeft / me.weapon.reload.coerceAtLeast(0.1f) else -1f
-        healBtn.label = "+${me.medkits}"
+        // The button says what a tap will do: start the channel, or stop it.
+        healBtn.label = if (healingNow) "STOP" else "+${me.medkits}"
         for ((button, _) in controlButtons) button.draw(b, hud.fontBold, hud.density)
         if (controlsOpen) {
             // The selected control gets a bright halo, so the size keys have an
@@ -3204,32 +3310,59 @@ class OeaArena : OeaGame() {
                 cx, cy + 17f * d, 13f, if (z.shrinking) 0xFF64B5F6.toInt() else 0xDDFFFFFF.toInt(), Align.CENTER)
             if (me.alive && z.outside(me.pos.x, me.pos.z) && !me.skydiving) hud.text("Outside the zone!", cx, cy + 38f * d, 16f, 0xFF64B5F6.toInt(), Align.CENTER, bold = true)
         }
-        // The status strip: everything the body is currently doing, stacked in
-        // one place above the weapon slots, so healing, reloading, a shield and
-        // an out-of-combat regen never fight for the same pixel.
-        var stripY = h * 0.60f
-        if (me.healProgress > 0f) {
-            hud.text("Healing…", w / 2f, stripY, 15f, Colors.WHITE, Align.CENTER, bold = true)
-            hud.bar(w / 2f - 70f * d, stripY + 22f * d, 140f * d, 6f * d, me.healProgress, 0xFF66BB6A.toInt())
-            stripY += 38f * d
-        } else if (me.alive && me.health < 60f && me.calmTime > 8f) {
-            // Out of combat: say so, and how far the slow regen has got.
-            hud.text("Regenerating", w / 2f, stripY, 12.5f, 0xFF9CCC8A.toInt(), Align.CENTER, bold = true)
-            hud.bar(w / 2f - 52f * d, stripY + 18f * d, 104f * d, 4f * d, MathX.clamp01(me.health / 60f), 0xCC9CCC8A.toInt())
-            stripY += 30f * d
-        }
+        // The status strip: everything the body is currently doing, in one
+        // column above the weapon slots. Built as a list and laid out
+        // bottom-up, so it can never run into the slot row on a short landscape
+        // phone — the fixed 60% anchor this replaced did exactly that, and so
+        // did the first version of this strip, whose lowest line drew *below*
+        // the slot row's top edge.
+        //
+        // Order is priority, lowest line first: reload (you need it every few
+        // seconds) then healing/regen, then spawn shield, then burst. When the
+        // screen is too short for all four, the least urgent lines are the ones
+        // that drop, and the ones that remain are still fully legible.
+        data class StatusLine(val text: String, val size: Float, var bar: Float, val barWidth: Float, val barColour: Int, val colour: Int, val advance: Float, val bold: Boolean)
+        val lines = ArrayList<StatusLine>(4)
         if (me.reloadLeft > 0f) {
-            hud.text("Reloading", w / 2f, stripY, 14f, 0xDDFFFFFF.toInt(), Align.CENTER)
-            stripY += 22f * d
+            // The bar is the point: "Reloading" alone does not say whether to
+            // push now or hold. The weapon slot shows the magazine behind it.
+            val total = me.weapon.reloadNow(me.upLevels[me.active]).coerceAtLeast(0.05f)
+            val done = (1f - me.reloadLeft / total).coerceIn(0f, 1f)
+            lines += StatusLine("Reloading", 14f, done, 88f, 0xDDCFD8DC.toInt(), 0xDDFFFFFF.toInt(), 30f, false)
+        }
+        if (me.healProgress > 0f) {
+            lines += StatusLine("Healing…", 15f, me.healProgress, 140f, 0xFF66BB6A.toInt(), Colors.WHITE, 38f, true)
+        } else if (me.alive && me.health < 60f && me.calmTime <= REGEN_DELAY) {
+            // During the delay, show *when* recovery starts. A player who cannot
+            // see the timer treats 8 seconds of waiting as "regen is broken".
+            val wait = (REGEN_DELAY - me.calmTime).coerceAtLeast(0f)
+            lines += StatusLine("Regen in ${wait.toInt() + 1}s", 12f, (1f - wait / REGEN_DELAY).coerceIn(0f, 1f), 104f,
+                0x66A5D6A7.toInt(), 0x99A5D6A7.toInt(), 28f, false)
+        } else if (me.alive && me.health < 60f) {
+            lines += StatusLine("Regenerating", 12.5f, MathX.clamp01(me.health / 60f), 104f, 0xCC9CCC8A.toInt(), 0xFF9CCC8A.toInt(), 30f, true)
         }
         if (me.spawnGuard > 0f && me.alive) {
-            // Spawn shield: a countdown, because a player must know exactly how
-            // long they cannot be shot for.
-            hud.text("Spawn shield ${ceil(me.spawnGuard).toInt()}s", w / 2f, stripY, 12.5f, 0xFF8AB4F8.toInt(), Align.CENTER, bold = true)
-            stripY += 22f * d
+            lines += StatusLine("Spawn shield ${ceil(me.spawnGuard).toInt()}s", 12.5f, -1f, 0f, 0, 0xFF8AB4F8.toInt(), 20f, true)
         }
         if (me.burstLeft > 0 && me.weapon == Weapon.BURST) {
-            hud.text("BURST", w / 2f, stripY, 11.5f, 0xCCFFD54F.toInt(), Align.CENTER, bold = true)
+            lines += StatusLine("BURST", 11.5f, -1f, 0f, 0, 0xCCFFD54F.toInt(), 20f, true)
+        }
+        // How much room there is between the slot row and the middle of the
+        // screen; the strip only ever uses the bottom half of that.
+        val slotRowTop = h - hud.safeBottom - (46f + 12f) * d
+        val room = (slotRowTop - h * 0.5f) - 14f * d
+        var stack = lines
+        while (stack.isNotEmpty() && stack.sumOf { (it.advance * d).toDouble() }.toFloat() > room) {
+            stack = stack.subList(0, stack.size - 1)   // drop the least urgent line
+        }
+        var y = slotRowTop - 8f * d
+        for (line in stack) {
+            y -= line.advance * d
+            hud.text(line.text, w / 2f, y, line.size, line.colour, Align.CENTER, bold = line.bold)
+            if (line.bar >= 0f) {
+                val bw = line.barWidth * d
+                hud.bar(w / 2f - bw / 2f, y + line.size * 1.45f * d, bw, 4.5f * d, line.bar, line.barColour)
+            }
         }
         if (net == null && hud.iconButton("menu", "☰", w - hud.safeRight - 150f * d, y + 20f * d, 18f)) onBack()
     }
@@ -3391,6 +3524,7 @@ class OeaArena : OeaGame() {
         private const val EV_ROSTER = 45
         private const val EV_ROUND_OVER = 46
         private const val EV_ROUND_START = 47
+        private const val EV_LOOT_CHANGED = 48
         private val BOT_NAMES = listOf("Raven", "Kodo", "Viper", "Nova", "Blaze", "Echo", "Titan", "Shade", "Rook", "Jinx", "Atlas", "Mira", "Onyx", "Zed", "Kira")
         private val EngineColors = com.oea.engine.EngineSettings.PLAYER_COLORS
 
