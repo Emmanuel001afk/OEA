@@ -63,15 +63,19 @@ class OeaSecurityScanJob : JobService() {
     override fun onDestroy() { generation.incrementAndGet(); executor.shutdownNow(); super.onDestroy() }
 
     private fun scanPackage(pkg: String, stopped: () -> Boolean) {
-        val database = File(filesDir, "security/signatures.txt")
-        if (!database.isFile) {
-            notifyResult("No malware signatures installed", "Automatic install checks cannot identify malware until you import a signature list.", null, 736824)
-            return
-        }
-        val hashes = OeaSignatureEngine.parse(database.readText()).hashes
-        if (hashes.isEmpty()) throw IllegalStateException("Empty signature list")
         val app = packageManager.getApplicationInfo(pkg, 0)
         if (app.flags and ApplicationInfo.FLAG_SYSTEM != 0) return
+        if (stopped()) return
+        // The bundled rules first: they need no imported list and no network, so a
+        // new install is checked even on a phone that has never been online. Before
+        // this, the watch had nothing to say until the user imported a signature
+        // database from somewhere else.
+        checkRules(pkg, stopped)
+        // Then the optional SHA-256 list, for the code-level check the rules cannot do.
+        val database = File(filesDir, "security/signatures.txt")
+        if (!database.isFile) return
+        val hashes = OeaSignatureEngine.parse(database.readText()).hashes
+        if (hashes.isEmpty()) return
         val paths = listOfNotNull(app.sourceDir) + (app.splitSourceDirs?.toList() ?: emptyList())
         if (paths.isEmpty()) throw IllegalStateException("APK path unavailable")
         var matched = false
@@ -83,6 +87,26 @@ class OeaSecurityScanJob : JobService() {
             val label = packageManager.getApplicationLabel(app).toString()
             notifyResult("Signature match: $label", "A file matches your imported list. Verify the source and review this app.", pkg, pkg.hashCode())
         }
+    }
+
+    private fun checkRules(pkg: String, stopped: () -> Boolean) {
+        if (pkg in OeaAppAudit.allowedPackages(this)) return
+        val facts = OeaAppAudit.factsFor(this, pkg) ?: return
+        if (stopped()) return
+        val assessment = OeaThreatEngine.assess(facts)
+        if (assessment.verdict != OeaThreatEngine.Verdict.HIGH && assessment.verdict != OeaThreatEngine.Verdict.REVIEW) return
+        val worst = assessment.findings.maxByOrNull { it.severity }
+        notifyResult(
+            "${OeaThreatEngine.verdictLabel(assessment.verdict)}: ${facts.label}",
+            buildString {
+                append(worst?.title ?: "This app matched an OEA rule")
+                append(". ")
+                worst?.detail?.let { append(it) }
+                append(" Open Console › Security to review it, or allow the app there to stop these alerts.")
+            },
+            pkg,
+            ("oea-threat-" + pkg).hashCode()
+        )
     }
 
     private fun notifyResult(title: String, text: String, pkg: String?, id: Int) {

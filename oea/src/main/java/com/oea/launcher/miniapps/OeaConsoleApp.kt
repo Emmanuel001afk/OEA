@@ -22,6 +22,7 @@ import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.fault.OeaFaultLog
 import com.oea.launcher.fault.OeaFaultRecord
 import com.oea.launcher.privilege.OeaPrivileges
+import com.oea.launcher.security.OeaThreatEngine
 import com.oea.launcher.ui.OeaAppKit
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
@@ -177,18 +178,31 @@ object OeaConsoleApp {
                 "security" -> {
                     kit.sectionTitle(content, "Access & protections")
                     val group = kit.group(content)
-                    kit.row(group, R.drawable.oic_shield, "App security review", "High-risk permissions, sideloaded apps and platform protections", chevron = true) {
-                        showSecurity(host, kit)
+                    val lastScan = com.oea.launcher.security.OeaAppAudit.lastScan(host)
+                    val auditSubtitle = if (lastScan.first <= 0L) {
+                        "Never run • ${OeaThreatEngine.ruleCount} rules built in, on this phone"
+                    } else {
+                        "Last scan ${SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(lastScan.first))} • " +
+                            "${lastScan.second} flagged" + if (lastScan.third > 0) ", ${lastScan.third} high risk" else ""
+                    }
+                    kit.row(group, R.drawable.oic_shield, "Antivirus & app audit", auditSubtitle, chevron = true) {
+                        showProtection(host, kit)
                     }
                     kit.row(group, R.drawable.oic_accessibility_new, "Privileges & special access", "Overlay, notification access, app suspension and split-screen", chevron = true) {
                         showPrivileges(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_check_circle_fill, "Allowed apps", "${com.oea.launcher.security.OeaAppAudit.allowListSize(host)} apps you told OEA to stop reporting", chevron = true) {
+                        showAllowList(host, kit)
+                    }
+                    kit.row(group, R.drawable.oic_wifi, "Offline by design", "What works with no network, and the only two things in OEA that ask for one", chevron = true) {
+                        showOfflineNote(host, kit)
                     }
                     kit.row(group, R.drawable.oic_ac_unit_fill, "App Freezer", "Pause unused apps so they stop running in the background", chevron = true) {
                         runCatching {
                             host.startActivity(Intent(host, com.oea.launcher.freezer.OeaFreezerActivity::class.java))
                         }
                     }
-                    kit.row(group, R.drawable.oic_shield_fill, "Full permission scan", "Open OEA's standalone Security Scan inspector", chevron = true) {
+                    kit.row(group, R.drawable.oic_shield_fill, "File signature scan", "Optional: match a file against a SHA-256 list you import", chevron = true) {
                         runCatching {
                             host.startActivity(Intent(host, com.oea.launcher.security.OeaSecurityScanActivity::class.java))
                         }
@@ -505,96 +519,398 @@ object OeaConsoleApp {
 
     // ------------------------------------------------------------------ security
 
-    private data class SecurityFinding(val packageName: String, val label: String, val details: String)
-    private data class SecurityReview(val checked: Int, val skipped: Int, val findings: List<SecurityFinding>, val error: String? = null)
+    // ------------------------------------------------------- antivirus / protection
 
-    private fun showSecurity(host: Activity, kit: OeaKit) {
-        kit.sheet("Security review", "Review app permissions, scan file signatures and open Android security settings.") { panel, dialog ->
-            val progress = kit.text("Checking installed apps…", 13f, kit.palette.textSecondary).apply {
-                setPadding(kit.dp(6), kit.dp(12), kit.dp(6), kit.dp(6))
+    /** The severity a finding is drawn with. */
+    private fun severityIcon(severity: OeaThreatEngine.Severity): Int =
+        if (severity == OeaThreatEngine.Severity.HIGH) R.drawable.oic_warning_fill else R.drawable.oic_shield
+
+    /**
+     * Device protection: OEA's own antivirus, on the phone.
+     *
+     * The old sheet's answer to "is this phone safe?" was a button that opened the
+     * Play Store — an external platform doing the work, unavailable offline, on a
+     * phone without Google services, or on a build like this one. What can be done
+     * here is a real audit of every installed app against rules bundled in the APK:
+     * what it can see, who signed it, where it came from, which dangerous
+     * capabilities it holds together. Nothing is uploaded and nothing is
+     * downloaded, so it works on a phone that has never been online.
+     */
+    private fun showProtection(host: Activity, kit: OeaKit) {
+        val subtitle = "Every installed app is checked on this phone against " +
+            "${OeaThreatEngine.ruleCount} built-in rules. No cloud, no Play Protect, nothing uploaded."
+        kit.sheet("Device protection", subtitle) { panel, dialog ->
+            val progress = kit.text("Reading installed apps…", 13f, kit.palette.textSecondary).apply {
+                setPadding(kit.dp(6), kit.dp(14), kit.dp(6), kit.dp(8))
             }
             panel.addView(progress)
-            val resultHost = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-            panel.addView(resultHost)
-            val actions = kit.group(panel)
-            kit.row(actions, R.drawable.oic_shield, "Malware signature scan", "Scan installed APKs or a selected file against imported SHA-256 signatures") {
-                host.startActivity(Intent(host, com.oea.launcher.security.OeaSecurityScanActivity::class.java))
+            val results = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            panel.addView(results)
+            val tools = kit.group(panel)
+            kit.row(
+                tools, R.drawable.oic_shield_fill, "File signature scan",
+                "Match a file's SHA-256 against a list you import — the code-level check these rules cannot do",
+                chevron = true
+            ) {
+                runCatching {
+                    host.startActivity(Intent(host, com.oea.launcher.security.OeaSecurityScanActivity::class.java))
+                }.onFailure { consoleToast(host, "Security Scan unavailable") }
             }
-            kit.row(actions, R.drawable.oic_shield, "Android security settings", "Review device security and updates") {
+            val watchPrefs = host.getSharedPreferences("security_scan", Context.MODE_PRIVATE)
+            val watching = watchPrefs.getBoolean("monitor", false)
+            kit.row(
+                tools, R.drawable.oic_shield_fill, "Watch new installs",
+                if (watching) "On — a newly installed app is checked against the rules and you are told if it needs review"
+                else "Off — apps are checked only when you open this screen",
+                value = if (watching) "On" else "Off"
+            ) {
+                watchPrefs.edit().putBoolean("monitor", !watching).apply()
+                consoleToast(host, if (watching) "Install watch off" else "Install watch on — new apps are checked as they arrive")
+                dialog.dismiss()
+                showProtection(host, kit)
+            }
+            kit.row(tools, R.drawable.oic_lock, "Android security settings", "Screen lock, encryption and system updates", chevron = true) {
                 runCatching { host.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
-                    .onFailure { android.widget.Toast.makeText(host, "Security settings unavailable", android.widget.Toast.LENGTH_SHORT).show() }
+                    .onFailure { consoleToast(host, "Security settings unavailable") }
             }
-            kit.row(actions, R.drawable.oic_open_in_new, "Google Play Protect", "Open Play Store to review Play Protect, if installed") {
-                val intent = host.packageManager.getLaunchIntentForPackage("com.android.vending")
-                if (intent != null) runCatching { host.startActivity(intent) }
-                else android.widget.Toast.makeText(host, "Google Play Store is not installed", android.widget.Toast.LENGTH_SHORT).show()
+            // A local function, not a lambda: allowing an app re-runs the scan, so it
+            // has to be able to call itself.
+            fun runScan() {
+                progress.visibility = View.VISIBLE
+                results.removeAllViews()
+                io.execute {
+                    val scan = runCatching { com.oea.launcher.security.OeaAppAudit.scan(host.applicationContext) }
+                        .getOrElse {
+                            com.oea.launcher.security.OeaAppAudit.ScanResult(
+                                OeaThreatEngine.Report(0, 0, 0, emptyList(), 0, 0, 0),
+                                emptyList(),
+                                it.message ?: "The scan stopped unexpectedly"
+                            )
+                        }
+                    host.runOnUiThread {
+                        if (host.isDestroyed || !dialog.isShowing) return@runOnUiThread
+                        progress.visibility = View.GONE
+                        renderProtection(host, kit, results, scan) { runScan() }
+                    }
+                }
             }
-            kit.note(panel, "Play Protect is in Play Store › profile › Play Protect. OEA cannot run or control its scan. This local review checks permission declarations and grants, not app code, files, websites, live behavior or known malware signatures. A finding is not proof of malware; no findings do not mean the device is safe.")
+            runScan()
+        }
+    }
+
+    private fun renderProtection(
+        host: Activity,
+        kit: OeaKit,
+        container: LinearLayout,
+        scan: com.oea.launcher.security.OeaAppAudit.ScanResult,
+        rescan: () -> Unit
+    ) {
+        container.removeAllViews()
+        val report = scan.report
+        if (scan.error != null) {
+            kit.banner(container, R.drawable.oic_warning_fill, "Scan could not run", scan.error, OeaKit.Tone.DANGER)
+            return
+        }
+        val tone = when (scan.verdict) {
+            OeaThreatEngine.Verdict.HIGH -> OeaKit.Tone.DANGER
+            OeaThreatEngine.Verdict.REVIEW -> OeaKit.Tone.WARNING
+            OeaThreatEngine.Verdict.LOW -> OeaKit.Tone.INFO
+            OeaThreatEngine.Verdict.CLEAN -> OeaKit.Tone.SUCCESS
+        }
+        kit.banner(
+            container,
+            if (scan.verdict == OeaThreatEngine.Verdict.CLEAN) R.drawable.oic_check_circle_fill else R.drawable.oic_warning_fill,
+            OeaThreatEngine.verdictLabel(scan.verdict),
+            OeaThreatEngine.verdictSentence(report),
+            tone
+        )
+        val stats = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
+        stats.addView(
+            kit.statTile("Apps checked", report.checked.toString(), kit.palette.text),
+            LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) }
+        )
+        stats.addView(
+            kit.statTile("High risk", report.high.toString(), if (report.high > 0) kit.palette.danger else kit.palette.success),
+            LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) }
+        )
+        stats.addView(
+            kit.statTile("To review", (report.review + report.low).toString(), if (report.review + report.low > 0) kit.palette.warning else kit.palette.textSecondary),
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+        container.addView(stats, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
+        if (report.assessments.isEmpty()) {
+            kit.note(
+                container,
+                "No app matched a rule. That is a good result for ${report.checked} apps, " +
+                    "not a guarantee: these rules read declarations, signatures and install records, not app code."
+            )
+        }
+
+        report.assessments.forEach { assessment ->
+            val g = kit.group(container)
+            val severity = assessment.highest ?: OeaThreatEngine.Severity.LOW
+            kit.row(
+                g, severityIcon(severity), assessment.facts.label, assessment.facts.packageName,
+                value = OeaThreatEngine.severityLabel(severity),
+                chevron = false,
+                iconBg = if (severity == OeaThreatEngine.Severity.HIGH) kit.alpha(kit.palette.danger, 0x33) else kit.palette.accentSoft,
+                iconTint = if (severity == OeaThreatEngine.Severity.HIGH) kit.palette.danger else kit.palette.onAccentSoft
+            )
+            assessment.findings.forEach { finding ->
+                kit.row(g, 0, finding.title, finding.detail, chevron = false)
+            }
+            val actions = LinearLayout(host).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(kit.dp(14), kit.dp(4), kit.dp(14), kit.dp(12))
+            }
+            actions.addView(
+                kit.tonalButton("App info") {
+                    runCatching {
+                        host.startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${assessment.facts.packageName}"))
+                        )
+                    }.onFailure { consoleToast(host, "App info unavailable") }
+                },
+                LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) }
+            )
+            actions.addView(
+                kit.tonalButton("Allow") {
+                    kit.confirm(
+                        "Stop checking ${assessment.facts.label}?",
+                        "It stays installed and keeps its access — OEA simply stops reporting it. You can scan again after removing it from the allow list.",
+                        "Allow"
+                    ) {
+                        com.oea.launcher.security.OeaAppAudit.allow(host, assessment.facts.packageName, true)
+                        rescan()
+                    }
+                },
+                LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) }
+            )
+            actions.addView(
+                kit.tonalButton("Uninstall") {
+                    runCatching {
+                        host.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${assessment.facts.packageName}")))
+                    }.onFailure { consoleToast(host, "Uninstall unavailable") }
+                },
+                LinearLayout.LayoutParams(0, -2, 1f)
+            )
+            g.addView(actions)
+        }
+
+        if (scan.apks.isNotEmpty()) {
+            kit.sectionTitle(container, "Installers waiting")
+            val g = kit.group(container)
+            scan.apks.forEach { apk ->
+                kit.row(
+                    g, R.drawable.oic_file_download, apk.name,
+                    "${com.oea.launcher.security.OeaAppAudit.sizeText(apk.bytes)} • an APK nothing has installed",
+                    value = "Delete"
+                ) {
+                    val sender = com.oea.launcher.security.OeaAppAudit.deleteRequest(host, listOf(apk.uri))
+                    if (sender == null) {
+                        consoleToast(host, "This Android version cannot delete it from here")
+                    } else {
+                        runCatching { host.startIntentSenderForResult(sender, 0x0EA1, null, 0, 0, 0) }
+                            .onFailure { consoleToast(host, "Android refused the delete request") }
+                    }
+                }
+            }
+            kit.note(
+                container,
+                "An APK sitting in storage is not running and has no access to anything. It is worth " +
+                    "deleting only because installing it later would. On Android 13+ a plain app can only " +
+                    "see some of storage, so this list can be empty while one exists elsewhere."
+            )
+        }
+
+        kit.note(
+            container,
+            "How this works: ${OeaThreatEngine.ruleCount} rules, compiled into this build, read what each app " +
+                "declares (permissions it holds, whether it can draw over other apps, accessibility and " +
+                "notification access, device administrator), which certificate signed it and what installed " +
+                "it. That finds the shapes Android malware takes — a text-reading app that can also send, " +
+                "accessibility plus overlay, an overlay that can install apps — without reading a single byte " +
+                "of app code, which is what the optional SHA-256 list is for.\n\n" +
+                "It cannot prove an app is malicious and no result here proves a phone is safe. Nothing is " +
+                "uploaded, nothing is downloaded, and no external service — Play Protect included — is " +
+                "consulted or needed."
+        )
+    }
+
+    private fun showAllowList(host: Activity, kit: OeaKit) {
+        val allowed = com.oea.launcher.security.OeaAppAudit.allowedPackages(host)
+        kit.sheet("Allowed apps", "Findings for these apps are not reported. They keep every permission they hold — allowing only silences OEA.") { panel, dialog ->
+            if (allowed.isEmpty()) {
+                kit.banner(
+                    panel, R.drawable.oic_check_circle_fill, "Nothing is allowed",
+                    "Every non-system app is checked on each scan.", OeaKit.Tone.INFO
+                )
+                return@sheet
+            }
+            val g = kit.group(panel)
+            allowed.sorted().forEach { pkg ->
+                val label = runCatching {
+                    host.packageManager.getApplicationLabel(host.packageManager.getApplicationInfo(pkg, 0)).toString()
+                }.getOrDefault(pkg)
+                kit.row(g, R.drawable.oic_apps, label, pkg, value = "Check again") {
+                    com.oea.launcher.security.OeaAppAudit.allow(host, pkg, false)
+                    dialog.dismiss()
+                    showAllowList(host, kit)
+                }
+            }
+            kit.note(
+                panel,
+                "Removing an app from this list puts it back in the next scan. Allowing is for apps you " +
+                    "have decided about — not for apps you have not looked at yet."
+            )
+        }
+    }
+
+    /**
+     * Where the console is honest about the network: what it does with none, and the
+     * only two places in OEA that ever ask for one. The protection path uses neither.
+     */
+    private fun showOfflineNote(host: Activity, kit: OeaKit) {
+        kit.sheet("Offline by design", "OEA Console, and the protection in it, never uses the network.") { panel, _ ->
+            val worksWithout = kit.group(panel)
+            kit.row(worksWithout, R.drawable.oic_shield_fill, "Antivirus & app audit", "All ${OeaThreatEngine.ruleCount} rules are compiled into the APK", chevron = false)
+            kit.row(worksWithout, R.drawable.oic_search, "File signature scan", "SHA-256, computed here; the list is a file you import", chevron = false)
+            kit.row(worksWithout, R.drawable.oic_cleaning_services, "Junk, caches and large files", "Measured on the phone with Android's own storage service", chevron = false)
+            kit.row(worksWithout, R.drawable.oic_memory, "Memory, battery, thermals", "BatteryManager, ActivityManager, PowerManager", chevron = false)
+            kit.row(worksWithout, R.drawable.oic_developer_mode, "Command system and doctors", "Package manager, app-ops and settings state, read back", chevron = false)
+
+            kit.sectionTitle(panel, "The exceptions, in full")
+            kit.note(
+                panel,
+                "Two parts of the launcher — not the console — can use a connection:\n\n" +
+                    "• Weather: fetches a forecast from a public weather service when you open it. " +
+                    "Without a connection it says so and shows nothing stale.\n" +
+                    "• Network quality: opens one connection to time the round trip when the Game Boost " +
+                    "panel asks for a latency reading.\n\n" +
+                    "Nothing else in OEA sends or receives. The console's protection features run on a " +
+                    "phone that has never been online, and no result is uploaded, ever."
+            )
+            kit.note(
+                panel,
+                "Why this matters for an antivirus: a scanner that depends on a cloud service stops " +
+                    "working offline, on a de-Googled phone, and on the day the service changes. OEA's rules " +
+                    "ship with the app, so the answer is the same on the first boot and in a tunnel."
+            )
+        }
+    }
+
+    // --------------------------------------------------------------- phone master
+
+    private fun showAppCaches(host: Activity, kit: OeaKit) {
+        kit.sheet("App caches", "Sizes from Android's own storage service. Clearing another app's cache is not something Android allows an ordinary app to do, so OEA opens that app's storage page.") { panel, dialog ->
+            val progress = kit.text("Measuring app storage…", 13f, kit.palette.textSecondary).apply {
+                setPadding(kit.dp(6), kit.dp(14), kit.dp(6), kit.dp(8))
+            }
+            panel.addView(progress)
+            val results = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            panel.addView(results)
             io.execute {
-                val review = scanSecurity(host.applicationContext)
+                val caches = runCatching { com.oea.launcher.security.OeaAppAudit.appCaches(host.applicationContext) }.getOrNull()
                 host.runOnUiThread {
                     if (host.isDestroyed || !dialog.isShowing) return@runOnUiThread
-                    progress.text = if (review.error != null) "Review failed: ${review.error}"
-                        else "Reviewed ${review.checked} apps" + if (review.skipped > 0) " • ${review.skipped} could not be inspected" else ""
-                    resultHost.removeAllViews()
-                    if (review.error == null && review.findings.isEmpty()) {
-                        kit.banner(resultHost, R.drawable.oic_info, "No permission combinations flagged", "This limited review cannot establish that apps are safe.", OeaKit.Tone.INFO)
-                    }
-                    review.findings.forEach { finding ->
-                        val g = kit.group(resultHost)
-                        kit.banner(g, R.drawable.oic_info, finding.label, finding.details, OeaKit.Tone.WARNING)
-                        kit.row(g, R.drawable.oic_info, "App info", finding.packageName) {
-                            runCatching { host.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${finding.packageName}"))) }
-                                .onFailure { android.widget.Toast.makeText(host, "App info unavailable", android.widget.Toast.LENGTH_SHORT).show() }
+                    results.removeAllViews()
+                    if (caches == null) {
+                        progress.text = "Usage access is not granted, so Android withholds other apps' sizes."
+                        kit.banner(
+                            results, R.drawable.oic_info, "Usage access needed",
+                            "Android only reports other apps' cache and data to an app with Usage access. OEA reads the sizes and nothing else; no data leaves the phone either way.",
+                            OeaKit.Tone.INFO, "Open"
+                        ) {
+                            runCatching { host.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+                                .onFailure { consoleToast(host, "Usage access settings unavailable") }
                         }
-                        kit.row(g, R.drawable.oic_delete, "Uninstall", "Ask Android to uninstall this app") {
-                            runCatching { host.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${finding.packageName}"))) }
-                                .onFailure { android.widget.Toast.makeText(host, "Uninstall unavailable", android.widget.Toast.LENGTH_SHORT).show() }
+                        return@runOnUiThread
+                    }
+                    progress.text = com.oea.launcher.security.OeaAppAudit.cacheSummary(caches)
+                    if (caches.isEmpty()) return@runOnUiThread
+                    val g = kit.group(results)
+                    caches.forEach { cache ->
+                        kit.row(
+                            g, R.drawable.oic_apps, cache.label,
+                            "Data ${com.oea.launcher.security.OeaAppAudit.sizeText(cache.dataBytes)}",
+                            value = com.oea.launcher.security.OeaAppAudit.sizeText(cache.cacheBytes)
+                        ) {
+                            runCatching {
+                                host.startActivity(
+                                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${cache.packageName}"))
+                                )
+                            }.onFailure { consoleToast(host, "That app's settings are unavailable") }
                         }
                     }
+                    kit.note(
+                        results,
+                        "Cache is data an app can rebuild, so Android tells apps to keep it small on its own. " +
+                            "Deleting it saves space until the app rebuilds it, and the value on the right is the " +
+                            "cache each app is holding now — opened, not cleared, from here."
+                    )
                 }
             }
         }
     }
 
-    private fun scanSecurity(ctx: Context): SecurityReview {
-        val pm = ctx.packageManager
-        val apps = try { pm.getInstalledApplications(0) } catch (e: Exception) {
-            return SecurityReview(0, 0, emptyList(), e.message ?: "Package list unavailable")
-        }
-        var checked = 0
-        var skipped = 0
-        val findings = mutableListOf<SecurityFinding>()
-        val sensitive = mapOf(
-            "android.permission.SYSTEM_ALERT_WINDOW" to "display over other apps (requested)",
-            "android.permission.READ_SMS" to "read SMS",
-            "android.permission.RECEIVE_SMS" to "receive SMS",
-            "android.permission.READ_CALL_LOG" to "read call log",
-            "android.permission.RECORD_AUDIO" to "microphone",
-            "android.permission.CAMERA" to "camera",
-            "android.permission.ACCESS_FINE_LOCATION" to "precise location"
-        )
-        apps.filter { it.packageName != ctx.packageName && it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }.forEach { app ->
-            try {
-                val info = pm.getPackageInfo(app.packageName, PackageManager.GET_PERMISSIONS or PackageManager.GET_SERVICES)
-                val granted = mutableListOf<String>()
-                val requested = info.requestedPermissions ?: emptyArray()
-                requested.forEachIndexed { index, permission ->
-                    val label = sensitive[permission] ?: return@forEachIndexed
-                    val flags = info.requestedPermissionsFlags?.getOrNull(index) ?: 0
-                    if (permission == "android.permission.SYSTEM_ALERT_WINDOW" || flags and android.content.pm.PackageInfo.REQUESTED_PERMISSION_GRANTED != 0) granted.add(label)
+    private fun showBigFiles(host: Activity, kit: OeaKit) {
+        kit.sheet("Large files", "The largest files OEA is allowed to see, over 50 MB. Deleting goes through Android's own confirmation, so OEA never removes a file on its own authority.") { panel, dialog ->
+            val progress = kit.text("Looking for large files…", 13f, kit.palette.textSecondary).apply {
+                setPadding(kit.dp(6), kit.dp(14), kit.dp(6), kit.dp(8))
+            }
+            panel.addView(progress)
+            val results = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+            panel.addView(results)
+            io.execute {
+                val files = runCatching { com.oea.launcher.security.OeaAppAudit.bigFiles(host.applicationContext) }.getOrDefault(emptyList())
+                host.runOnUiThread {
+                    if (host.isDestroyed || !dialog.isShowing) return@runOnUiThread
+                    results.removeAllViews()
+                    if (files.isEmpty()) {
+                        progress.text = "No file over 50 MB is visible to OEA on this phone."
+                        kit.note(
+                            results,
+                            "On Android 13+ an app only sees the media it has permission for, so a large file " +
+                                "in another app's private storage is invisible here — and so is the space it takes, " +
+                                "until you look in Settings › Storage."
+                        )
+                        return@runOnUiThread
+                    }
+                    val total = files.sumOf { it.bytes }
+                    progress.text = "${files.size} files · ${com.oea.launcher.security.OeaAppAudit.sizeText(total)}"
+                    val g = kit.group(results)
+                    files.forEach { file ->
+                        kit.row(
+                            g, R.drawable.oic_folder, file.name,
+                            com.oea.launcher.security.OeaAppAudit.sizeText(file.bytes),
+                            value = "Delete"
+                        ) {
+                            kit.confirm(
+                                "Delete ${file.name}?",
+                                "Android will ask you to confirm removing ${com.oea.launcher.security.OeaAppAudit.sizeText(file.bytes)}. OEA cannot undo it.",
+                                "Delete",
+                                destructive = true
+                            ) {
+                                val sender = com.oea.launcher.security.OeaAppAudit.deleteRequest(host, listOf(file.uri))
+                                if (sender == null) {
+                                    consoleToast(host, "This Android version cannot delete it from here")
+                                } else {
+                                    runCatching { host.startIntentSenderForResult(sender, 0x0EA2, null, 0, 0, 0) }
+                                        .onFailure { consoleToast(host, "Android refused the delete request") }
+                                }
+                            }
+                        }
+                    }
+                    kit.note(
+                        results,
+                        "Sorted by size, largest first. A large file is not junk — a long video or a phone " +
+                            "backup is large because it is worth keeping. OEA measures and asks; it never " +
+                            "sweeps your storage."
+                    )
                 }
-                val accessibility = info.services?.any { it.permission == "android.permission.BIND_ACCESSIBILITY_SERVICE" } == true
-                if (accessibility) granted.add("declares an accessibility service (not necessarily enabled)")
-                checked++
-                if (granted.size >= 2) {
-                    val label = runCatching { pm.getApplicationLabel(app).toString() }.getOrDefault(app.packageName)
-                    findings.add(SecurityFinding(app.packageName, label,
-                        "Review access: ${granted.joinToString(", ")}. These capabilities can be legitimate; check whether they match the app's purpose."))
-                }
-            } catch (_: Exception) { skipped++ }
+            }
         }
-        return SecurityReview(checked, skipped, findings.sortedBy { it.label.lowercase(Locale.getDefault()) })
     }
 
     // ------------------------------------------------------------------ storage
@@ -627,6 +943,14 @@ object OeaConsoleApp {
             }
             kit.row(g, R.drawable.oic_photo_library, "OEA Camera photos", "Photos in Pictures/OEA", value = "Open") {
                 try { host.startActivity(Intent(Intent.ACTION_VIEW).setType("image/*")) } catch (_: Throwable) {}
+            }
+            kit.sectionTitle(panel, "Phone master")
+            val master = kit.group(panel)
+            kit.row(master, R.drawable.oic_apps, "App caches", "What each app keeps in cache, measured by Android", chevron = true) {
+                showAppCaches(host, kit)
+            }
+            kit.row(master, R.drawable.oic_folder, "Large files", "Files over 50 MB, with a confirmed delete", chevron = true) {
+                showBigFiles(host, kit)
             }
             kit.note(panel, "OEA only cleans its own files. Does not claim to boost performance by clearing other apps' caches, which Android manages itself. Real storage info from StatFs and package manager.")
             val stats = storageStats(host)
