@@ -252,8 +252,9 @@ object OeaVoiceApp {
                                 .replaceFirstChar { it.uppercase() }
                             val executed = OeaSpeechEngine.executeCommand(host, command)
                             if (executed) {
+                                // The engine already said what it did ("Opening Notes"),
+                                // so a second "Done" would be the phone talking over itself.
                                 commandBadge.text = "$label · Done"
-                                OeaSpeechEngine.speak(host, "Done")
                             } else {
                                 commandBadge.text = label
                                 if (command.type == OeaSpeechEngine.LauncherCommand.Type.SEARCH_WEB) {

@@ -68,8 +68,28 @@ open class OeaInCallActivity : Activity() {
     private var builtKeypad = false
     private var keypadVisible = false
     private var dtmfDigits = ""
-    private var activeSinceMs = 0L
+    /**
+     * The call timer advances on [android.os.SystemClock.elapsedRealtime], not on the
+     * wall clock: a phone whose network corrects its time mid-call used to make the
+     * duration jump (or drop back to 0:00) while the call carried on.
+     */
+    private var activeSinceElapsed = 0L
+    private var connectElapsed = 0L
     private var endedAtMs = 0L
+
+    /** Starts the timer once, from the moment the call became active. */
+    private fun markActive() {
+        if (activeSinceElapsed != 0L) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        activeSinceElapsed = now
+        // Telecom's connect time is wall clock; convert it once, here, into the
+        // monotonic clock the timer runs on.
+        val wallConnect = runCatching { OeaCallState.current?.details?.connectTimeMillis }.getOrNull() ?: 0L
+        if (wallConnect > 0L) {
+            val delta = (System.currentTimeMillis() - wallConnect).coerceIn(0L, 24L * 60L * 60L * 1000L)
+            connectElapsed = now - delta
+        }
+    }
     private var lastDurationText = ""
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var palette: OeaPalette
@@ -103,7 +123,7 @@ open class OeaInCallActivity : Activity() {
     private val callback = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) {
             runOnUiThread {
-                if (state == Call.STATE_ACTIVE && activeSinceMs == 0L) activeSinceMs = System.currentTimeMillis()
+                if (state == Call.STATE_ACTIVE) markActive()
                 render()
             }
         }
@@ -202,9 +222,7 @@ open class OeaInCallActivity : Activity() {
 
     private fun attachCall() {
         val current = OeaCallState.current ?: return
-        if (runCatching { current.state }.getOrNull() == Call.STATE_ACTIVE && activeSinceMs == 0L) {
-            activeSinceMs = System.currentTimeMillis()
-        }
+        if (runCatching { current.state }.getOrNull() == Call.STATE_ACTIVE) markActive()
         if (observedCall !== current) {
             observedCall?.unregisterCallback(callback)
             observedCall = current
@@ -699,8 +717,13 @@ open class OeaInCallActivity : Activity() {
     }
 
     private fun duration(call: Call): String {
-        val connect = runCatching { call.details?.connectTimeMillis }.getOrNull()?.takeIf { it > 0L } ?: activeSinceMs
-        val seconds = ((System.currentTimeMillis() - connect).coerceAtLeast(0L)) / 1000L
+        val now = android.os.SystemClock.elapsedRealtime()
+        val start = when {
+            connectElapsed > 0L -> connectElapsed
+            activeSinceElapsed > 0L -> activeSinceElapsed
+            else -> now
+        }
+        val seconds = ((now - start).coerceAtLeast(0L)) / 1000L
         val hours = seconds / 3600L
         return if (hours > 0) String.format(Locale.US, "%d:%02d:%02d", hours, (seconds % 3600L) / 60L, seconds % 60L)
         else String.format(Locale.US, "%02d:%02d", seconds / 60L, seconds % 60L)

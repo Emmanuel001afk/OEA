@@ -59,7 +59,7 @@ class OeaAllInOneActivity : Activity(), ArcadeHubHost {
 
     // ---------------------------------------------------------------- hub host
 
-    override fun openCabinet(spec: ArcadeSpec, seed: Long?) {
+    override fun openCabinet(spec: ArcadeSpec, seed: Long?, level: Int?) {
         if (spec.externalApp == "chess") {
             runCatching { startActivity(Intent(this, OeaChessGameActivity::class.java)) }
                 .onFailure { toast("Chess is not available in this build.") }
@@ -70,7 +70,8 @@ class OeaAllInOneActivity : Activity(), ArcadeHubHost {
             return
         }
         val config = ArcadeConfig(
-            level = progress.unlocked(spec.id),
+            // The daily challenge pins the rung; everything else opens where you got to.
+            level = (level ?: progress.unlocked(spec.id)).coerceIn(1, spec.levels.coerceAtLeast(1)),
             difficulty = progress.difficulty(),
             players = 1,
             seed = seed ?: System.nanoTime(),

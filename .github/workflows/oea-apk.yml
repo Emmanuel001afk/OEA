@@ -914,6 +914,75 @@ jobs:
           grep -Fq 'battery.chargingNote' oea/src/main/java/com/oea/launcher/workspace/OeaGlanceView.kt
           test -z "$(grep -rlF 'EXTRA_LEVEL' oea/src/main/java/com/oea/launcher --include=*.kt | grep -v 'launcher/power/')"
           ! grep -rFq 'BatteryManager.isCharging' oea/src/main/java/com/oea/launcher --include=*.kt
+      - name: Note reminder and voice grammar tests
+        run: |
+          set -o pipefail
+          for T in 'com.oea.launcher.miniapps.OeaNoteReminderPlanTest' 'com.oea.launcher.voice.OeaVoiceGrammarTest'; do
+            if ! ./gradlew :oea:testDebugUnitTest --tests "$T" --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-notes-voice.log"; then
+              { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-notes-voice.log" || true; } | head -60 | while IFS= read -r line; do
+                printf '::error::%s\n' "${line//%/%25}"
+              done
+              exit 1
+            fi
+          done
+      - name: Verify notes, phone, call block, freezer, voice and the arcade
+        run: |
+          set -euo pipefail
+          NOTES=oea/src/main/java/com/oea/launcher/miniapps/OeaNotesApp.kt
+          REMIND=oea/src/main/java/com/oea/launcher/miniapps/OeaNoteReminders.kt
+          PLAN=oea/src/main/java/com/oea/launcher/miniapps/OeaNoteReminderPlan.kt
+          GRAMMAR=oea/src/main/java/com/oea/launcher/voice/OeaVoiceGrammar.kt
+          ENGINE=oea/src/main/java/com/oea/launcher/voice/OeaSpeechEngine.kt
+          SCREEN=oea/src/main/java/com/oea/launcher/callblocker/OeaCallScreeningService.kt
+          INCALL=oea/src/main/java/com/oea/launcher/phone/OeaInCallActivity.kt
+          TOOLS=oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          HUB=oea-games/src/main/java/com/oea/games/allinone/ArcadeHubScreen.kt
+          MANIFEST=oea/src/main/AndroidManifest.xml
+          # A note reminder is an alarm, not a line of text.
+          grep -Fq 'internal object OeaNoteReminders' "$REMIND"
+          grep -Fq 'AlarmManager' "$REMIND"
+          grep -Fq 'setExactAndAllowWhileIdle' "$REMIND"
+          grep -Fq 'internal fun reminderNotes(' "$NOTES"
+          grep -Fq 'OeaNoteReminders.sync(host)' "$NOTES"
+          grep -Fq 'OeaNoteReminders.sync(context)' "$REMIND"
+          grep -Fq 'OeaNoteReminderReceiver' "$MANIFEST"
+          grep -Fq 'OeaNoteRestoreReceiver' "$MANIFEST"
+          grep -Fq 'TIME_SET' "$MANIFEST"
+          # The decision is pure, and it knows the difference between "arm", "ring now" and "drop".
+          ! grep -Fq 'import android' "$PLAN"
+          grep -Fq 'enum class Action { ARM, RING_NOW, DROP }' "$PLAN"
+          grep -Fq 'const val GRACE_MS' "$PLAN"
+          test "$(grep -Fc '@Test' oea/src/test/java/com/oea/launcher/miniapps/OeaNoteReminderPlanTest.kt)" -ge 10
+          # The grammar is pure, and every command it can name is answered.
+          ! grep -Fq 'import android' "$GRAMMAR"
+          grep -Fq 'fun matchingApp(' "$GRAMMAR"
+          grep -Fq 'fun clockTime(' "$GRAMMAR"
+          grep -Fq 'fun durationSeconds(' "$GRAMMAR"
+          grep -Fq 'OeaVoiceGrammar.parse(raw, installedAppNames(context))' "$ENGINE"
+          for PAIR in OPEN_APP:openApp CALL_CONTACT:startCall MESSAGE_CONTACT:startMessage SET_ALARM:setAlarm SET_TIMER:setTimer PLAY_MUSIC:playMusic NAVIGATE:navigate TOGGLE_DND:toggleDnd TOGGLE_LOWMODE:toggleLowMode CHANGE_MODE:changeMode CHANGE_THEME:openThemes; do
+            grep -Fq "LauncherCommand.Type.${PAIR%%:*}" "$ENGINE"
+            grep -Fq "private fun ${PAIR##*:}(" "$ENGINE"
+          done
+          grep -Fq 'fun flashlight(' "$ENGINE"
+          # "call mum" used to open an empty dialer: the name went into an extra ACTION_DIAL ignores.
+          ! grep -Fq 'Uri.parse("tel:")).putExtra' "$ENGINE"
+          grep -Fq 'ACTION_DIAL, android.net.Uri.fromParts("tel", number, null)' "$ENGINE"
+          # "go to" is navigation unless an app is called that.
+          ! grep -Fq 'listOf("open ", "launch ", "start ", "go to ", "show ")' "$ENGINE"
+          test "$(grep -Fc '@Test' oea/src/test/java/com/oea/launcher/voice/OeaVoiceGrammarTest.kt)" -ge 12
+          # The call blocker's log keeps the number it decided about.
+          grep -Fq 'noteDecision(this, verdict, rawNumber)' "$SCREEN"
+          ! grep -Fq 'PRESENTATION_PAYPHONE' "$SCREEN"
+          # The in-call timer cannot jump when the network corrects the clock.
+          grep -Fq 'SystemClock.elapsedRealtime()' "$INCALL"
+          ! grep -Fq 'activeSinceMs' "$INCALL"
+          # No control on the Freezer that does nothing.
+          grep -Fq 'private fun freezerOptions(' "$TOOLS"
+          ! grep -Fq '"Freezer options", palette.cardHigh, palette.text) {}' "$TOOLS"
+          ! grep -rFq 'quietButton("Close") { }' oea/src/main/java/com/oea/launcher --include=*.kt
+          # Today's challenge is the same rung for every player, as the card says.
+          grep -Fq 'host.openCabinet(spec, dailySeed(), dailyLevel(spec))' "$HUB"
+          grep -Fq 'private fun dailyLevel(' "$HUB"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

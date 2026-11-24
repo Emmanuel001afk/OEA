@@ -100,6 +100,15 @@ object OeaNotesApp {
     private val decoded = HashMap<String, Pair<String, List<Note>>>()
 
     /** Forgets one parsed list, so the next read sees what was just written. */
+    /**
+     * Every note that carries a reminder and still exists — the normal list, the
+     * private list and the archive. The trash is excluded: a note waiting to be
+     * restored is not a promise to ring about it.
+     */
+    internal fun reminderNotes(ctx: Context): List<Note> =
+        (load(ctx, KEY_NOTES) + load(ctx, KEY_PRIVATE) + load(ctx, KEY_ARCHIVED))
+            .filter { it.reminder > 0L && it.deletedAt <= 0L }
+
     private fun drop(ctx: Context, key: String) {
         decoded.remove(key)
     }
@@ -168,6 +177,10 @@ object OeaNotesApp {
     }
 
     fun build(host: Activity, palette: OeaPalette): View {
+        // Opening the app is the one moment a missed reminder can be noticed: the
+        // sync rings anything that came due while the phone was off, and re-arms
+        // whatever a reboot or a clock change lost.
+        runCatching { OeaNoteReminders.sync(host) }
         val kit = OeaAppKit(host, palette)
         var refresh: (String) -> Unit = {}
         var currentFilter = "all"
@@ -883,6 +896,8 @@ object OeaNotesApp {
         val list = load(host, key).map { if (it.id == note.id) newNote else it }
         p.edit().putString(key, encode(list)).apply()
         drop(host, key)
+        // A reminder that was just set, moved or cleared changes one alarm.
+        OeaNoteReminders.sync(host)
     }
 
     /** Where a note lives while it is not in the trash. */
@@ -910,11 +925,13 @@ object OeaNotesApp {
         val p = prefs(host)
         p.edit().putString(KEY_TRASH, encode(load(host, KEY_TRASH).filterNot { it.id == note.id })).apply()
         drop(host, KEY_TRASH)
+        OeaNoteReminders.sync(host)
     }
 
     private fun emptyTrash(host: Activity) {
         prefs(host).edit().putString(KEY_TRASH, "").apply()
         drop(host, KEY_TRASH)
+        OeaNoteReminders.sync(host)
     }
 
     /** Quietly drops what has been in the trash longer than [TRASH_DAYS]. */
@@ -935,6 +952,8 @@ object OeaNotesApp {
         p.edit().putString(fromKey, encode(from)).putString(toKey, encode(to)).apply()
         drop(host, fromKey)
         drop(host, toKey)
+        // A note that went to the trash must stop ringing; one restored today rings again.
+        OeaNoteReminders.sync(host)
     }
 
     private fun startVoiceInput(host: Activity) {

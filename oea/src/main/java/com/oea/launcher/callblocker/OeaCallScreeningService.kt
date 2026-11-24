@@ -40,7 +40,7 @@ class OeaCallScreeningService : CallScreeningService() {
         // Every decision is recorded (kept, disposable, separate from the
         // rules) so the blocker screen can answer the important diagnostic
         // question after the fact: was the screening service invoked at all?
-        OeaCallBlockRules.noteDecision(this, verdict)
+        OeaCallBlockRules.noteDecision(this, verdict, rawNumber)
         OeaCallBlockRules.noteScreenedAt(this)
         OeaCallBlockRules.pruneHistory(this)
         OeaCallBlockRules.ensureDailyCleanup(this)
@@ -259,9 +259,11 @@ object OeaCallBlockRules {
     fun screeningVerdict(context: Context, rawNumber: String?, presentation: Int): Verdict {
         if (!enabled(context)) return Verdict(false, "blocking paused")
         val normalized = normalize(rawNumber.orEmpty())
+        // A payphone is not private: it presents its own number, so a call from one is
+        // screened against the rules like any other. Only restricted and withheld
+        // numbers are "private", and only they are caught by the unknown-number rule.
         val isPrivate = presentation == TelecomManager.PRESENTATION_RESTRICTED ||
-            presentation == TelecomManager.PRESENTATION_UNKNOWN ||
-            presentation == TelecomManager.PRESENTATION_PAYPHONE
+            presentation == TelecomManager.PRESENTATION_UNKNOWN
         if (normalized.isNotEmpty() && shouldBlock(context, rawNumber.orEmpty())) {
             return Verdict(true, "matched a blocking rule")
         }

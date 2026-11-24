@@ -111,6 +111,7 @@ object OeaSpeechEngine {
     }
 
     fun startListening(context: Context, listener: Listener, preferOffline: Boolean = true, language: String = Locale.getDefault().toLanguageTag()) {
+        lastListener = listener
         if (isListening.getAndSet(true)) {
             stopListening()
         }
@@ -220,219 +221,322 @@ object OeaSpeechEngine {
             tts?.shutdown()
         } catch (_: Throwable) {}
         tts = null
+        lastListener = null
         isListening.set(false)
     }
 
-    // ---- Launcher command parsing — own grammar, competes with Google
+    // ---- Launcher command parsing — own grammar, in OeaVoiceGrammar and tested
 
     fun parseCommand(context: Context, raw: String): LauncherCommand? {
-        val text = raw.trim()
-        if (text.isBlank()) return null
-        val lower = text.lowercase(Locale.getDefault())
-
-        // App names for fuzzy matching
-        val apps = try {
-            val pm = context.packageManager
-            pm.getInstalledApplications(0).map { it.loadLabel(pm).toString() to it.packageName }.take(200)
-        } catch (_: Throwable) { emptyList() }
-
-        // Open app: "open calculator", "launch camera", "start youtube"
-        val openPatterns = listOf("open ", "launch ", "start ", "go to ", "show ")
-        for (p in openPatterns) {
-            if (lower.startsWith(p)) {
-                val query = text.substring(p.length).trim()
-                // Fuzzy match app name
-                val matched = apps.firstOrNull { it.first.lowercase().contains(query.lowercase()) || query.lowercase().contains(it.first.lowercase()) }
-                if (matched != null || query.length >= 2) {
-                    return LauncherCommand(LauncherCommand.Type.OPEN_APP, matched?.first ?: query, 0.9f, raw)
-                }
-            }
-        }
-
-        // Search: "search cats", "search for cats", "find cats", "look up cats"
-        val searchPatterns = listOf("search for ", "search ", "find ", "look up ", "google ")
-        for (p in searchPatterns) {
-            if (lower.startsWith(p)) {
-                val query = text.substring(p.length).trim()
-                if (query.isNotBlank()) return LauncherCommand(LauncherCommand.Type.SEARCH_WEB, query, 0.85f, raw)
-            }
-        }
-
-        // Call: "call mom", "phone mom", "dial mom"
-        val callPatterns = listOf("call ", "phone ", "dial ")
-        for (p in callPatterns) {
-            if (lower.startsWith(p)) {
-                val query = text.substring(p.length).trim()
-                if (query.isNotBlank()) return LauncherCommand(LauncherCommand.Type.CALL_CONTACT, query, 0.85f, raw)
-            }
-        }
-
-        // Message: "message mom", "text mom", "sms mom"
-        val msgPatterns = listOf("message ", "text ", "sms ", "send message to ", "send text to ")
-        for (p in msgPatterns) {
-            if (lower.startsWith(p)) {
-                val query = text.substring(p.length).trim()
-                if (query.isNotBlank()) return LauncherCommand(LauncherCommand.Type.MESSAGE_CONTACT, query, 0.8f, raw)
-            }
-        }
-
-        // Alarm/timer: "set alarm", "set timer", "remind me"
-        if (lower.contains("alarm") || lower.startsWith("set alarm") || lower.contains("wake me")) {
-            return LauncherCommand(LauncherCommand.Type.SET_ALARM, text, 0.8f, raw)
-        }
-        if (lower.contains("timer") || lower.startsWith("set timer")) {
-            return LauncherCommand(LauncherCommand.Type.SET_TIMER, text, 0.8f, raw)
-        }
-
-        // Music: "play music", "play despacito"
-        if (lower.startsWith("play ")) {
-            val query = text.substring(5).trim()
-            return LauncherCommand(LauncherCommand.Type.PLAY_MUSIC, query, 0.8f, raw)
-        }
-
-        // Navigate: "navigate to home", "directions to"
-        val navPatterns = listOf("navigate to ", "directions to ", "go to ", "take me to ")
-        for (p in navPatterns) {
-            if (lower.startsWith(p)) {
-                val query = text.substring(p.length).trim()
-                if (query.isNotBlank()) return LauncherCommand(LauncherCommand.Type.NAVIGATE, query, 0.8f, raw)
-            }
-        }
-
-        // Flashlight: "turn on flashlight", "flashlight on/off"
-        if (lower.contains("flashlight") || lower.contains("torch")) {
-            return LauncherCommand(LauncherCommand.Type.TOGGLE_FLASHLIGHT, text, 0.85f, raw)
-        }
-
-        // DND: "do not disturb", "dnd on/off", "silence"
-        if (lower.contains("do not disturb") || lower.contains("dnd") || lower == "silence" || lower.contains("silent mode")) {
-            return LauncherCommand(LauncherCommand.Type.TOGGLE_DND, text, 0.85f, raw)
-        }
-
-        // Low mode: "low mode", "ultra power saving", "battery saver"
-        if (lower.contains("low mode") || lower.contains("ultra power saving") || lower.contains("battery saver") || lower.contains("power saving")) {
-            return LauncherCommand(LauncherCommand.Type.TOGGLE_LOWMODE, text, 0.85f, raw)
-        }
-
-        // Mode: "study mode", "gaming mode", "sleep mode", etc.
-        val modes = listOf("classic", "liquid", "tide", "depth", "ink", "aurora", "glass", "mesh", "paper", "slate", "bloom", "study", "music", "sleeping", "focus", "gaming", "reading", "work", "driving", "low")
-        for (m in modes) {
-            if (lower.contains("$m mode") || lower == m || lower == "set $m" || lower.contains("change to $m")) {
-                return LauncherCommand(LauncherCommand.Type.CHANGE_MODE, m, 0.9f, raw)
-            }
-        }
-
-        // Wallpaper: "change wallpaper", "wallpaper"
-        if (lower.contains("wallpaper") || lower.contains("background")) {
-            return LauncherCommand(LauncherCommand.Type.CHANGE_WALLPAPER, text, 0.7f, raw)
-        }
-
-        // Theme: "change theme", "theme"
-        if (lower.contains("theme")) {
-            return LauncherCommand(LauncherCommand.Type.CHANGE_THEME, text, 0.7f, raw)
-        }
-
-        // Camera: "take photo", "take picture", "selfie"
-        if (lower.contains("take photo") || lower.contains("take picture") || lower.contains("selfie") || lower.contains("take a photo")) {
-            return LauncherCommand(LauncherCommand.Type.TAKE_PHOTO, text, 0.8f, raw)
-        }
-        if (lower.contains("take video") || lower.contains("record video")) {
-            return LauncherCommand(LauncherCommand.Type.TAKE_VIDEO, text, 0.8f, raw)
-        }
-
-        // Settings: "open settings", "settings"
-        if (lower.contains("settings") || lower == "open settings") {
-            return LauncherCommand(LauncherCommand.Type.OPEN_SETTINGS, text, 0.7f, raw)
-        }
-
-        // Fallback: treat as search
-        return LauncherCommand(LauncherCommand.Type.SEARCH_WEB, text, 0.5f, raw)
+        val match = OeaVoiceGrammar.parse(raw, installedAppNames(context)) ?: return null
+        val type = runCatching { LauncherCommand.Type.valueOf(match.kind.name) }
+            .getOrDefault(LauncherCommand.Type.UNKNOWN)
+        return LauncherCommand(type, match.query, match.confidence, raw)
     }
 
-    // Execute launcher command — own implementation, not just intent
+    /** App names once per command, so the grammar matches without touching Android. */
+    private fun installedAppNames(context: Context): List<String> =
+        installedApps(context).map { it.first }
+
+    private fun installedApps(context: Context): List<Pair<String, String>> = try {
+        val pm = context.packageManager
+        pm.getInstalledApplications(0).mapNotNull { info ->
+            runCatching { info.loadLabel(pm).toString() to info.packageName }.getOrNull()
+        }
+    } catch (_: Throwable) {
+        emptyList()
+    }
+
+    /**
+     * Runs a parsed command with the real Android API behind each one.
+     *
+     * Every type the grammar can produce is answered here. Before this, only five
+     * were: "call mum" opened an empty dialer (the name went into an intent extra
+     * that ACTION_DIAL ignores) and "set an alarm" reported nothing at all, because
+     * the branch that should have handled it returned false. A command that cannot
+     * be carried out says why out loud instead of failing silently.
+     */
     fun executeCommand(context: Context, command: LauncherCommand): Boolean {
+        val app = context.applicationContext
         return try {
             when (command.type) {
-                LauncherCommand.Type.OPEN_APP -> {
-                    val pm = context.packageManager
-                    val apps = pm.getInstalledApplications(0).map { it.loadLabel(pm).toString() to it.packageName }
-                    val matched = apps.firstOrNull { it.first.lowercase().contains(command.query.lowercase()) || command.query.lowercase().contains(it.first.lowercase()) }
-                    if (matched != null) {
-                        val launch = pm.getLaunchIntentForPackage(matched.second)
-                        if (launch != null) {
-                            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            speak(context, "Opening ${matched.first}")
-                            return true
-                        }
-                    }
-                    // Try mini-apps
-                    val mini = when {
-                        command.query.lowercase().contains("calculator") -> "calculator"
-                        command.query.lowercase().contains("camera") -> "camera"
-                        command.query.lowercase().contains("clock") -> "clock"
-                        command.query.lowercase().contains("calendar") -> "calendar"
-                        command.query.lowercase().contains("weather") -> "weather"
-                        command.query.lowercase().contains("notes") -> "notes"
-                        command.query.lowercase().contains("gallery") || command.query.lowercase().contains("photos") -> "emage"
-                        command.query.lowercase().contains("image") || command.query.lowercase().contains("emage") -> "emage"
-                        command.query.lowercase().contains("video") || command.query.lowercase().contains("vip") -> "vip"
-                        command.query.lowercase().contains("message") -> "messaging"
-                        command.query.lowercase().contains("console") -> "console"
-                        else -> null
-                    }
-                    if (mini != null) {
-                        context.startActivity(com.oea.launcher.miniapps.OeaMiniApps.launchIntent(context, mini).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        speak(context, "Opening $mini")
-                        return true
-                    }
-                    false
-                }
-                LauncherCommand.Type.SEARCH_WEB -> {
-                    val intent = Intent(Intent.ACTION_WEB_SEARCH).putExtra("query", command.query).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
-                    true
-                }
-                LauncherCommand.Type.CALL_CONTACT -> {
-                    context.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:")).putExtra("query", command.query).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    true
-                }
-                LauncherCommand.Type.TOGGLE_FLASHLIGHT -> {
-                    // "turn the flashlight off" must not be read as "on" merely
-                    // because the word "on" appears somewhere in the sentence, so
-                    // the two words are matched as whole words and "off" wins.
-                    if (!OeaTorch.available(context)) {
-                        speak(context, "This phone has no flashlight I can switch")
-                        return false
-                    }
-                    val spoken = command.raw.lowercase(java.util.Locale.US)
-                    val words = spoken.split(Regex("[^a-z]+"))
-                    val wantsOn = words.contains("on") && !words.contains("off")
-                    val wantsOff = words.contains("off")
-                    val state = when {
-                        wantsOff -> {
-                            OeaTorch.set(context, false)
-                            false
-                        }
-                        wantsOn -> OeaTorch.set(context, true)
-                        else -> OeaTorch.toggle(context)
-                    }
-                    speak(context, if (state) "Flashlight on" else "Flashlight off")
-                    true
-                }
-                LauncherCommand.Type.CHANGE_MODE -> {
-                    val mode = com.oea.launcher.ui.OeaMode.entries.firstOrNull { it.id == command.query.lowercase() }
-                    if (mode != null) {
-                        com.oea.launcher.ui.OeaModes.apply(context, mode)
-                        speak(context, "${mode.label} mode")
-                        true
-                    } else false
-                }
-                LauncherCommand.Type.OPEN_SETTINGS -> {
-                    context.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    true
-                }
-                else -> false
+                LauncherCommand.Type.OPEN_APP, LauncherCommand.Type.SEARCH_APP -> openApp(app, command.query)
+                LauncherCommand.Type.SEARCH_WEB -> webSearch(app, command.query)
+                LauncherCommand.Type.CALL_CONTACT -> startCall(app, command.query)
+                LauncherCommand.Type.MESSAGE_CONTACT -> startMessage(app, command.query)
+                LauncherCommand.Type.SET_ALARM -> setAlarm(app, command.raw)
+                LauncherCommand.Type.SET_TIMER -> setTimer(app, command.raw)
+                LauncherCommand.Type.PLAY_MUSIC -> playMusic(app, command.query)
+                LauncherCommand.Type.NAVIGATE -> navigate(app, command.query)
+                LauncherCommand.Type.TOGGLE_FLASHLIGHT -> flashlight(app, command.raw)
+                LauncherCommand.Type.TOGGLE_DND -> toggleDnd(app)
+                LauncherCommand.Type.TOGGLE_LOWMODE -> toggleLowMode(app)
+                LauncherCommand.Type.CHANGE_MODE -> changeMode(app, command.query)
+                LauncherCommand.Type.CHANGE_WALLPAPER -> openScreen(
+                    app,
+                    Intent(Intent.ACTION_SET_WALLPAPER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    "Opening wallpapers"
+                )
+                LauncherCommand.Type.CHANGE_THEME -> openThemes(app)
+                LauncherCommand.Type.TAKE_PHOTO -> openMiniApp(app, "camera", "Opening Camera")
+                LauncherCommand.Type.TAKE_VIDEO -> openMiniApp(app, "camera", "Opening Camera")
+                LauncherCommand.Type.OPEN_SETTINGS -> openScreen(
+                    app,
+                    Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    "Opening settings"
+                )
+                LauncherCommand.Type.UNKNOWN -> false
             }
-        } catch (_: Throwable) { false }
+        } catch (e: Throwable) {
+            listenerSafely { it.onError("Could not run that: ${e.message ?: "unknown error"}") }
+            false
+        }
     }
+
+    /** No active listener during execution; kept for the error path above. */
+    private var lastListener: Listener? = null
+    private fun listenerSafely(block: (Listener) -> Unit) {
+        val l = lastListener ?: return
+        runCatching { block(l) }
+    }
+
+    // ------------------------------------------------------------- execution
+
+    private fun openApp(context: Context, query: String): Boolean {
+        val pm = context.packageManager
+        val apps = installedApps(context)
+        val q = query.trim()
+        val matched = apps.firstOrNull { it.first.equals(q, ignoreCase = true) }
+            ?: apps.firstOrNull { it.first.startsWith(q, ignoreCase = true) }
+            ?: apps.firstOrNull { it.first.contains(q, ignoreCase = true) }
+        if (matched != null) {
+            val launch = pm.getLaunchIntentForPackage(matched.second)
+            if (launch != null) {
+                context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                speak(context, "Opening ${matched.first}")
+                return true
+            }
+        }
+        val mini = miniAppFor(q)
+        if (mini != null) return openMiniApp(context, mini.first, mini.second)
+        speak(context, "I could not find $q on this phone")
+        return false
+    }
+
+    private fun miniAppFor(query: String): Pair<String, String>? {
+        val q = query.lowercase(Locale.US)
+        return when {
+            q.contains("calculator") -> "calculator" to "Opening Calculator"
+            q.contains("camera") -> "camera" to "Opening Camera"
+            q.contains("clock") -> "clock" to "Opening Clock"
+            q.contains("calendar") -> "calendar" to "Opening Calendar"
+            q.contains("weather") -> "weather" to "Opening Weather"
+            q.contains("notes") -> "notes" to "Opening Notes"
+            q.contains("gallery") || q.contains("photos") || q.contains("picture") -> "emage" to "Opening EMAGE"
+            q.contains("image") || q.contains("emage") -> "emage" to "Opening EMAGE"
+            q.contains("video") || q.contains("vip") -> "vip" to "Opening VIP"
+            q.contains("message") || q.contains("sms") || q.contains("chat") -> "messaging" to "Opening Messages"
+            q.contains("console") -> "console" to "Opening Console"
+            else -> null
+        }
+    }
+
+    private fun openMiniApp(context: Context, id: String, spoken: String): Boolean = runCatching {
+        context.startActivity(com.oea.launcher.miniapps.OeaMiniApps.launchIntent(context, id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        speak(context, spoken)
+        true
+    }.getOrDefault(false)
+
+    private fun openScreen(context: Context, intent: Intent, spoken: String): Boolean = runCatching {
+        context.startActivity(intent)
+        speak(context, spoken)
+        true
+    }.getOrDefault(false)
+
+    private fun webSearch(context: Context, query: String): Boolean = openScreen(
+        context,
+        Intent(Intent.ACTION_WEB_SEARCH)
+            .putExtra(android.app.SearchManager.QUERY, query)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        "Searching for $query"
+    )
+
+    /** A saved contact's number, or null when contacts cannot be read or nothing matches. */
+    private fun resolveContact(context: Context, query: String): Pair<String, String>? {
+        if (context.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return null
+        }
+        val uri = android.net.Uri.withAppendedPath(
+            android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
+            android.net.Uri.encode(query)
+        )
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                null, null, null
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) null
+                else (cursor.getString(0) ?: query) to (cursor.getString(1) ?: "")
+            }
+        }.getOrNull()?.takeIf { it.second.isNotBlank() }
+    }
+
+    /** Digits spoken or typed, when the query is itself a number. */
+    private fun digitsOf(query: String): String? {
+        val digits = query.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+        return if (digits.count(Char::isDigit) >= 3) digits else null
+    }
+
+    private fun startCall(context: Context, query: String): Boolean {
+        val resolved = resolveContact(context, query)
+        val number = resolved?.second?.takeIf { it.isNotBlank() } ?: digitsOf(query)
+        if (number == null) {
+            speak(context, "I could not find a number for $query")
+            return openScreen(
+                context,
+                Intent(context, com.oea.launcher.phone.OeaPhoneActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                "Opening Phone"
+            )
+        }
+        // ACTION_DIAL, not ACTION_CALL: the number is ready and the call stays the
+        // user's tap, which needs no CALL_PHONE permission from a voice command.
+        val intent = Intent(Intent.ACTION_DIAL, android.net.Uri.fromParts("tel", number, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return openScreen(context, intent, "Dialling ${resolved?.first ?: number}")
+    }
+
+    private fun startMessage(context: Context, query: String): Boolean {
+        val resolved = resolveContact(context, query)
+        val number = resolved?.second?.takeIf { it.isNotBlank() } ?: digitsOf(query)
+        if (number == null) {
+            speak(context, "I could not find a number for $query")
+            return openMiniApp(context, "messaging", "Opening Messages")
+        }
+        val intent = Intent(Intent.ACTION_SENDTO, android.net.Uri.fromParts("smsto", number, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return openScreen(context, intent, "Messaging ${resolved?.first ?: number}")
+    }
+
+    private fun setAlarm(context: Context, raw: String): Boolean {
+        val time = OeaVoiceGrammar.clockTime(raw)
+        if (time == null) {
+            speak(context, "Say the time, for example: set an alarm for 6:30")
+            return openMiniApp(context, "clock", "Opening Clock")
+        }
+        val intent = Intent(android.provider.AlarmClock.ACTION_SET_ALARM)
+            .putExtra(android.provider.AlarmClock.EXTRA_HOUR, time.first)
+            .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, time.second)
+            .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val spoken = "Alarm at ${String.format(Locale.US, "%d:%02d", time.first, time.second)}"
+        return openScreen(context, intent, spoken)
+    }
+
+    private fun setTimer(context: Context, raw: String): Boolean {
+        val seconds = OeaVoiceGrammar.durationSeconds(raw)
+        if (seconds == null) {
+            speak(context, "Say how long, for example: set a timer for 10 minutes")
+            return openMiniApp(context, "clock", "Opening Clock")
+        }
+        val intent = Intent(android.provider.AlarmClock.ACTION_SET_TIMER)
+            .putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds.toInt())
+            .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "OEA timer")
+            .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val minutes = (seconds + 59) / 60
+        return openScreen(context, intent, "Timer for $minutes minute${if (minutes == 1L) "" else "s"}")
+    }
+
+    private fun playMusic(context: Context, query: String): Boolean {
+        val intent = Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            .putExtra(android.app.SearchManager.QUERY, query)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val handled = runCatching { context.startActivity(intent); true }.getOrDefault(false)
+        if (handled) {
+            speak(context, "Playing $query")
+            return true
+        }
+        speak(context, "No music app answered, opening VIP")
+        return openMiniApp(context, "vip", "Opening VIP")
+    }
+
+    private fun navigate(context: Context, query: String): Boolean {
+        if (query.isBlank()) return false
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(query))
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return openScreen(context, intent, "Navigating to $query")
+    }
+
+    private fun flashlight(context: Context, raw: String): Boolean {
+        // "turn the flashlight off" must not be read as "on" merely because the word
+        // "on" appears somewhere in the sentence: whole words, and "off" wins.
+        if (!OeaTorch.available(context)) {
+            speak(context, "This phone has no flashlight I can switch")
+            return false
+        }
+        val state = when (OeaVoiceGrammar.flashlightWants(raw)) {
+            false -> { OeaTorch.set(context, false); false }
+            true -> OeaTorch.set(context, true)
+            else -> OeaTorch.toggle(context)
+        }
+        speak(context, if (state) "Flashlight on" else "Flashlight off")
+        return true
+    }
+
+    private fun toggleDnd(context: Context): Boolean {
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        if (manager == null) return false
+        if (!manager.isNotificationPolicyAccessGranted) {
+            speak(context, "Do Not Disturb needs notification access")
+            openScreen(
+                context,
+                Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                ""
+            )
+            return false
+        }
+        val next = if (manager.currentInterruptionFilter == android.app.NotificationManager.INTERRUPTION_FILTER_ALL) {
+            android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY
+        } else {
+            android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+        }
+        return runCatching {
+            manager.setInterruptionFilter(next)
+            speak(context, if (next == android.app.NotificationManager.INTERRUPTION_FILTER_ALL) "Do Not Disturb off" else "Do Not Disturb on")
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun toggleLowMode(context: Context): Boolean = runCatching {
+        val store = com.oea.launcher.data.OeaDataStore.get(context)
+        val next = !store.lowModeEnabled()
+        store.setLowModeEnabled(next)
+        store.setLowModeAutoEngaged(false)
+        com.oea.launcher.perf.OeaLowMode.apply(context)
+        speak(context, if (next) "Low mode on" else "Low mode off")
+        true
+    }.getOrDefault(false)
+
+    private fun changeMode(context: Context, query: String): Boolean {
+        val mode = com.oea.launcher.ui.OeaMode.entries.firstOrNull { it.id == query.lowercase(Locale.US) }
+        if (mode == null) return false
+        com.oea.launcher.ui.OeaModes.apply(context, mode)
+        speak(context, "${mode.label} mode")
+        return true
+    }
+
+    private fun openThemes(context: Context): Boolean = openScreen(
+        context,
+        Intent(context, com.oea.launcher.themes.OeaThemesActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        "Opening themes"
+    )
 }

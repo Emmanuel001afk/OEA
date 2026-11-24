@@ -2167,6 +2167,73 @@ open class OeaSystemToolsActivity : Activity() {
      * Android's App info page, behind its own progress screen.
      * CI regression guards retain the previous SELECT VISIBLE and REFRESH STATE control identifiers.
      */
+    /**
+     * The Freezer's overflow menu. It used to be a button with an empty click
+     * handler: a control that looks like it opens something and never does.
+     */
+    private fun freezerOptions(systemMode: Boolean, backend: OeaAppFreezer.Backend) {
+        val frozen = OeaAppFreezer.allFrozen(this)
+        kit.sheet(
+            "Freezer options",
+            if (frozen.isEmpty()) "Nothing is frozen right now" else "${frozen.size} frozen · Android's state, re-read on open"
+        ) { panel, dialog ->
+            val group = kit.group(panel)
+            kit.row(
+                group, R.drawable.oic_refresh, "Re-read Android's frozen state",
+                if (systemMode) "Suspension can be changed outside OEA" else "Checks which frozen apps are still installed"
+            ) {
+                dialog.dismiss()
+                OeaAppFreezer.syncActualState(this)
+                rerender()
+                toast("Frozen state re-read from Android")
+            }
+            if (frozen.isNotEmpty()) {
+                kit.row(group, R.drawable.oic_lock, "Restore all frozen apps", "${frozen.size} app${if (frozen.size == 1) "" else "s"} back to normal", chevron = true) {
+                    dialog.dismiss()
+                    kit.confirm(
+                        "Restore ${frozen.size} app${if (frozen.size == 1) "" else "s"}?",
+                        "Every frozen app becomes launchable again, with its background work and notifications. Nothing is uninstalled.",
+                        "Restore all"
+                    ) {
+                        var done = 0
+                        var refused = 0
+                        frozen.forEach { pkg ->
+                            if (OeaAppFreezer.setFrozen(this, pkg, false).success) done++ else refused++
+                        }
+                        OeaAppFreezer.syncActualState(this)
+                        toast(
+                            when {
+                                refused == 0 -> "Restored $done app${if (done == 1) "" else "s"}"
+                                done == 0 -> "Android refused to restore any of them"
+                                else -> "Restored $done · $refused refused"
+                            }
+                        )
+                        rerender()
+                    }
+                }
+            }
+            kit.note(
+                panel,
+                when (backend) {
+                    OeaAppFreezer.Backend.DEVICE_OWNER ->
+                        "Device Owner: Android itself suspends a frozen app, so it cannot run for any reason until you unfreeze it."
+                    OeaAppFreezer.Backend.ROOT ->
+                        "Root: OEA suspends the package through Android's own package manager and checks the result before saving anything."
+                    OeaAppFreezer.Backend.ADB ->
+                        "Wireless Debugging (OEA Authority): OEA asks Android to suspend the package and verifies it took effect."
+                    OeaAppFreezer.Backend.DEVICE_ADMIN ->
+                        "Ordinary Device Admin cannot suspend apps, so OEA Freeze blocks launches and force-stops through the app's own page."
+                    OeaAppFreezer.Backend.NONE ->
+                        "No privileged path is set up on this phone yet, so freezing waits for OEA Assistant or a pairing."
+                }
+            )
+            panel.addView(
+                kit.buttonRow(kit.quietButton("Close") { dialog.dismiss() }),
+                LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) }
+            )
+        }
+    }
+
     private fun showFreezer() {
         // Root (if any) is detected once in the background; the screen updates when it is known.
         OeaAppFreezer.primeRootCheck { if (!isDestroyed && current == "freezer" && OeaAppFreezer.backend(this) != freezerBackendShown) rerender() }
@@ -2213,7 +2280,9 @@ open class OeaSystemToolsActivity : Activity() {
         }
         titles.addView(kit.text(modeLine, 12.5f, palette.textSecondary).apply { setPadding(0, dp(1), 0, 0) })
         top.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-        val overflow = kit.circleIconButton(R.drawable.oic_more_vert, "Freezer options", palette.cardHigh, palette.text) {}
+        val overflow = kit.circleIconButton(R.drawable.oic_more_vert, "Freezer options", palette.cardHigh, palette.text) {
+            freezerOptions(systemMode, backend)
+        }
         top.addView(overflow, LinearLayout.LayoutParams(dp(44), dp(44)))
         header.addView(top, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
 
@@ -3665,12 +3734,12 @@ open class OeaSystemToolsActivity : Activity() {
     }
 
     private fun explainCapability(capability: Capability) {
-        kit.sheet(capability.feature, capability.requires.title) { panel, _ ->
+        kit.sheet(capability.feature, capability.requires.title) { panel, dialog ->
             kit.note(panel, "Needs: ${capability.requires.summary}")
             kit.note(panel, "Shown as: ${capability.surface.label} — ${capability.surface.detail}")
             kit.note(panel, if (capability.isReady) "Fully available on this phone." else "Without it: ${capability.effect}.")
             panel.addView(kit.buttonRow(
-                kit.quietButton("Close") { },
+                kit.quietButton("Close") { dialog.dismiss() },
                 kit.primaryButton(if (capability.isReady) "Settings" else "Open the page", R.drawable.oic_settings) {
                     if (capability.isReady) navigate("access") else requestPrivilege(capability.requires, capability.granted)
                 }
