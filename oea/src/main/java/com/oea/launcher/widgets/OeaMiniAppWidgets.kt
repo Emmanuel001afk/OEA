@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.widget.RemoteViews
 import com.oea.launcher.R
 import com.oea.launcher.miniapps.OeaCalendarApp
+import com.oea.launcher.miniapps.OeaWeatherFormat
 import com.oea.launcher.miniapps.OeaCalendarRecurrence
 import com.oea.launcher.miniapps.OeaMiniApps
 import java.io.File
@@ -48,16 +49,32 @@ class OeaWeatherWidgetProvider : AppWidgetProvider() {
             var temp = "--"
             var desc = "Tap to open"
             val city = prefs.getString("location_name", "Weather") ?: "Weather"
-            if (cache != null) {
+            // Only a reading for the place the phone is set to may be shown: otherwise
+            // the widget prints the new city's name above the old city's temperature.
+            // With no saved city the app is following the device fix, so the cache's own
+            // place is the only one it can be checked against.
+            val place = if (prefs.getString("location_name", null) != null) {
+                OeaWeatherFormat.placeKey(
+                    prefs.getFloat("lat", 0f).toDouble(),
+                    prefs.getFloat("lon", 0f).toDouble()
+                )
+            } else {
+                prefs.getString("cache_place", null)
+            }
+            val usable = if (cache != null && prefs.getString("cache_place", null) == place) cache else null
+            if (usable != null) {
                 try {
-                    val obj = org.json.JSONObject(cache)
+                    val obj = org.json.JSONObject(usable)
                     val cur = obj.optJSONObject("current")
                     temp = OeaWidgetStudio.temperature(cur?.optDouble("temperature_2m", 0.0) ?: 0.0, OeaWidgetStudio.weatherUsesFahrenheit(context))
                     val code = cur?.optInt("weather_code", 0) ?: 0
-                    desc = when (code) {
-                        0 -> "Clear"; 1 -> "Mainly clear"; 2 -> "Partly cloudy"; 3 -> "Overcast"
-                        45, 48 -> "Fog"; 51, 53, 55 -> "Drizzle"; 61, 63, 65 -> "Rain"
-                        71, 73, 75 -> "Snow"; 80, 81, 82 -> "Showers"; 95 -> "Thunderstorm"; else -> "Weather $code"
+                    val fetchedAt = prefs.getLong("last_fetch", 0L)
+                    // The same words the app uses, and the age when it has stopped being true.
+                    val age = OeaWeatherFormat.age(System.currentTimeMillis(), fetchedAt)
+                    desc = if (OeaWeatherFormat.stale(System.currentTimeMillis(), fetchedAt) && age != null) {
+                        "${OeaWeatherFormat.description(code)} · $age"
+                    } else {
+                        OeaWeatherFormat.description(code)
                     }
                 } catch (_: Throwable) {}
             }

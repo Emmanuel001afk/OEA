@@ -583,6 +583,54 @@ jobs:
           # A day can be changed without deleting and retyping the event.
           grep -Fq 'private fun pickDate(' "$CAL"
           grep -Fq '"Date", null,' "$CAL"
+      - name: Weather formatting tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaWeatherFormatTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-weather.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-weather.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the weather work
+        run: |
+          set -euo pipefail
+          WEA=oea/src/main/java/com/oea/launcher/miniapps/OeaWeatherApp.kt
+          FMT=oea/src/main/java/com/oea/launcher/miniapps/OeaWeatherFormat.kt
+          WID=oea/src/main/java/com/oea/launcher/widgets/OeaMiniAppWidgets.kt
+          STUDIO=oea/src/main/java/com/oea/launcher/widgets/OeaWidgetStudio.kt
+          # One place for units, rounding and wording, and the app uses it everywhere.
+          grep -Fq 'internal object OeaWeatherFormat' "$FMT"
+          grep -Fq 'fun temperature(value: Double, celsius: Boolean): Int' "$FMT"
+          grep -Fq 'fun speed(kmh: Double, celsius: Boolean): String' "$FMT"
+          grep -Fq 'fun rain(mm: Double, celsius: Boolean): String' "$FMT"
+          grep -Fq 'fun placeKey(lat: Double, lon: Double): String' "$FMT"
+          grep -Fq 'fun advisories(' "$FMT"
+          grep -Fq 'fun description(code: Int): String' "$FMT"
+          grep -Fq 'fun age(now: Long, fetchedAt: Long): String?' "$FMT"
+          grep -Fq 'OeaWeatherFormat.degrees(now.temp, celsius)' "$WEA"
+          grep -Fq 'OeaWeatherFormat.rain(day.rainMm, celsius)' "$WEA"
+          grep -Fq 'OeaWeatherFormat.speed(day.gust, celsius)' "$WEA"
+          grep -Fq 'OeaWeatherFormat.pressure(now.pressure)' "$WEA"
+          ! grep -Fq 'private fun shown(' "$WEA"
+          ! grep -Fq 'private fun weatherDesc(' "$WEA"
+          ! grep -Fq 'val speed = if (celsius)' "$WEA"
+          # A dead network cannot pin a pool thread, and an old answer cannot repaint.
+          grep -Fq 'private fun readUrl(url: String): String' "$WEA"
+          grep -Fq 'connectTimeout = 10_000' "$WEA"
+          ! grep -Fq 'URL(url).readText()' "$WEA"
+          grep -Fq 'var generation = 0' "$WEA"
+          grep -Fq 'isCurrent = { current == generation }' "$WEA"
+          grep -Fq 'host.miniResumeHook = { reload(force = false) }' "$WEA"
+          # A cached reading belongs to a place, in the app and in the widget.
+          grep -Fq 'private const val KEY_CACHE_PLACE = "cache_place"' "$WEA"
+          grep -Fq 'p.getString(KEY_CACHE_PLACE, null) == place' "$WEA"
+          grep -Fq 'prefs.getString("cache_place", null) == place' "$WID"
+          grep -Fq 'OeaWeatherFormat.description(code)' "$WID"
+          grep -Fq 'debounce.postDelayed(task, 280L)' "$WEA"
+          # The widget and the app share one unit.
+          grep -Fq 'fun weatherUsesFahrenheit(context: Context): Boolean {' "$STUDIO"
+          grep -Fq 'getSharedPreferences("oea_weather", Context.MODE_PRIVATE)' "$STUDIO"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

@@ -118,9 +118,27 @@ object OeaWidgetStudio {
         refreshWidgets(context, "clock")
     }
 
-    fun weatherUsesFahrenheit(context: Context): Boolean = prefs(context).getBoolean(KEY_WEATHER_FAHRENHEIT, false)
+    /**
+     * The app and the widget share one unit, stored where the app keeps it.
+     *
+     * They used to keep two: tapping °F in Weather changed the app, tapping it in the
+     * widget settings changed the widget, and the two screens disagreed about the same
+     * reading — while the Weather screen's own text promised they never would.
+     */
+    fun weatherUsesFahrenheit(context: Context): Boolean {
+        val weather = context.getSharedPreferences("oea_weather", Context.MODE_PRIVATE)
+        if (!weather.contains("unit_celsius")) {
+            // Adopt the widget's old setting once, so upgrading does not flip the unit.
+            val legacy = prefs(context).getBoolean(KEY_WEATHER_FAHRENHEIT, false)
+            weather.edit().putBoolean("unit_celsius", !legacy).apply()
+            return legacy
+        }
+        return !weather.getBoolean("unit_celsius", true)
+    }
+
     fun saveWeatherUnit(context: Context, fahrenheit: Boolean) {
-        prefs(context).edit().putBoolean(KEY_WEATHER_FAHRENHEIT, fahrenheit).apply()
+        context.getSharedPreferences("oea_weather", Context.MODE_PRIVATE)
+            .edit().putBoolean("unit_celsius", !fahrenheit).apply()
         refreshWidgets(context, "weather")
     }
 
