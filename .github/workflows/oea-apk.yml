@@ -753,6 +753,54 @@ jobs:
           ! grep -Fq '"%.0f KB".format(kb)' "$LIB"
           # A slideshow with nothing to show does not start (and cannot divide by zero).
           grep -Fq 'if (items.isEmpty()) {' "$VIEW"
+      - name: Messaging detail tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaMessagingFactsTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-messaging.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-messaging.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the messaging work
+        run: |
+          set -euo pipefail
+          FACTS=oea/src/main/java/com/oea/launcher/miniapps/OeaMessagingFacts.kt
+          APP=oea/src/main/java/com/oea/launcher/miniapps/OeaMessagingApp.kt
+          RX=oea/src/main/java/com/oea/launcher/miniapps/OeaSmsDeliveryReceiver.kt
+          SVC=oea/src/main/java/com/oea/launcher/miniapps/OeaSmsRespondViaMessageService.kt
+          # One place decides what a message is, what it sent, and who it notifies.
+          grep -Fq 'internal object OeaMessagingFacts' "$FACTS"
+          grep -Fq 'fun composeBody(typed: String, quoted: String?): String' "$FACTS"
+          grep -Fq 'fun quotePrefix(quoted: String?): String' "$FACTS"
+          grep -Fq 'fun counterLabel(parts: Int, remaining: Int): String?' "$FACTS"
+          grep -Fq 'fun isFailed(type: Int, status: Int): Boolean' "$FACTS"
+          grep -Fq 'fun statusNote(type: Int, status: Int): String' "$FACTS"
+          grep -Fq 'fun notificationId(address: String): Int' "$FACTS"
+          grep -Fq 'fun notificationTitle(contactName: String?, address: String): String' "$FACTS"
+          # The counter and the send measure the same body, quote included.
+          test "$(grep -Fc 'OeaMessagingFacts.composeBody(typed, replyTo?.body)' "$APP")" -ge 2
+          ! grep -Fq 'replyTo?.let { "' "$APP"
+          grep -Fq 'if (::editor.isInitialized && ::counter.isInitialized) paintComposerState' "$APP"
+          # The network's verdict is written to the row it belongs to, not just heard.
+          grep -Fq 'internal fun markSendResult(ctx: Context, address: String, body: String, status: Int): Boolean' "$APP"
+          grep -Fq 'OeaMessagingFacts.isFailed(message.type, message.status)' "$APP"
+          grep -Fq 'OeaMessagingFacts.statusNote(message.type, message.status)' "$APP"
+          grep -Fq 'recordReport(intent, OeaMessagingFacts.STATUS_FAILED)' "$APP"
+          grep -Fq 'recordReport(intent, OeaMessagingFacts.STATUS_COMPLETE)' "$APP"
+          grep -Fq 'putExtra(OeaMessagingFacts.EXTRA_ADDRESS, address)' "$APP"
+          grep -Fq 'putExtra(OeaMessagingFacts.EXTRA_BODY, body)' "$APP"
+          ! grep -Fq 'Message not sent — tap the failed bubble to retry' "$RX"
+          # One notification per conversation, led by the name the phone knows.
+          grep -Fq 'OeaMessagingFacts.notificationId(sender)' "$RX"
+          grep -Fq 'OeaMessagingFacts.notificationTitle(name, sender)' "$RX"
+          grep -Fq 'R.drawable.oic_message' "$RX"
+          grep -Fq 'setShowWhen(true)' "$RX"
+          ! grep -Fq 'System.currentTimeMillis() % Int.MAX_VALUE' "$RX"
+          test -f oea/src/main/res/drawable/oic_message.xml
+          # A reply sent from the system UI is filed like any other.
+          grep -Fq 'OeaMessagingApp.sendNow(applicationContext, address, body, -1)' "$SVC"
+          ! grep -Fq 'SmsManager.getDefault()' "$SVC"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

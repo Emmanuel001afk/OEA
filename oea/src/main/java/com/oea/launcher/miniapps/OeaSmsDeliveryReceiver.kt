@@ -61,7 +61,18 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
                 saved == senderRaw || OeaSmsMatcher.sameAddress(saved, senderRaw)
             }
         }.getOrDefault(false)
-        if (inserted && !suppressed) postNewMessageNotification(context, senderRaw, body)
+        if (inserted && !suppressed) {
+            // The notification needs the contact name, which is a provider lookup:
+            // run it off the broadcast thread and hold the receiver open until done.
+            val pending = runCatching { goAsync() }.getOrNull()
+            OeaMessagingApp.inboxIo.execute {
+                try {
+                    postNewMessageNotification(context, senderRaw, body, first.timestampMillis)
+                } finally {
+                    runCatching { pending?.finish() }
+                }
+            }
+        }
     }
 
     private fun subscriptionIdFrom(intent: Intent): Int {
@@ -75,7 +86,7 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
         return -1
     }
 
-    private fun postNewMessageNotification(context: Context, sender: String, body: String) {
+    private fun postNewMessageNotification(context: Context, sender: String, body: String, whenMillis: Long) {
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (Build.VERSION.SDK_INT >= 26) {
@@ -96,25 +107,32 @@ class OeaSmsDeliveryReceiver : BroadcastReceiver() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }.getOrNull() ?: return
+        // The contact's name, not a bare number, and one notification per
+        // conversation: the old id was the current time, so every message in a
+        // thread posted its own, and each one led with the raw address.
+        val name = runCatching { OeaMessagingApp.contactName(context, sender) }.getOrNull()
+        val title = OeaMessagingFacts.notificationTitle(name, sender)
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, CHANNEL) else Notification.Builder(context)
         val notification = builder
-            .setSmallIcon(R.drawable.oic_send)
-            .setContentTitle(sender.ifBlank { "New message" })
+            .setSmallIcon(R.drawable.oic_message)
+            .setContentTitle(title)
             .setContentText(body.take(120))
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setContentIntent(openMessaging)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setWhen(if (whenMillis > 0L) whenMillis else System.currentTimeMillis())
+            .setShowWhen(true)
             .setPublicVersion(
                 (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, CHANNEL) else Notification.Builder(context))
-                    .setSmallIcon(R.drawable.oic_send)
+                    .setSmallIcon(R.drawable.oic_message)
                     .setContentTitle("New message")
                     .setContentText("Open OEA to view")
                     .build()
             )
             .setAutoCancel(true)
             .build()
-        runCatching { manager.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification) }
+        runCatching { manager.notify(OeaMessagingFacts.notificationId(sender), notification) }
             .onFailure { Log.w(TAG, "Could not show incoming-message notification", it) }
     }
 
