@@ -245,6 +245,18 @@ Nothing was compiled here (no Android SDK or Kotlin compiler in this workspace):
 test expectations were cross-checked against a Python model of the same grammar before
 being written down, every guard was run locally, and CI is the compile signal.
 
+**The first run earned its keep.** [`45308873571`](https://github.com/Emmanuel001afk/OEA/actions/runs/45308873571)
+compiled everything and then failed one test: `0x1F AND 0x0F`. The cause was a real bug
+the tests had just been written to catch — `A` is a hex digit *and* the first letter of
+`AND`, so the literal scan consumed `0x1FA` and never saw the operator. A hex scan now
+ends at an `AND` keyword, with two more assertions pinning it
+(`0xF AND 0x3` = 3, `0x1 AND 3` = 1).
+
+**The run that carries this change set:** [`45309697633`](https://github.com/Emmanuel001afk/OEA/actions/runs/45309697633)
+is green on both jobs, with `269 tests` in the unit-test step (232 before, plus the
+thirty-seven `OeaCalcEngineTest` cases) and the new `Verify the calculator work` step
+among them. PR #162 merged as `f030468` at 2026-11-24T02:10:47Z.
+
 ## 5. What to check on a device
 
 1. **`2^3^2`** in the calculator and in the launcher search box: both 512. `-2^2`: -4.
