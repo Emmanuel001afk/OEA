@@ -701,6 +701,58 @@ jobs:
           grep -Fq 'private val scaler = android.view.ScaleGestureDetector(' "$CAL"
           grep -Fq 'fun onTouchEvent(event: android.view.MotionEvent): Boolean' "$CAL"
           ! grep -Fq 'Evaluator.evaluate(expr, true)' "$CAL"
+      - name: EMAGE detail tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.miniapps.OeaEmageFactsTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-emage.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-emage.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the EMAGE work
+        run: |
+          set -euo pipefail
+          FACTS=oea/src/main/java/com/oea/launcher/miniapps/OeaEmageFacts.kt
+          PROBE=oea/src/main/java/com/oea/launcher/miniapps/OeaMediaProbe.kt
+          EDIT=oea/src/main/java/com/oea/launcher/miniapps/OeaEmageEditor.kt
+          VIEW=oea/src/main/java/com/oea/launcher/miniapps/OeaEmageViewer.kt
+          LIB=oea/src/main/java/com/oea/launcher/miniapps/OeaMediaLibrary.kt
+          # One place computes the numbers a photo app shows.
+          grep -Fq 'internal object OeaEmageFacts' "$FACTS"
+          grep -Fq 'fun sampleSize(width: Int, height: Int, target: Int, cover: Boolean = false): Int' "$FACTS"
+          grep -Fq 'const val EDIT_EDGE = 3000' "$FACTS"
+          grep -Fq 'fun size(bytes: Long): String' "$FACTS"
+          grep -Fq 'fun megapixels(width: Int, height: Int): String' "$FACTS"
+          grep -Fq 'fun shutter(raw: String): String' "$FACTS"
+          grep -Fq 'fun aperture(raw: String): String' "$FACTS"
+          grep -Fq 'fun focalLength(equivalent35mm: String, raw: String): String' "$FACTS"
+          grep -Fq 'fun exposureLine(shutter: String, aperture: String, iso: String): String' "$FACTS"
+          grep -Fq 'fun whiteBalance(code: Int): String' "$FACTS"
+          grep -Fq 'fun metering(code: Int): String' "$FACTS"
+          # Coordinates are data: always a dot, whatever the phone's language is.
+          grep -Fq 'String.format(Locale.US, "%.5f, %.5f", latitude, longitude)' "$FACTS"
+          ! grep -Fq '"%.5f, %.5f".format(latitude, longitude)' "$PROBE"
+          # Nothing decodes a picture at a size the phone cannot hold.
+          grep -Fq 'OeaEmageFacts.EDIT_EDGE' "$EDIT"
+          grep -Fq 'OeaEmageFacts.sampleSize(' "$EDIT"
+          ! grep -Fq '(sample * 2) >= 4096' "$EDIT"
+          grep -Fq 'OeaEmageFacts.sampleSize(bounds.outWidth, bounds.outHeight, edge, cover = true)' "$VIEW"
+          # The details sheet reads the shared wording, not its own.
+          grep -Fq 'OeaEmageFacts.shutter(exposure)' "$PROBE"
+          grep -Fq 'OeaEmageFacts.aperture(fNumber)' "$PROBE"
+          grep -Fq 'OeaEmageFacts.coordinates(latitude, longitude)' "$PROBE"
+          grep -Fq 'OeaEmageFacts.whiteBalance(' "$PROBE"
+          grep -Fq 'OeaEmageFacts.metering(' "$PROBE"
+          # Phones that write only the modern sensitivity tag still show an ISO.
+          grep -Fq 'exif.getAttribute("PhotographicSensitivity")' "$PROBE"
+          grep -Fq 'exif.exposureLabel' "$VIEW"
+          grep -Fq '"White balance", exif.whiteBalance' "$VIEW"
+          ! grep -Fq 'private fun megapixels(' "$VIEW"
+          grep -Fq 'fun formatSize(bytes: Long): String = OeaEmageFacts.size(bytes)' "$LIB"
+          ! grep -Fq '"%.0f KB".format(kb)' "$LIB"
+          # A slideshow with nothing to show does not start (and cannot divide by zero).
+          grep -Fq 'if (items.isEmpty()) {' "$VIEW"
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

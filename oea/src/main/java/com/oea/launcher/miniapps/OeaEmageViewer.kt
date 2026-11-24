@@ -129,7 +129,7 @@ internal object OeaEmageViewer {
             val group = kit.group(body)
             kit.row(group, R.drawable.oic_photo_library, "Taken", OeaMediaLibrary.formatDate(item.takenAt), chevron = false)
             kit.row(group, R.drawable.oic_layers, "Resolution",
-                if (item.hasRealResolution) "${item.width}×${item.height}  •  ${megapixels(item.width, item.height)}"
+                if (item.hasRealResolution) "${item.width}×${item.height}  •  ${OeaEmageFacts.megapixels(item.width, item.height)}"
                 else probedResolution ?: "Not recorded", chevron = false)
             kit.row(group, R.drawable.oic_memory, "File", OeaMediaLibrary.formatSize(item.size), chevron = false)
             kit.row(
@@ -151,10 +151,21 @@ internal object OeaEmageViewer {
                 if (exif.lens.isNotBlank()) {
                     kit.row(camera, R.drawable.oic_visibility_off, "Lens", exif.lens, chevron = false)
                 }
-                kit.row(camera, R.drawable.oic_schedule, "Exposure", "${exif.exposureSeconds}  •  ${exif.aperture}  •  ISO ${exif.iso}", chevron = false)
-                kit.row(camera, R.drawable.oic_tune, "Focal length", "${exif.focalLength}  •  flash ${if (exif.flash) "fired" else "off"}  •  ${exif.metering}", chevron = false)
+                kit.row(camera, R.drawable.oic_schedule, "Exposure", exif.exposureLabel, chevron = false)
+                // Only the fields the file actually has: "—  •  flash off  •  —" is
+                // not a lens description.
+                kit.row(
+                    camera, R.drawable.oic_tune, "Lens",
+                    listOf(exif.focalLength, "flash ${if (exif.flash) "fired" else "off"}", exif.metering)
+                        .filter { it.isNotEmpty() && it != "—" }
+                        .joinToString("  •  "),
+                    chevron = false
+                )
                 if (exif.takenAt > 0L) {
                     kit.row(camera, R.drawable.oic_info, "EXIF time", exif.takenLabel, chevron = false)
+                }
+                if (exif.whiteBalance != "—") {
+                    kit.row(camera, R.drawable.oic_brightness_medium, "White balance", exif.whiteBalance, chevron = false)
                 }
                 if (exif.software.isNotBlank()) {
                     kit.row(camera, R.drawable.oic_developer_mode, "Processed by", exif.software, chevron = false)
@@ -164,7 +175,7 @@ internal object OeaEmageViewer {
             val place = kit.group(body)
             if (exif?.hasLocation == true) {
                 kit.row(place, R.drawable.oic_location_on, "Coordinates", exif.locationLabel,
-                    value = exif.altitudeMeters?.let { "%.0f m".format(it) }, chevron = false) {
+                    value = OeaEmageFacts.altitude(exif.altitudeMeters), chevron = false) {
                     copy(host, exif.locationLabel, "Coordinates copied")
                 }
                 kit.row(place, R.drawable.oic_map, "Open in a map", "Hands the spot to your maps app") {
@@ -209,10 +220,9 @@ internal object OeaEmageViewer {
             val bitmap = runCatching {
                 val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 context.contentResolver.openInputStream(item.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
-                var sample = 1
-                while (bounds.outWidth / (sample * 2) >= edge && bounds.outHeight / (sample * 2) >= edge) sample *= 2
                 val options = android.graphics.BitmapFactory.Options().apply {
-                    inSampleSize = sample
+                    // A wallpaper covers the screen: the short edge must still reach it.
+                    inSampleSize = OeaEmageFacts.sampleSize(bounds.outWidth, bounds.outHeight, edge, cover = true)
                     inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                 }
                 context.contentResolver.openInputStream(item.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
@@ -238,19 +248,13 @@ internal object OeaEmageViewer {
         }
     }
 
-    private fun megapixels(width: Int, height: Int): String {
-        if (width <= 0 || height <= 0) return ""
-        val mega = width.toLong() * height.toLong() / 1_000_000.0
-        return "%.1f MP".format(mega)
-    }
-
     private fun probeResolution(context: Context, item: OeaMediaLibrary.Item): String? = runCatching {
         val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(item.uri)?.use { stream ->
             android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
         }
         if (bounds.outWidth > 0 && bounds.outHeight > 0) {
-            "${bounds.outWidth}×${bounds.outHeight}  •  ${megapixels(bounds.outWidth, bounds.outHeight)}"
+            "${bounds.outWidth}×${bounds.outHeight}  •  ${OeaEmageFacts.megapixels(bounds.outWidth, bounds.outHeight)}"
         } else null
     }.getOrNull()
 
@@ -751,6 +755,12 @@ internal object OeaEmageViewer {
         private var pauseButton: TextView? = null
 
         fun show() {
+            // `(index + 1) % items.size` on an empty pool is a divide by zero; a slideshow
+            // of nothing should simply not start.
+            if (items.isEmpty()) {
+                OeaMediaLibrary.toast(host, "There are no pictures to play")
+                return
+            }
             val root = FrameLayout(host).apply { setBackgroundColor(Color.BLACK) }
             val view = OeaZoomImageView(host).apply {
                 setBackgroundColor(Color.BLACK)
