@@ -9,9 +9,7 @@ import android.net.Uri
 import android.provider.ContactsContract
 import android.provider.Settings
 import com.oea.launcher.R
-import java.math.BigDecimal
-import java.math.MathContext
-import java.math.RoundingMode
+import com.oea.launcher.miniapps.OeaCalcEngine
 
 /**
  * One search result that is not an app: a calculation, a settings page, a
@@ -162,84 +160,20 @@ class OeaSearchController(private val context: Context) {
         }
     }
 
-    /** Evaluates + − × ÷ % ^ and parentheses; null when [input] is not arithmetic. */
+    /**
+     * The launcher's arithmetic, answered by the calculator's own engine.
+     *
+     * Search used to carry a third parser, and it disagreed with the app about the one
+     * thing a parser can disagree about quietly: `2^3^2` was 512 in search and 64 in the
+     * calculator. One expression must not have two answers in one launcher, so the
+     * evaluator and the formatter both live in [OeaCalcEngine] now.
+     */
     fun calculate(input: String): String? {
         val expr = input.replace('×', '*').replace('÷', '/').replace('−', '-').replace(',', '.').replace(" ", "")
         if (expr.length < 3 || expr.none { it in "+-*/%^" } || expr.any { !(it.isDigit() || it in "+-*/%^().") }) return null
         if (!expr.any(Char::isDigit)) return null
-        val parser = Parser(expr)
-        val value = runCatching { parser.parse() }.getOrNull() ?: return null
-        if (value.isNaN() || value.isInfinite()) return null
-        val decimal = BigDecimal(value).round(MathContext(12, RoundingMode.HALF_UP)).stripTrailingZeros()
-        val text = if (decimal.scale() <= 0) decimal.toBigInteger().toString() else decimal.toPlainString()
+        val value = OeaCalcEngine.evaluate(expr) ?: return null
+        val text = OeaCalcEngine.format(value)
         return if (text == expr) null else text
-    }
-
-    private class Parser(private val s: String) {
-        private var pos = 0
-
-        fun parse(): Double {
-            val v = expression()
-            if (pos != s.length) throw IllegalArgumentException("Unexpected input")
-            return v
-        }
-
-        private fun expression(): Double {
-            var v = term()
-            while (pos < s.length) {
-                when (s[pos]) {
-                    '+' -> { pos++; v += term() }
-                    '-' -> { pos++; v -= term() }
-                    else -> return v
-                }
-            }
-            return v
-        }
-
-        private fun term(): Double {
-            var v = factor()
-            while (pos < s.length) {
-                when (s[pos]) {
-                    '*' -> { pos++; v *= factor() }
-                    '/' -> { pos++; v /= factor() }
-                    '%' -> {
-                        pos++
-                        // "50%" alone is a percentage; "7%3" is modulo.
-                        v = if (pos >= s.length || s[pos] in "+-*/)") v / 100.0 else v % factor()
-                    }
-                    else -> return v
-                }
-            }
-            return v
-        }
-
-        private fun factor(): Double {
-            val base = unary()
-            if (pos < s.length && s[pos] == '^') {
-                pos++
-                return Math.pow(base, factor())
-            }
-            return base
-        }
-
-        private fun unary(): Double {
-            if (pos < s.length && s[pos] == '-') { pos++; return -unary() }
-            if (pos < s.length && s[pos] == '+') { pos++; return unary() }
-            return primary()
-        }
-
-        private fun primary(): Double {
-            if (pos < s.length && s[pos] == '(') {
-                pos++
-                val v = expression()
-                if (pos >= s.length || s[pos] != ')') throw IllegalArgumentException("Missing )")
-                pos++
-                return v
-            }
-            val start = pos
-            while (pos < s.length && (s[pos].isDigit() || s[pos] == '.')) pos++
-            if (start == pos) throw IllegalArgumentException("Number expected")
-            return s.substring(start, pos).toDouble()
-        }
     }
 }

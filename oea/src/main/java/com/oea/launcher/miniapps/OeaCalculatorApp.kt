@@ -2,7 +2,6 @@ package com.oea.launcher.miniapps
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Color
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -13,30 +12,29 @@ import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaPalette
 import com.oea.launcher.ui.OeaType
 import kotlin.math.*
-import java.util.Locale
 
 /**
- * OEA Calculator: fully competitive calculator with unique features.
+ * OEA Calculator.
  *
- * Modes:
- * - Standard: basic arithmetic with tape, history, memory, percentage, brackets
- * - Scientific: sin/cos/tan/log/ln/sqrt/power/factorial/pi/e, hyperbolic, inverse, degrees/radians, constants
- * - Programmer: binary/hex/octal/decimal, bitwise AND/OR/XOR/NOT, shifts
- * - Converter: ten families (length, mass, temperature, area, volume, speed, time,
- *   data, pressure, energy) as exact factors against one base unit each, live as you
- *   type, with swap and a send-to-display. Currency is a family of its own whose
- *   numbers you set and OEA keeps on the phone — no fetch is attempted, so nothing on
- *   screen pretends to be today's rate.
- * - Graphing: simple y=f(x) plotter with Canvas
+ * The arithmetic lives in [OeaCalcEngine] — one evaluator, one formatter, one
+ * programmer mode — and this file is the screen around it. What each mode is:
  *
- * Unique:
- * - Tape that saves every result, searchable, exportable
- * - Memory with M+, M-, MR, MC
- * - History with recall
- * - Unit converter built-in, not external
- * - Currency converter with honest offline fallback
- * - Graphing with pinch zoom
- * - Themes: follows OEA palette, polished animations
+ * - **Standard**: arithmetic, percent-of, brackets, memory (M+, M−, MR, MC) and `Ans`.
+ * - **Scientific**: sin/cos/tan, log/ln/√, powers and factorial on the first page;
+ *   a `2nd` key flips to the inverses, the hyperbolic functions, `10^x`, `e^x` and
+ *   `x²`, which the evaluator could always do but no key could reach. `DEG`/`RAD` on
+ *   screen, π and e as constants.
+ * - **Programmer**: 64-bit integers, `0x`/`0b`/`0o` literals, AND/OR/XOR/NOT, shifts,
+ *   `%` as modulo, and the current value shown in all four bases at once.
+ * - **Converter**: ten families as exact factors against one base unit each, live as
+ *   you type, decimals accepted, with swap and a send-to-display. Currency is a family
+ *   of its own whose numbers you set and OEA keeps on the phone — no fetch is
+ *   attempted, so nothing on screen pretends to be today's rate.
+ * - **Graphing**: `y = f(x)` in radians, plotted on a grid anchored to the origin, with
+ *   pinch zoom and drag.
+ *
+ * The tape behind all of it keeps the last hundred answers, searches them, reuses one
+ * with a tap, shares them as text, and feeds the home-screen widget.
  */
 object OeaCalculatorApp {
 
@@ -45,7 +43,23 @@ object OeaCalculatorApp {
     private const val KEY_MEMORY = "calc_memory"
     private const val KEY_MODE = "calc_mode"
     private const val KEY_DEG = "calc_deg"
+    private const val KEY_LAST = "calc_last"
+    /** Read by the home-screen widget, which shows the newest answer. */
+    private const val KEY_LAST_RESULT = "last_result"
     private const val TAPE_LIMIT = 100
+
+    /**
+     * Keys whose label is not their syntax. A keypad reads better as `1/x` and `x²`
+     * than as `inv(` and `sqr(`, and the expression beside it still has to be
+     * something the evaluator can parse.
+     */
+    private val KEY_INSERT = mapOf(
+        "1/x" to "inv(",
+        "x²" to "sqr(",
+        "sin⁻¹(" to "asin(",
+        "cos⁻¹(" to "acos(",
+        "tan⁻¹(" to "atan("
+    )
 
     enum class CalcMode(val label: String) {
         STANDARD("Standard"),
@@ -63,6 +77,9 @@ object OeaCalculatorApp {
         var mode = runCatching { CalcMode.valueOf(prefs.getString(KEY_MODE, "STANDARD") ?: "STANDARD") }.getOrDefault(CalcMode.STANDARD)
         var isDeg = prefs.getBoolean(KEY_DEG, true)
         var memory = prefs.getString(KEY_MEMORY, "0")?.toDoubleOrNull() ?: 0.0
+        var lastAnswer = prefs.getString(KEY_LAST, "")?.toDoubleOrNull()
+        /** The scientific keypad's second page: inverse and hyperbolic functions. */
+        var second = false
         var rebuildMode: () -> Unit = {}
 
         val indexBack = host.miniIndexBack()
@@ -99,18 +116,32 @@ object OeaCalculatorApp {
             setPadding(kit.dp(20), kit.dp(22), kit.dp(20), kit.dp(4))
             setLineSpacing(kit.dpf(2f), 1f)
             setFontFeatureSettings("tnum")
+            // A long expression wraps to two lines and then stops, instead of pushing
+            // the keypad off the screen.
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.START
         }
         val hint = kit.text("", 15f, palette.textSecondary).apply {
             gravity = Gravity.END
-            setPadding(kit.dp(20), 0, kit.dp(20), kit.dp(16))
+            setPadding(kit.dp(20), 0, kit.dp(20), kit.dp(10))
             maxLines = 2
             setFontFeatureSettings("tnum")
+        }
+        // Programmer mode's whole point is the same number in four bases; the mode used
+        // to promise HEX, BIN and OCT in its own hint and never show one of them.
+        val basesView = kit.text("", 13f, palette.textSecondary).apply {
+            gravity = Gravity.END
+            setPadding(kit.dp(20), 0, kit.dp(20), kit.dp(16))
+            setLineSpacing(kit.dpf(2f), 1f)
+            typeface = android.graphics.Typeface.MONOSPACE
+            visibility = View.GONE
         }
         val card = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
             background = kit.rounded(palette.card, 24, palette.stroke, 1)
             addView(display, LinearLayout.LayoutParams(-1, -2))
             addView(hint, LinearLayout.LayoutParams(-1, -2))
+            addView(basesView, LinearLayout.LayoutParams(-1, -2))
             isClickable = true
             setOnLongClickListener {
                 copy(host, result.ifEmpty { expression.ifEmpty { "0" } })
@@ -122,6 +153,18 @@ object OeaCalculatorApp {
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(0, kit.dp(12), 0, 0) }
         column.addView(content)
 
+        /** The current expression as a number, in whichever arithmetic this mode uses. */
+        fun evaluateNow(): Double? = when (mode) {
+            CalcMode.PROGRAMMER -> OeaCalcEngine.programmer(expression)?.toDouble()
+            else -> OeaCalcEngine.evaluate(expression, isDeg)
+        }
+
+        /** The programmer display: the same value in hex, decimal, octal and binary. */
+        fun programmerBases(): String {
+            val value = OeaCalcEngine.programmer(expression) ?: return ""
+            return OeaCalcEngine.bases(value).joinToString("\n") { "${it.label}  ${it.text}" }
+        }
+
         fun show() {
             display.text = expression.ifEmpty { "0" }
             display.textSize = when {
@@ -129,51 +172,85 @@ object OeaCalculatorApp {
                 expression.length > 12 -> 33f
                 else -> 42f
             }
-            val live = if (result.isEmpty() && expression.length >= 2 && expression.any { it in "+−×÷^%!" }) {
-                val evaluated = when (mode) {
-                    CalcMode.PROGRAMMER -> ProgrammerEvaluator.evaluate(expression)
-                    else -> Evaluator.evaluate(expression, isDeg)
-                }
-                evaluated?.let { format(it) }?.takeIf { it != expression }
+            // A preview is a promise about what `=` will do, so it is only shown once
+            // the expression can be one: while the last thing typed is an operator the
+            // calculator used to preview `5×` as `= 5`, which is not what `=` gives.
+            val typed = expression.lastOrNull()?.let { it !in "+−×÷^(" } == true
+            val live = if (result.isEmpty() && typed && expression.length >= 2 && expression.any { it in "+−×÷^%!" }) {
+                evaluateNow()?.let { format(it) }?.takeIf { it != expression }
             } else null
+            val bases = if (mode == CalcMode.PROGRAMMER) programmerBases() else ""
+            basesView.text = bases
+            basesView.visibility = if (bases.isNotEmpty()) View.VISIBLE else View.GONE
             hint.text = when {
                 result.isNotEmpty() -> "= $result"
                 live != null -> "= $live"
                 memory != 0.0 -> "M = ${format(memory)}" + if (mode == CalcMode.SCIENTIFIC) " · ${if (isDeg) "DEG" else "RAD"}" else ""
-                mode == CalcMode.SCIENTIFIC -> if (isDeg) "Degrees" else "Radians"
-                mode == CalcMode.PROGRAMMER -> "HEX (0x) · BIN (0b) · OCT (0o) · DEC"
+                mode == CalcMode.SCIENTIFIC -> (if (isDeg) "Degrees" else "Radians") + " · 2nd for inverses"
+                mode == CalcMode.PROGRAMMER -> if (bases.isEmpty()) "HEX · DEC · OCT · BIN of the current value" else ""
                 else -> ""
             }
         }
 
+        /**
+         * The tape, newest first, with the two things the app has always promised it
+         * had and never did: a search box and a way to get the numbers out. It also
+         * shows the whole tape — the sheet used to stop at thirty lines while the file
+         * kept a hundred, so seventy answers were unreachable.
+         */
         fun openTapeSheet() {
-            val lines = prefs.getString(KEY_TAPE, "").orEmpty().lineSequence().filter { it.isNotBlank() }.toList()
-            kit.sheet("Calculation history", if (lines.isEmpty()) "Recent answers appear here" else "Tap a line to reuse its answer, or copy it") { panel, dialog ->
-                if (lines.isEmpty()) {
+            val stored = prefs.getString(KEY_TAPE, "")
+            val total = OeaCalcEngine.tapeLines(stored, "", TAPE_LIMIT).size
+            kit.sheet(
+                "Calculation history",
+                if (total == 0) "Recent answers appear here" else "$total saved · search, reuse or share"
+            ) { panel, dialog ->
+                if (total == 0) {
                     kit.note(panel, "No calculations recorded yet.")
                 } else {
+                    val query = kit.field("Search history", "")
+                    panel.addView(query, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+
                     val list = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-                    val group = kit.group(list)
-                    lines.take(30).forEach { line ->
-                        val expr = line.substringBefore(" = ").trim()
-                        val ans = line.substringAfter(" = ", "").trim()
-                        kit.row(group, R.drawable.oic_history, ans.ifEmpty { line }, if (ans.isNotEmpty()) expr else null, value = "Use") {
-                            if (ans.isNotEmpty()) {
-                                expression = ans
-                                result = ""
-                                show()
-                            } else {
-                                copy(host, line)
+                    fun fill(text: String) {
+                        list.removeAllViews()
+                        val shown = OeaCalcEngine.tapeLines(stored, text, TAPE_LIMIT)
+                        if (shown.isEmpty()) {
+                            kit.note(list, "Nothing in the tape matches \"${text.trim()}\".")
+                            return
+                        }
+                        val group = kit.group(list)
+                        shown.forEach { line ->
+                            val (expr, ans) = OeaCalcEngine.tapeParts(line)
+                            kit.row(group, R.drawable.oic_history, ans.ifEmpty { line }, if (ans.isNotEmpty()) expr else null, value = if (ans.isNotEmpty()) "Use" else null) {
+                                if (ans.isNotEmpty()) {
+                                    expression = ans
+                                    result = ""
+                                    show()
+                                    dialog.dismiss()
+                                } else {
+                                    copy(host, line)
+                                }
                             }
-                            dialog.dismiss()
                         }
                     }
-                    panel.addView(kit.boundedScroll(list, 0.52f))
+                    fill("")
+                    query.addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                        override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                        override fun afterTextChanged(t: android.text.Editable?) = fill(t?.toString().orEmpty())
+                    })
+                    panel.addView(kit.boundedScroll(list, 0.46f))
                     panel.addView(
-                        kit.button("Clear history", palette.cardHigh, palette.danger, R.drawable.oic_delete) {
-                            prefs.edit().remove(KEY_TAPE).apply()
-                            dialog.dismiss()
-                        },
+                        kit.buttonRow(
+                            kit.button("Share tape", palette.cardHigh, palette.accent, R.drawable.oic_share_filled) {
+                                shareTape(host, OeaCalcEngine.tapeLines(stored, "", TAPE_LIMIT))
+                            },
+                            kit.button("Clear", palette.cardHigh, palette.danger, R.drawable.oic_delete) {
+                                prefs.edit().remove(KEY_TAPE).apply()
+                                dialog.dismiss()
+                            }
+                        ),
                         LinearLayout.LayoutParams(-1, kit.dp(48)).apply { topMargin = kit.dp(10) }
                     )
                 }
@@ -207,10 +284,7 @@ object OeaCalculatorApp {
         fun press(key: String) {
             when (key) {
                 "AC", "C" -> { expression = ""; result = "" }
-                "⌫" -> {
-                    if (expression.isNotEmpty()) expression = expression.dropLast(1)
-                    result = ""
-                }
+                "⌫" -> { expression = OeaCalcEngine.backspace(expression); result = "" }
                 "( )" -> {
                     val open = expression.count { it == '(' }
                     val close = expression.count { it == ')' }
@@ -219,33 +293,44 @@ object OeaCalculatorApp {
                     result = ""
                 }
                 "=" -> {
-                    val value = when (mode) {
-                        CalcMode.PROGRAMMER -> ProgrammerEvaluator.evaluate(expression)
-                        else -> Evaluator.evaluate(expression, isDeg)
-                    }
+                    val value = evaluateNow()
                     if (expression.isBlank()) {
                         result = ""
                     } else if (value == null) {
                         result = "Error"
                     } else {
                         val formatted = format(value)
-                        prefs.edit().putString(
-                            KEY_TAPE,
-                            (("$expression = $formatted") + "\n" + prefs.getString(KEY_TAPE, "").orEmpty())
-                                .trim().lineSequence().take(TAPE_LIMIT).joinToString("\n")
-                        ).apply()
+                        val line = OeaCalcEngine.tapeLine(expression, value)
+                        prefs.edit()
+                            .putString(KEY_TAPE, OeaCalcEngine.pushTape(prefs.getString(KEY_TAPE, ""), line, TAPE_LIMIT))
+                            .putString(KEY_LAST, value.toString())
+                            .putString(KEY_LAST_RESULT, formatted)
+                            .apply()
+                        lastAnswer = value
                         result = ""
-                        expression = formatted
+                        // Only hand the entry field a number it can continue from: the
+                        // old code wrote the display string back unconditionally, which
+                        // in a comma-decimal locale was a string the parser could not read.
+                        if (OeaCalcEngine.reusable(formatted)) expression = formatted
+                        runCatching { com.oea.launcher.widgets.OeaWidgetStudio.refreshWidgets(host, "calculator") }
                     }
                 }
                 "MC" -> { memory = 0.0; prefs.edit().putString(KEY_MEMORY, "0").apply() }
                 "MR" -> { expression += format(memory); result = "" }
-                "M+" -> { Evaluator.evaluate(expression, isDeg)?.let { memory += it; prefs.edit().putString(KEY_MEMORY, memory.toString()).apply() } }
-                "M-" -> { Evaluator.evaluate(expression, isDeg)?.let { memory -= it; prefs.edit().putString(KEY_MEMORY, memory.toString()).apply() } }
+                "M+" -> evaluateNow()?.let { memory += it; prefs.edit().putString(KEY_MEMORY, memory.toString()).apply() }
+                "M-" -> evaluateNow()?.let { memory -= it; prefs.edit().putString(KEY_MEMORY, memory.toString()).apply() }
                 "DEG/RAD" -> { isDeg = !isDeg; prefs.edit().putBoolean(KEY_DEG, isDeg).apply() }
+                "2nd" -> { second = !second; rebuildMode() }
+                "Ans" -> {
+                    val answer = lastAnswer
+                    if (answer != null && expression.length < 200) {
+                        result = ""
+                        expression += format(answer)
+                    }
+                }
                 else -> {
                     result = ""
-                    if (expression.length < 200) expression += key
+                    if (expression.length < 200) expression += (KEY_INSERT[key] ?: key)
                 }
             }
             show()
@@ -272,7 +357,7 @@ object OeaCalculatorApp {
             when (mode) {
                 CalcMode.STANDARD -> {
                     val memRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, kit.dp(4)) }
-                    listOf("MC", "MR", "M+", "M-").forEachIndexed { idx, key ->
+                    listOf("MC", "MR", "M+", "M-", "Ans").forEachIndexed { idx, key ->
                         memRow.addView(
                             keyButton(host, kit, key, small = true) { press(key) },
                             LinearLayout.LayoutParams(0, kit.dp(42), 1f).apply { if (idx > 0) leftMargin = kit.dp(8) }
@@ -298,13 +383,20 @@ object OeaCalculatorApp {
                     }
                 }
                 CalcMode.SCIENTIFIC -> {
+                    // The second page is what makes this a scientific calculator: the
+                    // parser had inverse and hyperbolic functions all along, but no key
+                    // could reach them, and "2nd" is how every real one offers them.
+                    val trig = if (second) listOf("sin⁻¹(", "cos⁻¹(", "tan⁻¹(") else listOf("sin(", "cos(", "tan(")
+                    val expo = if (second) listOf("10^(", "e^(") else listOf("log(", "ln(")
+                    val root = if (second) "x²" else "√("
                     val rows = listOf(
-                        listOf("DEG/RAD", "sin(", "cos(", "tan(", "log(", "ln("),
-                        listOf("√(", "π", "e", "^", "!", "AC"),
-                        listOf("(", ")", "%", "÷", "⌫", "="),
-                        listOf("7", "8", "9", "×", "MC", "MR"),
-                        listOf("4", "5", "6", "−", "M+", "M-"),
-                        listOf("1", "2", "3", "+", "0", ".")
+                        listOf("2nd", "DEG/RAD", trig[0], trig[1], trig[2], "AC"),
+                        listOf(expo[0], expo[1], root, "π", "e", "^"),
+                        listOf("sinh(", "cosh(", "tanh(", "1/x", "Ans", "!"),
+                        listOf("(", ")", "%", "÷", "×", "⌫"),
+                        listOf("7", "8", "9", "−", "MC", "MR"),
+                        listOf("4", "5", "6", "+", "M+", "M-"),
+                        listOf("1", "2", "3", "0", ".", "=")
                     )
                     rows.forEach { keys ->
                         val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(6), 0, 0) }
@@ -318,13 +410,15 @@ object OeaCalculatorApp {
                     }
                 }
                 CalcMode.PROGRAMMER -> {
+                    // Integer arithmetic: no decimal point (a Long has none), and `%` is
+                    // modulo here because that is what a programmer reaches for.
                     val rows = listOf(
                         listOf("0x", "0b", "0o", "(", ")", "AC"),
                         listOf("A", "B", "C", "D", "E", "F"),
                         listOf("7", "8", "9", "AND", "OR", "⌫"),
                         listOf("4", "5", "6", "XOR", "NOT", "÷"),
                         listOf("1", "2", "3", "<<", ">>", "×"),
-                        listOf("0", ".", "+", "−", "%", "=")
+                        listOf("0", "Ans", "+", "−", "%", "=")
                     )
                     rows.forEach { keys ->
                         val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(6), 0, 0) }
@@ -349,7 +443,9 @@ object OeaCalculatorApp {
                     var fromIndex = 1
                     var toIndex = 0
 
-                    val amount = kit.field("Enter value", "1", numeric = true)
+                    // `numeric = true` alone gives a digits-only keyboard, so the converter
+                    // could not accept 1.5 — the single most common thing to convert.
+                    val amount = kit.field("Enter value", "1", numeric = true, decimal = true)
                     val out = TextView(host).apply {
                         textSize = 34f
                         typeface = OeaType.light
@@ -379,7 +475,13 @@ object OeaCalculatorApp {
                     fun refreshConv() {
                         val value = convert()
                         val names = names(fam)
-                        out.text = if (value == null) "—" else "${OeaUnits.show(value)} ${names[toIndex]}"
+                        val text = if (value == null) "—" else "${OeaUnits.show(value)} ${names[toIndex]}"
+                        // Long conversions (a light year in nanometres) stay on two lines
+                        // instead of pushing the pickers off the screen.
+                        out.text = text
+                        out.textSize = if (text.length > 18) 22f else 34f
+                        out.maxLines = 2
+                        out.ellipsize = android.text.TextUtils.TruncateAt.END
                     }
 
                     fun buildConv() {
@@ -392,8 +494,10 @@ object OeaCalculatorApp {
                             chips.addView(
                                 kit.chip(f.name, f.name == fam.name) {
                                     fam = f
+                                    // Currency opens on USD → EUR: a pair someone can read,
+                                    // not "1 USD = 1 USD".
                                     fromIndex = if (OeaUnits.isCurrency(f)) 0 else 1
-                                    toIndex = 0
+                                    toIndex = if (OeaUnits.isCurrency(f)) 1 else 0
                                     buildConv()
                                 },
                                 LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(6) }
@@ -464,7 +568,7 @@ object OeaCalculatorApp {
                     val funcField = kit.field("y = f(x), e.g. sin(x) or x^2", "sin(x)")
                     content.addView(funcField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
                     val presets = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, kit.dp(8)) }
-                    listOf("sin(x)", "cos(x)", "x^2", "x^3-2×x", "√(x)").forEach { fn ->
+                    listOf("sin(x)", "cos(x)", "tan(x)", "x^2", "x^3-2×x", "√(x)", "1/x").forEach { fn ->
                         presets.addView(
                             kit.chip(fn, false) {
                                 funcField.setText(fn)
@@ -474,10 +578,40 @@ object OeaCalculatorApp {
                         )
                     }
                     content.addView(kit.hscroll(presets))
+                    val graphState = kit.text("", 12.5f, palette.textTertiary).apply {
+                        setPadding(kit.dp(4), 0, kit.dp(4), kit.dp(8))
+                    }
+                    fun plot(text: String) {
+                        val func = text.trim()
+                        if (func.isEmpty()) {
+                            graphState.text = "Type a function of x."
+                            return
+                        }
+                        graphView.setFunction(func)
+                        // Say so when the expression cannot be read, instead of quietly
+                        // drawing yesterday's curve.
+                        graphState.text = if (OeaCalcEngine.sample(func, 1.0) == null) {
+                            "This is not something the calculator can plot."
+                        } else {
+                            "x is in radians · pinch to zoom, drag to pan"
+                        }
+                    }
+                    content.addView(graphState)
                     content.addView(kit.primaryButton("Plot function", R.drawable.oic_show_chart) {
-                        val func = funcField.text.toString().trim()
-                        if (func.isNotBlank()) graphView.setFunction(func)
+                        plot(funcField.text.toString())
                     }, LinearLayout.LayoutParams(-1, kit.dp(48)))
+                    content.addView(
+                        kit.button("Reset the view", palette.cardHigh, palette.accent, R.drawable.oic_refresh) {
+                            graphView.reset()
+                        },
+                        LinearLayout.LayoutParams(-1, kit.dp(44)).apply { topMargin = kit.dp(8) }
+                    )
+                    funcField.addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                        override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) = Unit
+                        override fun afterTextChanged(t: android.text.Editable?) = plot(t?.toString().orEmpty())
+                    })
+                    plot(funcField.text.toString())
                 }
             }
             show()
@@ -486,52 +620,152 @@ object OeaCalculatorApp {
         return shell.root
     }
 
-    private class GraphView(ctx: Context, val palette: OeaPalette) : View(ctx) {
+    /**
+     * A plot of `y = f(x)`.
+     *
+     * Three things were wrong in the first version and are why this was rewritten:
+     *
+     * 1. the curve was evaluated in degrees, so the default `sin(x)` — a dozen degrees
+     *    across the whole screen — was a nearly flat line, not a wave;
+     * 2. the grid started at the view's corner while the curve was drawn from the
+     *    centre, so a gridline was never where it claimed to be, and its spacing was
+     *    decorative rather than a unit;
+     * 3. the header advertised pinch zoom on a view that had no touch handler at all.
+     */
+    private class GraphView(ctx: Context, private val palette: OeaPalette) : View(ctx) {
         private var function: String = "sin(x)"
-        private val paintLine = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent; strokeWidth = 4f; style = android.graphics.Paint.Style.STROKE }
-        private val paintGrid = android.graphics.Paint().apply { color = palette.stroke; strokeWidth = 1f }
-        private val paintAxis = android.graphics.Paint().apply { color = palette.textSecondary; strokeWidth = 2f }
+        /** Pixels per unit. */
         private var scale = 40f
+        /** Where the origin sits, as an offset from the middle of the view, in pixels. */
         private var offsetX = 0f
         private var offsetY = 0f
 
-        fun setFunction(f: String) { function = f; invalidate() }
+        private val paintLine = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = palette.accent
+            strokeWidth = 4f
+            style = android.graphics.Paint.Style.STROKE
+        }
+        private val paintGrid = android.graphics.Paint().apply { color = palette.stroke; strokeWidth = 1f }
+        private val paintAxis = android.graphics.Paint().apply { color = palette.textSecondary; strokeWidth = 2f }
+        private val paintLabel = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = palette.textTertiary
+            textSize = 22f
+        }
+
+        fun setFunction(f: String) {
+            function = f.trim()
+            invalidate()
+        }
+
+        fun reset() {
+            scale = 40f
+            offsetX = 0f
+            offsetY = 0f
+            invalidate()
+        }
+
+        private val scaler = android.view.ScaleGestureDetector(
+            ctx,
+            object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
+                    val next = (scale * detector.scaleFactor).coerceIn(4f, 600f)
+                    if (next == scale) return false
+                    // Zoom about the fingers: the point under them must not move.
+                    val focalX = detector.focusX - (width / 2f + offsetX)
+                    val focalY = detector.focusY - (height / 2f + offsetY)
+                    val ratio = next / scale
+                    offsetX -= focalX * (ratio - 1f)
+                    offsetY -= focalY * (ratio - 1f)
+                    scale = next
+                    invalidate()
+                    return true
+                }
+            }
+        )
+
+        private var lastX = 0f
+        private var lastY = 0f
+        private var dragging = false
+
+        override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+            scaler.onTouchEvent(event)
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    dragging = true
+                    lastX = event.x
+                    lastY = event.y
+                    // The graph scrolls and zooms itself; the screen must not steal the drag.
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    if (dragging && !scaler.isInProgress && event.pointerCount == 1) {
+                        offsetX += event.x - lastX
+                        offsetY += event.y - lastY
+                        lastX = event.x
+                        lastY = event.y
+                        invalidate()
+                    }
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    dragging = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return true
+        }
 
         override fun onDraw(canvas: android.graphics.Canvas) {
-            val w = width.toFloat(); val h = height.toFloat()
-            // Grid
-            var x = offsetX % scale
-            while (x < w) { canvas.drawLine(x, 0f, x, h, paintGrid); x += scale }
-            var y = offsetY % scale
-            while (y < h) { canvas.drawLine(0f, y, w, y, paintGrid); y += scale }
-            // Axes
-            canvas.drawLine(0f, h/2f + offsetY, w, h/2f + offsetY, paintAxis)
-            canvas.drawLine(w/2f + offsetX, 0f, w/2f + offsetX, h, paintAxis)
+            val w = width.toFloat()
+            val h = height.toFloat()
+            val ox = w / 2f + offsetX
+            val oy = h / 2f + offsetY
 
-            // Plot function
+            // Grid, anchored on the origin so a square is a unit and the curve crosses
+            // the lines where the numbers say it does.
+            var gx = ox - floor(ox / scale) * scale
+            while (gx <= w) {
+                canvas.drawLine(gx, 0f, gx, h, paintGrid)
+                labelX(canvas, gx, ox, oy, h)
+                gx += scale
+            }
+            var gy = oy - floor(oy / scale) * scale
+            while (gy <= h) {
+                canvas.drawLine(0f, gy, w, gy, paintGrid)
+                gy += scale
+            }
+            if (oy in 0f..h) canvas.drawLine(0f, oy, w, oy, paintAxis)
+            if (ox in 0f..w) canvas.drawLine(ox, 0f, ox, h, paintAxis)
+
             val path = android.graphics.Path()
-            var first = true
-            var lastYValid = false
-            for (px in 0 until width step 2) {
-                val xVal = ((px - w/2f - offsetX) / scale).toDouble()
-                val yVal = evaluateFunction(function, xVal)
-                if (yVal == null || yVal.isNaN() || yVal.isInfinite() || abs(yVal) > 1000) {
-                    first = true
-                    lastYValid = false
-                    continue
+            var pen = false
+            var px = 0
+            while (px <= width) {
+                val x = (px - ox) / scale
+                val y = OeaCalcEngine.sample(function, x.toDouble())
+                val py = if (y == null || !y.isFinite() || abs(y) > 1e6) null else (oy - y.toFloat() * scale)
+                // A break in the curve (a pole, a gap in the domain) starts a new path
+                // instead of drawing a straight line across the discontinuity.
+                if (py == null || py < -h * 3 || py > h * 4) {
+                    pen = false
+                } else if (pen) {
+                    path.lineTo(px.toFloat(), py)
+                } else {
+                    path.moveTo(px.toFloat(), py)
+                    pen = true
                 }
-                val py = h/2f + offsetY - yVal.toFloat() * scale
-                if (first) { path.moveTo(px.toFloat(), py); first = false } else path.lineTo(px.toFloat(), py)
-                lastYValid = true
+                px += 2
             }
             canvas.drawPath(path, paintLine)
         }
 
-        private fun evaluateFunction(func: String, x: Double): Double? {
-            return try {
-                val expr = func.replace("x", x.toString())
-                Evaluator.evaluate(expr, true)
-            } catch (_: Throwable) { null }
+        /** A tick label on the x axis: the world value of that gridline. */
+        private fun labelX(canvas: android.graphics.Canvas, gx: Float, ox: Float, oy: Float, h: Float) {
+            if (scale < 26f) return
+            val value = (gx - ox) / scale
+            if (abs(value) < 0.5f) return
+            val text = OeaCalcEngine.format(value.roundToInt().toDouble())
+            val baseline = (oy + 26f).coerceIn(26f, h - 6f)
+            canvas.drawText(text, gx - paintLabel.measureText(text) / 2f, baseline, paintLabel)
         }
     }
 
@@ -573,7 +807,7 @@ object OeaCalculatorApp {
                         if (code == base) {
                             android.widget.Toast.makeText(host, "$code is the base", android.widget.Toast.LENGTH_SHORT).show()
                         } else {
-                            kit.prompt("One $base in $code", "Set the rate you want OEA to use", "$code per $base", if (code == base) "1" else OeaUnits.show(value), numeric = true) { input ->
+                            kit.prompt("One $base in $code", "Set the rate you want OEA to use", "$code per $base", if (code == base) "1" else OeaUnits.show(value), numeric = true, decimal = true) { input ->
                                 val parsed = input.replace(",", ".").toDoubleOrNull()
                                 if (parsed == null || parsed <= 0.0) "That is not a rate" else {
                                     OeaUnits.setRate(host, code, parsed)
@@ -641,6 +875,27 @@ object OeaCalculatorApp {
         return text
     }
 
+    /**
+     * Hands the tape to any app that takes text. The header has promised an exportable
+     * tape for as long as it has promised a searchable one; a share sheet is the export
+     * that needs no storage permission and no new file to manage.
+     */
+    private fun shareTape(host: Activity, lines: List<String>) {
+        if (lines.isEmpty()) {
+            android.widget.Toast.makeText(host, "Nothing to share yet", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        runCatching {
+            val body = "OEA calculator — ${lines.size} calculation${if (lines.size == 1) "" else "s"}\n\n" + lines.joinToString("\n")
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_TEXT, body)
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "OEA calculator history")
+            }
+            host.startActivity(android.content.Intent.createChooser(send, "Share history"))
+        }
+    }
+
     private fun copy(host: Activity, value: String) {
         runCatching {
             val clipboard = host.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -651,169 +906,6 @@ object OeaCalculatorApp {
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    private fun format(value: Double): String {
-        if (value.isNaN() || value.isInfinite()) return "not a number"
-        val rounded = if (abs(value) < 1e-12) 0.0 else value
-        val asLong = rounded.roundToLong()
-        if (abs(rounded - asLong) < 1e-9 && abs(rounded) < 1e15) return asLong.toString()
-        val text = "%.8f".format(rounded).trimEnd('0').trimEnd('.')
-        return text.ifEmpty { "0" }
-    }
-
-    internal object Evaluator {
-        fun evaluate(raw: String, isDeg: Boolean = true): Double? {
-            var text = raw
-                .replace('×', '*')
-                .replace('÷', '/')
-                .replace('−', '-')
-                .replace('—', '-')
-                .replace(" ", "")
-                .replace("π", Math.PI.toString())
-                .replace("e", Math.E.toString())
-                .trimEnd('+', '-', '*', '/', '^')
-            if (text.isBlank()) return null
-            text = text.replace("√", "sqrt")
-            return try {
-                val parser = Parser(text, isDeg)
-                val value = parser.parse()
-                if (parser.atEnd()) value else null
-            } catch (_: Throwable) { null }
-        }
-
-        private class Parser(private val text: String, private val isDeg: Boolean) {
-            private var i = 0
-            fun atEnd(): Boolean = i >= text.length
-            fun parse(): Double? = expression()
-            fun expression(): Double? {
-                var value = term() ?: return null
-                while (i < text.length) {
-                    when (text[i]) {
-                        '+' -> { i++; value += term() ?: return null }
-                        '-' -> { i++; value -= term() ?: return null }
-                        else -> return value
-                    }
-                }
-                return value
-            }
-            private fun term(): Double? {
-                var value = power() ?: return null
-                while (i < text.length) {
-                    when (text[i]) {
-                        '*' -> { i++; value *= power() ?: return null }
-                        '/' -> { i++; val d = power() ?: return null; if (d == 0.0) return null; value /= d }
-                        else -> return value
-                    }
-                }
-                return value
-            }
-            private fun power(): Double? {
-                var base = factor() ?: return null
-                while (i < text.length && text[i] == '^') {
-                    i++
-                    val exp = factor() ?: return null
-                    base = base.pow(exp)
-                }
-                return base
-            }
-            private fun factor(): Double? {
-                if (i >= text.length) return null
-                var sign = 1.0
-                while (i < text.length && (text[i] == '-' || text[i] == '+')) {
-                    if (text[i] == '-') sign = -sign
-                    i++
-                }
-                var base = atom() ?: return null
-                base *= sign
-                while (i < text.length && (text[i] == '%' || text[i] == '!')) {
-                    when (text[i]) {
-                        '%' -> { base /= 100.0; i++ }
-                        '!' -> { base = factorial(base) ?: return null; i++ }
-                    }
-                }
-                return base
-            }
-            private fun atom(): Double? {
-                if (i >= text.length) return null
-                val funcs = listOf("sin", "cos", "tan", "log", "ln", "sqrt", "sinh", "cosh", "tanh", "asin", "acos", "atan")
-                for (f in funcs) {
-                    if (text.startsWith(f, i)) {
-                        i += f.length
-                        if (i < text.length && text[i] == '(') {
-                            i++
-                            val arg = expression() ?: return null
-                            if (i < text.length && text[i] == ')') i++ else return null
-                            return when (f) {
-                                "sin" -> sin(if (isDeg) Math.toRadians(arg) else arg)
-                                "cos" -> cos(if (isDeg) Math.toRadians(arg) else arg)
-                                "tan" -> tan(if (isDeg) Math.toRadians(arg) else arg)
-                                "asin" -> { val v = asin(arg); if (isDeg) Math.toDegrees(v) else v }
-                                "acos" -> { val v = acos(arg); if (isDeg) Math.toDegrees(v) else v }
-                                "atan" -> { val v = atan(arg); if (isDeg) Math.toDegrees(v) else v }
-                                "sinh" -> sinh(arg)
-                                "cosh" -> cosh(arg)
-                                "tanh" -> tanh(arg)
-                                "log" -> if (arg <= 0) null else log10(arg)
-                                "ln" -> if (arg <= 0) null else ln(arg)
-                                "sqrt" -> if (arg < 0) null else sqrt(arg)
-                                else -> null
-                            }
-                        }
-                    }
-                }
-                if (text[i] == '(') {
-                    i++
-                    val v = expression() ?: return null
-                    if (i < text.length && text[i] == ')') i++ else return null
-                    return v
-                }
-                val start = i
-                while (i < text.length && (text[i].isDigit() || text[i] == '.')) i++
-                if (i == start) return null
-                return text.substring(start, i).toDoubleOrNull()
-            }
-            private fun factorial(d: Double): Double? {
-                if (d < 0 || d != floor(d) || d > 20) return null
-                var res = 1.0
-                for (k in 2..d.toInt()) res *= k
-                return res
-            }
-        }
-    }
-
-    internal object ProgrammerEvaluator {
-        fun evaluate(raw: String): Double? {
-            var text = raw.replace(" ", "").uppercase()
-            if (text.isBlank()) return null
-            return try {
-                // Handle binary, hex, octal prefixes
-                when {
-                    text.startsWith("0B") -> text.substring(2).toLong(2).toDouble()
-                    text.startsWith("0X") -> text.substring(2).toLong(16).toDouble()
-                    text.startsWith("0O") -> text.substring(2).toLong(8).toDouble()
-                    text.contains("AND") -> {
-                        val parts = text.split("AND")
-                        (parts[0].toLong().and(parts[1].toLong())).toDouble()
-                    }
-                    text.contains("OR") -> {
-                        val parts = text.split("OR")
-                        (parts[0].toLong().or(parts[1].toLong())).toDouble()
-                    }
-                    text.contains("XOR") -> {
-                        val parts = text.split("XOR")
-                        (parts[0].toLong().xor(parts[1].toLong())).toDouble()
-                    }
-                    text.startsWith("NOT") -> text.substring(3).toLong().inv().toDouble()
-                    text.contains("<<") -> {
-                        val parts = text.split("<<")
-                        (parts[0].toLong() shl parts[1].toInt()).toDouble()
-                    }
-                    text.contains(">>") -> {
-                        val parts = text.split(">>")
-                        (parts[0].toLong() shr parts[1].toInt()).toDouble()
-                    }
-                    else -> Evaluator.evaluate(text)?.toDouble()
-                }
-            } catch (_: Throwable) { null }
-        }
-    }
+    /** One number formatter for the whole calculator. */
+    private fun format(value: Double): String = OeaCalcEngine.format(value)
 }
