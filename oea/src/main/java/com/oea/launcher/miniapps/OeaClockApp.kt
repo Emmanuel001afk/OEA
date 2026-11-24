@@ -51,6 +51,8 @@ object OeaClockApp {
     private const val KEY_24H = "24h"
     private const val KEY_BEDTIME = "bedtime"
     private const val SEP_ROW = "\u001E"
+    /** Five repaints a second is enough for a countdown that shows whole seconds. */
+    private const val TIMER_TICK_MS = 200L
     private const val SEP_FIELD = "\u001F"
 
     data class Alarm(
@@ -231,6 +233,73 @@ object OeaClockApp {
             swHandler.removeCallbacks(swTicker)
             swHandler.post(swTicker)
         }
+
+        /**
+         * The countdown ticker, owned by the screen rather than by the button that
+         * started it.
+         *
+         * It used to be created inside the Start/Resume click handler, so a second
+         * tap before the button relabelled itself started a second chain: two
+         * tickers, double work, and two "Timer finished" notifications.
+         */
+        val timerTicker = object : Runnable {
+            override fun run() {
+                if (!timerRunning || host.isDestroyed) return
+                val rem = (timerEndAt - System.currentTimeMillis()).coerceAtLeast(0L)
+                timerRemainingMs = rem
+                val label = formatTimerMs(rem)
+                // 00:42 is the same string five times a second; only a new second
+                // is news, so the label is only written when it changes.
+                if (timerText?.text?.toString() != label) timerText?.text = label
+                if (rem > 0L) {
+                    timerHandler.postDelayed(this, TIMER_TICK_MS)
+                } else {
+                    timerRunning = false
+                    timerRemainingMs = timerDurationMs
+                    host.runOnUiThread {
+                        android.widget.Toast.makeText(host, "Timer finished", android.widget.Toast.LENGTH_LONG).show()
+                        try {
+                            val nm = host.getSystemService(android.app.NotificationManager::class.java)
+                            if (Build.VERSION.SDK_INT >= 26) nm?.createNotificationChannel(android.app.NotificationChannel("oea_clock", "Clock", android.app.NotificationManager.IMPORTANCE_HIGH))
+                            val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(host, "oea_clock") else @Suppress("DEPRECATION") android.app.Notification.Builder(host)
+                            val notif = builder.setSmallIcon(R.drawable.ic_oea_launcher_monochrome).setContentTitle("Timer finished").setContentText("Timer • ${formatTimerMs(timerDurationMs)}").setAutoCancel(true).build()
+                            nm?.notify(1001, notif)
+                        } catch (_: Throwable) {}
+                        refresh()
+                    }
+                }
+            }
+        }
+
+        /**
+         * Nobody is looking at the screen: stop repainting it, but keep the promise.
+         * The countdown keeps exactly one wakeup, at the moment it finishes.
+         */
+        fun onHostPaused() {
+            swHandler.removeCallbacks(swTicker)
+            if (!timerRunning) return
+            timerHandler.removeCallbacks(timerTicker)
+            val remaining = (timerEndAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            timerHandler.postDelayed(timerTicker, remaining)
+        }
+
+        fun onHostResumed() {
+            if (swRunning) {
+                swText?.text = formatMs(swElapsed + (System.currentTimeMillis() - swStartAt))
+                swStartTicking()
+            }
+            if (timerRunning) {
+                timerHandler.removeCallbacks(timerTicker)
+                timerHandler.post(timerTicker)
+            }
+        }
+
+        // The host tells the screen when it is out of sight. A stopwatch that keeps
+        // repainting an invisible TextView twenty times a second in the background is
+        // a battery bug, and a countdown that needs five wakes a second to keep a
+        // promise it could keep with one is the same bug with better manners.
+        host.miniPauseHook = { onHostPaused() }
+        host.miniResumeHook = { onHostResumed() }
 
         with(kit) {
             shell.bar.addAction(R.drawable.oic_more_vert, "Clock options") {
@@ -445,36 +514,14 @@ object OeaClockApp {
                     ) {
                         if (timerRunning) {
                             timerRunning = false
+                            timerHandler.removeCallbacks(timerTicker)
                             timerRemainingMs = (timerEndAt - System.currentTimeMillis()).coerceAtLeast(0L)
                         } else {
                             if (timerRemainingMs <= 0L) timerRemainingMs = timerDurationMs.coerceAtLeast(1000L)
                             timerRunning = true
                             timerEndAt = System.currentTimeMillis() + timerRemainingMs
-                            timerHandler.post(object : Runnable {
-                                override fun run() {
-                                    if (!timerRunning || host.isDestroyed) return
-                                    val rem = (timerEndAt - System.currentTimeMillis()).coerceAtLeast(0L)
-                                    timerRemainingMs = rem
-                                    timerText?.text = formatTimerMs(rem)
-                                    if (rem <= 0L) {
-                                        timerRunning = false
-                                        timerRemainingMs = timerDurationMs
-                                        host.runOnUiThread {
-                                            android.widget.Toast.makeText(host, "Timer finished", android.widget.Toast.LENGTH_LONG).show()
-                                            try {
-                                                val nm = host.getSystemService(android.app.NotificationManager::class.java)
-                                                if (Build.VERSION.SDK_INT >= 26) nm?.createNotificationChannel(android.app.NotificationChannel("oea_clock", "Clock", android.app.NotificationManager.IMPORTANCE_HIGH))
-                                                val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(host, "oea_clock") else @Suppress("DEPRECATION") android.app.Notification.Builder(host)
-                                                val notif = builder.setSmallIcon(R.drawable.ic_oea_launcher_monochrome).setContentTitle("Timer finished").setContentText("Timer • ${formatTimerMs(timerDurationMs)}").setAutoCancel(true).build()
-                                                nm?.notify(1001, notif)
-                                            } catch (_: Throwable) {}
-                                            refresh()
-                                        }
-                                    } else {
-                                        timerHandler.postDelayed(this, 200L)
-                                    }
-                                }
-                            })
+                            timerHandler.removeCallbacks(timerTicker)
+                            timerHandler.post(timerTicker)
                         }
                         refresh()
                     }, LinearLayout.LayoutParams(0, kit.dp(48), 1.3f).apply { rightMargin = kit.dp(8) })
@@ -823,14 +870,7 @@ object OeaClockApp {
         }.joinToString(" ").ifBlank { "1m" }
     }
 
-    private fun formatTimerMs(ms: Long): String {
-        val totalSec = (ms.coerceAtLeast(0L) + 999L) / 1000L
-        val h = totalSec / 3600L
-        val m = (totalSec % 3600L) / 60L
-        val s = totalSec % 60L
-        return if (h > 0L) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
-        else String.format(Locale.US, "%02d:%02d", m, s)
-    }
+    private fun formatTimerMs(ms: Long): String = OeaClockFormat.countdown(ms)
 
     private fun loadSavedTimers(ctx: Context): List<Pair<String, Long>> {
         val raw = prefs(ctx).getString(KEY_TIMERS, "").orEmpty()
@@ -849,15 +889,7 @@ object OeaClockApp {
         prefs(ctx).edit().putString(KEY_TIMERS, encoded).apply()
     }
 
-    private fun formatMs(ms: Long): String {
-        val totalSec = ms / 1000
-        val h = totalSec / 3600
-        val m = (totalSec % 3600) / 60
-        val s = totalSec % 60
-        val msPart = (ms % 1000) / 10
-        return if (h > 0) String.format(Locale.US, "%d:%02d:%02d.%02d", h, m, s, msPart)
-        else String.format(Locale.US, "%02d:%02d.%02d", m, s, msPart)
-    }
+    private fun formatMs(ms: Long): String = OeaClockFormat.stopwatch(ms)
 
     private fun editAlarm(host: Activity, kit: OeaAppKit, existing: Alarm?, is24h: Boolean, onDone: () -> Unit) {
         val isNew = existing == null
