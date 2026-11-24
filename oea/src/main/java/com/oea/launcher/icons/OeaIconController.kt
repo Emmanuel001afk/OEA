@@ -144,7 +144,7 @@ class OeaIconController(private val context: Context) {
         // of the session: request() was its only chance, and it had already returned.
         // One delayed retry covers that, off the main thread; if it fails too, the
         // tiles are released and draw their own letter plate instead of a hole.
-        val attempt: (Int) -> Unit = { tries ->
+        fun attempt(tries: Int) {
             runCatching {
                 resolveExecutor.execute {
                     // load() puts the bitmap in the cache before the waiters are released,
