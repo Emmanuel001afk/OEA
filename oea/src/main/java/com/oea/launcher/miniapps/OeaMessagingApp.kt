@@ -857,6 +857,36 @@ object OeaMessagingApp {
             .onFailure { runCatching { ctx.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values(false)) } }
     }
 
+    /**
+     * Writes the network's verdict onto the row OEA already filed as sent.
+     *
+     * Both reports were being listened to and thrown away: `SMS_SENT` with a
+     * failure only showed a toast, and `SMS_DELIVERED` only refreshed the list, so
+     * a message the network refused kept the thread looking sent and a confirmed
+     * delivery never reached the details sheet. The row is the one matching this
+     * conversation and this exact text, newest first — the same row [recordSentIfDefault]
+     * wrote a moment earlier.
+     */
+    internal fun markSendResult(ctx: Context, address: String, body: String, status: Int): Boolean {
+        if (address.isBlank() || body.isBlank()) return false
+        if (!isDefaultSmsApp(ctx)) return false
+        return runCatching {
+            var rowId = -1L
+            ctx.contentResolver.query(
+                Telephony.Sms.Sent.CONTENT_URI,
+                arrayOf(Telephony.Sms._ID),
+                "${Telephony.Sms.ADDRESS} = ? AND ${Telephony.Sms.BODY} = ?",
+                arrayOf(address, body),
+                "${Telephony.Sms.DATE} DESC"
+            )?.use { c -> if (c.moveToFirst()) rowId = c.getLong(0) }
+            if (rowId <= 0L) return@runCatching false
+            val values = ContentValues().apply { put(Telephony.Sms.STATUS, status) }
+            ctx.contentResolver.update(
+                Telephony.Sms.CONTENT_URI, values, "${Telephony.Sms._ID} = ?", arrayOf(rowId.toString())
+            ) > 0
+        }.getOrDefault(false)
+    }
+
     /** The manager bound to one SIM, or the system default when [subscriptionId] is unknown. */
     internal fun smsManagerFor(ctx: Context, subscriptionId: Int): SmsManager {
         if (subscriptionId >= 0) {
@@ -902,8 +932,8 @@ object OeaMessagingApp {
                 if (parts == null || parts.size <= 1) {
                     manager.sendTextMessage(
                         to, null, body,
-                        pendingIntent(ctx, sentAction, 101),
-                        pendingIntent(ctx, deliveredAction, 102)
+                        pendingIntent(ctx, sentAction, 101, to, body),
+                        pendingIntent(ctx, deliveredAction, 102, to, body)
                     )
                 } else {
                     val sent = ArrayList<android.app.PendingIntent>(parts.size)
@@ -911,8 +941,8 @@ object OeaMessagingApp {
                     repeat(parts.size) {
                         // pendingIntent() yields null when the caller did not ask
                         // for a report, and it does so for every part or none.
-                        pendingIntent(ctx, sentAction, 200 + it)?.let { sent.add(it) }
-                        pendingIntent(ctx, deliveredAction, 300 + it)?.let { delivered.add(it) }
+                        pendingIntent(ctx, sentAction, 200 + it, to, body)?.let { sent.add(it) }
+                        pendingIntent(ctx, deliveredAction, 300 + it, to, body)?.let { delivered.add(it) }
                     }
                     manager.sendMultipartTextMessage(to, null, parts, sent, delivered)
                 }
@@ -927,9 +957,19 @@ object OeaMessagingApp {
         }
     }
 
-    private fun pendingIntent(ctx: Context, action: String?, code: Int): android.app.PendingIntent? {
+    private fun pendingIntent(
+        ctx: Context,
+        action: String?,
+        code: Int,
+        address: String? = null,
+        body: String? = null
+    ): android.app.PendingIntent? {
         if (action.isNullOrBlank()) return null
         val intent = Intent(action).setPackage(ctx.packageName)
+        // Carry the conversation and the text, so the report can be matched to the
+        // row it belongs to. Without this the reports were heard and dropped.
+        if (!address.isNullOrBlank()) intent.putExtra(OeaMessagingFacts.EXTRA_ADDRESS, address)
+        if (body != null) intent.putExtra(OeaMessagingFacts.EXTRA_BODY, body)
         val flags = if (Build.VERSION.SDK_INT >= 23) {
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         } else android.app.PendingIntent.FLAG_UPDATE_CURRENT
@@ -2528,11 +2568,30 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
          * of band, so without this a message the carrier refused would sit in the
          * thread looking exactly like one that arrived.
          */
+        /**
+         * Records a send or delivery report on the row it belongs to, then refreshes.
+         *
+         * The report is matched by conversation and by text. A report meant for a
+         * different conversation (two threads open at once share one pending intent
+         * per part) is ignored rather than written to the wrong row.
+         */
+        private fun recordReport(intent: Intent?, status: Int) {
+            val reportedAddress = intent?.getStringExtra(OeaMessagingFacts.EXTRA_ADDRESS).orEmpty()
+            if (reportedAddress.isNotEmpty() && !OeaSmsMatcher.sameAddress(reportedAddress, address)) return
+            val reportedBody = intent?.getStringExtra(OeaMessagingFacts.EXTRA_BODY).orEmpty()
+            OeaMessagingApp.chatIo.execute {
+                OeaMessagingApp.markSendResult(host, address, reportedBody, status)
+                host.runOnUiThread { scheduleRefresh() }
+            }
+        }
+
         private val sentReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: Intent?) {
                 if (resultCode == Activity.RESULT_OK) {
+                    // Handed to the network — not delivered yet; that is the other report.
                     scheduleRefresh()
                 } else {
+                    recordReport(intent, OeaMessagingFacts.STATUS_FAILED)
                     host.runOnUiThread {
                         if (!dismissed) say("Message not sent — tap the failed bubble to retry", OeaKit.Tone.WARNING)
                     }
@@ -2540,7 +2599,10 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
             }
         }
         private val deliveredReceiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(context: android.content.Context?, intent: Intent?) = scheduleRefresh()
+            override fun onReceive(context: android.content.Context?, intent: Intent?) {
+                if (resultCode == Activity.RESULT_OK) recordReport(intent, OeaMessagingFacts.STATUS_COMPLETE)
+                else scheduleRefresh()
+            }
         }
 
         private val bubbleMaxWidth: Int
@@ -2896,6 +2958,9 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
         private fun setReplyTo(message: OeaMessagingApp.SmsMessage?) {
             replyTo = message
             quoteBar.removeAllViews()
+            // The quote is part of the message: the counter must be re-measured the
+            // moment it is set or cleared, not only when the field changes.
+            if (::editor.isInitialized && ::counter.isInitialized) paintComposerState(editor.text.toString())
             if (message == null) {
                 quoteBar.visibility = View.GONE
                 return
@@ -2986,25 +3051,28 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
             }
         }
 
-        private fun paintComposerState(body: String) {
-            val ready = body.isNotBlank()
+        /**
+         * The counter beside Send, and the weight of the Send button.
+         *
+         * [typed] is what is in the field; the body measured is what will actually
+         * be sent, quote included. A reply to a long message used to keep a "10
+         * remaining" counter while sending two segments.
+         */
+        private fun paintComposerState(typed: String) {
+            val ready = typed.isNotBlank()
             sendButton.alpha = if (ready) 1f else 0.4f
-            if (body.isEmpty()) {
+            if (!ready) {
                 counter.visibility = View.GONE
                 return
             }
+            val body = OeaMessagingFacts.composeBody(typed, replyTo?.body)
             val info = runCatching { android.telephony.SmsMessage.calculateLength(body, false) }.getOrNull()
-            if (info == null || info.size < 3) {
-                counter.visibility = View.GONE
-                return
-            }
-            val parts = info[0]
-            val remaining = info[2]
-            if (parts <= 1 && remaining > 25) {
+            val label = if (info != null && info.size >= 3) OeaMessagingFacts.counterLabel(info[0], info[2]) else null
+            if (label == null) {
                 counter.visibility = View.GONE
             } else {
                 counter.visibility = View.VISIBLE
-                counter.text = if (parts <= 1) "$remaining" else "$remaining • $parts SMS"
+                counter.text = label
             }
         }
 
@@ -3019,8 +3087,9 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
         private fun sendCurrent() {
             val typed = editor.text.toString().trim()
             if (typed.isEmpty()) return
-            val quoted = replyTo?.let { "“${it.body.take(120)}”\n" }.orEmpty()
-            val body = quoted + typed
+            // One composer, one body: the counter and the send both come from here,
+            // so a reply quote can no longer be sent without being counted.
+            val body = OeaMessagingFacts.composeBody(typed, replyTo?.body)
             sendSms(address, body, selectedSub) { sent ->
                 if (sent) {
                     editor.setText("")
@@ -3194,7 +3263,7 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
                 column.removeAllViews()
                 column.setPadding(kit.dp(12), if (row.tightTop) kit.dp(1) else kit.dp(7), kit.dp(12), 0)
                 column.gravity = if (sent) Gravity.END else Gravity.START
-                val failed = message.type == Telephony.Sms.MESSAGE_TYPE_FAILED
+                val failed = OeaMessagingFacts.isFailed(message.type, message.status)
                 val bubble = TextView(host).apply {
                     text = message.body.ifBlank { "(empty message)" }
                     textSize = 15.5f
@@ -3273,13 +3342,7 @@ internal class MessagingScreen(val host: Activity, val palette: OeaPalette) {
 
             private fun buildMeta(message: OeaMessagingApp.SmsMessage): String = buildString {
                 append(OeaMessageDates.timeLabel(message.date))
-                when (message.type) {
-                    Telephony.Sms.MESSAGE_TYPE_DRAFT -> append(" • Draft")
-                    Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.MESSAGE_TYPE_QUEUED -> append(" • Sending…")
-                    Telephony.Sms.MESSAGE_TYPE_FAILED -> append(" • Not sent — tap for options")
-                    Telephony.Sms.MESSAGE_TYPE_SENT ->
-                        if (message.status == Telephony.Sms.STATUS_COMPLETE) append(" • Delivered")
-                }
+                append(OeaMessagingFacts.statusNote(message.type, message.status))
                 if (message.incoming && !message.read) append(" • Unread")
                 if (simLines.size >= 2 && message.subscriptionId >= 0) {
                     simLines.firstOrNull { it.subscriptionId == message.subscriptionId }
