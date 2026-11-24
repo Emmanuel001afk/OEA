@@ -155,7 +155,8 @@ down` in `.github/workflows/oea-apk.yml`:
 
 | Run | Result |
 | --- | --- |
-| _pending_ | this branch, before merge |
+| `45426757208` | **red** — `e: OeaIconController.kt:159:44 Unresolved reference 'attempt'`: the new retry was written as a lambda that calls itself while declaring itself. A local function may; a lambda initialising that function cannot. |
+| `45427568541` | **green** — `build-apk` and `build-laptop-apk`; 383 unit tests across launcher, engine and games, `OeaAppFamiliesTest` included; the smart-folder guard step and every earlier guard passed. |
 
 ### Device checklist
 
