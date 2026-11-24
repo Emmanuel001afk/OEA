@@ -22,68 +22,76 @@ shooter, engine id `arena`), not Chess, Endless Days or the launcher.
   > plain solid white background, studio lighting, stylized Free Fire and Call
   > of Duty Mobile character style, full head to toe visible
 
-## Local stopgap characters (no Tripo required)
+## Reference sheets for image-to-model (generated from the shipped mesh)
 
-`concept_to_oeac.py` reads this PNG, samples its skin/hair/vest/shirt/pants/boot
-colours, and builds rigged low-poly humans in OEA's 19-bone bind pose. Each
-identity has its own palette and physical kit (cap, mask, helmet, hood or
-backpack), so bots are recognisable rather than simple recolours.
+`reference_sheet.py` renders the reference set straight out of the `.oeac` the
+game loads, so the art direction and the shipped asset cannot drift apart:
 
 ```bash
-python3 tools/tripo/concept_to_oeac.py --all       # all six + manifest.json
+python3 tools/tripo/reference_sheet.py hero
+python3 tools/tripo/reference_sheet.py hero --tile 900x1350   # bigger tiles
+```
+
+It writes:
+
+| file | use |
+|---|---|
+| `send-off-<id>-front.png` | front orthographic |
+| `send-off-<id>-three-quarter.png` | form read |
+| `send-off-<id>-side.png` | depth |
+| `send-off-<id>-back.png` | the view image-to-3D always invents |
+| `send-off-<id>-tpose-front.png` | **submit this one for rigging** |
+| `send-off-<id>-tpose-side.png` | T-pose depth |
+| `send-off-<id>-head-front.png` | face detail for the texture |
+| `send-off-<id>-head-three-quarter.png` | face form |
+| `send-off-<id>-sheet.png` | all six body views on one page |
+| `send-off-<id>-head-sheet.png` | both head views |
+
+White background, orthographic, no weapon, no props: a perspective beauty shot
+makes the head too large and the feet too small, and anything held in a hand
+comes back as geometry.
+
+## Local characters (no Tripo required)
+
+`concept_to_oeac.py` samples skin/hair/vest/shirt/pants/boot colours from
+`send-off-soldier-concept.png` and builds rigged humans on a 1.80 m,
+seven-and-a-half-head skeleton, in OEA's 19-bone bind pose. The shapes live in
+`soldier.py` (anatomy) and `humanoid.py` (lofting); each identity has its own
+palette and physical kit (cap, mask, helmet, hood, backpack), so bots are
+recognisable rather than recolours.
+
+```bash
+python3 tools/tripo/concept_to_oeac.py --all        # all six + manifest.json
 python3 tools/tripo/concept_to_oeac.py --variant bot_heavy
-python3 tools/tripo/preview_oeac.py                # single-character preview
-python3 tools/tripo/preview_lineup.py             # six-character lineup
+python3 tools/tripo/preview_oeac.py                 # single character, front view
+python3 tools/tripo/preview_lineup.py               # six-character lineup
 ```
 
-Generated identities (see `oea-engine/src/main/assets/characters/manifest.json`):
+### Looking at a mesh
 
-| Id | Name | Role | Kit |
-| --- | --- | --- | --- |
-| `hero` | Ranger 01 | local player | vest, A-pose, no headgear |
-| `bot_ranger` | Ranger | assault | green cap |
-| `bot_medic` | Medic | support | white/gray face mask |
-| `bot_heavy` | Bulwark | heavy | helmet + backpack |
-| `bot_scout` | Scout | recon | tan hood |
-| `bot_night` | Wraith | stealth | black helmet + mask |
-
-`character-lineup.png` and `local-mesh-preview.png` in this folder show the
-result. These are **stopgaps**, not AI 3D: clean A-pose rigs, image-derived
-colours and simple camo/fabric textures, but no photoreal scan detail.
-
-## 3D weapons
-
-`weapons_to_oeam.py` authors compact `.oeam` meshes for all 13 Send Off weapons
-(pan, pistols, SMG, rifles, sniper, LMG, launcher, mortar, howitzer). Each mesh
-carries its own paint in vertex colours and is loaded by `WeaponAssetLoader`;
-the original procedural boxes remain as a fallback if a file is missing.
+`render_oeac.py` is the tool you want when a character looks wrong. It is a
+shaded, depth-buffered software renderer with an orthographic camera at any
+angle, and it can pose the skeleton with a port of the engine's `Skeleton.update`:
 
 ```bash
-python3 tools/tripo/weapons_to_oeam.py
-python3 tools/tripo/preview_weapons.py
+python3 tools/tripo/render_oeac.py hero --views front,side,back --white
+python3 tools/tripo/render_oeac.py hero --yaw 30 --pose run --tile 400x700
+python3 tools/tripo/render_oeac.py hero --yaw 0 --zoom 4.6 --centre-y 1.66   # head
 ```
 
-Output: `oea-engine/src/main/assets/weapons/*.oeam` and
-`weapon-preview.png`. The generator uses only the Python standard library,
-so it can be re-run offline on any machine.
+Poses: `bind`, `tpose`, `aim`, `run`, `crouch`, `reload`. The old preview filled
+every triangle with one flat colour and had no depth buffer, which is why a mesh
+can look fine there and boxy in the game — do not judge geometry with it.
 
-## Rules and bot design sheet
+## Asset notes
 
-`preview_rules.py` parses `ArenaRules.kt` and renders every mode's objective,
-score limit and clocks, plus the three bot personalities, into
-`rules-preview.png`. Because the values are parsed from the Kotlin table, the
-sheet cannot drift from the game — re-run it after changing a mode.
-
-```bash
-python3 tools/tripo/preview_rules.py
-python3 tools/check-rules.py    # consistency + no stale HUD literals
-```
-
-## Next step
-
-Feed this PNG to Tripo `POST /v3/generation/image-to-model` with
-`model: "P2-20260801"`, `face_limit: 5000`, `texture: true`, `pbr: true`, then
-rig-check → v3 biped rig → retarget, and convert the downloaded GLB with
-`tools/tripo/glb_to_oeac.py`. Do not commit the raw Tripo API key or the API
-response URLs; download the GLB and keep only the converted `.oeac` plus its
-textures in the shipped game.
+* Bind pose: arms hang 8° out, not 45°. The old A-pose put the mesh's elbow
+  24 cm from the rig's elbow.
+* Bone naming: a bone is named for the joint it *starts* at. `SHOULDER` is the
+  upper arm, `ARM` the forearm, `FORE` the hand. Weighting one joint too far
+  down makes the upper arm swing with the elbow.
+* Cloth and the skin under it must use the *same* weight curve, or they shear
+  apart at a bend and skin shows through the sleeve.
+* There is no deltoid blob: the sleeve's own loft rises over the joint and *is*
+  the shoulder. See `docs/send-off-character-anatomy-2026-11-23.md` for the six
+  approaches that were tried and why each one failed.

@@ -32,18 +32,17 @@ RGB = Tuple[int, int, int]
 Vec = Tuple[float, float, float]
 Weight = Tuple[int, float]
 
-# OEA bind-pose joint offsets from Skeleton.kt. The mesh is authored around
-# these positions and the inverse binds below are their exact inverses.
-OFFSETS: List[Vec] = [
-    (0.0, 0.90, 0.0), (0.0, 0.18, 0.0), (0.0, 0.28, 0.0), (0.0, 0.16, 0.0),
-    (0.0, 0.12, 0.0),
-    # A-pose arms: shoulders ±0.18/1.40, elbows ±0.38/1.20, wrists ±0.56/1.02.
-    (0.20, -0.20, 0.0), (0.18, -0.18, 0.0), (0.06, -0.04, 0.01), (0.02, -0.01, 0.0),
-    (-0.20, -0.20, 0.0), (-0.18, -0.18, 0.0), (-0.06, -0.04, 0.01), (-0.02, -0.01, 0.0),
-    # Slightly apart legs: hips ±0.12, knees ±0.15, ankles ±0.17.
-    (0.12, -0.02, 0.0), (0.03, -0.44, 0.0), (0.02, -0.42, 0.0),
-    (-0.12, -0.02, 0.0), (-0.03, -0.44, 0.0), (-0.02, -0.42, 0.0),
-]
+# OEA bind-pose joint offsets. `soldier.BIND` is the source of truth: real
+# human segment lengths on the engine's 19-bone hierarchy, with arms hanging
+# 8 degrees out. The inverse binds below are its exact inverses, so the
+# engine's Skeleton — which derives every joint offset from these matrices —
+# animates the mesh around the joints it was built around.
+def _offsets() -> List[Vec]:
+    import soldier
+    return [offset for (_parent, offset) in soldier.BIND]
+
+
+OFFSETS: List[Vec] = _offsets()
 B = oeac.BONE_INDEX
 
 # Identifiable Send Off soldiers. The local player keeps the sampled concept
@@ -338,13 +337,24 @@ def argb(c: RGB) -> int:
 # --------------------------------------------------------------------- geometry
 
 def build_character(colours: Dict[str, RGB], tex_dir: Path, save_textures: bool,
-                    gear: Sequence[str] = ()) -> List[dict]:
+                    gear: Sequence[str] = (), fem: bool = False) -> List[dict]:
+    """Builds one character's meshes on the anatomy rig and packs them.
+
+    The shapes live in `soldier.py`; this function only decides which palette
+    and which kit goes on them, in the same way a bolt-on of the old generator
+    did — except the old one assembled cylinders and spheres and this one lofts
+    anatomy over real joint positions.
+    """
+    import humanoid
+    import soldier
+
     skin, hair = colours["skin"], colours["hair"]
     vest, shirt = colours["vest"], colours["shirt"]
     pants, boots, gloves = colours["pants"], colours["boots"], colours["gloves"]
-    dark = tuple(max(0, c - 28) for c in vest)  # type: ignore[assignment]
+    dark = tuple(max(0, c - 26) for c in vest)  # type: ignore[assignment]
 
     tex: Dict[str, str] = {}
+
     def texture(name: str, base: RGB, palette: Sequence[RGB] | None, seed: int, camo: bool) -> str:
         if not save_textures:
             return ""
@@ -355,119 +365,37 @@ def build_character(colours: Dict[str, RGB], tex_dir: Path, save_textures: bool,
 
     tex_skin = texture("skin", skin, None, 1, False)
     tex_fabric = texture("fabric", shirt, None, 2, False)
-    camo_palette = [vest, shirt, dark, tuple(max(0, c - 18) for c in shirt)]  # type: ignore[list-item]
+    camo_palette = [vest, shirt, dark, tuple(max(0, c - 16) for c in shirt)]  # type: ignore[list-item]
     tex_vest = texture("vest", vest, camo_palette, 3, True)
     tex_pants = texture("pants", pants, [pants, dark, vest], 4, True)
     tex_boots = texture("boots", boots, None, 5, False)
 
+    palette = soldier.Palette(
+        skin=skin, hair=hair, vest=vest, shirt=shirt, pants=pants,
+        boots=boots, gloves=gloves,
+    )
+    eye = tuple(max(0, min(255, int(c * 0.62 + 40))) for c in hair)  # type: ignore[assignment]
+    meshes = soldier.build(palette, gear=gear, fem=fem, eye=eye)  # type: ignore[arg-type]
+
+    # Flags: 1 = skin (subtle SSS in the shader), 2 = detail (hidden at LOD 2),
+    # 4 = double sided. Faces and hair are detail geometry; the body is not.
+    textures = {
+        "body": tex_skin, "face": "", "hair": "", "shirt": tex_fabric,
+        "pants": tex_pants, "boots": tex_boots, "gloves": "",
+        "vest": tex_vest, "gear": "",
+    }
+    flags = {
+        "body": oeac.FLAG_SKIN, "face": oeac.FLAG_DETAIL, "hair": oeac.FLAG_DETAIL,
+        "shirt": 0, "pants": 0, "boots": 0, "gloves": 0,
+        "vest": oeac.FLAG_DETAIL, "gear": oeac.FLAG_DETAIL,
+    }
     parts: List[dict] = []
-
-    def part(name: str, b: Builder, colour: RGB, textured: str, flags: int = 0) -> None:
-        parts.append({"name": name, "texture": textured, "color": argb((255, 255, 255)) if textured else argb(colour),
-                      "flags": flags, "vertices": b.vertices, "indices": b.indices})
-
-    # Body: pelvis/neck/head/hands. The head is a proper ellipsoid with ears,
-    # nose and jaw rather than the old single sphere.
-    body = Builder()
-    stack(body, [(0.64, 0.15, 0.115, [(B["PELVIS"], 1.0)]),
-                 (0.78, 0.16, 0.125, [(B["PELVIS"], 0.7), (B["SPINE"], 0.3)]),
-                 (0.90, 0.15, 0.12, [(B["SPINE"], 1.0)])], skin, segs=14)
-    stack(body, [(1.42, 0.082, 0.082, [(B["NECK"], 1.0)]),
-                 (1.52, 0.07, 0.07, [(B["HEAD"], 1.0)])], skin, segs=12)
-    ellipsoid(body, (0, 1.62, 0), (0.112, 0.125, 0.112), B["HEAD"], skin, 18, 12)
-    ellipsoid(body, (0, 1.535, 0.035), (0.082, 0.062, 0.088), B["HEAD"], skin, 14, 8)
-    tube(body, (0, 1.60, 0.09), (0, 1.55, 0.15), 0.022, 0.014, B["HEAD"], B["HEAD"], skin, 8, 3)
-    for side in (-1, 1):
-        ellipsoid(body, (side * 0.108, 1.60, -0.005), (0.025, 0.042, 0.020), B["HEAD"], skin, 8, 6)
-        ellipsoid(body, (side * 0.62, 0.98, 0.01), (0.05, 0.05, 0.032), B["HAND_L" if side > 0 else "HAND_R"], skin, 10, 6)
-    part("body", body, skin, tex_skin, oeac.FLAG_SKIN)
-
-    # Minimal face: eyes and mouth on the front of the head.
-    face_b = Builder()
-    for side in (-1, 1):
-        ellipsoid(face_b, (side * 0.042, 1.645, 0.098), (0.014, 0.009, 0.006), B["HEAD"], (30, 26, 24), 8, 4)
-    ellipsoid(face_b, (0, 1.565, 0.105), (0.025, 0.006, 0.006), B["HEAD"], (110, 62, 52), 10, 4)
-    part("face", face_b, skin, "", oeac.FLAG_DETAIL)
-
-    # Hair: a slightly oversized cap plus a short fringe.
-    hair_b = Builder()
-    ellipsoid(hair_b, (0, 1.70, -0.01), (0.116, 0.06, 0.116), B["HEAD"], hair, 18, 8)
-    ellipsoid(hair_b, (0, 1.665, 0.085), (0.10, 0.028, 0.05), B["HEAD"], hair, 14, 6)
-    part("hair", hair_b, hair, "", oeac.FLAG_DETAIL)
-
-    # Shirt torso and sleeves.
-    shirt_b = Builder()
-    stack(shirt_b, [(0.88, 0.158, 0.122, [(B["PELVIS"], 0.5), (B["SPINE"], 0.5)]),
-                    (1.02, 0.165, 0.128, [(B["SPINE"], 1.0)]),
-                    (1.18, 0.178, 0.132, [(B["SPINE"], 0.5), (B["CHEST"], 0.5)]),
-                    (1.36, 0.205, 0.135, [(B["CHEST"], 1.0)]),
-                    (1.43, 0.17, 0.115, [(B["CHEST"], 0.5), (B["NECK"], 0.5)])], shirt, segs=16)
-    for side in (-1, 1):
-        sho, arm = ("SHOULDER_L", "ARM_L") if side > 0 else ("SHOULDER_R", "ARM_R")
-        tube(shirt_b, (side * 0.18, 1.40, 0), (side * 0.38, 1.20, 0), 0.082, 0.066, B[sho], B[arm], shirt, 12, 5, 0.09)
-    part("shirt", shirt_b, shirt, tex_fabric)
-
-    # Armoured vest: shell, shoulder straps, magazine pouches and belt.
-    vest_b = Builder()
-    stack(vest_b, [(1.00, 0.172, 0.138, [(B["SPINE"], 1.0)]),
-                   (1.16, 0.188, 0.145, [(B["SPINE"], 0.4), (B["CHEST"], 0.6)]),
-                   (1.36, 0.215, 0.148, [(B["CHEST"], 1.0)])], vest, segs=16)
-    for x in (-0.11, 0.0, 0.11):
-        box(vest_b, (x, 1.21, 0.147), (0.045, 0.075, 0.025), B["CHEST"], dark)  # type: ignore[arg-type]
-    box(vest_b, (0, 0.925, 0.10), (0.155, 0.035, 0.05), B["PELVIS"], dark)  # type: ignore[arg-type]
-    for side in (-1, 1):
-        box(vest_b, (side * 0.18, 1.36, 0.0), (0.07, 0.035, 0.12), B["SHOULDER_L" if side > 0 else "SHOULDER_R"], vest)
-    part("vest", vest_b, vest, tex_vest, oeac.FLAG_DETAIL)
-
-    # Bare forearms and gloves.
-    arms = Builder()
-    for side in (-1, 1):
-        arm, fore, hand = ("ARM_L", "FORE_L", "HAND_L") if side > 0 else ("ARM_R", "FORE_R", "HAND_R")
-        tube(arms, (side * 0.38, 1.20, 0), (side * 0.56, 1.02, 0), 0.058, 0.045, B[arm], B[fore], skin, 12, 5, 0.1)
-        ellipsoid(arms, (side * 0.62, 0.98, 0.01), (0.055, 0.055, 0.032), B[hand], gloves, 10, 6)
-    part("arms", arms, skin, tex_skin, oeac.FLAG_SKIN)
-
-    # Cargo pants with a full pelvis shell and knee pads.
-    pants_b = Builder()
-    stack(pants_b, [(0.64, 0.152, 0.118, [(B["PELVIS"], 1.0)]),
-                    (0.78, 0.163, 0.128, [(B["PELVIS"], 0.7), (B["SPINE"], 0.3)]),
-                    (0.90, 0.153, 0.122, [(B["SPINE"], 1.0)])], pants, segs=14)
-    for side in (-1, 1):
-        thigh, shin, foot = ("THIGH_L", "SHIN_L", "FOOT_L") if side > 0 else ("THIGH_R", "SHIN_R", "FOOT_R")
-        tube(pants_b, (side * 0.12, 0.88, 0), (side * 0.15, 0.44, 0), 0.105, 0.082, B[thigh], B[shin], pants, 14, 6, 0.12)
-        tube(pants_b, (side * 0.15, 0.44, 0), (side * 0.17, 0.02, 0), 0.088, 0.062, B[shin], B[foot], pants, 14, 6, 0.1)
-        box(pants_b, (side * 0.15, 0.46, 0.075), (0.075, 0.075, 0.022), B[shin], dark)  # type: ignore[arg-type]
-    part("pants", pants_b, pants, tex_pants)
-
-    # Combat boots.
-    boots_b = Builder()
-    for side in (-1, 1):
-        foot = "FOOT_L" if side > 0 else "FOOT_R"
-        box(boots_b, (side * 0.17, 0.085, 0.035), (0.075, 0.085, 0.14), B[foot], boots)
-        ellipsoid(boots_b, (side * 0.17, 0.16, -0.01), (0.075, 0.045, 0.085), B[foot], boots, 12, 6)
-    part("boots", boots_b, boots, tex_boots)
-
-    # Variant kit: caps, helmets, hoods, face masks and backpacks are geometry,
-    # not recolours, so bots are identifiable from behind as well as in front.
-    gear_b = Builder()
-    if "cap" in gear:
-        ellipsoid(gear_b, (0, 1.735, -0.005), (0.125, 0.055, 0.125), B["HEAD"], vest, 16, 6)
-        box(gear_b, (0, 1.705, 0.115), (0.115, 0.014, 0.055), B["HEAD"], dark)  # type: ignore[arg-type]
-    if "helmet" in gear:
-        ellipsoid(gear_b, (0, 1.72, -0.01), (0.135, 0.09, 0.135), B["HEAD"], vest, 16, 8)
-        for side in (-1, 1):
-            box(gear_b, (side * 0.12, 1.68, 0.0), (0.025, 0.055, 0.09), B["HEAD"], dark)  # type: ignore[arg-type]
-    if "hood" in gear:
-        ellipsoid(gear_b, (0, 1.65, -0.055), (0.132, 0.14, 0.10), B["HEAD"], shirt, 16, 8)
-        ellipsoid(gear_b, (0, 1.735, -0.01), (0.128, 0.055, 0.128), B["HEAD"], shirt, 16, 6)
-    if "mask" in gear:
-        ellipsoid(gear_b, (0, 1.565, 0.088), (0.082, 0.05, 0.038), B["HEAD"], dark, 12, 6)  # type: ignore[arg-type]
-    if "backpack" in gear:
-        box(gear_b, (0, 1.16, -0.16), (0.14, 0.20, 0.075), B["SPINE"], vest)
-        box(gear_b, (0, 1.00, -0.175), (0.12, 0.055, 0.04), B["SPINE"], dark)  # type: ignore[arg-type]
-    if gear_b.vertices:
-        part("gear", gear_b, vest, "", oeac.FLAG_DETAIL)
-
+    for name, mesh in meshes.items():
+        if not mesh.idx:
+            continue
+        parts.append(humanoid.to_oeac_part(
+            name, mesh, textures.get(name, ""), flags.get(name, 0),
+        ))
     return parts
 
 
@@ -505,7 +433,8 @@ def main() -> int:
             colours = variant_colours(base, cfg)
             out = args.assets / "characters" / f"{variant_id}.oeac"
             tex_dir = args.assets / "characters" / variant_id
-            parts = build_character(colours, tex_dir, not args.no_textures, cfg["gear"])
+            parts = build_character(colours, tex_dir, not args.no_textures, cfg["gear"],
+                                    bool(cfg.get("fem", False)))
             oeac.write_oeac(out, bind_matrices(), parts, [])
             manifest["characters"].append({
                 "id": variant_id, "name": cfg["name"], "role": cfg["role"],

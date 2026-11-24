@@ -83,6 +83,12 @@ Unit tests: `./gradlew :oea-engine:testDebugUnitTest :oea-games:testDebugUnitTes
 
 Static check: `python3 tools/check-kotlin.py` — bracket balance over a real Kotlin lexer, toolkit call resolution, OEA symbol resolution, and the registration invariants that a compiler cannot see (a mini-app or game listed in Kotlin but missing from the manifest, a game entry Game Boost does not recognise). It runs as the first step of both APK workflows.
 
+Bundled Send Off characters are generated, not hand-authored, so
+`python3 tools/check-character-assets.py` reads every `.oeac` exactly as
+`CharacterAssetLoader` does and fails on a bone id out of range, weights that do
+not sum to 1, a missing texture, an inward-wound shell or a mesh drawn away from
+its own joint. It runs in the APK workflow before the compile.
+
 The resulting application ID is `com.oea.launcher`.
 
 ### On a laptop

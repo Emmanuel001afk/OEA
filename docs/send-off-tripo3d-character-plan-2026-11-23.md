@@ -6,7 +6,7 @@ _Investigation and action plan, 23 November 2026_
 
 Yes, Tripo3D can give Send Off a much better character than the current one, but **not by calling Tripo from the game**. Use it as an **offline art pipeline**: generate a soldier image/3D model in Tripo Studio or through the Tripo API, rig it there, export a GLB, convert that GLB into a compact OEA character asset, and ship the converted asset inside the one OEA APK.
 
-The current soldier is not “bad because of the shader alone” — it is a set of ellipsoids, tubes and rings generated from `CharSpec`, and the skinning path also has a bind-pose problem that needs fixing before any imported model will look right. Tripo solves the *art* problem; the engine still needs a small *loader + skinning fix* to use the art.
+The current soldier is not “bad because of the shader alone” — it is a set of ellipsoids, tubes and rings generated from `CharSpec`. (An earlier draft of this plan also blamed the skinning maths; that was wrong, see §1.1.) Tripo solves the *art* problem; the engine needs a **loader** for the art, which it now has.
 
 Recommended route:
 
@@ -25,24 +25,32 @@ Grounded in the code on this branch:
 | Character data | `CharSpec` holds gender, face, body, skin, hair and layered outfit sliders. Saved as JSON in `CharacterStudio` via `GameStorage`. |
 | Character geometry | `oea-engine/.../graphics/HumanBody.kt` builds ~10 skinned parts from `CharSpec`: body, face, brows, shirt, pants, hair, shoes, outer, headwear, vest, pack. The parts are procedural ellipsoids/tubes/rings, not authored human meshes. |
 | Skeleton | `Skeleton.kt`: fixed 19 bones (pelvis → spine → chest → neck → head, arms, legs). Poses are procedural math from `CharRig.Pose` (phase, speed, aim, crouch, airborne, reload). |
-| Skinning | `Renderer3D.drawSkinned` + `Shaders.SKIN_VERT`: 20-float vertex stride (pos, normal, uv, colour, 4 bone ids, 4 weights), `u_bones[19]`, up to 4 influences. There is no inverse-bind matrix anywhere. |
+| Skinning | `Renderer3D.drawSkinned` + `Shaders.SKIN_VERT`: 20-float vertex stride (pos, normal, uv, colour, 4 bone ids, 4 weights), `u_bones[19]`, up to 4 influences. The shader applies `u_bones[i]` directly, and `Skeleton.update()` publishes `poseWorld × inverseBind` — so `u_bones` is already a skin matrix, not a joint matrix. See the correction in §1.1. |
 | Live studio | `CharacterStudio` edits `CharSpec`; every `spec.touch()` bumps `revision`; `CharRig.ensureForm()` rebuilds `HumanBody` on the next frame. |
 | Send Off draw path | `OeaArena.drawSoldier()` picks a rig via `rigFor()`: local player uses the studio rig; bots are cached by colour/id. It drives `rigPose` and calls `drawSkinned()` per soldier, with LOD by distance. |
 | Look target | `docs/images/send-off-character-studio.png` and `send-off-arena.png` are **design renders**, not screenshots of the running game (the docs say so). The shipped code produces the procedural version, which is why the character looks far worse than the target image. |
 | Toolchain | No JDK/Android SDK in this sandbox, and the earlier character docs state the skinned pipeline was never compiled here. Nothing in this plan is “verified on device” until you build it. |
 
-### One concrete bug to fix first
+### 1.1 Bind-relative skinning — already correct (this section used to be wrong)
 
-`SKIN_VERT` does:
+An earlier revision of this document claimed there was "no inverse-bind matrix
+anywhere" and that the rig was therefore stretched by the height of the head
+chain. That is not true on this branch, and the claim has been removed so nobody
+spends a day chasing it:
 
-```glsl
-mat4 skin = u_bones[int(a_boneIds.x)] * a_boneWeights.x + ...;
-vec4 skinned = skin * vec4(a_pos, 1.0);
-```
+* `Skeleton.kt` builds a bind pose, inverts it, and publishes
+  `poseWorld × inverseBind` into `matrices`, which is what the shader binds to
+  `u_bones[19]`. The shader's `skin * vec4(a_pos, 1.0)` is then a correct
+  bind-relative transform.
+* `Skeleton(inverseBindMatrices)` accepts a 19-bone inverse-bind set from a
+  converted asset, so an imported rig and the procedural pose share one path.
+* `render_oeac.py` implements the same maths offline, which is how the poses in
+  this repo were checked: the joints bend where the mesh draws them.
 
-That is a bind-relative transform: normally `boneMatrix * inverseBindMatrix` is applied to a vertex authored in bind-pose model space. OEA publishes joint world matrices from `Skeleton.update()` and `HumanBody` authors vertices at model-space heights such as `y = 1.62` for the head, but the head bone chain in the code sums to roughly `0.74` (`0.18 + 0.28 + 0.16 + 0.12`; the pelvis root is at 0, despite the comment saying 0.90). There is no compensating inverse-bind step anywhere I found.
-
-So before importing anything, confirm on a device whether the current soldiers are stretched/misplaced. If they are, fix the skinning math by publishing `boneWorld * inverse(bindWorld)` matrices (or pre-bake bind-relative matrices in the converter). An imported glTF rig will need its `inverseBindMatrices` anyway, so this is not wasted work.
+The character still looked wrong, but for art reasons — the mesh was drawn 24 cm
+from its own elbow, arms were weighted to the wrong joint, and the shapes were
+primitives. That work is written up in
+`docs/send-off-character-anatomy-2026-11-23.md`.
 
 ---
 
@@ -177,7 +185,13 @@ This is the code work needed in the repo:
 4. Put the exported GLB in `tools/tripo/assets/` in this repo and tell me the path. I can then build the GLB→OEA converter, the inverse-bind skinning fix, and the `CharRig`/`OeaArena` hookup on this branch.
 5. Build and test on a phone; adjust polycount/texture size and studio behaviour from what you see.
 
-If you want a no-API-key visual improvement while the asset pipeline is being built, the parallel fix is small: correct the inverse-bind skinning, then raise the procedural mesh quality (more ring segments, real hair cards, normal detail baked into textures). That will not match the design render, but it will stop the current stretched/shape look at its source.
+Nothing in this plan blocks a no-API-key improvement, and that has now been
+done: the procedural characters were rebuilt on a real 1.80 m skeleton by
+`tools/tripo/soldier.py` + `tools/tripo/humanoid.py`, and the result shipped in
+the `.oeac` catalog. See `docs/send-off-character-anatomy-2026-11-23.md`. Those
+assets are also what the Tripo reference sheets are rendered from
+(`tools/tripo/reference_sheet.py`), so the model Tripo returns is a refinement of
+the shipped silhouette rather than a different character.
 
 ---
 
@@ -213,21 +227,32 @@ verified-by-inspection and Python-smoke-test pass only.
 - **Send Off concept reference.** `tools/tripo/concepts/send-off-soldier-concept.png`
   is a full-body, white-background A-pose tactical soldier, recorded with its
   prompt and purpose in `tools/tripo/concepts/README.md`.
-- **Local stopgap character.** Because Tripo access is restricted here,
-  `tools/tripo/concept_to_oeac.py` samples that concept and generates a
-  rigged 19-bone low-poly soldier at
-  `oea-engine/src/main/assets/characters/hero.oeac` (plus five generated PNG
-  textures). `tools/tripo/preview_oeac.py` renders a flat-shaded preview to
-  `tools/tripo/concepts/local-mesh-preview.png`. It is image-derived and
-  game-rigged, **not** AI-generated 3D, and is meant to be replaced by a real
-  Tripo GLB when available.
-- **Six identified soldiers + catalog.** `concept_to_oeac.py --all` now emits
+- **Anatomy-first character generator.** Because Tripo access is restricted
+  here, the shipped characters are generated locally: `tools/tripo/humanoid.py`
+  lofts station lists with swept frames, and `tools/tripo/soldier.py` supplies
+  the anatomy — a 1.80 m, 7.5-head skeleton, tapered limbs with muscle bias,
+  lofted skull and hands, and one continuous sleeve that *is* the shoulder.
+  `tools/tripo/concept_to_oeac.py` samples the concept PNG for palette and writes
+  `oea-engine/src/main/assets/characters/*.oeac`. They are image-derived and
+  game-rigged, **not** AI-generated 3D, and remain replaceable by a real Tripo
+  GLB. Write-up and the rejected designs:
+  `docs/send-off-character-anatomy-2026-11-23.md`.
+- **Six identified soldiers + catalog.** `concept_to_oeac.py --all` emits
   `hero` (Ranger 01) and five bot identities — Ranger, Medic, Bulwark, Scout
   and Wraith — each with its own palette and physical kit (cap, mask, helmet,
   backpack or hood). `assets/characters/manifest.json` is the single source of
   truth loaded by `CharacterCatalog.kt`; `OeaArena` uses the catalog for the
   studio hero and for local bots, falling back to the procedural rig whenever
   an asset is missing. `preview_lineup.py` renders all six for review.
+- **Asset checker.** `python3 tools/check-character-assets.py` reads every
+  bundled `.oeac` the way `CharacterAssetLoader` does and fails on the faults
+  that are otherwise invisible until someone looks closely: bone ids out of
+  range, weights that do not sum to 1, a missing texture, a shell wound inward
+  (invisible with back-face culling), a mesh drawn away from the joint its
+  weights name, or a pose that does not actually move the limb.
+- **Reference set for image-to-model.** `tools/tripo/reference_sheet.py hero`
+  renders front / three-quarter / side / back / T-pose front / T-pose side /
+  two head views / two contact sheets into `tools/tripo/concepts/`.
 - **3D weapon meshes.** `weapons_to_oeam.py` generates `.oeam` files for all
   13 weapons with receiver/stock/barrel/grip/magazine/optic detail and painted
   vertex colours. `WeaponAssetLoader.kt` loads them; `OeaArena` uses a white
@@ -268,6 +293,9 @@ python3 tools/tripo/preview_weapons.py
 - No real Tripo GLB has been converted yet — the smoke test uses a synthetic
   rig. Real exports may have different joint names, nested node transforms,
   sparse accessors or PBR textures that need converter tweaks.
+- Nothing has been checked on a phone. The `.oeac` files are verified
+  structurally (`tools/check-character-assets.py`) and rendered offline from
+  every angle in six poses, which is not the same thing.
 - Character Studio sliders no longer deform an imported mesh; they can only
   retint it through `CharSpec`. Decide whether to expose preset models instead.
 - Baked clips are parsed but not played; the imported hero and bots use the

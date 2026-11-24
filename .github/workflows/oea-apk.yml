@@ -41,6 +41,12 @@ jobs:
         # entry Game Boost does not recognise. Runs before the build so the
         # failure is readable.
         run: python3 tools/check-kotlin.py
+      - name: Check bundled character assets
+        # The .oeac files are generated Python-side, so a bad rebuild can ship a
+        # mesh whose weights do not sum to 1 or a shell wound inward. The loader
+        # then throws and the game falls back to the procedural rig, which looks
+        # plausible enough that nobody notices the catalogue was never used.
+        run: python3 tools/check-character-assets.py
       - name: Compile Kotlin (launcher, engine, arcade)
         # A dedicated compile before the tests: when a type error stops the
         # build, this step names it as a `:error:` annotation on the exact file
