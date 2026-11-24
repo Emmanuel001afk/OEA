@@ -510,6 +510,9 @@ internal object OeaCalcEngine {
         private fun digits(radix: Int): Long? {
             val start = i
             while (i < text.length) {
+                // `A` is a hex digit and also the first letter of `AND`, so a hex literal
+                // would otherwise swallow the operator: `0x1F AND 0x0F` read as `0x1FA`.
+                if (radix == 16 && text.startsWith("AND", i)) break
                 val digit = Character.digit(text[i], radix)
                 if (digit < 0) break
                 i++

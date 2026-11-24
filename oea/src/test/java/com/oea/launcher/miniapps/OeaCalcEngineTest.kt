@@ -260,6 +260,9 @@ class OeaCalcEngineTest {
     @Test
     fun bitwiseOperatorsFollowTheDocumentedPrecedence() {
         assertEquals(15L, OeaCalcEngine.programmer("0x1F AND 0x0F")!!)
+        // `A` is a hex digit and the first letter of `AND`; the literal must stop there.
+        assertEquals(3L, OeaCalcEngine.programmer("0xF AND 0x3")!!)
+        assertEquals(1L, OeaCalcEngine.programmer("0x1 AND 3")!!)
         assertEquals(15L, OeaCalcEngine.programmer("0b1010 OR 0b0101")!!)
         assertEquals(0L, OeaCalcEngine.programmer("0b1100 XOR 0b1100")!!)
         assertEquals(1L, OeaCalcEngine.programmer("1 OR 2 AND 0")!!)
