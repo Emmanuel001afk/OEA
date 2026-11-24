@@ -185,6 +185,10 @@ the thread that is filing an incoming SMS.
   through `sendNow` with no bare `SmsManager.getDefault()`.
 * `tools/check-kotlin.py` — `STATIC CHECK OK — 314 sources`.
 * Every guard was extracted from the workflow and run locally before pushing.
+* CI run **[45316274405](https://github.com/Emmanuel001afk/OEA/actions/runs/45316274405)** —
+  both jobs green on the first push, with `Messaging detail tests` and
+  `Verify the messaging work` in the step list between the EMAGE pair and the launcher-engine
+  pair. Merged as `1b2043a` (PR [#166](https://github.com/Emmanuel001afk/OEA/pull/166)).
 
 ## 5. What to check on a device
 
