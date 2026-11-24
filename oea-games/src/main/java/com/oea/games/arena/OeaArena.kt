@@ -223,7 +223,7 @@ class OeaArena : OeaGame() {
     /** Identity the pill claims pointers with, so the claim is inspectable. */
     private val viewChipOwner = Any()
     /** "first" or "third" — read from settings, mirrored here for the draw path. */
-    private var perspective = com.oea.engine.OeaEngine.DEFAULT_PERSPECTIVE
+    private var perspective = "third"
     /** Third-person distance the player chose, cached for the same reason. */
     private val settings: com.oea.engine.EngineSettings get() = ctx.settings
 
@@ -2568,6 +2568,8 @@ class OeaArena : OeaGame() {
 
     /** One plain-language briefing per rules set — what this mode IS and how to play it. */
     /** Clock line appended to every briefing so the limits are always shown. */
+    private val modeRules: ArenaRules.Mode get() = ArenaRules.of(rules)
+
     private fun clockLine(): String {
         val m = modeRules
         val parts = ArrayList<String>(2)
@@ -3328,7 +3330,7 @@ class OeaArena : OeaGame() {
         adsBtn.highlight = adsOn; crouchBtn.highlight = crouchOn
         reloadBtn.progress = if (me.reloadLeft > 0f) 1f - me.reloadLeft / me.weapon.reload.coerceAtLeast(0.1f) else -1f
         // The button says what a tap will do: start the channel, or stop it.
-        healBtn.label = if (healingNow) "STOP" else "+${me.medkits}"
+        healBtn.label = if (healLatch) "STOP" else "+${me.medkits}"
         if (controlsOpen) {
             // The selected control gets a bright halo, so the size keys have an
             // obvious subject and the player always knows what they are editing.
@@ -3520,7 +3522,7 @@ class OeaArena : OeaGame() {
         //
         // It exists because changing how you *see* should not cost a trip through
         // the pause menu mid-fight.
-        viewChipShown = alive && !matchOver && !studio.open && !controlsOpen && !me.skydiving
+        viewChipShown = alive > 0 && !matchOver && !studio.open && !controlsOpen && !me.skydiving
         if (viewChipShown) {
             viewChipW = 96f * d
             viewChipH = 22f * d
@@ -3567,7 +3569,7 @@ class OeaArena : OeaGame() {
         if (me.reloadLeft > 0f) {
             // The bar is the point: "Reloading" alone does not say whether to
             // push now or hold. The weapon slot shows the magazine behind it.
-            val total = me.weapon.reloadNow(me.upLevels[me.active]).coerceAtLeast(0.05f)
+            val total = me.weapon.reload.coerceAtLeast(0.05f)
             val done = (1f - me.reloadLeft / total).coerceIn(0f, 1f)
             lines += StatusLine("Reloading", 14f, done, 88f, 0xDDCFD8DC.toInt(), 0xDDFFFFFF.toInt(), 30f, false)
         }
@@ -3592,20 +3594,20 @@ class OeaArena : OeaGame() {
         // screen; the strip only ever uses the bottom half of that.
         val slotRowTop = h - hud.safeBottom - (46f + 12f) * d
         val room = (slotRowTop - h * 0.5f) - 14f * d
-        var stack = lines
+        var stack: List<StatusLine> = lines
         while (stack.isNotEmpty() && stack.sumOf { (it.advance * d).toDouble() }.toFloat() > room) {
             stack = stack.subList(0, stack.size - 1)   // drop the least urgent line
         }
-        var y = slotRowTop - 8f * d
+        var statusY = slotRowTop - 8f * d
         for (line in stack) {
-            y -= line.advance * d
-            hud.text(line.text, w / 2f, y, line.size, line.colour, Align.CENTER, bold = line.bold)
+            statusY -= line.advance * d
+            hud.text(line.text, w / 2f, statusY, line.size, line.colour, Align.CENTER, bold = line.bold)
             if (line.bar >= 0f) {
                 val bw = line.barWidth * d
-                hud.bar(w / 2f - bw / 2f, y + line.size * 1.45f * d, bw, 4.5f * d, line.bar, line.barColour)
+                hud.bar(w / 2f - bw / 2f, statusY + line.size * 1.45f * d, bw, 4.5f * d, line.bar, line.barColour)
             }
         }
-        if (net == null && hud.iconButton("menu", "☰", w - hud.safeRight - 150f * d, y + 20f * d, 18f)) onBack()
+        if (net == null && hud.iconButton("menu", "☰", w - hud.safeRight - 150f * d, statusY + 20f * d, 18f)) onBack()
     }
 
     /**

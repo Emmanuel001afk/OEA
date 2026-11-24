@@ -2353,8 +2353,8 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
             // Pick the side that is actually walkable, not just a coin flip.
             val left = dir + MathX.HALF_PI
             val right = dir - MathX.HALF_PI
-            val okL = !blockedToward(right + MathX.PI, 1.4f)
-            val okR = !blockedToward(left + MathX.PI, 1.4f)
+            val okL = !blockedToward(right + (MathX.HALF_PI * 2f), 1.4f)
+            val okR = !blockedToward(left + (MathX.HALF_PI * 2f), 1.4f)
             strafe = when {
                 okL && !okR -> 1f
                 okR && !okL -> -1f

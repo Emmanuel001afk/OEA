@@ -114,8 +114,8 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
         if (pool != null) {
             val pick = pool.choices.indexOfFirst { it.value == value("loadout") }.coerceAtLeast(0)
             val family = poolFamily(pool.choices[pick].value)
+            val count = com.oea.games.arena.ArenaArmory.pool(pool.choices[pick].value).size
             texts.addView(
-                val count = com.oea.games.arena.ArenaArmory.pool(pool.choices[pick].value).size
                 kit.text("Pool: ${pool.choices[pick].label} · $count guns", 11.5f, palette.textTertiary)
                     .apply { setPadding(0, kit.dp(8), 0, 0) },
                 LinearLayout.LayoutParams(-1, -2)

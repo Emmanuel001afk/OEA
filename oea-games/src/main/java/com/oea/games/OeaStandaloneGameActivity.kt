@@ -1405,7 +1405,7 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
                     } else {
                         // A live-valued row: the setting name and its current
                         // value on one line, so the page reads at a glance.
-                        k.valueRow(label, value, descriptions.getOrNull(index), item.kind == MenuKind.CHOICE && !item.disabled) {
+                        k.valueRow(list, label, value, descriptions.getOrNull(index), item.kind == MenuKind.CHOICE && !item.disabled) {
                             if (item.disabled) return@valueRow
                             picked = true
                             dialog.dismiss()
