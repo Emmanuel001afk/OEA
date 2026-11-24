@@ -99,6 +99,11 @@ class Texture private constructor(
             OeaEngine.context.assets.open(path).use { BitmapFactory.decodeStream(it) }
         }
 
+        /** Loads a decoded image from a private file (downloaded character assets). */
+        fun file(path: String, mipmaps: Boolean = true, repeat: Boolean = false): Texture = generated(mipmaps, repeat) {
+            BitmapFactory.decodeFile(path) ?: error("Missing texture file: $path")
+        }
+
         /** Builds a texture from ARGB pixels computed by [pixel] (x, y → colour). */
         fun pixels(width: Int, height: Int, mipmaps: Boolean = true, repeat: Boolean = true, nearest: Boolean = false, pixel: (Int, Int) -> Int): Texture =
             generated(mipmaps, repeat, nearest) {

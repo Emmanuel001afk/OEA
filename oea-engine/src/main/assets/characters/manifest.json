@@ -1,0 +1,52 @@
+{
+  "characters": [
+    {
+      "id": "bot_heavy",
+      "name": "Bulwark",
+      "role": "Bot \u00b7 heavy",
+      "asset": "characters/bot_heavy.oeac",
+      "textures": "characters/bot_heavy",
+      "color": 4282927184
+    },
+    {
+      "id": "bot_medic",
+      "name": "Medic",
+      "role": "Bot \u00b7 support",
+      "asset": "characters/bot_medic.oeac",
+      "textures": "characters/bot_medic",
+      "color": 4290428086
+    },
+    {
+      "id": "bot_night",
+      "name": "Wraith",
+      "role": "Bot \u00b7 stealth",
+      "asset": "characters/bot_night.oeac",
+      "textures": "characters/bot_night",
+      "color": 4280493614
+    },
+    {
+      "id": "bot_ranger",
+      "name": "Ranger",
+      "role": "Bot \u00b7 assault",
+      "asset": "characters/bot_ranger.oeac",
+      "textures": "characters/bot_ranger",
+      "color": 4282013236
+    },
+    {
+      "id": "bot_scout",
+      "name": "Scout",
+      "role": "Bot \u00b7 recon",
+      "asset": "characters/bot_scout.oeac",
+      "textures": "characters/bot_scout",
+      "color": 4285422652
+    },
+    {
+      "id": "hero",
+      "name": "Ranger 01",
+      "role": "Local player",
+      "asset": "characters/hero.oeac",
+      "textures": "characters/hero",
+      "color": 4281347888
+    }
+  ]
+}

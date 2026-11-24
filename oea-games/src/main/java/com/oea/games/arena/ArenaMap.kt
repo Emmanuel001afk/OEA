@@ -22,10 +22,28 @@ import kotlin.math.sqrt
  * snowcaps, broken red-ridge badlands), the palette, the vegetation and the
  * water. Dirt roads connect the towns, and watchtowers overlook them.
  */
-internal class ArenaMap(val seed: Long, private val terrainStyle: String = "island") {
+internal class ArenaMap(val seed: Long, private val terrainStyle: String = "island", private val season: String = "summer") {
     class Tree(val x: Float, val z: Float, val y: Float, val scale: Float, val tint: Int)
     class Rock(val x: Float, val y: Float, val z: Float, val sx: Float, val sy: Float, val sz: Float, val yaw: Float)
     class House(val x0: Float, val z0: Float, val x1: Float, val z1: Float, val floor: Float, val doorSide: Int)
+    /** A named point of interest with a physical 3D landmark and a loot cache. */
+    class Landmark(val x: Float, val y: Float, val z: Float, val name: String, val type: String)
+
+    private class Theme(val places: List<String>, val structures: List<String>)
+    private val theme: Theme get() = when (terrainStyle) {
+        "highlands" -> Theme(
+            listOf("NORTHWATCH", "FROST PASS", "RADIO RIDGE", "MILL BASE", "SUMMIT CAMP"),
+            listOf("radio", "windmill", "tower", "radio", "windmill"),
+        )
+        "badlands" -> Theme(
+            listOf("RUST YARD", "DUST MESA", "MINE 7", "RED RIDGE", "SCRAP TOWN"),
+            listOf("mine", "tower", "mine", "radio", "tower"),
+        )
+        else -> Theme(
+            listOf("PORT RAVEN", "PALM GROVE", "OLD PIER", "HILLTOP", "CAMP KODO"),
+            listOf("lighthouse", "windmill", "tower", "lighthouse", "windmill"),
+        )
+    }
 
     val physics = PhysicsWorld(8f)
     lateinit var terrain: HeightField
@@ -33,6 +51,8 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
     val trees = ArrayList<Tree>()
     val rocks = ArrayList<Rock>()
     val houses = ArrayList<House>()
+    val landmarks = ArrayList<Landmark>()
+    val placeNames get() = landmarks.map { it.name }
     val lootSpots = ArrayList<FloatArray>()
     val towns = ArrayList<FloatArray>()
     /** Town-to-town roads as (x0, z0, x1, z1) segments; used for terrain colouring. */
@@ -46,6 +66,17 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
         private set
     lateinit var propMesh: Mesh
         private set
+    lateinit var landmarkMesh: Mesh
+        private set
+    lateinit var landmarkGlowMesh: Mesh
+        private set
+
+    /** How much snow covers the ground; winter or alpine locations. */
+    val snowCover: Float get() = when {
+        season == "winter" -> 0.85f
+        terrainStyle == "highlands" -> 0.25f
+        else -> 0f
+    }
 
     /** Materials tinted for this level style (shared meshes, per-level colours). */
     val terrainMaterial = Material(
@@ -79,6 +110,14 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
         },
         specular = 0.15f,
     )
+    /** Named landmark structures use their own painted material. */
+    val landmarkMaterial = Material(color = Colors.WHITE, specular = 0.3f, shininess = 45f)
+    /** Windows and beacons stay readable at night. */
+    val landmarkGlowMaterial = Material(
+        color = Colors.WHITE, emissive = 0xFFFFD18A.toInt(), emissiveStrength = 1.7f,
+        unlit = true, castShadows = false, receiveShadows = false,
+    )
+
     /** Pine crowns for alpine/badlands, broadleaf crowns for the green island. */
     val crownMesh: Mesh get() = if (terrainStyle == "island") treeBroad else treeCrown
 
@@ -136,7 +175,21 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
         val walls = MeshBuilder()
         val roofs = MeshBuilder()
         val props = MeshBuilder()
+        val landmarkMb = MeshBuilder()
+        val glowMb = MeshBuilder()
         for (t in towns) buildTown(t, rng, walls, roofs, props)
+        // Named POIs: every town gets a real 3D landmark, a solid collider and
+        // a supply cache. These are the places players call out over voice chat.
+        for (i in towns.indices) {
+            val t = towns[i]
+            val (lx, lz) = landmarkSpot(t, rng)
+            val ly = heightAt(lx, lz)
+            val type = theme.structures[i % theme.structures.size]
+            val name = theme.places[i % theme.places.size]
+            landmarks += Landmark(lx, ly, lz, name, type)
+            buildLandmark(type, landmarkMb, glowMb, lx, ly, lz, rng)
+            lootSpots += floatArrayOf(lx + 2.4f, ly + 0.35f, lz + 1.8f)
+        }
         // Watchtowers: real cover with a view — and loot on the platform.
         repeat(if (terrainStyle == "badlands") 4 else 3) {
             val (x, z) = randomLand(rng, 0.72f)
@@ -167,11 +220,12 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
             val y = heightAt(x, z)
             if (y < 0.6f) return@repeat
             val s = rng.range(0.8f, 1.35f) * (if (terrainStyle == "highlands") 0.92f else 1f)
-            val tint = when (terrainStyle) {
+            val rawTint = when (terrainStyle) {
                 "badlands" -> Colors.hsv(rng.range(40f, 70f), rng.range(0.35f, 0.55f), rng.range(0.4f, 0.6f))
                 "highlands" -> Colors.hsv(rng.range(100f, 150f), rng.range(0.5f, 0.75f), rng.range(0.32f, 0.5f))
                 else -> Colors.hsv(rng.range(85f, 135f), rng.range(0.45f, 0.7f), rng.range(0.45f, 0.7f))
             }
+            val tint = seasonal(rawTint)
             trees += Tree(x, z, y, s, tint)
             physics.addCylinder(x, z, 0.35f * s, y - 0.5f, y + 5f * s, Layers.WORLD, "tree")
         }
@@ -186,7 +240,104 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
         buildingMesh = walls.build()
         roofMesh = roofs.build()
         propMesh = props.build()
+        landmarkMesh = landmarkMb.build()
+        landmarkGlowMesh = glowMb.build()
         terrainMesh = buildTerrainMesh()
+    }
+
+    /** Pick a clear plot near the town edge so landmarks don't sit inside a house. */
+    private fun landmarkSpot(t: FloatArray, rng: Rng): Pair<Float, Float> {
+        repeat(16) {
+            val a = rng.range(0f, MathX.TAU)
+            val d = t[2] * rng.range(0.75f, 1.15f)
+            val x = t[0] + kotlin.math.sin(a) * d
+            val z = t[1] + kotlin.math.cos(a) * d
+            if (!nearHouse(x, z, 4f) && heightAt(x, z) > 0.8f) return x to z
+        }
+        return t[0] to t[1]
+    }
+
+    /** A compact silhouette builders use for all map landmark types. */
+    private fun buildLandmark(type: String, mb: MeshBuilder, glow: MeshBuilder, x: Float, y: Float, z: Float, rng: Rng) {
+        val beacon = Colors.hsv(rng.range(10f, 45f), 0.8f, 1f)
+        when (type) {
+            "lighthouse" -> {
+                mb.color = 0xFFE6E2D4.toInt()
+                mb.cylinder(x, y, z, 1.65f, 7.5f, 12)
+                mb.color = 0xFFB34236.toInt()
+                mb.cylinder(x, y + 2.2f, z, 1.72f, 1.1f, 12)
+                mb.cylinder(x, y + 5.0f, z, 1.58f, 1.0f, 12)
+                mb.color = 0xFF3B4650.toInt()
+                mb.boxMinMax(x - 1.5f, y + 7.5f, z - 1.5f, x + 1.5f, y + 9.2f, z + 1.5f)
+                mb.color = 0xFF7E3E32.toInt()
+                mb.cone(x, y + 9.2f, z, 2f, 1.8f, 12)
+                glow.color = beacon
+                glow.boxMinMax(x - 0.6f, y + 8.1f, z - 0.6f, x + 0.6f, y + 8.8f, z + 0.6f)
+                physics.addCylinder(x, z, 1.7f, y - 0.5f, y + 7.5f, Layers.WORLD, "landmark")
+            }
+            "radio" -> {
+                mb.color = 0xFF8C949C.toInt()
+                for (dx in floatArrayOf(-1.2f, 1.2f)) for (dz in floatArrayOf(-1.2f, 1.2f)) {
+                    mb.boxMinMax(x + dx - 0.13f, y, z + dz - 0.13f, x + dx + 0.13f, y + 12f, z + dz + 0.13f)
+                }
+                mb.color = 0xFF6E767E.toInt()
+                for (k in 1..5) {
+                    val ky = y + k * 2f
+                    mb.boxMinMax(x - 1.4f, ky, z - 0.1f, x + 1.4f, ky + 0.14f, z + 0.1f)
+                    mb.boxMinMax(x - 0.1f, ky, z - 1.4f, x + 0.1f, ky + 0.14f, z + 1.4f)
+                }
+                mb.color = 0xFFE0E4E8.toInt()
+                mb.sphere(x, y + 10.5f, z, 1.35f, 10, 6)
+                glow.color = beacon
+                glow.boxMinMax(x - 0.25f, y + 12.2f, z - 0.25f, x + 0.25f, y + 12.7f, z + 0.25f)
+                physics.addBox(x - 1.4f, y, z - 1.4f, x + 1.4f, y + 12f, z + 1.4f, Layers.WORLD, "landmark")
+            }
+            "windmill" -> {
+                mb.color = 0xFFD8C9A8.toInt()
+                mb.cylinder(x, y, z, 1.35f, 9f, 12)
+                mb.color = 0xFF6E5540.toInt()
+                mb.cone(x, y + 9f, z, 1.9f, 2.2f, 10)
+                mb.color = 0xFFE6DED0.toInt()
+                mb.boxMinMax(x - 4.6f, y + 7.2f, z - 0.2f, x + 4.6f, y + 7.6f, z + 0.2f)
+                mb.boxMinMax(x - 0.2f, y + 3.6f, z - 4.6f, x + 0.2f, y + 4f, z + 4.6f)
+                glow.color = beacon
+                glow.boxMinMax(x - 0.35f, y + 6.4f, z + 1.1f, x + 0.35f, y + 6.9f, z + 1.8f)
+                physics.addCylinder(x, z, 1.4f, y - 0.5f, y + 9f, Layers.WORLD, "landmark")
+            }
+            "mine" -> {
+                mb.color = 0xFF6D4A34.toInt()
+                for (dx in floatArrayOf(-1.6f, 1.6f)) {
+                    mb.boxMinMax(x + dx - 0.18f, y, z - 1.7f, x + dx + 0.18f, y + 7f, z + 1.7f)
+                }
+                mb.boxMinMax(x - 2f, y + 6.8f, z - 1.9f, x + 2f, y + 7.2f, z + 1.9f)
+                mb.color = 0xFF9C6B45.toInt()
+                mb.cylinder(x, y + 4.4f, z, 1.15f, 0.5f, 12)
+                glow.color = beacon
+                glow.boxMinMax(x - 0.35f, y + 7.2f, z - 0.35f, x + 0.35f, y + 7.7f, z + 0.35f)
+                physics.addBox(x - 2f, y, z - 1.9f, x + 2f, y + 7.2f, z + 1.9f, Layers.WORLD, "landmark")
+            }
+            else -> { // supply tower: four legs, tank, lit windows
+                mb.color = 0xFF7C8B92.toInt()
+                for (dx in floatArrayOf(-1.5f, 1.5f)) for (dz in floatArrayOf(-1.5f, 1.5f)) {
+                    mb.boxMinMax(x + dx - 0.16f, y, z + dz - 0.16f, x + dx + 0.16f, y + 7.5f, z + dz + 0.16f)
+                }
+                mb.color = 0xFFB35C3E.toInt()
+                mb.cylinder(x, y + 7.2f, z, 1.9f, 2.6f, 14)
+                mb.color = 0xFF5D6A70.toInt()
+                mb.cone(x, y + 9.8f, z, 2.1f, 1.1f, 14)
+                glow.color = beacon
+                glow.boxMinMax(x - 1.2f, y + 8f, z + 1.8f, x + 1.2f, y + 8.6f, z + 1.95f)
+                physics.addBox(x - 1.7f, y, z - 1.7f, x + 1.7f, y + 7.5f, z + 1.7f, Layers.WORLD, "landmark")
+            }
+        }
+    }
+
+    /** Season recolours foliage and ground without changing the walkable level. */
+    private fun seasonal(c: Int): Int = when (season) {
+        "spring" -> Colors.lerp(c, 0xFF7FC65A.toInt(), 0.24f)
+        "autumn" -> Colors.lerp(c, 0xFFC28042.toInt(), 0.42f)
+        "winter" -> Colors.lerp(c, 0xFFC6D3CE.toInt(), 0.62f)
+        else -> c
     }
 
     private fun townHeight(noise: Noise, t: FloatArray): Float {
@@ -424,16 +575,16 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
                 "highlands" -> 0xFF8A8478.toInt()
                 else -> 0xFF8A8478.toInt()
             }
-            val grassLo = when (terrainStyle) {
+            val grassLo = seasonal(when (terrainStyle) {
                 "badlands" -> 0xFFA88A52.toInt()
                 "highlands" -> 0xFF4E7A34.toInt()
                 else -> 0xFF5E8F3E.toInt()
-            }
-            val grassHi = when (terrainStyle) {
+            })
+            val grassHi = seasonal(when (terrainStyle) {
                 "badlands" -> 0xFFC2A068.toInt()
                 "highlands" -> 0xFF6B9A46.toInt()
                 else -> 0xFF7BA34A.toInt()
-            }
+            })
             var c = when {
                 h < 0.6f -> Colors.lerp(sand, sandDeep, MathX.clamp01(-h / 3f))
                 slope > 0.25f -> Colors.lerp(rockLo, rockHi, MathX.clamp01((slope - 0.25f) * 4f))
@@ -444,6 +595,12 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
                 c = Colors.lerp(c, 0xFFF2F5F8.toInt(), MathX.smoothstep(16f, 24f, h) * (1f - slope * 0.8f))
             } else if (terrainStyle == "badlands" && slope > 0.42f) {
                 c = Colors.lerp(c, 0xFFD8C4A2.toInt(), MathX.clamp01((slope - 0.42f) * 2.2f))
+            }
+            // Winter (and the highlands) lay snow on level ground first; steep
+            // rock faces stay exposed so the terrain still reads as terrain.
+            if (snowCover > 0f && h > 1.2f) {
+                val cover = snowCover * (1f - MathX.smoothstep(0.12f, 0.45f, slope))
+                c = Colors.lerp(c, 0xFFEDF3F5.toInt(), cover * 0.85f)
             }
             // Dirt roads between towns.
             val rd = roadDist(x, z)

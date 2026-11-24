@@ -128,6 +128,18 @@ class ArenaFront(host: GameFrontHost) : GameFront(host) {
             val index = terrain.choices.indexOfFirst { it.value == value("terrain") }.coerceAtLeast(0)
             kit.chipRow(right, terrain.choices.map { it.label }, index, { pick -> set("terrain", terrain.choices[pick].value) })
         }
+        section(right, "Season")
+        val season = option("season")
+        if (season != null) {
+            val index = season.choices.indexOfFirst { it.value == value("season") }.coerceAtLeast(0)
+            kit.chipRow(right, season.choices.map { it.label }, index, { pick -> set("season", season.choices[pick].value) })
+        }
+        section(right, "Time of day")
+        val time = option("time")
+        if (time != null) {
+            val index = time.choices.indexOfFirst { it.value == value("time") }.coerceAtLeast(0)
+            kit.chipRow(right, time.choices.map { it.label }, index, { pick -> set("time", time.choices[pick].value) })
+        }
 
         section(right, "Match")
         val match = LinearLayout(kit.context).apply { orientation = LinearLayout.VERTICAL }
