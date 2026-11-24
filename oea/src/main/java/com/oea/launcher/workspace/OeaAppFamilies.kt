@@ -3,23 +3,27 @@ package com.oea.launcher.workspace
 /**
  * Works out which installed apps belong together — the "smart" in smart folders.
  *
- * The folder pass used to read a catalogue written by hand: a fixed list of
- * namespaces and package names. That list can only describe the apps someone
- * remembered to write down, so an app family nobody typed in never got a folder,
- * while a package that merely *looked* like one did. The phone already knows the
- * answer, so this asks it instead:
+ * Two versions of this came before, and both were wrong in the same direction: they
+ * guessed too much.
  *
- *  * **Shared UID** — two apps installed under one Android user id are, by the
- *    system's own rules, one developer family (they share storage and can read each
- *    other's data). This cannot be claimed by an app that does not hold that id.
- *  * **Shared signing certificate** — apps signed with the same key belong to the
- *    same publisher, whatever they are called and whatever namespace they use.
- *  * **Shared namespace** — `com.transsion.*`, `com.microsoft.*`: three segments of
- *    package name, which is how publishers lay out their own apps.
+ *  * A **written catalogue** of namespaces and package names could only describe the
+ *    apps someone remembered to type in.
+ *  * **Shared uid and shared signing certificate** sounded stronger, but they are
+ *    not: every preinstalled app on a phone shares the platform's signing key, and
+ *    many share one of Android's reserved uids (`android.uid.system` and friends).
+ *    Grouping on those turned a phone's Camera, SIM Toolkit, Settings and update
+ *    service into one "family" — a folder that mixed things that have nothing to do
+ *    with each other.
  *
- * All three come from the phone. Nothing here reads a label to decide membership,
- * because a label can be localised or faked; labels are only used to *name* a
- * family that the identifiers already agreed on.
+ * What is left is the one signal that means what a folder means: **the publisher
+ * namespace**. `com.google.android.*` is Google's, `com.microsoft.*` is Microsoft's,
+ * `com.facebook.*` is Meta's. A publisher can only own the namespace its package
+ * names sit in, the platform's own namespaces are excluded, and two apps are only a
+ * family if at least two of them really are installed. Nothing is written down, and
+ * nothing that merely shares a key with the operating system becomes a folder.
+ *
+ * Labels are used only to *name* a family the namespaces already agreed on — never
+ * to decide membership, because a label can be localised or faked.
  *
  * Pure Kotlin: no Android types, so the rules are tested rather than presumed.
  */
@@ -30,20 +34,15 @@ internal object OeaAppFamilies {
         /** The workspace key (`package/class`) this app is stored under. */
         val key: String,
         val packageName: String,
-        val label: String,
-        /** Android uid; 0 when unknown. Apps sharing a uid are one publisher. */
-        val uid: Int = 0,
-        /** Signing certificate digest; blank when unknown. */
-        val signature: String = ""
+        val label: String
     )
-
-    enum class Signal { SHARED_UID, SHARED_SIGNATURE, NAMESPACE }
 
     data class Family(
         val id: String,
         val title: String,
         val members: List<String>,
-        val signal: Signal
+        /** The publisher namespace the family was found by. */
+        val namespace: String
     )
 
     /** Words that make a poor folder title on their own. */
@@ -56,88 +55,54 @@ internal object OeaAppFamilies {
     private val PLATFORM = setOf("android", "google", "app", "apps", "mobile", "com", "www")
 
     /**
-     * Groups [facts] into families.
-     *
-     * [signatureOf] is consulted only for apps the first two signals did not group,
-     * because reading a signing certificate is a real PackageManager call; on a phone
-     * where shared UIDs already answer the question it is never asked.
+     * Groups [facts] into publisher families: two or more launchable apps under one
+     * `com.<publisher>.<line>` namespace.
      */
-    fun discover(
-        facts: List<Fact>,
-        signatureOf: ((String) -> String?)? = null,
-        minSize: Int = 2
-    ): List<Family> {
+    fun discover(facts: List<Fact>, minSize: Int = 2): List<Family> {
         val usable = facts.filter { it.key.isNotBlank() && it.packageName.isNotBlank() }
         if (usable.size < minSize) return emptyList()
 
-        val taken = LinkedHashSet<String>()
-        val out = ArrayList<Family>()
-
-        fun add(signal: Signal, id: String, group: List<Fact>) {
-            // One family per package: an app with two launchable activities must not
-            // appear twice, and a package must not straddle two families.
-            val fresh = group.filterNot { it.packageName in taken }
-            val packages = fresh.map { it.packageName }.distinct()
-            if (packages.size < minSize) return
-            taken += packages
-            out += Family(
-                id = sanitize(id),
-                title = titleFor(fresh, null),
-                members = fresh.map { it.key },
-                signal = signal
-            )
+        val byNamespace = LinkedHashMap<String, MutableList<Fact>>()
+        usable.forEach { fact ->
+            val namespace = namespaceOf(fact.packageName) ?: return@forEach
+            val group = byNamespace.getOrPut(namespace) { mutableListOf() }
+            // One entry per package: two launchable activities of one app are still
+            // one app, and a package belongs to exactly one family.
+            if (group.none { it.packageName == fact.packageName }) group += fact
         }
 
-        // 1. Shared uid.
-        usable.filter { it.uid > 0 }
-            .groupBy { it.uid }
-            .forEach { (uid, group) -> add(Signal.SHARED_UID, "uid$uid", group) }
-
-        // 2. Shared namespace, for what the uid pass did not cover.
-        usable.filterNot { it.packageName in taken }
-            .mapNotNull { fact -> namespaceOf(fact.packageName)?.let { it to fact } }
-            .groupBy({ it.first }, { it.second })
-            .forEach { (namespace, group) ->
-                add(Signal.NAMESPACE, "ns_$namespace", group)
+        return byNamespace
+            .filterValues { group -> group.map { it.packageName }.distinct().size >= minSize }
+            .map { (namespace, group) ->
+                Family(
+                    id = sanitize("ns_$namespace"),
+                    title = titleFor(group, namespace),
+                    members = group.map { it.key }.distinct(),
+                    namespace = namespace
+                )
             }
-
-        // 3. Shared signing certificate, last: it costs a PackageManager call.
-        if (signatureOf != null) {
-            val leftovers = usable.filterNot { it.packageName in taken }
-            if (leftovers.size >= minSize) {
-                leftovers.map { fact ->
-                    val sig = fact.signature.ifBlank { runCatching { signatureOf(fact.packageName) }.getOrNull().orEmpty() }
-                    sig to fact
-                }.filter { it.first.isNotBlank() }
-                    .groupBy({ it.first }, { it.second })
-                    .forEach { (sig, group) ->
-                        add(Signal.SHARED_SIGNATURE, "sig_${sig.take(12)}", group)
-                    }
-            }
-        }
-
-        return out.sortedWith(compareBy({ it.title.lowercase() }, { it.id }))
+            .sortedWith(compareBy({ it.title.lowercase() }, { it.id }))
     }
 
     /**
      * `com.transsion.hilauncher` → `com.transsion`; null when the package has no
-     * publisher namespace to speak of (`com.example` alone, or a two-segment name).
+     * publisher namespace to speak of (two segments only) or sits in the platform's
+     * own `com.android.*`, which is the operating system rather than a publisher.
      */
     fun namespaceOf(packageName: String): String? {
         val parts = packageName.split('.').filter { it.isNotBlank() }
         if (parts.size < 3) return null
-        // Never group on the platform's own namespace: com.android.* is not a family.
         if (parts[0] == "com" && parts[1] == "android") return null
         return parts.take(3).joinToString(".")
     }
 
-    /** A folder title for a group, derived from the apps themselves. */
+    /** A folder title for a group, derived from the apps and the namespace. */
     fun titleFor(group: List<Fact>, namespace: String?): String {
         commonLabelPrefix(group.map { it.label })?.let { return it }
         val ns = namespace ?: group.mapNotNull { namespaceOf(it.packageName) }
             .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
-        ns?.let { name ->
-            val segment = name.split('.')
+        if (ns != null) {
+            val segment = ns.split('.')
                 .filter { part -> part.isNotBlank() && part.lowercase() !in PLATFORM }
                 .lastOrNull()
             if (segment != null) {

@@ -587,10 +587,10 @@ open class OeaSystemToolsActivity : Activity() {
         val box = page.content
         kit.note(
             box,
-            "Families are worked out from the phone itself — apps that share an app id, a signing key or a " +
-                "publisher namespace. Nothing to write down. A folder appears once two or more of its apps are " +
-                "installed and follows installs and uninstalls; its name is derived from its apps and keeps itself up " +
-                "to date, unless you rename it. Moving, adding and removing apps by hand always wins."
+            "Families are worked out from the phone itself: one publisher's namespace, with two or more of its " +
+                "apps installed. Nothing to write down. A folder follows installs and uninstalls, and its name is " +
+                "derived from its apps and keeps itself up to date, unless you rename it. Moving, adding and " +
+                "removing apps by hand always wins."
         )
         OeaSmartFolders.families(this).forEach { (family, enabled) ->
             kit.sectionTitle(box, family.title)

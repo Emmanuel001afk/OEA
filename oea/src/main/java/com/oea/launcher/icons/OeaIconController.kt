@@ -201,11 +201,20 @@ class OeaIconController(private val context: Context) {
         // re-rendering every icon.
         val disk = diskName(key, packageName, style.pack)
         if (disk != null) readDisk(disk)?.let { cached ->
-            rendered.put(key, cached)
-            return cached
+            // An icon is not "a bitmap that decoded". A render that produced no
+            // pixels can be written by an older build (an adaptive icon with empty
+            // layers, a themed tint over nothing) and then read back for ever: the
+            // tile keeps a hole where its icon should be, across every restart,
+            // because nothing ever looks at what is in the file.
+            if (!isBlank(cached)) {
+                rendered.put(key, cached)
+                return cached
+            }
+            deleteDisk(disk)
         }
         val base = rawIcon(packageName, className, style.pack) ?: return null
         val bitmap = runCatching { render(base.drawable, base.fromPack, style) }.getOrNull() ?: return null
+        if (isBlank(bitmap)) return null
         rendered.put(key, bitmap)
         if (disk != null) writeDisk(disk, bitmap)
         return bitmap
@@ -473,6 +482,16 @@ class OeaIconController(private val context: Context) {
                     fg.draw(layerCanvas)
                 }
             }
+            if (isBlank(layers)) {
+                // Some preinstalled apps ship an adaptive icon whose background and
+                // foreground are both empty. Masking nothing gives nothing; draw the
+                // icon as it is instead of caching a hole.
+                layers.recycle()
+                if (style.themed) canvas.drawColor(style.themedBg)
+                drawFitted(canvas, drawable, s)
+                if (isBlank(out)) drawDefault(canvas, s)
+                return out
+            }
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
                 shader = BitmapShader(layers, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
             }
@@ -488,6 +507,13 @@ class OeaIconController(private val context: Context) {
         }
         val probe = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
         drawFitted(Canvas(probe), drawable, s)
+        if (isBlank(probe)) {
+            // Nothing was drawn, so wrapping it in a shape would just produce a plate
+            // with no icon on it. Android's own default icon is the honest answer.
+            probe.recycle()
+            drawDefault(canvas, s)
+            return out
+        }
         val inset = (s * 0.06f).toInt().coerceAtLeast(2)
         val fullBleed = listOf(
             probe.getPixel(inset, inset), probe.getPixel(s - 1 - inset, inset),
@@ -511,6 +537,35 @@ class OeaIconController(private val context: Context) {
         }
         probe.recycle()
         return out
+    }
+
+    /**
+     * True when a bitmap has no pixel at all. Sampling a 16x16 grid is enough: a
+     * real icon always has something near the middle or the edges, and this runs off
+     * the main thread, once per resolve.
+     */
+    private fun isBlank(bitmap: Bitmap): Boolean {
+        val stepX = (bitmap.width / 16).coerceAtLeast(1)
+        val stepY = (bitmap.height / 16).coerceAtLeast(1)
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                if (Color.alpha(bitmap.getPixel(x, y)) != 0) return false
+                x += stepX
+            }
+            y += stepY
+        }
+        return true
+    }
+
+    /** Android's own "some icon" — the last thing between a tile and a hole. */
+    private fun drawDefault(canvas: Canvas, s: Int) {
+        runCatching { drawFitted(canvas, packageManager.defaultActivityIcon, s) }
+    }
+
+    private fun deleteDisk(name: String) {
+        runCatching { File(diskDir(), name).delete() }
     }
 
     private fun drawFitted(canvas: Canvas, drawable: Drawable, s: Int) {

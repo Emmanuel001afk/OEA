@@ -1,18 +1,17 @@
 package com.oea.launcher.workspace
 
 import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.model.OeaAppInfo
 
 /**
  * Automatic app-family folders ("smart folders").
  *
- * Families are worked out from the phone, not from a list: apps that share an
- * Android uid, a signing certificate or a publisher namespace belong together (see
- * [OeaAppFamilies]). Nothing is read from a display name to decide membership, and
- * nothing has to be typed in — not the family, not the title. A folder names itself
+ * Families are worked out from the phone, not from a list and not from the things
+ * every app on it shares: a family is one publisher's namespace with two or more of
+ * its apps installed (see [OeaAppFamilies]). Nothing is read from a display name to
+ * decide membership, and nothing has to be typed in — not the family, not the
+ * title. A folder names itself
  * from its apps ("Google Maps" + "Google Photos" → **Google**, `com.transsion.*` →
  * **Transsion**) and keeps that name up to date as members come and go, unless you
  * renamed it yourself, in which case your name wins for ever.
@@ -129,11 +128,9 @@ object OeaSmartFolders {
                 OeaAppFamilies.Fact(
                     key = OeaWorkspaceStore.key(app.packageName, app.className),
                     packageName = app.packageName,
-                    label = app.label,
-                    uid = app.uid
+                    label = app.label
                 )
-            },
-            signatureOf = { packageName -> signatureOf(context, packageName) }
+            }
         )
 
         val signature = discovered.joinToString("|") { family ->
@@ -261,37 +258,4 @@ object OeaSmartFolders {
     }
 
     @Volatile private var cachedSignature: String? = null
-
-    private val signatures = HashMap<String, String>()
-
-    /**
-     * An app's signing certificate, shortened to a stable digest.
-     *
-     * Read once per process per package and only for apps the uid and namespace
-     * passes could not place, so a phone whose families share a uid never pays for it.
-     */
-    @Suppress("DEPRECATION")
-    private fun signatureOf(context: Context, packageName: String): String? {
-        val cached = synchronized(signatures) { signatures[packageName] }
-        if (cached != null) return if (cached.isBlank()) null else cached
-        val digest = runCatching {
-            val pm = context.packageManager
-            val bytes = when {
-                Build.VERSION.SDK_INT >= 28 ->
-                    pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-                        .signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
-                else ->
-                    pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
-                        .signatures?.firstOrNull()?.toByteArray()
-            }
-            if (bytes == null) {
-                ""
-            } else {
-                java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
-                    .joinToString("") { "%02x".format(it) }
-            }
-        }.getOrDefault("")
-        synchronized(signatures) { signatures[packageName] = digest }
-        return if (digest.isBlank()) null else digest
-    }
 }
