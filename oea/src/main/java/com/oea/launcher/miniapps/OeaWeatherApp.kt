@@ -17,6 +17,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 import org.json.JSONObject
 
 /**
@@ -51,6 +52,9 @@ object OeaWeatherApp {
     private const val KEY_UNIT_C = "unit_celsius"
     private const val KEY_AQ_CACHE = "air_cache"
     private const val KEY_AQ_LAST = "air_fetch"
+    /** Which place a cached reading belongs to; a cache for another place is not used. */
+    private const val KEY_CACHE_PLACE = "cache_place"
+    private const val KEY_AQ_PLACE = "air_place"
     private const val CACHE_MS = 30 * 60 * 1000L
 
     private val io = Executors.newFixedThreadPool(2) { Thread(it, "OeaWeather").apply { isDaemon = true } }
@@ -97,14 +101,27 @@ object OeaWeatherApp {
         val content = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
         shell.body.addView(content)
         var lastNow: Now? = null
+        // Only the newest fetch may paint. Before this, a slow answer for the previous
+        // city (or for a refresh the user had already repeated) could land after a newer
+        // one and overwrite the screen — the classic stale-response race.
+        var generation = 0
 
         fun reload(force: Boolean) {
-            fetch(host, kit, content, force) { now, fetchedAt ->
+            val current = ++generation
+            fetch(
+                host, kit, content, force,
+                isCurrent = { current == generation },
+                onRetry = { reload(force = true) }
+            ) { now, fetchedAt ->
                 lastNow = now
-                val stamp = if (fetchedAt > 0L) " · Updated ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(fetchedAt))}" else ""
-                shell.bar.setSubtitle(now.city + stamp)
+                val age = OeaWeatherFormat.age(System.currentTimeMillis(), fetchedAt)
+                shell.bar.setSubtitle(now.city + (age?.let { " · updated $it" } ?: ""))
             }
         }
+
+        // Coming back to the screen re-checks the half-hour cache instead of showing
+        // whatever was painted when the app was last used.
+        host.miniResumeHook = { reload(force = false) }
 
         shell.bar.addAction(R.drawable.oic_search, "Search city") {
             searchLocation(host, kit) { _, _, _ -> reload(force = true) }
@@ -122,6 +139,9 @@ object OeaWeatherApp {
                 if (isCelsius) "Metric (°C, km/h, mm) · Tap for °F" else "Imperial (°F, mph, in) · Tap for °C"
             ) {
                 prefs(host).edit().putBoolean(KEY_UNIT_C, !isCelsius).apply()
+                // The widget reads the same key (see OeaWidgetStudio.weatherUsesFahrenheit),
+                // so it has to be told to repaint the new unit.
+                runCatching { com.oea.launcher.widgets.OeaWidgetStudio.refreshWidgets(host, "weather") }
                 reload(force = false)
             }
             actions += OeaAppKit.Action(
@@ -158,16 +178,16 @@ object OeaWeatherApp {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** True when the phone has an active (metered or unmetered) data connection. */
+    /**
+     * True when the phone has an active internet-capable connection.
+     *
+     * The old version also carried a pre-Marshmallow branch that could not run on this
+     * app's minimum (26) and called the deprecated `activeNetworkInfo`.
+     */
     private fun isOnline(ctx: Context): Boolean {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            val network = cm.activeNetwork
-            network != null && cm.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        } else {
-            val network = cm.activeNetworkInfo
-            network != null && network.isConnected
-        }
+        val network = cm.activeNetwork ?: return false
+        return cm.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
     }
 
     // ------------------------------------------------------------------ search
@@ -180,21 +200,32 @@ object OeaWeatherApp {
             panel.addView(results)
             kit.note(results, "Two letters is enough to start. Nothing is sent anywhere but the geocoder's name lookup.")
 
+            // Typing asks the geocoder once per pause, and only the newest question may
+            // paint an answer: a slow reply for "la" must not replace the results for
+            // "lagos" that arrived first.
+            var searchToken = 0
+            val debounce = android.os.Handler(android.os.Looper.getMainLooper())
+            var pending: Runnable? = null
+
             fun search(query: String) {
                 if (query.trim().length < 2) {
+                    searchToken++
                     results.removeAllViews()
                     kit.note(results, "Two letters is enough to start. Nothing is sent anywhere but the geocoder's name lookup.")
                     return
                 }
+                val token = ++searchToken
                 results.removeAllViews()
                 results.addView(kit.text("Searching…", 13f, kit.palette.textSecondary))
                 io.execute {
                     try {
                         val encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8")
-                        val obj = JSONObject(URL("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=6&language=en&format=json").readText())
+                        val obj = JSONObject(
+                            readUrl("https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=6&language=en&format=json")
+                        )
                         val arr = obj.optJSONArray("results")
                         host.runOnUiThread {
-                            if (host.isDestroyed) return@runOnUiThread
+                            if (host.isDestroyed || token != searchToken) return@runOnUiThread
                             results.removeAllViews()
                             if (arr == null || arr.length() == 0) {
                                 kit.note(results, "No place called \"$query\" in the geocoder")
@@ -222,9 +253,9 @@ object OeaWeatherApp {
                         }
                     } catch (e: Throwable) {
                         host.runOnUiThread {
-                            if (host.isDestroyed) return@runOnUiThread
+                            if (host.isDestroyed || token != searchToken) return@runOnUiThread
                             results.removeAllViews()
-                            kit.note(results, "The search did not come back: ${e.message}")
+                            kit.note(results, if (!isOnline(host)) "No connection to search for places" else "The place search did not answer")
                         }
                     }
                 }
@@ -233,18 +264,52 @@ object OeaWeatherApp {
             field.addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                override fun afterTextChanged(s: android.text.Editable?) { search(s?.toString() ?: "") }
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    val query = s?.toString().orEmpty()
+                    pending?.let { debounce.removeCallbacks(it) }
+                    val task = Runnable { search(query) }
+                    pending = task
+                    debounce.postDelayed(task, 280L)
+                }
             })
         }
     }
 
     // ------------------------------------------------------------------ fetch
 
+    /**
+     * A request that cannot hang a pool thread for minutes on a dead network.
+     *
+     * `URL.readText()` has no timeout of any kind: on a captive portal or a train
+     * tunnel the thread waits for the OS default, which is minutes, and the screen
+     * stays on "Updating forecast…" with nothing to press. Ten seconds to connect and
+     * fifteen to read is long enough for a slow mobile network and short enough that
+     * the Retry button means something.
+     */
+    private fun readUrl(url: String): String {
+        val connection = (URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 15_000
+            instanceFollowRedirects = true
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "OEA-Weather/1.0 (Android)")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw java.io.IOException("HTTP $code")
+            return connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            runCatching { connection.disconnect() }
+        }
+    }
+
     private fun fetch(
         host: Activity,
         kit: OeaAppKit,
         content: LinearLayout,
         force: Boolean,
+        isCurrent: () -> Boolean,
+        onRetry: () -> Unit,
         onLoaded: (Now, Long) -> Unit = { _, _ -> }
     ) {
         content.removeAllViews()
@@ -271,17 +336,23 @@ object OeaWeatherApp {
                         lon = fix.longitude
                         city = "%.3f, %.3f".format(lat, lon)
                     } else {
-                        // A fixed starting point beats an empty screen; the chip in the
-                        // header lets you put your own city in one tap.
+                        // A fixed starting point beats an empty screen; the search in the
+                        // header puts your own city in one tap.
                         lat = 6.5244
                         lon = 3.3792
                         city = "Lagos"
                     }
                 }
 
+                // The cache belongs to a place. Without this, switching city and then
+                // opening Weather offline printed the *new* city's name above the *old*
+                // city's weather.
+                val place = OeaWeatherFormat.placeKey(lat, lon)
                 val cached = p.getString(KEY_CACHE, null)
+                    ?.takeIf { p.getString(KEY_CACHE_PLACE, null) == place }
                 val lastFetch = p.getLong(KEY_LAST, 0L)
                 val fresh = System.currentTimeMillis() - lastFetch < CACHE_MS
+                var fetchedAt = lastFetch
                 val text = if (!force && cached != null && fresh) {
                     cached
                 } else {
@@ -291,12 +362,25 @@ object OeaWeatherApp {
                         "&hourly=temperature_2m,weather_code,wind_speed_10m,precipitation_probability" +
                         "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,precipitation_probability_max,uv_index_max,wind_gusts_10m_max" +
                         "&timezone=auto&forecast_days=7"
-                    runCatching { URL(url).readText() }.getOrElse { error ->
-                        if (cached != null) cached else throw error
+                    try {
+                        val body = readUrl(url)
+                        // The timestamp follows a *successful* request, even when the
+                        // bytes are identical to the cache — otherwise a stable forecast
+                        // looked stale forever and every open re-downloaded it.
+                        fetchedAt = System.currentTimeMillis()
+                        p.edit()
+                            .putString(KEY_CACHE, body)
+                            .putString(KEY_CACHE_PLACE, place)
+                            .putLong(KEY_LAST, fetchedAt)
+                            .apply()
+                        body
+                    } catch (network: Throwable) {
+                        // Offline with a reading for *this* place: keep it and let the
+                        // card say how old it is. A reading for another place is not a
+                        // fallback, it is a lie, so it is not used.
+                        if (cached != null) cached else throw network
                     }
                 }
-                if (cached != text) p.edit().putString(KEY_CACHE, text).putLong(KEY_LAST, System.currentTimeMillis()).apply()
-                val fetchedAt = if (cached != text) System.currentTimeMillis() else lastFetch
 
                 val obj = JSONObject(text)
                 val current = obj.optJSONObject("current")
@@ -381,15 +465,18 @@ object OeaWeatherApp {
                 val air = fetchAir(host, lat, lon)
 
                 host.runOnUiThread {
-                    if (host.isDestroyed) return@runOnUiThread
+                    if (host.isDestroyed || !isCurrent()) return@runOnUiThread
                     onLoaded(now, fetchedAt)
                     render(host, kit, content, now, hours, days, air, fetchedAt)
                 }
             } catch (e: Throwable) {
+                // The connectivity check is a binder call; it belongs on this thread,
+                // not on the frame.
+                val offline = !isOnline(host)
                 host.runOnUiThread {
-                    if (host.isDestroyed) return@runOnUiThread
+                    if (host.isDestroyed || !isCurrent()) return@runOnUiThread
                     content.removeAllViews()
-                    val (title, message) = if (!isOnline(host)) {
+                    val (title, message) = if (offline) {
                         "No internet connection" to
                             "Connect to mobile data or Wi-Fi, then tap Retry to load live conditions."
                     } else {
@@ -397,12 +484,7 @@ object OeaWeatherApp {
                             "The forecast service did not respond. Tap Retry to try again."
                     }
                     content.addView(
-                        kit.emptyState(
-                            R.drawable.oic_warning_fill,
-                            title,
-                            message,
-                            "Retry"
-                        ) { fetch(host, kit, content, true, onLoaded) },
+                        kit.emptyState(R.drawable.oic_warning_fill, title, message, "Retry") { onRetry() },
                         LinearLayout.LayoutParams(-1, -2).apply { topMargin = kit.dp(12) }
                     )
                 }
@@ -412,15 +494,23 @@ object OeaWeatherApp {
 
     private fun fetchAir(context: Context, lat: Double, lon: Double): Air? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val place = OeaWeatherFormat.placeKey(lat, lon)
         val cached = prefs.getString(KEY_AQ_CACHE, null)
+            ?.takeIf { prefs.getString(KEY_AQ_PLACE, null) == place }
         val last = prefs.getLong(KEY_AQ_LAST, 0L)
         if (cached != null && System.currentTimeMillis() - last < CACHE_MS) return parseAir(cached)
         return runCatching {
-            val body = URL(
+            val body = readUrl(
                 "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=$lat&longitude=$lon&current=us_aqi,pm2_5,pm10"
-            ).readText()
+            )
             val parsed = parseAir(body)
-            if (parsed != null) prefs.edit().putString(KEY_AQ_CACHE, body).putLong(KEY_AQ_LAST, System.currentTimeMillis()).apply()
+            if (parsed != null) {
+                prefs.edit()
+                    .putString(KEY_AQ_CACHE, body)
+                    .putString(KEY_AQ_PLACE, place)
+                    .putLong(KEY_AQ_LAST, System.currentTimeMillis())
+                    .apply()
+            }
             parsed
         }.getOrNull()
     }
@@ -457,45 +547,50 @@ object OeaWeatherApp {
         }
         card.addView(kit.text(now.city, 16f, palette.text, OeaType.medium).apply { gravity = Gravity.CENTER })
         card.addView(
-            kit.text("${shown(if (celsius) now.temp else toF(now.temp))}°", 60f, palette.text, OeaType.light)
+            kit.text(OeaWeatherFormat.degrees(now.temp, celsius), 60f, palette.text, OeaType.light)
                 .apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(2), 0, 0) }
         )
         card.addView(
-            kit.text(weatherDesc(now.code), 16f, palette.text, OeaType.medium)
+            kit.text(OeaWeatherFormat.description(now.code), 16f, palette.text, OeaType.medium)
                 .apply { gravity = Gravity.CENTER }
         )
         val todayRange = days.firstOrNull()?.let { d ->
-            val hi = shown(if (celsius) d.max else toF(d.max))
-            val lo = shown(if (celsius) d.min else toF(d.min))
-            "H:$hi°  L:$lo°  ·  "
+            "H:${OeaWeatherFormat.degrees(d.max, celsius)}  L:${OeaWeatherFormat.degrees(d.min, celsius)}  ·  "
         }.orEmpty()
         card.addView(
             kit.text(
-                "${todayRange}Feels like ${shown(if (celsius) now.feelsLike else toF(now.feelsLike))}$unitLabel",
+                "${todayRange}Feels like ${OeaWeatherFormat.temperature(now.feelsLike, celsius)}$unitLabel",
                 13.5f,
                 palette.textSecondary
             ).apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(4), 0, 0) }
         )
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
 
-        val speed = if (celsius) "${now.wind.toInt()} km/h" else "%.0f mph".format(now.wind * 0.621371)
         val statsTop = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
-        statsTop.addView(kit.statTile("Wind", speed, palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
+        statsTop.addView(kit.statTile("Wind", OeaWeatherFormat.speed(now.wind, celsius), palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
         statsTop.addView(kit.statTile("Humidity", "${now.humidity}%", palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
-        statsTop.addView(kit.statTile("UV peak", "${now.uvPeak.toInt()}", palette.text), LinearLayout.LayoutParams(0, -2, 1f))
+        statsTop.addView(kit.statTile("UV peak", "${now.uvPeak.roundToInt()}", palette.text), LinearLayout.LayoutParams(0, -2, 1f))
         content.addView(statsTop, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
 
         val statsBottom = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL }
         statsBottom.addView(kit.statTile("Sunrise", formatTime(now.sunrise), palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
         statsBottom.addView(kit.statTile("Sunset", formatTime(now.sunset), palette.text), LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = kit.dp(8) })
-        statsBottom.addView(kit.statTile("Pressure", "${now.pressure.toInt()} hPa", palette.text), LinearLayout.LayoutParams(0, -2, 1f))
+        statsBottom.addView(kit.statTile("Pressure", OeaWeatherFormat.pressure(now.pressure), palette.text), LinearLayout.LayoutParams(0, -2, 1f))
         content.addView(statsBottom, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
 
-        val advisories = advisories(now, days)
+        val advisories = OeaWeatherFormat.advisories(now, days.firstOrNull(), celsius)
         if (advisories.isNotEmpty()) {
             kit.sectionTitle(content, "Advisories")
             advisories.forEach { advice ->
-                kit.banner(content, advice.icon, advice.title, advice.body, advice.tone, null, null)
+                val (icon, tone) = when (advice.kind) {
+                    OeaWeatherAdvisoryKind.GUSTS -> R.drawable.oic_speed to OeaKit.Tone.WARNING
+                    OeaWeatherAdvisoryKind.THUNDER -> R.drawable.oic_warning_fill to OeaKit.Tone.DANGER
+                    OeaWeatherAdvisoryKind.UV -> R.drawable.oic_brightness_medium to OeaKit.Tone.WARNING
+                    OeaWeatherAdvisoryKind.FROST -> R.drawable.oic_ac_unit to OeaKit.Tone.INFO
+                    OeaWeatherAdvisoryKind.RAIN -> R.drawable.oic_visibility_off to OeaKit.Tone.WARNING
+                    OeaWeatherAdvisoryKind.HEAT -> R.drawable.oic_thermostat to OeaKit.Tone.DANGER
+                }
+                kit.banner(content, icon, advice.title, advice.body, tone, null, null)
             }
         }
 
@@ -513,10 +608,10 @@ object OeaWeatherApp {
                 val secondaryFg = if (idx == 0) palette.onAccentSoft else palette.textSecondary
                 col.addView(kit.text(if (idx == 0) "Now" else formatTime(hour.time), 11.5f, secondaryFg, OeaType.medium).apply { gravity = Gravity.CENTER })
                 col.addView(
-                    kit.text("${shown(if (celsius) hour.temp else toF(hour.temp))}°", 18f, primaryFg, OeaType.medium)
+                    kit.text(OeaWeatherFormat.degrees(hour.temp, celsius), 18f, primaryFg, OeaType.medium)
                         .apply { gravity = Gravity.CENTER; setPadding(0, kit.dp(5), 0, kit.dp(3)) }
                 )
-                col.addView(kit.text(weatherDesc(hour.code), 10.5f, secondaryFg).apply { gravity = Gravity.CENTER; maxLines = 1 })
+                col.addView(kit.text(OeaWeatherFormat.description(hour.code), 10.5f, secondaryFg).apply { gravity = Gravity.CENTER; maxLines = 1 })
                 if (hour.rainChance > 0) {
                     col.addView(kit.text("${hour.rainChance}%", 10.5f, if (idx == 0) primaryFg else palette.accent, OeaType.medium).apply {
                         gravity = Gravity.CENTER
@@ -532,10 +627,10 @@ object OeaWeatherApp {
             kit.sectionTitle(content, "7-day forecast")
             val group = kit.group(content)
             days.forEachIndexed { index, day ->
-                val maxT = shown(if (celsius) day.max else toF(day.max))
-                val minT = shown(if (celsius) day.min else toF(day.min))
+                val maxT = OeaWeatherFormat.temperature(day.max, celsius)
+                val minT = OeaWeatherFormat.temperature(day.min, celsius)
                 val sub = buildString {
-                    append(weatherDesc(day.code))
+                    append(OeaWeatherFormat.description(day.code))
                     if (day.rainChance > 0) append(" · ${day.rainChance}% rain")
                 }
                 kit.row(
@@ -558,61 +653,45 @@ object OeaWeatherApp {
                 group,
                 R.drawable.oic_ac_unit,
                 "US AQI ${air.aqi}",
-                airAdvice(air.aqi),
-                value = "PM2.5 ${"%.1f".format(air.pm25)}",
+                OeaWeatherFormat.airAdvice(air.aqi),
+                value = "PM2.5 ${String.format(Locale.US, "%.1f", air.pm25)} µg/m³",
                 chevron = false
             )
-            kit.row(group, R.drawable.oic_info, "PM10", "Estimated particulate density", value = "${"%.1f".format(air.pm10)} µg/m³", chevron = false)
+            kit.row(group, R.drawable.oic_info, "PM10", "Estimated particulate density", value = "${String.format(Locale.US, "%.1f", air.pm10)} µg/m³", chevron = false)
         }
 
         if (fetchedAt > 0L) {
             val stamp = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(fetchedAt))
-            kit.note(content, "Source: Open-Meteo · Updated $stamp")
+            val age = OeaWeatherFormat.age(System.currentTimeMillis(), fetchedAt)
+            if (OeaWeatherFormat.stale(System.currentTimeMillis(), fetchedAt)) {
+                kit.banner(
+                    content,
+                    R.drawable.oic_history,
+                    "Showing a reading from $stamp",
+                    "That is ${age ?: "a while"} old. Reconnect and pull the refresh button for today's numbers.",
+                    OeaKit.Tone.INFO,
+                    null,
+                    null
+                )
+            }
+            kit.note(content, "Source: Open-Meteo · Updated $stamp${age?.let { " ($it)" } ?: ""}")
         }
     }
 
     private fun showDay(host: Activity, kit: OeaKit, day: ForecastDay, celsius: Boolean) {
-        kit.sheet(dayLabel(day.date), weatherDesc(day.code)) { panel, _ ->
+        kit.sheet(dayLabel(day.date), OeaWeatherFormat.description(day.code)) { panel, _ ->
             val group = kit.group(panel)
-            kit.row(group, R.drawable.oic_thermostat, "High / low", "${if (celsius) day.max else toF(day.max)}° / ${if (celsius) day.min else toF(day.min)}°", chevron = false)
-            kit.row(group, R.drawable.oic_ac_unit, "Rain", "${day.rainMm} mm total, ${day.rainChance}% of it falling", chevron = false)
-            kit.row(group, R.drawable.oic_brightness_medium, "UV at its worst", day.uvPeak.toInt().toString(), chevron = false)
-            kit.row(group, R.drawable.oic_speed, "Gusts", "${day.gust.toInt()} km/h", chevron = false)
+            kit.row(group, R.drawable.oic_thermostat, "High / low",
+                "${OeaWeatherFormat.degrees(day.max, celsius)} / ${OeaWeatherFormat.degrees(day.min, celsius)}", chevron = false)
+            kit.row(group, R.drawable.oic_ac_unit, "Rain",
+                "${OeaWeatherFormat.rain(day.rainMm, celsius)} total, ${day.rainChance}% chance", chevron = false)
+            kit.row(group, R.drawable.oic_brightness_medium, "UV at its worst", day.uvPeak.roundToInt().toString(), chevron = false)
+            kit.row(group, R.drawable.oic_speed, "Gusts", OeaWeatherFormat.speed(day.gust, celsius), chevron = false)
             kit.row(group, R.drawable.oic_schedule, "Sunrise · sunset", "${formatTime(day.sunrise)} → ${formatTime(day.sunset)}", chevron = false)
         }
     }
 
-    // ------------------------------------------------------------------ advisories
-
-    private class Advice(val icon: Int, val title: String, val body: String, val tone: OeaKit.Tone)
-
-    private fun advisories(now: Now, days: List<ForecastDay>): List<Advice> {
-        val out = ArrayList<Advice>()
-        if (now.gust >= 60) out.add(Advice(R.drawable.oic_speed, "Gusts at ${now.gust.toInt()} km/h", "Loose things outside will move. OEA raises this at 60 km/h and above.", OeaKit.Tone.WARNING))
-        if (now.code in 95..99) out.add(Advice(R.drawable.oic_warning_fill, "Thunder overhead", "Wet code ${now.code} — the storm is the forecast's, not OEA's guess.", OeaKit.Tone.DANGER))
-        if (now.uvPeak >= 8) out.add(Advice(R.drawable.oic_brightness_medium, "UV ${now.uvPeak.toInt()} today", "Short exposure burns at this level. Raised from 8.", OeaKit.Tone.WARNING))
-        if (days.firstOrNull()?.min?.let { it <= 2.0 } == true) out.add(Advice(R.drawable.oic_ac_unit, "Near freezing tonight", "${days[0].min.toInt()}° at the coldest — frost where it is damp.", OeaKit.Tone.INFO))
-        val wet = days.firstOrNull()?.rainMm ?: 0.0
-        if (wet >= 20) out.add(Advice(R.drawable.oic_visibility_off, "${wet.toInt()} mm of rain today", "Standing water and slow drains; the number is the model's total.", OeaKit.Tone.WARNING))
-        val hot = days.firstOrNull()?.max ?: 0.0
-        if (hot >= 38) out.add(Advice(R.drawable.oic_thermostat, "High of ${hot.toInt()}°", "Water, shade, and no midday work outdoors.", OeaKit.Tone.DANGER))
-        return out
-    }
-
-    private fun airAdvice(aqi: Int): String = when {
-        aqi <= 50 -> "Good — go outside"
-        aqi <= 100 -> "Moderate — sensitive throats may care"
-        aqi <= 150 -> "Unhealthy for the young, the old and anyone breathing hard"
-        aqi <= 200 -> "Unhealthy for everyone; keep the run short"
-        aqi <= 300 -> "Very unhealthy — windows shut"
-        else -> "Hazardous — this is a stay-in day"
-    }
-
     // ------------------------------------------------------------------ small
-
-    private fun toF(celsiusValue: Double): Double = celsiusValue * 9.0 / 5.0 + 32.0
-
-    private fun shown(value: Double): String = value.toInt().toString()
 
     private fun dayLabel(iso: String): String = try {
         val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(iso)
@@ -626,25 +705,4 @@ object OeaWeatherApp {
 
     private fun encode(text: String): String = java.net.URLEncoder.encode(text, "UTF-8")
 
-    private fun weatherDesc(code: Int): String = when (code) {
-        0 -> "Clear sky"
-        1 -> "Mainly clear"
-        2 -> "Partly cloudy"
-        3 -> "Overcast"
-        45, 48 -> "Fog"
-        51, 53, 55 -> "Drizzle"
-        56, 57 -> "Freezing drizzle"
-        61 -> "Light rain"
-        63 -> "Rain"
-        65 -> "Heavy rain"
-        66, 67 -> "Freezing rain"
-        71 -> "Light snow"
-        73, 75 -> "Snow"
-        77 -> "Snow grains"
-        80, 81, 82 -> "Rain showers"
-        85, 86 -> "Snow showers"
-        95 -> "Thunderstorm"
-        96, 99 -> "Thunderstorm with hail"
-        else -> "Weather $code"
-    }
 }
