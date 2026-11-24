@@ -19,6 +19,7 @@ import com.oea.engine.core.GameLaunch
 import com.oea.engine.core.GameResult
 import com.oea.engine.core.HostUi
 import com.oea.engine.core.MenuItem
+import com.oea.engine.core.MenuKind
 import com.oea.engine.core.PlayMode
 import com.oea.games.OeaGames
 import com.oea.launcher.data.OeaDataStore
@@ -26,6 +27,7 @@ import com.oea.launcher.fault.OeaFaultShield
 import com.oea.launcher.perf.OeaGameRescue
 import com.oea.launcher.ui.OeaKit
 import com.oea.launcher.ui.OeaScreenFailure
+import com.oea.launcher.ui.OeaType
 import com.oea.launcher.workspace.OeaDynamicIslandView
 
 /**
@@ -306,8 +308,25 @@ class OeaGameActivity : Activity(), HostUi {
         var picked = false
         OeaFaultShield.guard("game:menu") {
             val dialog = kit.sheet(title, subtitle) { panel, d ->
+                // A game hands us a grouped menu: headers split it into
+                // sections, rows show their live value, and nothing is a wall.
                 items.forEach { item ->
-                    val row = kit.button(item.label, kit.palette.cardHigh, if (item.destructive) kit.palette.danger else kit.palette.text) {
+                    if (item.kind == MenuKind.HEADER) {
+                        panel.addView(
+                            kit.text(item.label.uppercase(), 11f, kit.palette.textTertiary, OeaType.medium).apply {
+                                letterSpacing = 0.12f
+                                setPadding(kit.dp(8), kit.dp(14), kit.dp(8), kit.dp(6))
+                            },
+                            LinearLayout.LayoutParams(-1, -2)
+                        )
+                        return@forEach
+                    }
+                    // Rows with a live value (a choice, a toggle, a slider) get the
+                    // value on the same line as the label, so the menu reads as a
+                    // settings page rather than a list of buttons.
+                    val value = item.value
+                    val label = if (value.isNullOrBlank()) item.label else "${item.label}    ·    $value"
+                    val row = kit.button(label, kit.palette.cardHigh, if (item.destructive) kit.palette.danger else kit.palette.text) {
                         picked = true
                         d.dismiss()
                         onPick(item.id)

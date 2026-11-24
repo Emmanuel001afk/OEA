@@ -369,6 +369,7 @@ uniform sampler2D u_bloom;
 uniform vec2 u_texel;
 uniform vec2 u_bloomUvScale;
 uniform vec4 u_params;   // fxaa, bloomStrength, vignette, sharpen
+uniform vec4 u_grade;    // contrast, saturation, warmth, clarity
 uniform vec2 u_uvMax;
 uniform float u_time;
 out vec4 fragColor;
@@ -409,6 +410,32 @@ void main() {
     if (u_params.z > 0.0) {
         vec2 p = v_uv / u_uvMax - 0.5;
         c *= 1.0 - u_params.z * dot(p, p) * 1.6;
+    }
+    // Grade: the filmic look that makes a 3D scene read as a photograph rather
+    // than a renderer. Saturation and contrast are the two that matter; warmth
+    // is a split tone (amber in the highlights, blue in the shadows) and clarity
+    // is a small local-contrast lift so terrain edges keep their definition.
+    if (u_grade.x > 0.0 || u_grade.y != 1.0 || abs(u_grade.z) > 0.001 || u_grade.w > 0.0) {
+        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = mix(vec3(l), c, u_grade.y);
+        c = (c - 0.5) * u_grade.x + 0.5;
+        if (abs(u_grade.z) > 0.001) {
+            // Split tone: highlights lean warm, shadows lean cool, and the sign
+            // of `u_grade.z` decides how far the whole image is pushed. Adding
+            // the warmth to the luminance ramp (rather than halving it) keeps a
+            // neutral grade neutral: z = 0 leaves only a whisper of split tone,
+            // a positive z warms the top of the range to full, a negative z
+            // leaves the shadows cool and pulls the highlights back.
+            vec3 warm = vec3(1.045, 1.005, 0.955);
+            vec3 cool = vec3(0.960, 0.990, 1.050);
+            c *= mix(cool, warm, clamp(smoothstep(0.18, 0.86, l) + u_grade.z, 0.0, 1.0));
+        }
+        if (u_grade.w > 0.0) {
+            vec3 blurC = (tap(v_uv + vec2(u_texel.x, 0.0)) + tap(v_uv - vec2(u_texel.x, 0.0)) +
+                          tap(v_uv + vec2(0.0, u_texel.y)) + tap(v_uv - vec2(0.0, u_texel.y))) * 0.25;
+            c += (c - blurC) * u_grade.w;
+        }
+        c = clamp(c, 0.0, 1.0);
     }
     float n = fract(sin(dot(gl_FragCoord.xy + u_time, vec2(12.9898, 78.233))) * 43758.5453);
     c += (n - 0.5) / 255.0;

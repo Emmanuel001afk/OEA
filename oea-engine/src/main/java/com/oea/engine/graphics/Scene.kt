@@ -94,6 +94,18 @@ class Environment {
     /** Exponential-squared fog density; 0 disables fog. */
     var fogDensity = 0.006f
     var exposure = 1f
+    /**
+     * Colour grade applied in the final composite. A scene lit physically still
+     * reads as "a renderer" until it is graded: [contrast] deepens the tonal
+     * range, [saturation] decides whether the island looks like a photograph or
+     * a toy, [warmth] split-tones highlights amber and shadows blue, and
+     * [clarity] adds a little local contrast so terrain edges stay legible at
+     * distance. Defaults are a neutral-but-film look, not a filter.
+     */
+    var contrast = 1.06f
+    var saturation = 1.08f
+    var warmth = 0.18f
+    var clarity = 0.10f
     var shadows = true
     /** Shadow coverage radius around the camera focus. */
     var shadowDistance = 45f
@@ -110,6 +122,7 @@ class Environment {
         skyAmbient = o.skyAmbient; groundAmbient = o.groundAmbient; ambientIntensity = o.ambientIntensity
         drawSky = o.drawSky; skyTop = o.skyTop; skyHorizon = o.skyHorizon; skyGround = o.skyGround; sunSize = o.sunSize
         clearColor = o.clearColor; fogColor = o.fogColor; fogDensity = o.fogDensity; exposure = o.exposure
+        contrast = o.contrast; saturation = o.saturation; warmth = o.warmth; clarity = o.clarity
         shadows = o.shadows; shadowDistance = o.shadowDistance; shadowStrength = o.shadowStrength
         pointLights.clear()
         o.pointLights.forEach { l -> pointLights.add(PointLight().set(l.x, l.y, l.z, l.color, l.intensity, l.radius)) }
@@ -124,6 +137,7 @@ class Environment {
             skyTop = 0xFF2B3E78.toInt(); skyHorizon = 0xFFFF9E6B.toInt(); skyGround = 0xFF3C3440.toInt()
             skyAmbient = 0xFF8C88C0.toInt(); groundAmbient = 0xFF5A4038.toInt()
             fogColor = 0xFFE8A07C.toInt(); fogDensity = 0.007f
+            contrast = 1.04f; saturation = 1.12f; warmth = 0.38f; clarity = 0.10f
         }
         fun night() = Environment().apply {
             sunDirection.set(0.3f, 0.6f, -0.5f).nor()
@@ -131,10 +145,12 @@ class Environment {
             skyTop = 0xFF050814.toInt(); skyHorizon = 0xFF1B2440.toInt(); skyGround = 0xFF06070C.toInt()
             skyAmbient = 0xFF3A4A80.toInt(); groundAmbient = 0xFF141520.toInt(); ambientIntensity = 0.55f
             fogColor = 0xFF141B30.toInt(); fogDensity = 0.012f; sunSize = 0.5f
+            contrast = 1.02f; saturation = 0.88f; warmth = -0.14f; clarity = 0.18f
         }
         fun studio() = Environment().apply {
             drawSky = false; clearColor = 0xFF14171D.toInt(); fogDensity = 0f
             skyAmbient = 0xFFB8C4D8.toInt(); groundAmbient = 0xFF3A3530.toInt(); ambientIntensity = 0.7f
+            contrast = 1f; saturation = 1f; warmth = 0f; clarity = 0f
         }
     }
 }

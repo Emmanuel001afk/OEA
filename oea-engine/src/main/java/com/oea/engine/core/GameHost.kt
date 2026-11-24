@@ -378,6 +378,7 @@ class GameHost(
             if (steps == MAX_STEPS) accumulator = 0.0
             time.alpha = (accumulator / step).toFloat().coerceIn(0f, 1f)
             game.onUpdate(dt)
+            audio.updateDuck(dt)
             island.tick()
             graphics.beginFrame(time.alpha, dt)
             game.onRender(graphics)

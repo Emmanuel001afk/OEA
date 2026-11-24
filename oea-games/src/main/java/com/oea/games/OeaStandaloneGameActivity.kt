@@ -30,6 +30,7 @@ import com.oea.engine.core.GameResult
 import com.oea.engine.core.HostUi
 import com.oea.engine.core.LocalPlayer
 import com.oea.engine.core.MenuItem
+import com.oea.engine.core.MenuKind
 import com.oea.engine.core.PlayMode
 import com.oea.engine.net.lan.LanBrowser
 import com.oea.engine.net.lan.LanGame
@@ -216,23 +217,47 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
      */
     private var currentFrontView: View? = null
 
+    /**
+     * How this game wants the screen oriented.
+     *
+     * Only two answers survive, and the difference between them is *who*
+     * decides:
+     *  - "landscape" — the game locks itself sideways. Send Off is one of these:
+     *    a two-stick shooter needs the width, and letting the phone lie any way
+     *    it likes is how you end up holding a portrait phone with a landscape
+     *    HUD crushed into it.
+     *  - "auto" — the game genuinely runs upright and sideways (a board game), so
+     *    it follows the phone.
+     *
+     * There used to be a third, "portrait", for the arena. It was reachable, and
+     * it half-worked — but "half-worked" is the problem: a player would hold the
+     * phone upright, see a cramped view with the minimap sitting on their thumb,
+     * and have no idea whether the game was meant to do that. Send Off is not a
+     * portrait game. Saying so is the fix.
+     */
     private fun savedOrientationMode(d: GameDescriptor): String {
+        // An arena match is always landscape, whatever an older build stored.
+        if (d.orientation == com.oea.engine.core.GameOrientation.LANDSCAPE) return "landscape"
         val raw = runCatching { gamePrefs().getString("screen_orientation", null) }.getOrNull()
         if (raw == "auto" || raw == "portrait" || raw == "landscape") return raw
         return when (d.orientation) {
             com.oea.engine.core.GameOrientation.PORTRAIT -> "portrait"
-            com.oea.engine.core.GameOrientation.LANDSCAPE -> if (d.id == "arena") "auto" else "landscape"
             com.oea.engine.core.GameOrientation.ANY -> "auto"
+            else -> "auto"
         }
     }
 
     private fun applyScreenOrientation(d: GameDescriptor) {
         val mode = savedOrientationMode(d)
+        // Landscape uses SENSOR_LANDSCAPE rather than LANDSCAPE: the phone may be
+        // held either way up, which matters for a left-handed player and for
+        // lying on a sofa. FULL_SENSOR (not FULL_USER) is deliberate for the auto
+        // games, because it also releases the system's own orientation lock.
         runCatching {
             requestedOrientation = when (mode) {
                 "portrait" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
                 "landscape" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
             }
         }
     }
@@ -455,6 +480,11 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         runCatching { finish() }
     }
 
+    /** True when the phone is physically held upright right now. */
+    private fun isPortraitHold(): Boolean =
+        runCatching { resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT }
+            .getOrDefault(false)
+
     override fun frontOrientationMode(): String {
         val d = descriptor ?: return "auto"
         return savedOrientationMode(d)
@@ -465,6 +495,9 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
             "portrait", "landscape" -> mode
             else -> "auto"
         }
+        // A landscape game cannot be asked to run upright, even by an older
+        // front screen or a saved preference. Refuse rather than half-comply.
+        if (descriptor?.orientation == com.oea.engine.core.GameOrientation.LANDSCAPE && clean == "portrait") return
         runCatching { gamePrefs().edit().putString("screen_orientation", clean).apply() }
         descriptor?.let { applyScreenOrientation(it) }
         if (host == null) {
@@ -657,7 +690,9 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         if (lan) {
             s.startLan { info, warning ->
                 if (warning != null) toast(warning)
-                showLobby(joined = false, extra = info?.joinCode?.let { "Wi-Fi join code:\n$it" })
+                // The lobby's host card already shows the code and the addresses
+                // it can be reached on; the toast is only for the failure case.
+                showLobby(joined = false, extra = null)
             }
         } else {
             val invite = s.createOnlineInvite()
@@ -1014,6 +1049,10 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         }
         lobbyStatus = status
         val dialog = k.sheet(s.roomName.ifBlank { "Lobby" }, if (joined) "You are in." else "Waiting for players.") { panel, d ->
+            // The host's own network card, pinned above the scrolling status:
+            // the join code is the one thing a host reads aloud repeatedly, and
+            // it used to arrive as a string buried in a scrolling paragraph.
+            if (!joined && s.isHost) hostCard(panel, d)
             panel.addView(k.boundedScroll(status, 0.5f))
             val buttons = mutableListOf<View>()
             if (!joined && s.isHost) {
@@ -1038,6 +1077,64 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
         }
         lobbyDialog = dialog
         refreshLobby(extra)
+    }
+
+    /**
+     * The host's network card: which networks this game is reachable on, the
+     * join code, and the two buttons that actually get someone connected —
+     * copy the code, or share the whole invitation. The addresses are listed by
+     * kind because "which one do I read out" is the only question a host has.
+     */
+    private fun hostCard(panel: LinearLayout, dialog: android.app.Dialog) {
+        val s = NetSession.current ?: return
+        val k = toolkit()
+        val info = s.lanInfo
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(k.dp(14), k.dp(12), k.dp(14), k.dp(12))
+            background = k.rounded(palette.card, 14, palette.accent, 1)
+        }
+        if (info == null) {
+            card.addView(k.text("Opening the game on your network…", 13f, palette.textSecondary))
+            card.addView(k.text("If this stays here, this phone is not on Wi-Fi or a hotspot.", 12f, palette.textTertiary)
+                .apply { setPadding(0, k.dp(4), 0, 0) })
+            panel.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) })
+            return
+        }
+        // Where the game lives, by network kind.
+        val where = if (info.addresses.isEmpty()) "No Wi-Fi or hotspot right now" else info.addresses.joinToString("\n") {
+            "${it.label} · ${it.address.hostAddress}:${info.port}"
+        }
+        card.addView(k.text("Players on this network", 11f, palette.textTertiary, GameType.medium)
+            .apply { letterSpacing = 0.1f })
+        card.addView(k.text(where, 13f, palette.text).apply { setLineSpacing(k.dpf(2f), 1f); setPadding(0, k.dp(3), 0, k.dp(10)) })
+        card.addView(k.text("JOIN CODE", 11f, palette.textTertiary, GameType.medium).apply { letterSpacing = 0.1f })
+        card.addView(
+            k.text(info.joinCode, 15f, palette.accent, GameType.mono).apply {
+                setTextIsSelectable(true)
+                setPadding(0, k.dp(3), 0, k.dp(10))
+            }
+        )
+        card.addView(
+            k.buttonRow(
+                k.quietButton("Copy code") {
+                    runCatching {
+                        getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                            android.content.ClipData.newPlainText("OEA join code", info.joinCode)
+                        )
+                    }.onSuccess { toast("Join code copied.") }.onFailure { toast("Couldn't copy on this phone.") }
+                },
+                k.quietButton("Refresh") {
+                    s.refreshLanAddresses()
+                    toast("Looking for networks again…")
+                }
+            )
+        )
+        if (info.addresses.isEmpty()) {
+            card.addView(k.text("Turn on Wi-Fi or a hotspot, then tap Refresh. Everyone on that network will see this game in Join nearby.", 12f, palette.textTertiary)
+                .apply { setPadding(0, k.dp(6), 0, 0) })
+        }
+        panel.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(8) })
     }
 
     private fun refreshLobby(extra: String? = null) {
@@ -1282,40 +1379,58 @@ open class OeaStandaloneGameActivity : Activity(), HostUi, GameFrontHost {
             val labels = items.map { it.label }
             k.sheet(title, subtitle) { panel, dialog ->
                 val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                labels.forEachIndexed { index, label ->
-                    list.addView(
+                items.forEachIndexed { index, item ->
+                    // A header is a section divider, not a row: the pause menu is
+                    // grouped into Controls / Audio / Display / Match / Account so
+                    // "Resume" no longer sits at the same weight as "Turn limit".
+                    if (item.kind == MenuKind.HEADER) {
+                        list.addView(
+                            k.text(item.label.uppercase(), 11f, k.palette.textTertiary, GameType.medium).apply {
+                                letterSpacing = 0.12f
+                                setPadding(k.dp(12), k.dp(14), k.dp(8), k.dp(6))
+                            },
+                            LinearLayout.LayoutParams(-1, -2)
+                        )
+                        return@forEachIndexed
+                    }
+                    val value = item.value
+                    val label = labels[index]
+                    val row: android.view.View = if (value.isNullOrBlank()) {
                         k.optionRow(label, descriptions.getOrNull(index), false) {
+                            if (item.disabled) return@optionRow
                             picked = true
                             dialog.dismiss()
-                            onPick(items[index].id)
-                        },
-                        LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
-                    )
+                            onPick(item.id)
+                        }
+                    } else {
+                        // A live-valued row: the setting name and its current
+                        // value on one line, so the page reads at a glance.
+                        k.valueRow(label, value, descriptions.getOrNull(index), item.kind == MenuKind.CHOICE && !item.disabled) {
+                            if (item.disabled) return@valueRow
+                            picked = true
+                            dialog.dismiss()
+                            onPick(item.id)
+                        }
+                    }
+                    // A disabled row stays visible but reads as unavailable.
+                    if (item.disabled) row.alpha = 0.45f
+                    list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) })
                 }
                 if (host != null && descriptor?.id == "arena" && items.any { it.id == "resume" }) {
-                    val cur = frontOrientationMode()
-                    val next = when (cur) {
-                        "auto" -> "landscape"
-                        "landscape" -> "portrait"
-                        else -> "auto"
-                    }
-                    val curName = when (cur) {
-                        "landscape" -> "Landscape"
-                        "portrait" -> "Portrait"
-                        else -> "Auto"
-                    }
-                    val nextName = when (next) {
-                        "landscape" -> "Landscape"
-                        "portrait" -> "Portrait"
-                        else -> "Auto"
-                    }
+                    // No cycle here any more. The old row rotated through
+                    // Auto → Landscape → Portrait in a live match; Portrait was
+                    // never a supported way to play, so the row now states the
+                    // truth instead of offering the illusion of a choice.
+                    val turned = isPortraitHold()
                     list.addView(
-                        k.optionRow("Screen orientation · $curName", "Tap to switch to $nextName", false) {
-                            picked = true
-                            dialog.dismiss()
-                            frontSetOrientationMode(next)
-                            toast("Screen orientation: $nextName")
-                            onPick("resume")
+                        k.optionRow(
+                            "Screen orientation · Landscape",
+                            if (turned) "Turn the phone sideways to play — Send Off is a landscape shooter"
+                            else "Locked sideways, either way up",
+                            false
+                        ) {
+                            if (turned) toast("Turn your phone sideways to play")
+                            else toast("Send Off plays in landscape, either way up")
                         },
                         LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = k.dp(6) }
                     )

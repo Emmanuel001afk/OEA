@@ -149,7 +149,7 @@ class OeaRunner : OeaGame() {
             "off" -> null
             else -> MusicTrack(bpm = 118, bars = 8, root = 57, minor = true, progression = listOf(0, 5, 3, 4), pad = true, energy = 0.55f, seed = 7)
         }
-        if (track != null) { ctx.audio.musicVolume = 0.3f; ctx.audio.playMusic("runner", track) }
+        if (track != null) { ctx.audio.musicGain = 0.7f; ctx.audio.playMusic("runner", track) }
     }
 
     private fun setupRunners() {
