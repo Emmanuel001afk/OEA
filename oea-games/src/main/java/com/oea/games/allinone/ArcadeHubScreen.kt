@@ -29,8 +29,12 @@ import com.oea.games.ui.GameInsets
 
 /** What the hub can ask of the app that hosts it. */
 interface ArcadeHubHost {
-    /** Opens a cabinet. [seed] pins the board (the daily challenge uses one). */
-    fun openCabinet(spec: ArcadeSpec, seed: Long? = null)
+    /**
+     * Opens a cabinet. [seed] pins the board and [level] pins the rung — the daily
+     * challenge passes both, so "today's board" is the same board and the same level
+     * for every player, not each player's own progress.
+     */
+    fun openCabinet(spec: ArcadeSpec, seed: Long? = null, level: Int? = null)
     fun openFriends(spec: ArcadeSpec? = null)
     fun openProfile()
     fun toast(message: String)
@@ -183,7 +187,6 @@ class ArcadeHubScreen(
      */
     private fun dailyCard(): View {
         val spec = dailySpec()
-        val level = progress.unlocked(spec.id)
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(17), dp(15), dp(15), dp(15))
@@ -193,14 +196,14 @@ class ArcadeHubScreen(
                 rounded(Color.WHITE, 22)
             )
             isClickable = true
-            setOnClickListener { host.openCabinet(spec, dailySeed()) }
+            setOnClickListener { host.openCabinet(spec, dailySeed(), dailyLevel(spec)) }
         }
         val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         top.addView(label("TODAY'S CHALLENGE", 9.5f, ArcadeColors.MINT, bold = true).apply { letterSpacing = 0.2f }, LinearLayout.LayoutParams(0, -2, 1f))
         top.addView(label("SAME SEED FOR ALL", 8.5f, Color.argb(200, 255, 255, 255), bold = true).apply { letterSpacing = 0.12f })
         card.addView(top, LinearLayout.LayoutParams(-1, -2))
         card.addView(label(spec.title, 21f, Color.WHITE, bold = true).apply { setPadding(0, dp(5), 0, dp(2)) })
-        card.addView(label("${spec.levelName(level)} · ${spec.levels} levels · everyone plays the same board today", 11.5f, Color.argb(225, 255, 255, 255)))
+        card.addView(label("${spec.levelName(dailyLevel(spec))} · everyone plays the same board today", 11.5f, Color.argb(225, 255, 255, 255)))
         val action = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(11), 0, 0) }
         action.addView(
             label("Play today's board", 12.5f, Color.WHITE, bold = true).apply {
@@ -273,7 +276,17 @@ class ArcadeHubScreen(
         return year * 1000L + day
     }
 
-    private fun dailyStars(spec: ArcadeSpec): Int = progress.stars(spec.id, progress.unlocked(spec.id))
+    /**
+     * The rung today's challenge is played on. Fixed per day and the same for every
+     * player, which is what the card claims; it used to open at whatever level the
+     * player had reached, so two people playing "the same board" were not.
+     */
+    private fun dailyLevel(spec: ArcadeSpec): Int {
+        val day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+        return 1 + (day % spec.levels.coerceAtLeast(1))
+    }
+
+    private fun dailyStars(spec: ArcadeSpec): Int = progress.stars(spec.id, dailyLevel(spec))
 
     private fun continueCard(): View {
         val spec = progress.continueSpec() ?: ArcadeCatalog.byId("racing") ?: ArcadeCatalog.all().first()

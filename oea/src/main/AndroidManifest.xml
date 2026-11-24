@@ -1009,6 +1009,17 @@
         <receiver
             android:name="com.oea.launcher.miniapps.OeaCalendarReminderReceiver"
             android:exported="false" />
+        <!-- A note reminder is an alarm; these keep it alive across reboots and clock
+             changes, and post it when it fires. -->
+        <receiver android:name="com.oea.launcher.miniapps.OeaNoteReminderReceiver" android:exported="false" />
+        <receiver android:name="com.oea.launcher.miniapps.OeaNoteRestoreReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <receiver android:name="com.oea.launcher.miniapps.OeaCalendarRestoreReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
