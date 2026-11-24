@@ -52,4 +52,4 @@ CI runs on this branch (each one compiles the APK, runs the JVM tests, then the 
 
 | Run | Result |
 | --- | --- |
-| _pending_ | _first run after the push_ |
+| `45352328116` (PR #170, first push) | **green** — compiled, `OeaBatteryMathTest` passed, `Verify the battery work` passed |
