@@ -200,7 +200,11 @@ pool with a toast.
   coordinates / white balance / metering, the `PhotographicSensitivity` fallback, the
   sheet's `exposureLabel` and white-balance row, no second `megapixels` helper, `formatSize`
   delegating with no `"%.0f KB".format(kb)`, and the slideshow's empty-pool guard.
-* `tools/check-kotlin.py` — `STATIC CHECK OK — 312 sources`.
+* `tools/check-kotlin.py` — `STATIC CHECK OK — 313 sources`.
+* CI run **[45313485001](https://github.com/Emmanuel001afk/OEA/actions/runs/45313485001)** —
+  both jobs green on the first push, with `EMAGE detail tests` and `Verify the EMAGE work`
+  in the step list between the calculator pair and the launcher-engine pair. Merged as
+  `3f8294a` (PR [#164](https://github.com/Emmanuel001afk/OEA/pull/164)).
 
 No Android SDK or Kotlin compiler here, so CI compiles it; the expectations were
 cross-checked against a Python model of the same arithmetic (rounding, unit framing and
