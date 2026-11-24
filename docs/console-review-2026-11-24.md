@@ -162,6 +162,18 @@ download.
   install watcher applying the rules with no signature database present.
 * `tools/check-kotlin.py` — `STATIC CHECK OK — 318 sources`.
 * Every guard was extracted from the workflow and run locally before pushing.
+* CI, in order — and the two red rounds were real:
+  1. run **45319084461** failed to compile: `DevicePolicyManager.ACTION_DEVICE_ADMIN_ENABLED`
+     is on `DeviceAdminReceiver`; `statTile` is on `OeaAppKit`, so the protection screens must
+     take that type; and the console's `security scan` **command** still called the removed
+     `scanSecurity` — it now prints the rules-based verdict. The local static check cannot see
+     any of the three.
+  2. run **45319519070** failed one test: `systemAppsArePartOfThePlatformNotSuspects` expected
+     two skipped apps, but a clean non-system app is *checked* and simply has nothing to say.
+     `skipped` means system and OEA itself, and the test now says so.
+  3. run **45320147251** — both jobs green, `Threat engine tests` and `Verify the console work`
+     in the step list between the messaging pair and the launcher-engine pair. Merged as
+     `200cf03` (PR [#168](https://github.com/Emmanuel001afk/OEA/pull/168)).
 
 ## 5. What to check on a device
 
