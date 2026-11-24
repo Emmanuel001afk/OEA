@@ -185,9 +185,14 @@ generation guard then discarded (`miniapps/OeaMessagingApp.kt:2574-2582`).
   unchanged-label guard, `OeaClockFormat` in the view, and Messaging's single
   `refreshTask` with no per-event `postDelayed({ reload() })` left.
 * The existing `Static check` (`tools/check-kotlin.py`, 302 sources), Kotlin compile,
-  camera/search/VIP tests and guards, responsiveness guards and both APK builds all run
-  in the same job. The run that carries this change set is named in the pull request
-  that merged it.
+  camera/search/VIP/responsiveness tests and guards and both APK builds all run in the
+  same job.
+
+**The run that carries this change set:** [`45296502034`](https://github.com/Emmanuel001afk/OEA/actions/runs/45296502034)
+went green for branch `arena/28ebef8e-oea` at commit `2538de6`, with `185 tests` in the
+unit-test step (179 before, plus the six `OeaClockFormatTest` cases) and the new
+`Verify the mini-app response work` step among them. PR #156 merged as `2f8319c` at
+2026-11-24T00:28:07Z.
 
 Nothing here was compiled on this machine: this workspace has no Android SDK and no
 Kotlin compiler, so the CI job's green result is the claim, not mine. Every guard was
