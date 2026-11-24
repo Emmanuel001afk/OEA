@@ -5,12 +5,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.BatteryManager
 import android.provider.Settings
 import android.util.Log
 import com.oea.launcher.applock.OeaAppFreezer
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.fault.OeaFaultShield
+import com.oea.launcher.power.OeaBatteryMath
+import com.oea.launcher.power.OeaBatteryState
 import com.oea.launcher.workspace.OeaDynamicIslandOverlayService
 
 /**
@@ -77,17 +78,17 @@ object OeaLowMode {
         }
     }
 
+    /**
+     * The percentage and whether the phone is on power — the shared reading, not a
+     * second implementation of it.
+     *
+     * "On power" is what the automatic switch cares about: LOW mode turns itself off
+     * when the phone is plugged in, which includes a phone sitting at its charge limit
+     * with the cable in and the battery full.
+     */
     fun battery(context: Context): Pair<Int, Boolean> {
-        val manager = runCatching { context.getSystemService(BatteryManager::class.java) }.getOrNull()
-            ?: return -1 to false
-        val level = runCatching {
-            manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        }.getOrDefault(-1)
-        val status = runCatching {
-            manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)
-        }.getOrDefault(BatteryManager.BATTERY_STATUS_UNKNOWN)
-        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
-        return level to charging
+        val reading = OeaBatteryState.read(context)
+        return (reading.percent ?: OeaBatteryMath.NO_PERCENT) to (reading.plugged || reading.isCharging)
     }
 
     fun apply(context: Context) {
@@ -158,10 +159,13 @@ object OeaLowMode {
             val store = OeaDataStore.get(context)
             return if (store.lowModeAuto()) "Off · turns on at ${store.lowModeThreshold()}% • Tier ${tier(context).label}" else "Off • Tier ${tier(context).label}"
         }
-        val (percent, charging) = battery(context)
+        // Said from the reading, so a phone on a charge limiter is "plugged in" and not
+        // "charging", and an unreadable level is not printed as a number.
+        val reading = OeaBatteryState.read(context)
         val because = when {
-            charging -> "on, phone is charging"
-            percent in 0..100 -> "on · $percent% battery"
+            reading.isCharging -> "on, phone is charging"
+            reading.plugged -> "on, phone is plugged in"
+            reading.percent != null -> "on · ${reading.percent}% battery"
             else -> "on"
         }
         return "$because • ${tier(context).label} • ${if (isDeviceUltraSaving(context)) "Device ultra saving ON!" else "Device ultra saving OFF"}"
@@ -173,14 +177,14 @@ object OeaLowMode {
         val r = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 OeaFaultShield.guard("low-mode:battery") {
-                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-                    val percent = if (level >= 0) level * 100 / scale else -1
-                    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
-                    val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                        status == BatteryManager.BATTERY_STATUS_FULL ||
-                        intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-                    onBatteryChanged(context, percent, charging)
+                    // Same reading, same rules: the auto switch reacts to what the
+                    // phone says, not to a second interpretation of the intent.
+                    val state = OeaBatteryState.from(intent)
+                    onBatteryChanged(
+                        context,
+                        state.percent ?: OeaBatteryMath.NO_PERCENT,
+                        state.plugged || state.isCharging
+                    )
                 }
             }
         }

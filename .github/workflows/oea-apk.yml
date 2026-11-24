@@ -855,6 +855,65 @@ jobs:
           # Install watch applies the rules with nothing imported from anywhere.
           grep -Fq 'checkRules(pkg, stopped)' "$WATCH"
           ! grep -Fq 'No malware signatures installed' "$WATCH"
+      - name: Battery reading tests
+        run: |
+          set -o pipefail
+          if ! ./gradlew :oea:testDebugUnitTest --tests 'com.oea.launcher.power.OeaBatteryMathTest' --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-battery.log"; then
+            { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-battery.log" || true; } | head -60 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//%/%25}"
+            done
+            exit 1
+          fi
+      - name: Verify the battery work
+        run: |
+          set -euo pipefail
+          MATH=oea/src/main/java/com/oea/launcher/power/OeaBatteryMath.kt
+          STATE=oea/src/main/java/com/oea/launcher/power/OeaBatteryState.kt
+          TEST=oea/src/test/java/com/oea/launcher/power/OeaBatteryMathTest.kt
+          BOOST=oea/src/main/java/com/oea/launcher/gameboost/OeaGameBoostActivity.kt
+          STRIP=oea/src/main/java/com/oea/launcher/gameboost/OeaGameBoostService.kt
+          LOW=oea/src/main/java/com/oea/launcher/perf/OeaLowMode.kt
+          TOOLS=oea/src/main/java/com/oea/launcher/OeaSystemToolsActivity.kt
+          CONSOLE=oea/src/main/java/com/oea/launcher/miniapps/OeaConsoleApp.kt
+          # One arithmetic, on the phone, and none of it in Android.
+          grep -Fq 'internal object OeaBatteryMath' "$MATH"
+          grep -Fq 'fun percent(level: Int, scale: Int): Int?' "$MATH"
+          grep -Fq 'fun percentProperty(value: Int): Int?' "$MATH"
+          grep -Fq 'fun hudCaption(' "$MATH"
+          ! grep -Fq 'import android' "$MATH"
+          # Unknown is unknown: neither 0% nor a made-up scale.
+          grep -Fq 'const val NO_PERCENT = -1' "$MATH"
+          ! grep -Eq 'EXTRA_SCALE, 100|EXTRA_SCALE, \s*100' oea/src/main/java/com/oea/launcher --include=*.kt -r
+          ! grep -Eq 'level \* 100 /' oea/src/main/java/com/oea/launcher --include=*.kt -r
+          test "$(grep -Fc '@Test' "$TEST")" -ge 15
+          grep -Fq 'fun brokenScaleIsUnknownNotZero' "$TEST"
+          grep -Fq 'fun aLimitedBatteryIsPluggedInButNotCharging' "$TEST"
+          grep -Fq 'fun unknownIsAnEmDashNeverZero' "$TEST"
+          # The shared reader knows the difference between charging and plugged in.
+          grep -Fq 'fun read(context: Context): OeaBatteryState' "$STATE"
+          grep -Fq 'fun observe(view: View, update: (OeaBatteryState) -> Unit)' "$STATE"
+          grep -Fq 'val plugged: Boolean' "$STATE"
+          # Every screen that shows a percentage asks that reader.
+          grep -Fq 'OeaBatteryState.read(this)' "$BOOST"
+          grep -Fq 'OeaBatteryState.observe(rootHost)' "$BOOST"
+          grep -Fq 'OeaBatteryState.read(this)' "$STRIP"
+          grep -Fq 'OeaBatteryMath.hudCaption(' "$STRIP"
+          grep -Fq 'OeaBatteryState.read(context)' "$LOW"
+          grep -Fq 'OeaBatteryState.read(this)' "$TOOLS"
+          grep -Fq 'OeaBatteryState.observe(box)' "$TOOLS"
+          grep -Fq 'OeaBatteryState.read(ctx)' "$CONSOLE"
+          # No second implementation of the reading anywhere in main.
+          ! grep -rFq 'BATTERY_PROPERTY_CAPACITY' oea/src/main/java/com/oea/launcher/gameboost
+          ! grep -rFq 'BATTERY_PROPERTY_CAPACITY' oea/src/main/java/com/oea/launcher/perf
+          ! grep -rFq 'BATTERY_PROPERTY_CAPACITY' oea/src/main/java/com/oea/launcher/miniapps
+          ! grep -rFq 'BatteryManager.BATTERY_PROPERTY_CAPACITY' oea/src/main/java/com/oea/launcher/workspace
+          # Framework battery parsing lives in power/ and nowhere else: the island,
+          # the glance chip, LOW mode and the console all read the same state.
+          grep -Fq 'OeaBatteryState.from(intent)' oea/src/main/java/com/oea/launcher/workspace/OeaDynamicIslandView.kt
+          grep -Fq 'OeaBatteryState.from(intent)' "$LOW"
+          grep -Fq 'battery.chargingNote' oea/src/main/java/com/oea/launcher/workspace/OeaGlanceView.kt
+          test -z "$(grep -rlF 'EXTRA_LEVEL' oea/src/main/java/com/oea/launcher --include=*.kt | grep -v 'launcher/power/')"
+          ! grep -rFq 'BatteryManager.isCharging' oea/src/main/java/com/oea/launcher --include=*.kt
       - name: Verify launcher engine and Home live activities
         run: |
           set -euo pipefail

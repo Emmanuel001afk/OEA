@@ -11,7 +11,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -1414,13 +1413,14 @@ class OeaGameBoostService : Service() {
             virtualFraction = (if (virtualTotal > 0) virtualUsed / virtualTotal else 0.0).toFloat()
         }
 
-        val battery = getSystemService(BATTERY_SERVICE) as BatteryManager
-        val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val charging = runCatching { battery.isCharging }.getOrDefault(false)
+        // One reading for the strip: the sticky broadcast first (falling back to the
+        // BatteryManager properties), so the percentage and the caption can never
+        // disagree with each other or with the phone.
+        val reading = com.oea.launcher.power.OeaBatteryState.read(this)
         device.update(
             networkQualityReader.read(activeGame),
-            if (level in 0..100) "$level%" else "—",
-            charging,
+            reading.label,
+            com.oea.launcher.power.OeaBatteryMath.hudCaption(reading.status, reading.plugged),
             OeaGameBoostStore.prefs(this).getBoolean(PREF_NETWORK_QUALITY, true),
             OeaGameBoostStore.prefs(this).getString("network_display_mode", "status") ?: "status"
 )

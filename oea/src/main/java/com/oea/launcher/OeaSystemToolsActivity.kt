@@ -37,6 +37,7 @@ import com.oea.launcher.assistant.OeaAssistant
 import com.oea.launcher.callblocker.OeaCallBlockerActivity
 import com.oea.launcher.data.OeaDataStore
 import com.oea.launcher.perf.OeaLowMode
+import com.oea.launcher.power.OeaBatteryState
 import com.oea.launcher.power.OeaPower
 import com.oea.launcher.fault.OeaFaultLog
 import com.oea.launcher.fault.OeaFaultShield
@@ -107,6 +108,8 @@ open class OeaSystemToolsActivity : Activity() {
     private var appsLoading = false
     private var appsLoadFailed = false
     private var appsLoadError: String? = null
+    /** The battery reading the LOW mode page was last painted from. */
+    private var lowModeBattery: Triple<Int?, Int, Boolean>? = null
     private var usageStatsCache: Map<String, Long>? = null
     private var usageStatsLoading = false
     private var usageStatsLoadFailed = false
@@ -1046,7 +1049,10 @@ open class OeaSystemToolsActivity : Activity() {
         val page = page("LOW mode", "OEA's own power saving")
         val box = page.content
         val active = OeaLowMode.active(this)
-        val (percent, charging) = OeaLowMode.battery(this)
+        // The same reading the rest of OEA shows, taken now and then kept live below:
+        // a percentage that is right when the page opens is a memory, not a reading.
+        val reading = OeaBatteryState.read(this)
+        lowModeBattery = Triple(reading.percent, reading.status, reading.plugged)
 
         if (active) {
             kit.banner(box, R.drawable.oic_battery_charging_full, "LOW mode is on",
@@ -1056,8 +1062,11 @@ open class OeaSystemToolsActivity : Activity() {
             }
         } else {
             val body = when {
-                percent in 0..100 && charging -> "$percent% and charging. OEA will not switch itself on while the phone is plugged in."
-                percent in 0..100 -> "$percent% battery."
+                reading.isCharging ->
+                    "${reading.label} and charging. OEA will not switch itself on while the phone is plugged in."
+                reading.plugged ->
+                    "${reading.label} and plugged in (${reading.description.lowercase()}). OEA will not switch itself on while the phone is plugged in."
+                reading.percent != null -> "${reading.label} battery."
                 else -> "The battery level is not readable on this phone, so only the manual switch applies."
             }
             kit.banner(box, R.drawable.oic_battery_full, "LOW mode is off", body, OeaKit.Tone.INFO)
@@ -1078,10 +1087,17 @@ open class OeaSystemToolsActivity : Activity() {
         kit.stepperRow(switching, R.drawable.oic_insights, "Turn on at", "Battery percentage", dataStore.lowModeThreshold() / 5, 1, 10, { "${it * 5}%" }) {
             dataStore.setLowModeThreshold(it * 5)
         }
-        kit.stepperRow(switching, R.drawable.oic_refresh, "Turn off at", "Or as soon as the phone is charging", dataStore.lowModeExit() / 5, 2, 16, { "${it * 5}%" }) {
+        kit.stepperRow(switching, R.drawable.oic_refresh, "Turn off at", "Or as soon as you plug it in", dataStore.lowModeExit() / 5, 2, 16, { "${it * 5}%" }) {
             dataStore.setLowModeExit(it * 5)
         }
         kit.note(box, "One that switched itself on also switches itself off when the battery recovers or the phone is plugged in. One you turned on by hand stays on until you turn it off.")
+
+        // Live reading: plugging in, unplugging or a level change repaints this page
+        // instead of leaving a snapshot that contradicts the phone in your hand.
+        OeaBatteryState.observe(box) { state ->
+            val next = Triple(state.percent, state.status, state.plugged)
+            if (next != lowModeBattery) box.post { if (!isFinishing && !isDestroyed) rerender() }
+        }
 
         kit.sectionTitle(box, "Going further")
         val deep = kit.group(box)

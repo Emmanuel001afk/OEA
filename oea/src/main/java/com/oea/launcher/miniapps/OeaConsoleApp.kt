@@ -9,7 +9,6 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
-import android.os.BatteryManager
 import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
@@ -470,11 +469,11 @@ object OeaConsoleApp {
         } catch (_: Throwable) {}
         list.add("OEA Home" to homeHandlerStatus(ctx))
         list.add("EMAGE image handler" to imageHandlerStatus(ctx))
-        try {
-            val bm = ctx.getSystemService(android.os.BatteryManager::class.java)
-            val capacity = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
-            if (capacity > 0) list.add("Battery" to "$capacity% current charge")
-        } catch (_: Throwable) {}
+        runCatching {
+            // One reading for the whole launcher. A phone that reports no level gets
+            // "—" — hiding the row (the old `capacity > 0`) made 0% look like no battery.
+            list.add("Battery" to com.oea.launcher.power.OeaBatteryState.read(ctx).text)
+        }
         list.add("Low mode (Ultra Saving)" to if (com.oea.launcher.perf.OeaLowMode.active(ctx)) "ON • ${com.oea.launcher.perf.OeaLowMode.summary(ctx)}" else "OFF")
         list.add("Device ultra saving" to if (isDeviceInUltraPowerSaving(ctx)) "ON • OEM may block mini-apps" else "OFF")
         list.add("Power save mode" to if (isPowerSaveMode(ctx)) "ON" else "OFF")
@@ -1058,13 +1057,12 @@ object OeaConsoleApp {
     private fun batteryInfo(ctx: Context): com.oea.launcher.power.OeaBatteryState =
         com.oea.launcher.power.OeaBatteryState.read(ctx)
 
-    private fun batteryTemp(ctx: Context): String {
-        return try {
-            val intent = ctx.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
-            if (temp > 0) String.format(Locale.US, "%.1f°C", temp / 10.0) else "Unavailable"
-        } catch (_: Throwable) { "Unavailable" }
-    }
+    private fun batteryTemp(ctx: Context): String =
+        // From the shared reading: 0 °C and sub-zero are real temperatures, and the
+        // old `temp > 0` test reported both as "Unavailable".
+        com.oea.launcher.power.OeaBatteryState.read(ctx).temperatureCelsius
+            ?.let { String.format(Locale.US, "%.1f°C", it) }
+            ?: "Unavailable"
 
     private fun thermalInfo(ctx: Context): String {
         return try {
@@ -1237,7 +1235,7 @@ object OeaConsoleApp {
             kit.stepperRow(switching, R.drawable.oic_refresh, "Turn off at", "Or when charging", OeaDataStore.get(host).lowModeExit() / 5, 2, 16, { "${it * 5}%" }) {
                 OeaDataStore.get(host).setLowModeExit(it * 5)
             }
-            kit.note(panel, "Auto: battery level from BatteryManager. One that switched itself on also switches off when battery recovers or charging. Manual stays until off.")
+            kit.note(panel, "Auto: battery level from BatteryManager. One that switched itself on also switches off when the battery recovers or the phone is plugged in. Manual stays until off.")
 
             kit.sectionTitle(panel, "Whitelist & Mini-apps")
             kit.note(panel, "Mini-apps are whitelisted in LOW mode — they still work. Device ultra saving (OEM) may block them, not OEA's LOW. To keep mini-apps working in device ultra saving, whitelist OEA in battery settings.")
