@@ -49,23 +49,36 @@ internal object OeaVoiceGrammar {
         "forty five" to 45, "fifty" to 50, "sixty" to 60, "ninety" to 90
     )
 
-    /** Trims the politeness and punctuation a recogniser adds, and folds case. */
-    fun normalize(raw: String): String {
-        var text = raw.trim().replace(Regex("\\s+"), " ").lowercase()
+    /**
+     * Trims the politeness and punctuation a recogniser adds, keeping the words' case:
+     * "open Tunde" must still be Tunde when it reaches the contact lookup.
+     */
+    fun normalizeKeepCase(raw: String): String {
+        var text = raw.trim().replace(Regex("\\s+"), " ")
         text = text.trimEnd('.', ',', '!', '?')
-        for (p in POLITE) if (text == p.trim() || text.startsWith(p)) { text = text.removePrefix(p); break }
+        val lower = text.lowercase()
+        for (p in POLITE) {
+            if (lower == p.trim() || lower.startsWith(p)) { text = text.substring(p.length); break }
+        }
         return text.trim()
     }
 
+    /** The same, folded to lowercase, for matching only. */
+    fun normalize(raw: String): String = normalizeKeepCase(raw).lowercase()
+
     /** Parses one spoken instruction. [appNames] are the installed apps, lowercased by the caller. */
     fun parse(raw: String, appNames: List<String> = emptyList()): Match? {
-        val text = normalize(raw)
+        val cased = normalizeKeepCase(raw)
+        val text = cased.lowercase()
         if (text.isBlank()) return null
+
+        // The remainder after a prefix, still in the case it was spoken.
+        fun rest(prefix: String): String = cased.substring(prefix.length.coerceAtMost(cased.length)).trim()
 
         // "go to X": an app if one is called X, otherwise a place to navigate to.
         for (prefix in listOf("go to ", "take me to ")) {
             if (text.startsWith(prefix)) {
-                val query = text.removePrefix(prefix).trim()
+                val query = rest(prefix)
                 if (query.isEmpty()) return null
                 val app = matchingApp(query, appNames)
                 return if (app != null) Match(Kind.OPEN_APP, app, 0.9f)
@@ -75,14 +88,14 @@ internal object OeaVoiceGrammar {
 
         for (prefix in listOf("navigate to ", "directions to ")) {
             if (text.startsWith(prefix)) {
-                val query = text.removePrefix(prefix).trim()
+                val query = rest(prefix)
                 if (query.isNotEmpty()) return Match(Kind.NAVIGATE, query, 0.85f)
             }
         }
 
         for (prefix in listOf("open ", "launch ", "start ")) {
             if (text.startsWith(prefix)) {
-                val query = text.removePrefix(prefix).trim()
+                val query = rest(prefix)
                 if (query.isEmpty()) return null
                 return Match(Kind.OPEN_APP, matchingApp(query, appNames) ?: query, 0.9f)
             }
@@ -90,21 +103,21 @@ internal object OeaVoiceGrammar {
 
         for (prefix in listOf("search for ", "search ", "look up ", "find ", "google ")) {
             if (text.startsWith(prefix)) {
-                val query = text.removePrefix(prefix).trim()
+                val query = rest(prefix)
                 if (query.isNotEmpty()) return Match(Kind.SEARCH_WEB, query, 0.85f)
             }
         }
 
         for (prefix in listOf("call ", "phone ", "dial ")) {
             if (text.startsWith(prefix)) {
-                val query = text.removePrefix(prefix).trim()
+                val query = rest(prefix)
                 if (query.isNotEmpty()) return Match(Kind.CALL_CONTACT, query, 0.85f)
             }
         }
 
         for (prefix in listOf("send a message to ", "send text to ", "message ", "text ", "sms ")) {
             if (text.startsWith(prefix)) {
-                val query = text.removePrefix(prefix).trim()
+                val query = rest(prefix)
                 if (query.isNotEmpty()) return Match(Kind.MESSAGE_CONTACT, query, 0.8f)
             }
         }
@@ -127,7 +140,7 @@ internal object OeaVoiceGrammar {
         }
 
         if (text.startsWith("play ")) {
-            val query = text.removePrefix("play ").trim()
+            val query = rest("play ")
             return Match(Kind.PLAY_MUSIC, query, 0.8f)
         }
 
@@ -154,7 +167,7 @@ internal object OeaVoiceGrammar {
         if (text.contains("settings")) return Match(Kind.OPEN_SETTINGS, text, 0.7f)
 
         // Anything else is a web search — the honest fallback, announced as a search.
-        return Match(Kind.SEARCH_WEB, text, 0.5f)
+        return Match(Kind.SEARCH_WEB, cased, 0.5f)
     }
 
     /**
@@ -167,8 +180,8 @@ internal object OeaVoiceGrammar {
         val q = query.trim().lowercase()
         if (q.isEmpty()) return null
         return appNames.firstOrNull { it.equals(q, ignoreCase = true) }
-            ?: appNames.firstOrNull { it.startsWith(q) }
-            ?: appNames.firstOrNull { it.contains(q) }
+            ?: appNames.firstOrNull { it.lowercase().startsWith(q) }
+            ?: appNames.firstOrNull { it.lowercase().contains(q) }
     }
 
     /** Which way a flashlight sentence points: true = on, false = off, null = toggle. */
