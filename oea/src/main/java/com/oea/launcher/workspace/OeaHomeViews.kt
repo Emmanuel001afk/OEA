@@ -185,17 +185,12 @@ class OeaTileView(context: Context) : View(context) {
         canvas.drawText(rest, (width - labelPaint.measureText(rest)) / 2f, baseline + lineHeight, labelPaint)
     }
 
-    private fun drawIcon(canvas: Canvas, drawable: Drawable?, bounds: Rect, placeholder: Boolean = true) {
-        val d = drawable
-        if (d == null) {
-            // Never an invisible tile. An icon can be missing for real reasons — a
-            // resolve that has not finished, a package that was removed while Home was
-            // bound, a pack image that cannot be decoded — and a hole the size of the
-            // icon reads as a broken launcher. A plate with the app's initial is honest
-            // about the gap and still lets you tap the right thing.
-            if (placeholder) drawIconPlate(canvas, bounds)
-            return
-        }
+    private fun drawIcon(canvas: Canvas, drawable: Drawable?, bounds: Rect) {
+        // No stand-in is drawn here. A letter plate was tried and is worse than the
+        // gap: the tile is an app, and the only thing that belongs in it is that
+        // app's icon. The icon engine now guarantees one (see OeaIconController),
+        // so there is nothing to fake.
+        val d = drawable ?: return
         d.bounds = bounds
         if (frozen) {
             d.colorFilter = frozenFilter
@@ -206,19 +201,6 @@ class OeaTileView(context: Context) : View(context) {
         } else {
             d.draw(canvas)
         }
-    }
-
-    /** The stand-in for an icon that is not (yet) available: plate plus initial. */
-    private fun drawIconPlate(canvas: Canvas, bounds: Rect) {
-        folderPaint.color = folderColor
-        rectF.set(bounds)
-        val radius = bounds.width() * folderCornerFraction
-        canvas.drawRoundRect(rectF, radius, radius, folderPaint)
-        val initial = label.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: return
-        badgeTextPaint.color = labelColor
-        badgeTextPaint.textSize = bounds.height() * 0.42f
-        val baseline = bounds.exactCenterY() - (badgeTextPaint.descent() + badgeTextPaint.ascent()) / 2f
-        canvas.drawText(initial, bounds.exactCenterX(), baseline, badgeTextPaint)
     }
 
     private fun drawFolder(canvas: Canvas) {
@@ -233,7 +215,7 @@ class OeaTileView(context: Context) : View(context) {
             val cx = iconRect.left + inner + (i % 2) * (cell + gapPx)
             val cy = iconRect.top + inner + (i / 2) * (cell + gapPx)
             val r = Rect(cx.toInt(), cy.toInt(), (cx + cell).toInt(), (cy + cell).toInt())
-            drawIcon(canvas, d, r, placeholder = false)
+            drawIcon(canvas, d, r)
         }
     }
 
