@@ -154,7 +154,7 @@ in `.github/workflows/oea-apk.yml`:
 | `45426757208` | **red** — `e: OeaIconController.kt:159:44 Unresolved reference 'attempt'`: the retry was a lambda that called itself while declaring itself. A local function may; a lambda cannot. Fixed in `1ef063b`. |
 | `45427568541` | **green** — first pass, `build-apk` + `build-laptop-apk`, 383 unit tests. |
 | `45428650096` | **green** — first pass with the run table recorded. |
-| _this pass_ | pending |
+| `45462468720` | **green** — this pass: `build-apk` + `build-laptop-apk`, 382 unit tests (9 of them `OeaAppFamiliesTest`, including the Camera + SIM Toolkit regression), the namespace guard and every earlier guard. |
 
 ### Device checklist
 
