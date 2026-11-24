@@ -1,5 +1,6 @@
 package com.oea.launcher.security
 
+import android.app.admin.DeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
 import android.app.usage.StorageStatsManager
 import android.content.ComponentName
@@ -167,7 +168,7 @@ object OeaAppAudit {
         val dpm = runCatching { ctx.getSystemService(DevicePolicyManager::class.java) }.getOrNull()
             ?: return emptySet()
         return runCatching {
-            ctx.packageManager.queryBroadcastReceivers(Intent(DevicePolicyManager.ACTION_DEVICE_ADMIN_ENABLED), 0)
+            ctx.packageManager.queryBroadcastReceivers(Intent(DeviceAdminReceiver.ACTION_DEVICE_ADMIN_ENABLED), 0)
                 .mapNotNull { it.activityInfo }
                 .filter { dpm.isAdminActive(ComponentName(it.packageName, it.name)) }
                 .map { it.packageName }

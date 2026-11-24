@@ -536,7 +536,7 @@ object OeaConsoleApp {
      * capabilities it holds together. Nothing is uploaded and nothing is
      * downloaded, so it works on a phone that has never been online.
      */
-    private fun showProtection(host: Activity, kit: OeaKit) {
+    private fun showProtection(host: Activity, kit: OeaAppKit) {
         val subtitle = "Every installed app is checked on this phone against " +
             "${OeaThreatEngine.ruleCount} built-in rules. No cloud, no Play Protect, nothing uploaded."
         kit.sheet("Device protection", subtitle) { panel, dialog ->
@@ -600,7 +600,7 @@ object OeaConsoleApp {
 
     private fun renderProtection(
         host: Activity,
-        kit: OeaKit,
+        kit: OeaAppKit,
         container: LinearLayout,
         scan: com.oea.launcher.security.OeaAppAudit.ScanResult,
         rescan: () -> Unit
@@ -654,7 +654,7 @@ object OeaConsoleApp {
                 g, severityIcon(severity), assessment.facts.label, assessment.facts.packageName,
                 value = OeaThreatEngine.severityLabel(severity),
                 chevron = false,
-                iconBg = if (severity == OeaThreatEngine.Severity.HIGH) kit.alpha(kit.palette.danger, 0x33) else kit.palette.accentSoft,
+                iconBg = if (severity == OeaThreatEngine.Severity.HIGH) OeaTheme.alpha(kit.palette.danger, 0x33) else kit.palette.accentSoft,
                 iconTint = if (severity == OeaThreatEngine.Severity.HIGH) kit.palette.danger else kit.palette.onAccentSoft
             )
             assessment.findings.forEach { finding ->
@@ -1731,11 +1731,30 @@ Examples:
 
             "security" -> when (parts.getOrNull(1)?.lowercase()) {
                 "scan" -> {
-                    val review = scanSecurity(ctx)
-                    if (review.error != null) "Security review failed: ${review.error}"
-                    else "Reviewed ${review.checked} apps; ${review.skipped} unavailable. This is not a malware scan.\n" +
-                        if (review.findings.isEmpty()) "No permission combinations flagged; this does not establish safety."
-                        else review.findings.joinToString("\n\n") { "${it.label} (${it.packageName})\n${it.details}" }
+                    val scan = runCatching { com.oea.launcher.security.OeaAppAudit.scan(ctx) }.getOrNull()
+                    val error = scan?.error
+                    when {
+                        scan == null || error != null -> "Protection scan failed: ${error ?: "unknown error"}"
+                        else -> {
+                            val report = scan.report
+                            buildString {
+                                append(OeaThreatEngine.verdictLabel(report.verdict)).append(" — ")
+                                append(OeaThreatEngine.verdictSentence(report))
+                                append("\n\nRules: ${OeaThreatEngine.ruleCount} (built in, offline)").append('\n')
+                                append("Apps checked: ${report.checked}").append('\n')
+                                append("Flagged: ${report.flagged} (${report.high} high)")
+                                if (scan.apks.isNotEmpty()) append(" • ${scan.apks.size} installers waiting")
+                                if (report.assessments.isEmpty()) append("\n\nNothing flagged.")
+                                report.assessments.forEach { assessment ->
+                                    append("\n\n${assessment.facts.label} (${assessment.facts.packageName}) — ")
+                                    append(OeaThreatEngine.severityLabel(assessment.highest ?: OeaThreatEngine.Severity.LOW))
+                                    assessment.findings.forEach { finding ->
+                                        append("\n  • ${finding.title}: ${finding.detail}")
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 else -> "Usage: security scan"
             }
