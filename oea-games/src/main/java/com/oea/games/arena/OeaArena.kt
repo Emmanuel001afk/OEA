@@ -81,6 +81,8 @@ class OeaArena : OeaGame() {
         var walk = 0f
         var lastX = 0f; var lastZ = 0f
         var speed01 = 0f
+        /** Sideways velocity in the body frame, -1..1 (banking). */
+        var lateral = 0f
         /** Reload progress 0..1 from the snapshot (drives the reload pose). */
         var reloadN = 0f
         /** Weather/wind state for this soldier (wet, dusty, hair in the wind). */
@@ -333,6 +335,8 @@ class OeaArena : OeaGame() {
     private var damageAngle = 0f
     /** Sight kick from recoil: rises on fire, recovers smoothly (radians). */
     private var recoilPitch = 0f
+    /** Slow horizontal drift after a shot — the weapon settles back, not springs. */
+    private var recoilYaw = 0f
     /** Brief dip of the camera when the weapon slot changes. */
     private var switchDip = 0f
     /** 0..1 blend between hip and ADS camera/field of view. */
@@ -488,13 +492,16 @@ class OeaArena : OeaGame() {
             else -> { vfx.rain = 0.14f; vfx.windX = 0.35f }
         }
         // Season changes the air as well as the ground: winter snow, spring
-        // showers, autumn leaves on the wind, summer's dry haze.
+        // showers, autumn leaves on the wind, summer's dry haze. The wind now
+        // comes from the map, the same vector the soldiers and grenades feel,
+        // so the weather and the bodies cannot disagree.
         when (season) {
             "winter" -> { vfx.snow = (vfx.snow + 0.55f).coerceAtMost(1f); vfx.cold = 0.85f }
-            "spring" -> { vfx.rain = (vfx.rain + 0.22f).coerceAtMost(1f); vfx.windZ += 0.2f }
-            "autumn" -> { vfx.dust = (vfx.dust + 0.18f).coerceAtMost(1f); vfx.windX += 0.35f }
-            else -> vfx.windZ += 0.1f
+            "spring" -> { vfx.rain = (vfx.rain + 0.22f).coerceAtMost(1f) }
+            "autumn" -> { vfx.dust = (vfx.dust + 0.18f).coerceAtMost(1f) }
         }
+        vfx.windX = map.windX * map.windStrength
+        vfx.windZ = map.windZ * map.windStrength
         if (rules == "haunted" || rules == "lights_out") {
             vfx.fogBank(0f, map.heightAt(0f, 0f), 0f, radius = 18f, density = 0.8f)
         }
@@ -603,6 +610,7 @@ class OeaArena : OeaGame() {
         // Aim tuning and progression come from the device's own settings.
         adsSens = ctx.settings.adsSensitivity
         invertY = ctx.settings.invertLookY
+        look.smoothing = ctx.settings.lookSmoothing
         turnLimit = ctx.settings.turnSpeedLimit * MathX.DEG_TO_RAD
         look.maxDeltaPx = 420f // only absurd pointer-resync jumps are discarded
         // Controls: the saved button layout and the ADS tap/hold mode.
@@ -769,6 +777,21 @@ class OeaArena : OeaGame() {
     }
 
     private val aim = FloatArray(2)
+    /** Last frame's delta, used by render-only smoothing in the draw path. */
+    private var renderDt = 1f / 60f
+    /** Smoothed body yaw for rendering: the torso swivels, the shot does not. */
+    private var bodyYaw = 0f
+    private var bodyInit = false
+    /**
+     * The render-only torso heading. It follows the camera with a short lag, so
+     * a fast flick shows the body turning instead of a turret snapping 180°.
+     * Only visual state — aim, shots and hit tests all use the exact yaw.
+     */
+    private fun visualBodyYaw(want: Float, dt: Float): Float {
+        if (!bodyInit) { bodyYaw = want; bodyInit = true }
+        bodyYaw = MathX.dampAngle(bodyYaw, want, 13f, dt.coerceIn(0.001f, 0.1f))
+        return bodyYaw
+    }
 
     /**
      * Third-person aim convergence: the body aims from its eye at whatever the
@@ -776,16 +799,20 @@ class OeaArena : OeaGame() {
      * despite the over-the-shoulder camera offset.
      */
     private fun aimAngles(me: ArenaPlayer, out: FloatArray) {
-        out[0] = lookYaw; out[1] = lookPitch + recoilPitch
+        // Reset the convergence smooth step for this sample.
+        out[0] = lookYaw + recoilYaw; out[1] = lookPitch + recoilPitch
         if (me.skydiving) return
         val cp = cos(lookPitch)
-        val fx = sin(lookYaw) * cp; val fy = sin(lookPitch); val fz = cos(lookYaw) * cp
+        val fx = sin(lookYaw + recoilYaw) * cp; val fy = sin(lookPitch + recoilPitch); val fz = cos(lookYaw + recoilYaw) * cp
         val dist = if (map.physics.raycast(camPos.x, camPos.y, camPos.z, fx, fy, fz, 260f, hit, Layers.WORLD or Layers.PROPS)) hit.distance else 260f
         if (dist < 2.5f) return
         val tx = camPos.x + fx * dist; val ty = camPos.y + fy * dist; val tz = camPos.z + fz * dist
         val dx = tx - me.pos.x; val dy = ty - (me.pos.y + me.eyeHeight); val dz = tz - me.pos.z
         val flat = sqrt(dx * dx + dz * dz)
         if (flat < 0.5f) return
+        // The input yaw is exactly the camera ray — shots must land on the
+        // crosshair. Visual smoothing of the body happens in the draw path,
+        // where it cannot affect hit registration.
         out[0] = kotlin.math.atan2(dx, dz)
         out[1] = MathX.clamp(kotlin.math.atan2(dy, flat), -1.2f, 1.1f)
     }
@@ -929,6 +956,12 @@ class OeaArena : OeaGame() {
                         val newest = q.lastOrNull()?.seq ?: last
                         if (InputHistory.seqDiff(inp.seq, newest) > 0) q.addLast(inp)
                     }
+                    // The client repeats its last packets, so the same command
+                    // can arrive twice; drop duplicates before they are consumed.
+                    var prev = last
+                    val dedup = ArrayDeque<PlayerInput>(q.size)
+                    for (cmd in q) { if (InputHistory.seqDiff(cmd.seq, prev) > 0) { dedup.addLast(cmd); prev = cmd.seq } }
+                    q.clear(); q.addAll(dedup)
                     while (q.size > 6) q.removeFirst()
                 }
                 MSG_SNAP -> if (!isAuthority) readSnapshot(r)
@@ -1042,6 +1075,10 @@ class OeaArena : OeaGame() {
         val err = if (p != null) MathX.length(p[0] - x, p[1] - y, p[2] - z) else 99f
         if (err > 0.3f || !me.alive) {
             me.ctrl.position.set(x, y, z)
+            // Reconciliation replaces the body, so the local velocity estimate
+            // has to come with it — otherwise the ramp would fight the host's
+            // position and the camera would stutter after every correction.
+            me.velX = 0f; me.velZ = 0f
             if (me.alive) {
                 val replay = PlayerInput()
                 history.forEachPending { _, st ->
@@ -1096,8 +1133,8 @@ class OeaArena : OeaGame() {
         if (mine) {
             ctx.audio.play(s, 0.85f, pitch = shotPitch(w)); ctx.haptics.tick()
             // Muzzle physics: light on the hands, sparks, and a push of hot air.
-            val fx = sin(lookYaw); val fz = cos(lookYaw)
-            vfx.muzzle(x, y, z, fx, sin(lookPitch) * 0.3f, fz, heavy = if (w == Weapon.LMG || w == Weapon.SHOTGUN) 1.3f else 1f)
+            val fx = sin(lookYaw + recoilYaw); val fz = cos(lookYaw + recoilYaw)
+            vfx.muzzle(x, y, z, fx, sin(lookPitch + recoilPitch) * 0.3f, fz, heavy = if (w == Weapon.LMG || w == Weapon.SHOTGUN) 1.3f else 1f)
         } else {
             ctx.audio.play3D(s, x, y, z, camera, 90f, 0.9f, pitch = shotPitch(w))
             vfx.muzzle(x, y, z, rng1(), 0.2f, rng1(), heavy = if (w == Weapon.SNIPER) 1.2f else 0.8f)
@@ -1203,6 +1240,7 @@ class OeaArena : OeaGame() {
     // ---------------------------------------------------------------- per frame
 
     override fun onUpdate(dt: Float) {
+        renderDt = dt
         val g = ctx.graphics
         val w = g.width.toFloat(); val h = g.height.toFloat(); val d = g.density
         if (w > 0f && h > 0f) applyOrientationControls(w < h)
@@ -1264,8 +1302,8 @@ class OeaArena : OeaGame() {
         smokeBtn.label = if ((me?.smokes ?: 0) > 0) "SMK ${me!!.smokes}" else "—"
         joystick.paused = controlsPaused
         look.paused = controlsPaused
-        joystick.update(ctx.input, w, h, d)
-        look.update(ctx.input, w, h)
+        joystick.update(ctx.input, w, h, d, dt)
+        look.update(ctx.input, w, h, dt)
         val zoom = if (adsOn) (me?.weapon?.zoom ?: 1f) else 1f
         // Sensitivity: base × ADS multiplier ÷ zoom, then the turn-rate cap —
         // the cap is what keeps a glitched pointer or a wild stick from ever
@@ -1358,11 +1396,19 @@ class OeaArena : OeaGame() {
             // Recoil (host simulation or client snapshot) kicks the sight up;
             // the kick decays smoothly so the crosshair recovers like a real gun.
             recoilPitch += me.recoil
+            // Alternating side drift: a real weapon walks the sight picture
+            // slightly left/right as it climbs, and settles back the same way.
+            recoilYaw += me.recoil * (if (recoilPitch > 0f) 0.28f else -0.28f)
             me.recoil = 0f
         }
         if (recoilPitch != 0f) {
             recoilPitch *= MathX.damp(1f, 0f, 8f, dt)
             if (kotlin.math.abs(recoilPitch) < 0.002f) recoilPitch = 0f
+        }
+        if (recoilYaw != 0f) {
+            // Recovers slower than the climb: a settle, not a snap-back.
+            recoilYaw *= MathX.damp(1f, 0f, 4.5f, dt)
+            if (kotlin.math.abs(recoilYaw) < 0.002f) recoilYaw = 0f
         }
         if (switchDip != 0f) {
             switchDip *= MathX.damp(1f, 0f, 10f, dt)
@@ -1398,6 +1444,50 @@ class OeaArena : OeaGame() {
             respawnCountdown -= dt
             if (me?.alive == true) respawnCountdown = -1f
         }
+        // Ground contact: a hard landing throws dust and kicks the view, a
+        // slide drags a trail. Both read the sim's surface, so the effect
+        // always matches what the boots are actually on.
+        val lp = local
+        if (lp != null && lp.alive) {
+            val landing = lp.landImpact
+            if (landing > 0.35f && landing > lastLandImpact + 0.02f) {
+                val gy = map.heightAt(lp.pos.x, lp.pos.z) + 0.04f
+                val puff = if (lp.surface == ArenaMap.Surface.WATER) 0.9f else 0.55f * landing
+                vfx.dustPuff(lp.pos.x, gy, lp.pos.z, puff)
+                if (lp.surface == ArenaMap.Surface.WATER) vfx.dustPuff(lp.pos.x, gy + 0.1f, lp.pos.z, 0.7f)
+                ctx.audio.play(sStep, 0.45f * landing, pitch = 0.7f)
+                shake = max(shake, landing * 0.35f)
+            }
+            lastLandImpact = landing
+            if (lp.sliding) {
+                slideFxTimer -= dt
+                if (slideFxTimer <= 0f) {
+                    slideFxTimer = 0.09f
+                    vfx.dustPuff(lp.pos.x, map.heightAt(lp.pos.x, lp.pos.z) + 0.05f, lp.pos.z, 0.3f)
+                }
+            } else slideFxTimer = 0f
+        }
+        // Airborne debris rides the wind: autumn leaves, spring blossom, snow
+        // spindrift and badlands sand. One emitter, coloured by the season, so
+        // the air is visibly the same system that pushes the soldiers.
+        if (lp != null) ambientTimer -= dt
+        if (ambientTimer <= 0f && lp != null) {
+            ambientTimer = 0.08f
+            map.windAt(ctx.time.elapsed.toFloat(), windTmp)
+            val (col, life, size) = when {
+                season == "autumn" -> Triple(0xF7B2670Au.toInt(), 3.4f, 0.11f)
+                season == "spring" -> Triple(0xE8F2C0D8u.toInt(), 3.0f, 0.09f)
+                season == "winter" || map.snowCover > 0.4f -> Triple(0xDDEDF2F7u.toInt(), 2.4f, 0.07f)
+                map.levelStyle == "badlands" -> Triple(0x66C9B9A0.toInt(), 1.9f, 0.14f)
+                else -> Triple(0x55D8E0C8u.toInt(), 2.2f, 0.08f)
+            }
+            val px = lp.pos.x + (kotlin.random.Random.nextFloat() - 0.5f) * 26f
+            val pz = lp.pos.z + (kotlin.random.Random.nextFloat() - 0.5f) * 26f
+            val py = map.heightAt(px, pz) + 1.2f + kotlin.random.Random.nextFloat() * 5f
+            puffs.emit(px, py, pz, windTmp[0] * 1.4f, -0.6f - kotlin.random.Random.nextFloat() * 0.7f, windTmp[1] * 1.4f,
+                life, size, size * 0.6f, col, col and 0x00FFFFFF,
+                gravity = 0.25f, drag = 1.1f, spin = 2.4f)
+        }
         // Seasons, sky, sun arc and fog are one continuous state for every mode.
         worldEnv.update(dt)
         // Remote actors.
@@ -1408,6 +1498,8 @@ class OeaArena : OeaGame() {
                 val moved = MathX.length(a.view[0] - a.lastX, a.view[2] - a.lastZ)
                 a.speed01 = MathX.clamp01(moved * 28f)
                 a.walk += moved * 2.2f
+                // Which way they are drifting relative to the way they face.
+                a.lateral = (if (moved > 1e-4f) ((a.view[0] - a.lastX) * -cos(a.view[3]) + (a.view[2] - a.lastZ) * sin(a.view[3])) / max(1e-4f, moved) else 0f).coerceIn(-1f, 1f)
                 a.lastX = a.view[0]; a.lastZ = a.view[2]
             }
         }
@@ -1435,8 +1527,14 @@ class OeaArena : OeaGame() {
         val target = viewTarget()
         val (px, py, pz) = target
         val me = local
+        // Landing and sliding reshape the camera instead of teleporting it:
+        // a hard landing drops the eye and rolls the horizon slightly, and a
+        // slide leans the view downhill. Both decay with the body state.
+        val impact = me?.landImpact ?: 0f
+        val dip = impact * 0.36f
+        val lean = if (me?.sliding == true) 0.06f else 0f
         val yaw: Float; val pitch: Float
-        if (me != null && me.alive) { yaw = lookYaw; pitch = lookPitch }
+        if (me != null && me.alive) { yaw = lookYaw + recoilYaw; pitch = lookPitch }
         else { yaw = lookYaw; pitch = MathX.clamp(lookPitch, -0.6f, 0.6f) }
         // Recoil rise, the reload dip and the switch jolt reshape the sight
         // picture without touching the input — the crosshair stays glued to shots.
@@ -1449,7 +1547,7 @@ class OeaArena : OeaGame() {
             me?.prone == true -> 0.8f
             me?.crouching == true -> 1.15f
             else -> 1.7f
-        }
+        } - dip
         val fx = sin(yaw); val fz = cos(yaw)
         val rx = -fz; val rz = fx
         // ADS blends the whole camera: field of view, offset and stance.
@@ -1485,9 +1583,16 @@ class OeaArena : OeaGame() {
             camTgtSm.set(cx + lx * 10f, cy + ly * 10f, cz + lz * 10f)
             camInit = true
         } else {
-            val kPos = MathX.damp(0f, 1f, 15f, dt)
-            camPosSm.x = MathX.lerp(camPosSm.x, cx, kPos); camPosSm.y = MathX.lerp(camPosSm.y, cy, kPos); camPosSm.z = MathX.lerp(camPosSm.z, cz, kPos)
-            camTgtSm.x = MathX.lerp(camTgtSm.x, cx + lx * 10f, kPos); camTgtSm.y = MathX.lerp(camTgtSm.y, cy + ly * 10f, kPos); camTgtSm.z = MathX.lerp(camTgtSm.z, cz + lz * 10f, kPos)
+            // Softer spring: 15 was stiff enough to transmit footstep jitter
+            // and terrain steps straight into the camera. 11 glides.
+            val kPos = MathX.damp(0f, 1f, 11f, dt)
+            camPosSm.x = MathX.lerp(camPosSm.x, cx, kPos); camPosSm.z = MathX.lerp(camPosSm.z, cz, kPos)
+            // Vertical is eased separately and more gently: stairs, ledges and
+            // slopes are exactly where a single stiff spring looked like a
+            // step-jitter, so height gets its own softer spring.
+            val kY = MathX.damp(0f, 1f, 8.5f, dt)
+            camPosSm.y = MathX.lerp(camPosSm.y, cy, kY)
+            camTgtSm.x = MathX.lerp(camTgtSm.x, cx + lx * 10f, kPos); camTgtSm.y = MathX.lerp(camTgtSm.y, cy + ly * 10f, kY); camTgtSm.z = MathX.lerp(camTgtSm.z, cz + lz * 10f, kPos)
         }
         camPos.set(camPosSm.x, camPosSm.y, camPosSm.z)
         // Explosions near the player kick the view — the world wobbles, then settles.
@@ -1498,6 +1603,9 @@ class OeaArena : OeaGame() {
         }
         camera.position.set(camPos)
         camera.target.set(camTgtSm.x, camTgtSm.y, camTgtSm.z)
+        // Roll is a camera-up tilt, so a slide or a hard landing reads as the
+        // body reacting to the ground rather than the world tilting randomly.
+        if (lean != 0f) camera.up.set(rx * lean, 1f, rz * lean).nor() else camera.up.set(0f, 1f, 0f)
         // ADS blends the field of view so the zoom glides in instead of popping.
         val wantAds = if (ads) 1f else 0f
         adsBlend = MathX.damp(adsBlend, wantAds, 14f, dt)
@@ -1558,11 +1666,13 @@ class OeaArena : OeaGame() {
         val sensLabel = String.format(java.util.Locale.US, "Look sensitivity · %.1f×", ctx.settings.lookSensitivity)
         val adsLabel = String.format(java.util.Locale.US, "ADS sensitivity · %.0f%%", adsSens * 100f)
         val turnLabel = if (turnLimit <= 0f) "Turn limit · Off" else String.format(java.util.Locale.US, "Turn limit · %.0f°/s", ctx.settings.turnSpeedLimit)
+        val smoothLabel = String.format(java.util.Locale.US, "Look smoothing · %.0f%%", ctx.settings.lookSmoothing / 0.7f * 100f)
         val items = listOf(
             MenuItem("resume", "Resume"),
             MenuItem("sens", sensLabel),
             MenuItem("ads", adsLabel),
             MenuItem("turn", turnLabel),
+            MenuItem("smooth", smoothLabel),
             MenuItem("invert", "Invert look · " + if (invertY) "On" else "Off"),
             MenuItem("studio", "Character studio"),
             MenuItem("pack", "Pack · weapons & throwables"),
@@ -1590,6 +1700,13 @@ class OeaArena : OeaGame() {
                     val idx = steps.indexOfFirst { it >= ctx.settings.turnSpeedLimit - 1f }.coerceAtLeast(0)
                     ctx.settings.turnSpeedLimit = steps[(idx + 1) % steps.size]
                     turnLimit = ctx.settings.turnSpeedLimit * MathX.DEG_TO_RAD
+                    openPauseMenu()
+                }
+                "smooth" -> {
+                    val steps = floatArrayOf(0f, 0.2f, 0.35f, 0.5f, 0.6f)
+                    val idx = steps.indexOfFirst { it >= ctx.settings.lookSmoothing - 0.02f }.coerceAtLeast(0)
+                    ctx.settings.lookSmoothing = steps[(idx + 1) % steps.size]
+                    look.smoothing = ctx.settings.lookSmoothing
                     openPauseMenu()
                 }
                 "invert" -> {
@@ -1785,7 +1902,11 @@ class OeaArena : OeaGame() {
         // and register the physics-driven particle systems.
         vfx.register(r, env)
         r.draw(map.terrainMesh, map.terrainMaterial, m.idt())
-        r.draw(waterMesh, map.water, 0f, -0.15f, 0f)
+        // Water breathes with the same wind: a slow vertical swell and a tiny
+        // drift, so the sea is not a dead plane next to moving foliage.
+        val seaT = ctx.time.elapsed.toFloat()
+        val swell = sin(seaT * 0.55f) * 0.06f * map.windStrength
+        r.draw(waterMesh, map.water, sin(seaT * 0.17f) * 0.4f * map.windStrength, -0.15f + swell, cos(seaT * 0.13f) * 0.4f * map.windStrength)
         r.draw(map.buildingMesh, map.wallMaterial, m.idt())
         r.draw(map.roofMesh, map.roofMaterial, m.idt())
         r.draw(map.propMesh, map.propMaterial, m.idt())
@@ -1795,11 +1916,22 @@ class OeaArena : OeaGame() {
         r.draw(map.landmarkMesh, map.landmarkMaterial, m.idt())
         if (worldEnv.lanternsOn) r.draw(map.landmarkGlowMesh, map.landmarkGlowMaterial, m.idt())
         val far = camera.far
-        for (t in map.trees) {
+        // Foliage answers the same wind the bodies feel: canopies sway on a slow
+        // per-tree phase, and the gust strength comes from the map's wind.
+        val windT = ctx.time.elapsed.toFloat()
+        val gust = 0.55f + 0.45f * sin(windT * 0.23f) * sin(windT * 0.077f + 1.3f)
+        val swayAmp = map.windStrength * gust
+        for ((ti, t) in map.trees.withIndex()) {
             val ddx = t.x - camera.position.x; val ddz = t.z - camera.position.z
             if (ddx * ddx + ddz * ddz > far * far) continue
             r.draw(ArenaMap.treeTrunk, map.trunk, t.x, t.y - 0.2f, t.z, 0f, t.scale)
-            r.draw(map.crownMesh, map.leaves, t.x, t.y - 0.2f, t.z, 0f, t.scale, t.tint)
+            // Lean the crown downwind, with a small oscillation so a still tree
+            // still breathes. The trunk stays planted.
+            val ph = ti * 1.7f
+            val lean = swayAmp * (0.06f + 0.03f * sin(windT * 1.6f + ph))
+            val ox = map.windX * lean * t.scale * 2.2f
+            val oz = map.windZ * lean * t.scale * 2.2f
+            r.draw(map.crownMesh, map.leaves, t.x + ox, t.y - 0.2f + kotlin.math.abs(ox) * 0.08f, t.z + oz, 0f, t.scale, t.tint)
         }
         for (rk in map.rocks) r.draw(ArenaMap.rockMesh, map.rock, rk.x, rk.y + rk.sy * 0.2f, rk.z, rk.yaw, 0f, 0f, rk.sx, rk.sy * 1.2f, rk.sz)
         if (worldEnv.lanternsOn) {
@@ -1840,20 +1972,26 @@ class OeaArena : OeaGame() {
                 val y = if (pr != null) MathX.lerp(pr[1], p.pos.y, alpha) else p.pos.y
                 val z = if (pr != null) MathX.lerp(pr[2], p.pos.z, alpha) else p.pos.z
                 val flags = (if (p.alive) 1 else 0) or (if (p.crouching) 2 else 0) or (if (p.aiming) 4 else 0) or (if (p.skydiving) 8 else 0) or (if (p.parachute) 16 else 0) or (if (p.prone) 64 else 0)
-                drawSoldier(r, x, y, z, if (p.id == localId) lookYaw else p.yaw, p.pitch, p.color, flags, p.weapon, p.armor, p.helmet, p.ctrl.position.dstXZ(tmp.set(pr?.get(0) ?: x, 0f, pr?.get(2) ?: z)) * 0f + walkPhase(p), walkSpeeds[p.id] ?: 0f, team = p.team, id = p.id,
-                    fx = if (p.id == localId) myFx else actorFx.getOrPut(p.id) { CharFx() })
+                val bodyY = if (p.id == localId) visualBodyYaw(lookYaw, renderDt) else p.yaw
+                drawSoldier(r, x, y, z, bodyY, p.pitch, p.color, flags, p.weapon, p.armor, p.helmet, walkPhase(p), smoothedSpeed(p), team = p.team, id = p.id,
+                    fx = if (p.id == localId) myFx else actorFx.getOrPut(p.id) { CharFx() },
+                    air = p.airTime,
+                    slide = if (p.sliding) 1f else 0f,
+                    lateral = lateralLean(p))
             }
         } else {
             val me = local
             if (me != null && !(me.alive && adsOn && me.weapon.zoom > 2f)) {
                 val (x, y, z) = viewTarget().takeIf { me.alive } ?: Triple(me.pos.x, me.pos.y, me.pos.z)
                 val flags = (if (me.alive) 1 else 0) or (if (crouchOn) 2 else 0) or (if (adsOn) 4 else 0) or (if (me.skydiving) 8 else 0) or (if (me.parachute) 16 else 0) or (if (proneOn) 64 else 0)
-                drawSoldier(r, x, y, z, lookYaw, lookPitch, me.color, flags, me.weapon, me.armor, me.helmet, walkPhase(me), walkSpeeds[me.id] ?: 0f, team = me.team, id = me.id, fx = myFx)
+                drawSoldier(r, x, y, z, visualBodyYaw(lookYaw, renderDt), lookPitch, me.color, flags, me.weapon, me.armor, me.helmet, walkPhase(me), smoothedSpeed(me), team = me.team, id = me.id, fx = myFx,
+                    air = me.airTime, slide = if (me.sliding) 1f else 0f, lateral = lateralLean(me))
             }
             for (a in actors.values) {
                 if (a.id == localId || a.buffer.isEmpty) continue
                 val v = a.view
-                drawSoldier(r, v[0], v[1], v[2], v[3], v[4], a.color, a.flags, Weapon.entries.getOrElse(a.weapon) { Weapon.PAN }, a.armor, a.helmet, a.walk, a.speed01, team = a.team, id = a.id, fx = a.fx)
+                drawSoldier(r, v[0], v[1], v[2], v[3], v[4], a.color, a.flags, Weapon.entries.getOrElse(a.weapon) { Weapon.PAN }, a.armor, a.helmet, a.walk, a.speed01, team = a.team, id = a.id, fx = a.fx,
+                    lateral = a.lateral)
             }
         }
         // Thrown grenades: a small spinning egg, with a blinking warning light
@@ -1903,7 +2041,7 @@ class OeaArena : OeaGame() {
         // the muzzle flash is not the only thing that pushes the dark back.
         if ((rules == "lights_out" || rules == "haunted") && local?.alive == true) {
             val me = local!!
-            val fx0 = sin(lookYaw); val fz0 = cos(lookYaw)
+            val fx0 = sin(lookYaw + recoilYaw); val fz0 = cos(lookYaw + recoilYaw)
             flashLight.set(me.pos.x + fx0 * 0.8f, me.pos.y + 1.5f, me.pos.z + fz0 * 0.8f, 0xFFFFC08A.toInt(), 2.4f, 10f)
             env.pointLights.add(flashLight)
         }
@@ -1922,17 +2060,59 @@ class OeaArena : OeaGame() {
         r.particles(sparks)
     }
 
+    /** Ambient debris cadence and scratch wind buffer. */
+    private var ambientTimer = 0f
+    private val windTmp = FloatArray(2)
+    /** Previous landing impact, so one touchdown fires one puff. */
+    private var lastLandImpact = 0f
+    private var slideFxTimer = 0f
+    /** Smoothed gait speed per player, so the run cycle cross-fades. */
+    private val speedSmooth = HashMap<Int, Float>()
+    private fun smoothedSpeed(p: ArenaPlayer): Float {
+        val raw = MathX.clamp01(MathX.length(p.velX, p.velZ) / 8.4f)
+        val cur = speedSmooth[p.id] ?: raw
+        val v = MathX.damp(cur, raw, 9f, 1f / 60f)
+        speedSmooth[p.id] = v
+        return v
+    }
+    /** Sideways velocity in the body's own frame: -1 left, 1 right. */
+    private fun lateralLean(p: ArenaPlayer): Float {
+        val fx = sin(p.yaw); val fz = cos(p.yaw)
+        val rx = -fz; val rz = fx
+        val side = p.velX * rx + p.velZ * rz
+        return (side / 4.2f).coerceIn(-1f, 1f)
+    }
     private val walkPhases = HashMap<Int, FloatArray>()
     private val walkSpeeds = HashMap<Int, Float>()
+    /**
+     * Stride phase, gait speed and the footfall itself. The step lands on the
+     * actual ground material: a wet splash on the shore, a crunch in snow, a
+     * hollow knock on a wooden floor, a puff of dust on dirt and rock.
+     */
     private fun walkPhase(p: ArenaPlayer): Float {
+        // Snapshot-surface soldiers keep whatever the authority last said they
+        // stood on; the local sim player refreshes it every tick.
+        if (p.id == localId || isAuthority) p.surface = map.surfaceAt(p.pos.x, p.pos.z)
         val st = walkPhases.getOrPut(p.id) { floatArrayOf(p.pos.x, p.pos.z, 0f) }
         val moved = MathX.length(p.pos.x - st[0], p.pos.z - st[1])
         walkSpeeds[p.id] = MathX.clamp01(moved * 28f)
         st[0] = p.pos.x; st[1] = p.pos.z
         st[2] += moved * 2.2f
-        if (p.id == localId && moved > 0.04f && p.ctrl.grounded && (st[2] % MathX.PI_F) < moved * 2.2f) {
-            ctx.audio.play(sStep, 0.35f)
-            vfx.dustPuff(p.pos.x, map.heightAt(p.pos.x, p.pos.z) + 0.05f, p.pos.z, 0.25f)
+        if (moved > 0.04f && p.ctrl.grounded && (st[2] % MathX.PI_F) < moved * 2.2f) {
+            val gy = map.heightAt(p.pos.x, p.pos.z) + 0.05f
+            if (p.id == localId) {
+                when (p.surface) {
+                    ArenaMap.Surface.WATER -> { ctx.audio.play(sStep, 0.5f, pitch = 0.72f); vfx.dustPuff(p.pos.x, gy, p.pos.z, 0.5f) }
+                    ArenaMap.Surface.SNOW -> ctx.audio.play(sStep, 0.26f, pitch = 0.86f)
+                    ArenaMap.Surface.WOOD -> ctx.audio.play(sStep, 0.34f, pitch = 1.22f)
+                    ArenaMap.Surface.ROCK -> ctx.audio.play(sStep, 0.38f, pitch = 1.1f)
+                    ArenaMap.Surface.DIRT, ArenaMap.Surface.SAND -> { ctx.audio.play(sStep, 0.3f, pitch = 0.94f); vfx.dustPuff(p.pos.x, gy, p.pos.z, 0.3f) }
+                    ArenaMap.Surface.GRASS -> ctx.audio.play(sStep, 0.3f)
+                }
+            } else if (p.surface == ArenaMap.Surface.WATER || p.surface == ArenaMap.Surface.SNOW) {
+                // Other soldiers' steps stay visible where the ground reacts.
+                vfx.dustPuff(p.pos.x, gy, p.pos.z, 0.22f)
+            }
         }
         return st[2]
     }
@@ -2028,7 +2208,7 @@ class OeaArena : OeaGame() {
     }
 
     /** Soldier on the shared human rig: real joints, run cycle, gear, weapon in the hands. */
-    private fun drawSoldier(r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, pitch: Float, color: Int, flags: Int, weapon: Weapon, armor: Int, helmet: Int, walk: Float, speed01: Float = 0f, team: Int = 0, id: Int = 0, fx: CharFx? = null) {
+    private fun drawSoldier(r: Renderer3D, x: Float, y: Float, z: Float, yaw: Float, pitch: Float, color: Int, flags: Int, weapon: Weapon, armor: Int, helmet: Int, walk: Float, speed01: Float = 0f, team: Int = 0, id: Int = 0, fx: CharFx? = null, air: Float = 0f, slide: Float = 0f, lateral: Float = 0f) {
         val alive = flags and 1 != 0
         val crouch = flags and 2 != 0
         val prone = flags and 64 != 0
@@ -2087,10 +2267,15 @@ class OeaArena : OeaGame() {
         // Prone folds into the crouch pose — the rig has no flat-ly pose, so the
         // body sits lower and smaller: reads as lying down at a glance.
         rigPose.crouch = crouch || prone
-        rigPose.airborne = chute
+        // Real jumps read as jumps: the legs tuck for a moment in the air, and
+        // the body lands with a short knee bend instead of snapping upright.
+        rigPose.airborne = chute || air > 0.12f
         rigPose.aimHold = !chute
         rigPose.aimPitch = MathX.clamp(pitch, -0.9f, 0.9f)
-        rigPose.lean = 0f
+        // A running turn banks the body: strafing leans into the movement and
+        // sliding leans out of it, so direction changes are visible before the
+        // feet catch up.
+        rigPose.lean = (lateral * 0.55f + slide * 0.5f).coerceIn(-1f, 1f)
         rigPose.headYaw = 0f
         rigPose.detail = true
         // Reload pose: the snapshot carries the sim's reload progress for every
@@ -2364,6 +2549,26 @@ class OeaArena : OeaGame() {
             hud.text("MATCH ${ArenaRules.clock(sim.matchTimeLeft)}", mx + 10f * d, y + 53f * d, 11f,
                 if (urgent) 0xFFFF8A80.toInt() else 0xCCFFFFFF.toInt(), bold = urgent, shadow = false)
         }
+        // Ground contact readout: what the boots are on, and the wind. This is
+        // the same query movement uses, so the HUD can never disagree with the
+        // physics — snow really is slower than rock on screen and underfoot.
+        if (!matchOver && me.alive && !me.skydiving) {
+            val surf = when (me.surface) {
+                ArenaMap.Surface.WATER -> "WADING"
+                ArenaMap.Surface.SNOW -> "SNOW"
+                ArenaMap.Surface.WOOD -> "TIMBER"
+                ArenaMap.Surface.ROCK -> "ROCK"
+                ArenaMap.Surface.SAND -> "SAND"
+                ArenaMap.Surface.DIRT -> "DIRT"
+                ArenaMap.Surface.GRASS -> "GRASS"
+            }
+            map.windAt(ctx.time.elapsed.toFloat(), windTmp)
+            val windSpeed = MathX.length(windTmp[0], windTmp[1])
+            val surfaceY = ly + 52f * d
+            hud.panel(x, surfaceY, 132f * d, 20f * d, 0x80101418.toInt(), 8f)
+            hud.text(surf, x + 9f * d, surfaceY + 4f * d, 10f, 0xCCE8F0F8.toInt(), bold = true, shadow = false)
+            hud.text("WIND ${windSpeed.toInt()}", x + 92f * d, surfaceY + 4f * d, 9.5f, 0xAAFFFFFF.toInt(), shadow = false)
+        }
         if (!matchOver && sim.roundMode && sim.roundPhase == 0 && sim.roundTimeLeft > 0f) {
             hud.panel(mx, y + 74f * d, mw, 20f * d, 0x99101418.toInt(), 8f)
             hud.text("ROUND ${ArenaRules.clock(sim.roundTimeLeft)}", mx + 10f * d, y + 77f * d, 11f,
@@ -2435,7 +2640,7 @@ class OeaArena : OeaGame() {
             }
         }
         val px = mx(me.pos.x); val py = my(me.pos.z)
-        val dirx = -sin(lookYaw); val diry = -cos(lookYaw)
+        val dirx = -sin(lookYaw + recoilYaw); val diry = -cos(lookYaw + recoilYaw)
         b.polygon(floatArrayOf(px + dirx * 8f * d, py + diry * 8f * d, px - diry * 4f * d - dirx * 4f * d, py + dirx * 4f * d - diry * 4f * d,
             px + diry * 4f * d - dirx * 4f * d, py - dirx * 4f * d - diry * 4f * d), ACCENT)
     }

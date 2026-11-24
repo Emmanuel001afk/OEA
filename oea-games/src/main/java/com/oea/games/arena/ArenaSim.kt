@@ -265,6 +265,17 @@ internal class ArenaPlayer(val id: Int, val name: String, val color: Int, val is
     var lastDamageTime = -10f
     val history = PositionHistory(48)
     var lastAck = 0
+    /** Smoothed locomotion: current horizontal velocity, ramped instead of snapped. */
+    var velX = 0f
+    var velZ = 0f
+    /** Surface under the feet (for footsteps, dust and grip). */
+    var surface = ArenaMap.Surface.GRASS
+    /** Seconds since the feet last touched ground — drives the landing squash. */
+    var airTime = 0f
+    /** Landing impact 0..1, decays; the HUD/camera/animation read it. */
+    var landImpact = 0f
+    /** True while sliding on a steep slope beyond control. */
+    var sliding = false
     /** Bot brain. */
     var bot: BotBrain? = null
 
@@ -418,6 +429,12 @@ internal class ArenaSim(
     /** Warfare capture points: three objectives spread across the map. */
     val points = ArrayList<CapturePoint>(3)
 
+    /** Scratch buffers for per-tick ground and wind queries (no allocation). */
+    private val slopeTmp = FloatArray(3)
+    private val windTmp = FloatArray(2)
+    /** Wind right now (m/s), for grenades, VFX and bots. */
+    fun wind(out: FloatArray) = map.windAt(time, out)
+
     /** A warfare objective: who holds it, and how full the capture bar is. */
     class CapturePoint(val x: Float, val z: Float, val r: Float = 4.5f) {
         var owner = -1
@@ -553,7 +570,12 @@ internal class ArenaSim(
         return p
     }
 
-    /** Ground spawn point: the team's town in TDM, a random town otherwise. */
+    /**
+     * Ground spawn point: the team's town in TDM, a random town otherwise.
+     * Candidates are scored by ground rather than dropped blind — a spawn on
+     * a riverbank or a cliff face is a slide or a fall the instant the player
+     * takes control, which reads as the movement system fighting them.
+     */
     private fun spawnSpot(p: ArenaPlayer): FloatArray {
         val towns = map.towns
         val t = when {
@@ -561,8 +583,22 @@ internal class ArenaSim(
             teams -> towns[p.team % towns.size]
             else -> towns[rng.nextInt(towns.size)]
         }
-        val x = t[0] + rng.range(-6f, 6f); val z = t[1] + rng.range(-6f, 6f)
-        return floatArrayOf(x, map.heightAt(x, z) + 0.1f, z)
+        var bestX = t[0]; var bestZ = t[1]; var bestScore = -Float.MAX_VALUE
+        repeat(10) {
+            val x = t[0] + rng.range(-7f, 7f); val z = t[1] + rng.range(-7f, 7f)
+            val h = map.heightAt(x, z)
+            val surf = map.surfaceAt(x, z)
+            // Dry, flat, out of the sea — and not inside a house wall.
+            val score = h * 0.5f - map.slopeAt(x, z) * 14f +
+                when (surf) {
+                    ArenaMap.Surface.WATER -> -40f
+                    ArenaMap.Surface.SNOW -> -2f
+                    ArenaMap.Surface.ROCK -> -3f
+                    else -> 2f
+                }
+            if (score > bestScore) { bestScore = score; bestX = x; bestZ = z }
+        }
+        return floatArrayOf(bestX, map.heightAt(bestX, bestZ) + 0.1f, bestZ)
     }
 
     private fun equipGunGameLoadout(p: ArenaPlayer) {
@@ -627,7 +663,7 @@ internal class ArenaSim(
             p.recoil = 0f
             val s = spawnSpot(p)
             p.ctrl.teleport(s[0], s[1], s[2])
-            p.ctrl.velocity.setZero()
+            p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
         }
         if (roundMode) events?.onRoundStart(round)
     }
@@ -691,7 +727,7 @@ internal class ArenaSim(
             // Royale resurgence: the kit survives the death; only position and health change.
             val s = spawnSpot(p)
             p.ctrl.teleport(s[0], s[1], s[2])
-            p.ctrl.velocity.setZero()
+            p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
             p.health = 100f
             p.alive = true
             p.skydiving = false
@@ -708,7 +744,7 @@ internal class ArenaSim(
         }
         val s = spawnSpot(p)
         p.ctrl.teleport(s[0], s[1], s[2])
-        p.ctrl.velocity.setZero()
+        p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
         p.health = 100f
         p.armor = if (teams) 1 else 0
         p.helmet = 0
@@ -810,6 +846,13 @@ internal class ArenaSim(
                 continue
             }
             g.vy -= 21f * dt
+            // Thrown grenades ride the same wind the soldiers feel, so a gust
+            // visibly drifts a frag — the air is one physical system, not a
+            // screen effect.
+            map.windAt(time, windTmp)
+            val drag = if (g.bounces > 0) 0.15f else 0.9f
+            g.vx += windTmp[0] * 0.28f * drag * dt
+            g.vz += windTmp[1] * 0.28f * drag * dt
             g.x += g.vx * dt; g.y += g.vy * dt; g.z += g.vz * dt
             val gy = map.heightAt(g.x, g.z)
             if (g.y < gy) {
@@ -1043,7 +1086,8 @@ internal class ArenaSim(
             if (p.ctrl.position.y <= ground + 0.05f) {
                 p.ctrl.position.y = ground
                 p.skydiving = false; p.parachute = false
-                p.ctrl.velocity.setZero()
+                p.ctrl.velocity.setZero(); p.velX = 0f; p.velZ = 0f
+                p.landImpact = 0.55f
             }
             return false
         }
@@ -1060,7 +1104,11 @@ internal class ArenaSim(
         // Walk and run are a wide, readable split (4.8 vs 8.4 m/s) — a jog reads as
         // a jog, not a slightly-faster walk.
         val sprinting = sprint && !p.aiming && !p.crouching && !p.prone
-        val speed = when {
+        // The ground answers back: snow and wet grass reduce traction, slopes
+        // cost speed uphill and add it downhill, and water drags hard.
+        p.surface = map.surfaceAt(p.pos.x, p.pos.z)
+        val grip = map.gripAt(p.surface)
+        val wanted = when {
             p.stunTimer > 0f -> (if (p.crouching) 2.6f else 4.8f) * weight * 0.45f
             p.prone -> 1.8f * weight
             p.crouching -> 2.6f * weight
@@ -1068,6 +1116,52 @@ internal class ArenaSim(
             sprinting -> 8.4f * weight
             else -> 4.8f * weight
         }
+        map.downhillAt(p.pos.x, p.pos.z, slopeTmp)
+        val slope = slopeTmp[2]
+        // Walking along the fall line is downhill (fast); fighting it is uphill.
+        val withSlope = dirX * slopeTmp[0] + dirZ * slopeTmp[1]
+        val slopeFactor = if (p.ctrl.grounded) MathX.clamp(1f + withSlope * slope * 0.5f, 0.62f, 1.06f) else 1f
+        // Grip already carries the water penalty (0.62) — multiplying by it a
+        // second time would make wading a crawl.
+        val speed = wanted * grip * slopeFactor
+        // Smoothed locomotion: the input asks for a velocity, the body ramps to
+        // it. Snapping straight to full speed is what made movement look robotic
+        // and made bots jitter at the edge of every strafe.
+        val accel = if (p.ctrl.grounded) MathX.lerp(15f, 11f, slope) else 4.5f
+        val targetVX = dirX * speed
+        val targetVZ = dirZ * speed
+        val k = 1f - kotlin.math.exp(-accel * dt)
+        p.velX += (targetVX - p.velX) * k
+        p.velZ += (targetVZ - p.velZ) * k
+        // A hard stop bleeds off faster than a direction change, so releasing
+        // the stick stops crisply while strafing stays fluid.
+        if (dirX == 0f && dirZ == 0f) {
+            val brake = 1f - kotlin.math.exp(-24f * dt)
+            p.velX -= p.velX * brake
+            p.velZ -= p.velZ * brake
+        }
+        // Steep ground: once the slope is past what a boot can hold, gravity
+        // wins and the player slides down the fall line until it flattens.
+        p.sliding = p.ctrl.grounded && slope > 0.5f && !p.prone
+        if (p.sliding) {
+            val pull = (slope - 0.4f) * 12f * dt
+            p.velX += slopeTmp[0] * pull
+            p.velZ += slopeTmp[1] * pull
+        }
+        // Wind shoves you a little: a gale on an exposed ridge is felt, and it
+        // makes smoke and foliage agree with the body instead of lying.
+        if (p.ctrl.grounded && !p.prone) {
+            map.windAt(time, windTmp)
+            val exposure = MathX.clamp01(1.2f - map.heightAt(p.pos.x, p.pos.z) * 0.04f)
+            p.velX += windTmp[0] * 0.055f * exposure * dt * 4f
+            p.velZ += windTmp[1] * 0.055f * exposure * dt * 4f
+        }
+        // Cap so accumulated wind/slide never launches anyone.
+        val vlen = sqrt(p.velX * p.velX + p.velZ * p.velZ)
+        val vcap = 9.6f * weight
+        if (vlen > vcap) { p.velX = p.velX / vlen * vcap; p.velZ = p.velZ / vlen * vcap }
+        val wasGrounded = p.ctrl.grounded
+        val fallSpeed = -p.ctrl.velocity.y
         p.ctrl.height = when {
             p.prone -> 0.65f
             p.crouching -> 1.2f
@@ -1079,7 +1173,25 @@ internal class ArenaSim(
         // climbable rather than decorative. Only applies from the ground, so
         // it cannot be chained into an infinite climb.
         val vaultBoost = if (p.ctrl.hitWall && p.ctrl.grounded) 2.6f else 0f
-        p.ctrl.move(map.physics, dirX * speed, dirZ * speed, if (inp.jump && !p.crouching) 7.4f + vaultBoost else 0f, dt)
+        p.ctrl.move(map.physics, p.velX, p.velZ, if (inp.jump && !p.crouching) 7.4f + vaultBoost else 0f, dt)
+        // Wall contact kills the into-wall component so the ramp doesn't keep
+        // pushing against concrete (which read as a stutter).
+        if (p.ctrl.hitWall) {
+            p.velX *= 0.86f
+            p.velZ *= 0.86f
+        }
+        // Airborne / landing state, shared with the camera and soldier pose.
+        if (p.ctrl.grounded) {
+            if (!wasGrounded) {
+                p.airTime = 0f
+                // Landing impact scales with how hard we came down.
+                p.landImpact = MathX.clamp01(fallSpeed / 11f)
+            }
+            p.airTime = 0f
+        } else {
+            p.airTime += dt
+        }
+        p.landImpact = MathX.damp(p.landImpact, 0f, 6f, dt)
         return true
     }
 
@@ -1632,6 +1744,8 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
     private var seenZ = 0f
     private var seenAt = -10f
     private var grenadeCooldown = 0f
+    /** Ground slope under the bot this tick (0 flat, 1 cliff). */
+    private var curSlope = 0f
     private val hit = RayHit()
 
     fun think(sim: ArenaSim, dt: Float) {
@@ -1645,6 +1759,7 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
             steerTo(goalX, goalZ, inp, 1f)
             return
         }
+        curSlope = sim.map.slopeAt(p.pos.x, p.pos.z)
         thinkTimer -= dt
         if (thinkTimer <= 0f) {
             thinkTimer = 0.25f
@@ -1753,10 +1868,32 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
                 }
             }
         } else if (!hasGoal || MathX.length(goalX - p.pos.x, goalZ - p.pos.z) < 2f) pickGoal(sim)
-        steerTo(goalX, goalZ, inp, 0.9f)
+        steerTo(goalX, goalZ, inp, routeSpeed(sim))
         // Sprint on long rotations; humans don't walk 60 m to the next hill.
         inp.sprint = MathX.length(goalX - p.pos.x, goalZ - p.pos.z) > 24f
         if (p.mags[p.active] < p.weapon.mag / 2 && p.weapon != Weapon.PAN) inp.reload = true
+    }
+
+    /**
+     * Terrain-aware throttle. The old bot always asked for 0.9 speed, which
+     * on a slope or in snow meant the body never reached what the brain
+     * wanted and the controller ramp looked like stuttering. Bots now ask for
+     * a speed their feet can actually hold: slower uphill, faster downhill,
+     * slower on snow and water.
+     */
+    private fun routeSpeed(sim: ArenaSim): Float {
+        val surf = p.surface
+        val slope = sim.map.slopeAt(p.pos.x, p.pos.z)
+        val base = when (surf) {
+            ArenaMap.Surface.WATER -> 0.55f
+            ArenaMap.Surface.SNOW -> 0.8f
+            ArenaMap.Surface.SAND -> 0.86f
+            ArenaMap.Surface.ROCK -> 0.82f
+            else -> 0.9f
+        }
+        val sloped = MathX.clamp(base - slope * 0.35f, 0.45f, 1f)
+        // Downhill is free speed; let them use it rather than fighting the ramp.
+        return if (slope > 0.3f && p.ctrl.velocity.y < 0.5f) MathX.clamp(sloped + 0.1f, 0.45f, 1f) else sloped
     }
 
     private fun perceive(sim: ArenaSim) {
@@ -1924,18 +2061,33 @@ internal class BotBrain(private val p: ArenaPlayer, private val rng: Rng, privat
      *  from a kill zone — and drop to a lower profile at close range. */
     private fun coverStrafe(inp: PlayerInput, dt: Float, dist: Float) {
         strafeTimer -= dt
-        if (strafeTimer <= 0f) {
-            strafe = if (rng.chance(0.5f)) 1f else -1f
-            strafeTimer = rng.range(0.4f, 1.2f)
-        }
         val t = target
         val dir = atan2(p.pos.x - (t?.pos?.x ?: p.pos.x), p.pos.z - (t?.pos?.z ?: p.pos.z))
+        if (strafeTimer <= 0f) {
+            // Pick the side that is actually walkable, not just a coin flip.
+            val left = dir + MathX.HALF_PI
+            val right = dir - MathX.HALF_PI
+            val okL = !blockedToward(right + MathX.PI, 1.4f)
+            val okR = !blockedToward(left + MathX.PI, 1.4f)
+            strafe = when {
+                okL && !okR -> 1f
+                okR && !okL -> -1f
+                else -> if (rng.chance(0.5f)) 1f else -1f
+            }
+            strafeTimer = rng.range(0.5f, 1.3f)
+        }
         val side = dir + MathX.HALF_PI * strafe
         inp.moveX = 0f
         inp.moveY = 0.85f
         inp.yaw = MathX.lerpAngle(p.yaw, side, 0.25f)
-        inp.crouch = dist < 20f || rng.chance(0.3f)
+        // Drop the body only when the ground is not a slope: crouching on a
+        // slope is how bots used to slide out of their own cover.
+        inp.crouch = (dist < 20f || rng.chance(0.3f)) && curSlope < 0.35f
     }
+
+    /** True if a wall is within [dist] along a compass bearing from the bot. */
+    private fun blockedToward(bearing: Float, dist: Float): Boolean =
+        physicsRef?.raycast(p.pos.x, p.pos.y + 0.9f, p.pos.z, sin(bearing), 0f, cos(bearing), dist, hit, Layers.WORLD or Layers.PROPS) == true
 
     private fun nearestUseful(sim: ArenaSim): Loot? {
         var best: Loot? = null; var bd = 35f * 35f

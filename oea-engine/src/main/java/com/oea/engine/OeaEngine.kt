@@ -172,6 +172,15 @@ class EngineSettings internal constructor(context: Context) {
         get() = prefs.getFloat("turn_speed_limit", 0f).coerceIn(0f, 360f)
         set(v) = prefs.edit().putFloat("turn_speed_limit", v.coerceIn(0f, 360f)).apply()
 
+    /**
+     * How much the reported look drag is eased before it turns the camera:
+     * 0 = raw finger tracking, 0.7 = silky. Games that read `LookPad` deltas
+     * apply it; the default keeps aiming responsive while removing jitter.
+     */
+    var lookSmoothing: Float
+        get() = prefs.getFloat("look_smoothing", 0.35f).coerceIn(0f, 0.7f)
+        set(v) = prefs.edit().putFloat("look_smoothing", v.coerceIn(0f, 0.7f)).apply()
+
     /** Touch aiming sensitivity multiplier (Arena and other shooters). */
     var lookSensitivity: Float
         get() = prefs.getFloat("look_sensitivity", 1f).coerceIn(0.2f, 3f)

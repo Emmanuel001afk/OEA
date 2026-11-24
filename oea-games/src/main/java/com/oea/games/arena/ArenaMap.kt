@@ -8,6 +8,7 @@ import com.oea.engine.math.Colors
 import com.oea.engine.math.MathX
 import com.oea.engine.math.Noise
 import com.oea.engine.math.Rng
+import com.oea.engine.math.Vec3
 import com.oea.engine.physics.HeightField
 import com.oea.engine.physics.Layers
 import com.oea.engine.physics.PhysicsWorld
@@ -76,6 +77,97 @@ internal class ArenaMap(val seed: Long, private val terrainStyle: String = "isla
         season == "winter" -> 0.85f
         terrainStyle == "highlands" -> 0.25f
         else -> 0f
+    }
+
+    /** The island level this map was generated for ("island", "highlands", "badlands"). */
+    val levelStyle: String get() = terrainStyle
+
+    /** What the boots are standing on — drives footstep sound, dust and grip. */
+    enum class Surface { GRASS, DIRT, ROCK, SAND, SNOW, WATER, WOOD }
+
+    private val normalTmp = Vec3()
+
+    /** Shared scratch for callers that need the raw ground normal (x, y, z). */
+    fun groundNormal(x: Float, z: Float, out: Vec3): Vec3 = terrain.normalAt(x, z, out)
+
+    /** 0 = flat, 1 = vertical rock face. */
+    fun slopeAt(x: Float, z: Float): Float {
+        terrain.normalAt(x, z, normalTmp)
+        return (1f - normalTmp.y).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Downhill direction and steepness in one call. Fill [out] with
+     * (dirX, dirZ, slope) — the fall line a sliding body follows.
+     */
+    fun downhillAt(x: Float, z: Float, out: FloatArray) {
+        terrain.normalAt(x, z, normalTmp)
+        val nx = normalTmp.x; val nz = normalTmp.z
+        val l = sqrt(nx * nx + nz * nz)
+        out[0] = if (l > 1e-4f) nx / l else 0f
+        out[1] = if (l > 1e-4f) nz / l else 0f
+        out[2] = (1f - normalTmp.y).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Ground material at a point. This is the link between the world and
+     * movement: snow is slippery, water drags, wood gives a hollow step, and
+     * the footstep puff takes its colour from the same answer.
+     */
+    fun surfaceAt(x: Float, z: Float): Surface {
+        val h = heightAt(x, z)
+        if (h < -0.05f) return Surface.WATER
+        // Interior floors of enterable houses read as timber.
+        if (houses.any { x > it.x0 && x < it.x1 && z > it.z0 && z < it.z1 }) return Surface.WOOD
+        if (snowCover > 0.35f) return Surface.SNOW
+        if (h < 1.1f) return Surface.SAND
+        if (roadDist(x, z) < 3.4f) return Surface.DIRT
+        val slope = slopeAt(x, z)
+        if (slope > 0.42f || (terrainStyle == "badlands" && slope > 0.28f)) return Surface.ROCK
+        if (terrainStyle == "badlands") return Surface.DIRT
+        return Surface.GRASS
+    }
+
+    /** Movement grip 0.7..1.0 — wet grass and snow slide, rock and roads hold. */
+    fun gripAt(surface: Surface): Float = when (surface) {
+        Surface.SNOW -> if (season == "winter") 0.78f else 0.84f
+        Surface.WATER -> 0.62f
+        Surface.SAND -> 0.86f
+        Surface.DIRT -> 0.95f
+        Surface.WOOD -> 0.97f
+        Surface.ROCK -> 1f
+        Surface.GRASS -> if (season == "spring") 0.9f else 0.94f
+    }
+
+    /**
+     * Prevailing wind, season-driven: spring squalls off the sea, autumn
+     * gusts, winter gales, summer a light drift. Bots, grenades and VFX all
+     * use the same vector so the air agrees with itself.
+     */
+    val windStrength: Float get() = when (season) {
+        "spring" -> 0.9f
+        "autumn" -> 1.15f
+        "winter" -> 1.3f
+        else -> 0.55f
+    }
+    val windX: Float get() = when (terrainStyle) {
+        "highlands" -> 0.82f
+        "badlands" -> 0.68f
+        else -> 0.42f
+    }
+    val windZ: Float get() = when (terrainStyle) {
+        "highlands" -> 0.24f
+        "badlands" -> 0.55f
+        else -> -0.35f
+    }
+
+    /** Wind velocity (m/s) at a moment, with a slow gust cycle. */
+    fun windAt(time: Float, out: FloatArray): FloatArray {
+        val gust = 0.72f + 0.28f * kotlin.math.sin(time * 0.23f) * kotlin.math.sin(time * 0.077f + 1.3f)
+        val s = windStrength * gust * 3.2f
+        out[0] = windX * s
+        out[1] = windZ * s
+        return out
     }
 
     /** Materials tinted for this level style (shared meshes, per-level colours). */

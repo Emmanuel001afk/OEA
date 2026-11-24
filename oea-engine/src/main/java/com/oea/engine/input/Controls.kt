@@ -12,6 +12,7 @@ import com.oea.engine.graphics.SpriteBatch
 import com.oea.engine.math.Colors
 import com.oea.engine.math.MathX
 import com.oea.engine.math.Vec2
+import kotlin.math.exp
 import kotlin.math.hypot
 
 /**
@@ -43,7 +44,8 @@ class VirtualJoystick(
     /** When true the control stands down: no touches claimed, value reads zero (UI overlays). */
     var paused = false
 
-    fun update(input: Input, width: Float, height: Float, density: Float) {
+    fun update(input: Input, width: Float, height: Float, density: Float, dt: Float = 0f) {
+        stepMs = if (dt > 0f) (dt * 1000f).coerceIn(4f, 60f) else 16.7f
         if (paused) {
             input.pointer(pointerId)?.owner = null
             pointerId = -1
@@ -81,8 +83,25 @@ class VirtualJoystick(
         knobX = baseX + nx * clamped; knobY = baseY + ny * clamped
         var m = clamped / radius
         m = if (m < deadZone) 0f else (m - deadZone) / (1f - deadZone)
-        value.set(nx * m, -ny * m)
+        // Soft response curve: the outer 40% of the stick still adds speed, but
+        // small deflections give fine control instead of a snappy full step.
+        // Linear below the knee keeps a deliberate walk walkable.
+        if (m > 0f) {
+            val knee = 0.45f
+            m = if (m <= knee) m else knee + (m - knee) * (1f - (m - knee) * 0.35f) * 1.15f
+            m = m.coerceIn(0f, 1f)
+        }
+        val rawX = nx * m; val rawY = -ny * m
+        // Feather the vector so a released or reversed stick eases instead of
+        // snapping the body to a stop; quick flicks still arrive in ~80 ms.
+        val k = 1f - exp(-response * 0.001f * stepMs)
+        value.set(value.x + (rawX - value.x) * k, value.y + (rawY - value.y) * k)
     }
+
+    /** Response sharpness: higher follows the finger faster. */
+    var response = 26f
+    /** Milliseconds since the last update, used to keep the smoothing frame-rate independent. */
+    private var stepMs = 16.7f
 
     private fun inRegion(nx: Float, ny: Float) = nx >= region[0] && ny >= region[1] && nx <= region[2] && ny <= region[3]
 
@@ -197,7 +216,7 @@ class LookPad(var region: FloatArray = floatArrayOf(0.45f, 0f, 1f, 1f)) {
     /** When true the pad stands down: no touches claimed (UI overlays). */
     var paused = false
 
-    fun update(input: Input, width: Float, height: Float) {
+    fun update(input: Input, width: Float, height: Float, dt: Float = 0f) {
         if (paused) {
             input.pointer(pointerId)?.owner = null
             pointerId = -1
@@ -231,7 +250,28 @@ class LookPad(var region: FloatArray = floatArrayOf(0.45f, 0f, 1f, 1f)) {
                 }
             }
         }
+        // Ease the reported drag so the camera turns in a clean arc instead of
+        // tracking every micro-jump of a finger. Flicks still land the same
+        // total rotation, just spread over a couple of frames.
+        if (smoothing > 0f) {
+            // Frame-rate independent ease: at 120 Hz it filters less per frame,
+            // at 30 Hz more, so the camera feels identical on both.
+            val step = if (dt > 0f) (dt * 1000f).coerceIn(4f, 60f) else 16.7f
+            val k = 1f - exp(-(1f - smoothing).coerceIn(0.03f, 1f) * step * 0.22f)
+            smoothedX += (deltaX - smoothedX) * k
+            smoothedY += (deltaY - smoothedY) * k
+            deltaX = smoothedX
+            deltaY = smoothedY
+        } else {
+            smoothedX = deltaX; smoothedY = deltaY
+        }
+        if (!active) { smoothedX = 0f; smoothedY = 0f }
     }
+
+    /** 0 = raw finger (fastest), 0.6 = silky. Default keeps aim responsive. */
+    var smoothing = 0.35f
+    private var smoothedX = 0f
+    private var smoothedY = 0f
 }
 
 /** Short vibration cues tuned for games. Respects the engine's haptics setting. */
