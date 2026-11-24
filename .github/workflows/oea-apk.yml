@@ -119,6 +119,46 @@ jobs:
           ! grep -Fq "adb shell dpm set-device-owner" "$TOOLS"
           ! grep -Fq "Copy Device Owner command" "$TOOLS"
           ! grep -Fq "DEVICE OWNER SETUP" "$TOOLS"
+      - name: Verify smart folders are identified from the phone, not written down
+        # Smart folders used to read a catalogue typed by hand, and folder titles
+        # wrote a guessed category word into the layout. Both are regressions a
+        # compile cannot see: the app still builds, it just starts inventing names
+        # again. Families must come from facts the phone owns (shared uid, signing
+        # certificate, publisher namespace) and names must be derived and maintained
+        # automatically.
+        run: |
+          set -euo pipefail
+          MODEL=oea/src/main/java/com/oea/launcher/model/OeaAppModel.kt
+          FAMILIES=oea/src/main/java/com/oea/launcher/workspace/OeaAppFamilies.kt
+          SMART=oea/src/main/java/com/oea/launcher/workspace/OeaSmartFolders.kt
+          WS=oea/src/main/java/com/oea/launcher/workspace/OeaWorkspace.kt
+          TILES=oea/src/main/java/com/oea/launcher/workspace/OeaHomeViews.kt
+          ICONS=oea/src/main/java/com/oea/launcher/icons/OeaIconController.kt
+          # The uid is carried from PackageManager through the catalogue to discovery.
+          grep -Fq "uid = appInfo.uid" "$MODEL"
+          grep -Fq "val uid: Int = 0" "$MODEL"
+          grep -Fq "SHARED_UID" "$FAMILIES"
+          grep -Fq "SHARED_SIGNATURE" "$FAMILIES"
+          grep -Fq "GET_SIGNING_CERTIFICATES" "$SMART"
+          grep -Fq "namespaceOf(" "$FAMILIES"
+          grep -Fq "OeaAppFamilies.discover(" "$SMART"
+          # No written catalogue, and no licence to name families by hand.
+          ! grep -Fq "CATALOGUE" "$SMART"
+          ! grep -Fq "com.google." "$SMART"
+          ! grep -Fq "com.microsoft." "$SMART"
+          ! grep -Fq "com.transsion" "$SMART"
+          # Titles are OEA's own and are replaced when the family changes; a name
+          # the user wrote is never touched, which is what the written title is for.
+          grep -Fq "KEY_WRITTEN_TITLE" "$SMART"
+          # A folder made by dropping one app on another gets a plain name: no
+          # ApplicationInfo category is turned into a word and stored.
+          ! grep -Fq "CATEGORY_GAME" "$WS"
+          ! grep -Fq "CATEGORY_SOCIAL" "$WS"
+          grep -Fq "internal fun suggestFolderName" "$WS"
+          # A missing icon is drawn as a plate, and one failed resolve retries
+          # instead of leaving the tile blank for the session.
+          grep -Fq "drawIconPlate" "$TILES"
+          grep -Fq "attempt(1)" "$ICONS"
       - name: Verify launcher identity and required launcher features
         run: |
           set -euo pipefail

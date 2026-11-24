@@ -26,7 +26,13 @@ data class OeaAppInfo(
     val label: String,
     val category: Int = -1,
     val system: Boolean = false,
-    val stamp: Long = 0L
+    val stamp: Long = 0L,
+    /**
+     * Android uid of the app. Apps installed under one uid are one publisher
+     * family — a fact the system enforces, which smart folders group on. 0 when
+     * unknown (a cached catalogue written by an older build).
+     */
+    val uid: Int = 0
 )
 
 /**
@@ -64,7 +70,15 @@ class OeaAppModel(private val context: Context) {
             val o = array.optJSONObject(i) ?: return@mapNotNull null
             val pkg = o.optString("p").takeIf(String::isNotBlank) ?: return@mapNotNull null
             val cls = o.optString("c").takeIf(String::isNotBlank) ?: return@mapNotNull null
-            OeaAppInfo(pkg, cls, o.optString("l").ifBlank { pkg }, o.optInt("g", -1), o.optBoolean("s"), o.optLong("t"))
+            OeaAppInfo(
+                pkg,
+                cls,
+                o.optString("l").ifBlank { pkg },
+                o.optInt("g", -1),
+                o.optBoolean("s"),
+                o.optLong("t"),
+                o.optInt("u")
+            )
         }
     }.onFailure { Log.w(TAG, "Ignoring unreadable app catalogue cache", it) }.getOrDefault(emptyList())
 
@@ -81,6 +95,7 @@ class OeaAppModel(private val context: Context) {
                     if (app.category != -1) put("g", app.category)
                     if (app.system) put("s", true)
                     if (app.stamp != 0L) put("t", app.stamp)
+                    if (app.uid != 0) put("u", app.uid)
                 })
             }
             val file = cacheFile
@@ -126,7 +141,8 @@ class OeaAppModel(private val context: Context) {
                 category = if (Build.VERSION.SDK_INT >= 26) appInfo.category else -1,
                 system = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
                     (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0,
-                stamp = apkStamp(appInfo)
+                stamp = apkStamp(appInfo),
+                uid = appInfo.uid
 )
         }.getOrNull()
 

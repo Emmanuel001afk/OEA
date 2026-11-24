@@ -138,19 +138,30 @@ class OeaIconController(private val context: Context) {
             alreadyLoading += onReady
             return
         }
-        runCatching {
-            resolveExecutor.execute {
-                // load() puts the bitmap in the cache before the waiters are released,
-                // so a request that races this delivery finds it and is answered at once.
-                val bitmap = runCatching { load(key, packageName, className, style) }.getOrNull()
-                pending.remove(key)
-                if (bitmap != null) {
-                    val drawable = BitmapDrawable(context.resources, bitmap)
-                    val listeners = synchronized(waiting) { waiting.toList() }
-                    main.post { listeners.forEach { listener -> runCatching { listener(drawable) } } }
+        // A failed resolve must not strand the tiles waiting on it. The first load of a
+        // session can lose a race with the package manager (the app catalogue is ready
+        // before the icon service is) and then the tile would stay blank for the rest
+        // of the session: request() was its only chance, and it had already returned.
+        // One delayed retry covers that, off the main thread; if it fails too, the
+        // tiles are released and draw their own letter plate instead of a hole.
+        fun attempt(tries: Int) {
+            runCatching {
+                resolveExecutor.execute {
+                    // load() puts the bitmap in the cache before the waiters are released,
+                    // so a request that races this delivery finds it and is answered at once.
+                    val bitmap = runCatching { load(key, packageName, className, style) }.getOrNull()
+                    pending.remove(key)
+                    if (bitmap != null) {
+                        val drawable = BitmapDrawable(context.resources, bitmap)
+                        val listeners = synchronized(waiting) { waiting.toList() }
+                        main.post { listeners.forEach { listener -> runCatching { listener(drawable) } } }
+                    } else if (tries > 0) {
+                        main.postDelayed({ attempt(tries - 1) }, 500L)
+                    }
                 }
-            }
-        }.onFailure { pending.remove(key) }
+            }.onFailure { pending.remove(key) }
+        }
+        attempt(1)
     }
 
     fun iconBitmap(packageName: String, className: String? = null): Bitmap? {
