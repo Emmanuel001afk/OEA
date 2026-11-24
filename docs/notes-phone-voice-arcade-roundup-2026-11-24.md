@@ -76,4 +76,10 @@ CI runs on this branch (compile, JVM tests, then the guard steps):
 
 | Run | Result |
 | --- | --- |
-| _pending_ | _first run after the push_ |
+| `45355672496` (first push) | **red** — compiled, but three `OeaVoiceGrammarTest` cases failed: `goToAPlaceNavigates`, `callingAndMessaging`, `appMatchingPrefersTheExactName` |
+| `45356522486` (after the fix) | **green** — both jobs: compiled, all JVM tests passed, every guard step passed |
+
+The red run was the grammar being wrong about case, not the tests being wrong:
+
+* the sentence was lowercased before the query was sliced out of it, so "go to Ikeja" reached the map lookup as `ikeja` and "send a message to Tunde" as `tunde`. The sentence is now folded for matching and sliced from a copy that keeps its case.
+* `matchingApp("chr", …)` found nothing because `"Chrome".startsWith("chr")` is false. App names are compared case-insensitively now.
