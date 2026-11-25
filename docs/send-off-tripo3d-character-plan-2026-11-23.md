@@ -220,6 +220,15 @@ verified-by-inspection and Python-smoke-test pass only.
   inverse binds, normalises to 1.8 m with feet at y=0, extracts base-colour
   textures and samples animation clips as bind-relative matrices. It has a
   dependency-free smoke test: `python3 tools/tripo/test_glb_to_oeac.py` (passes).
+- **Auto-rig for unrigged models.** `tools/tripo/autorig.py` fits OEA's 19-bone
+  skeleton to a standing humanoid that has no skin at all — it measures the up
+  axis, scale, crotch, arm axis and leg axis from the vertices, places the
+  joints, computes distance-based weights with a per-bone influence radius, and
+  flips inward-wound shells. Runs through the same converter (`--auto-rig`, or
+  automatically when the GLB has no skin) and writes the identical `.oeac`. Test:
+  `python3 tools/tripo/test_autorig.py` (passes, builds its own unrigged GLB).
+  **This is how the shipped hero got its rig**: see
+  `docs/send-off-imported-soldier-rig-2026-11-24.md`.
 - **Additive Send Off hookup.** `CharacterStudio.rig(asset)` accepts an
   imported asset; `OeaArena.onCreate()` tries a private file at
   `characters/hero.oeac`, then `assets/characters/hero.oeac`, falling back to
@@ -258,18 +267,27 @@ verified-by-inspection and Python-smoke-test pass only.
   vertex colours. `WeaponAssetLoader.kt` loads them; `OeaArena` uses a white
   material for the painted meshes and keeps the old procedural boxes as a
   fallback. `preview_weapons.py` renders a verification sheet.
-- **Static check:** `python3 tools/check-kotlin.py` passes (303 sources).
+- **Imported hero.** The committed `3d.glb` (a 10,040-vertex soldier, no rig) is
+  now the local player: `characters/hero_rigged.oeac` plus its 512 px albedo,
+  and the procedural `characters/hero.oeac` is gone. The five bots remain
+  procedural. `concept_to_oeac.py --all` skips `hero` rather than overwriting it.
+- **Static check:** `python3 tools/check-kotlin.py` passes (306 sources).
 
 ### How to use it
 
-1. Generate/rig/export a GLB from Tripo (phases 1–2 above).
+1. Generate/rig/export a GLB from Tripo (phases 1–2 above). A rig is optional —
+   `autorig.py` fits one if the export has no skin.
 2. Convert it:
 
    ```bash
    python3 tools/tripo/glb_to_oeac.py soldier_rigged.glb \
-     --out oea-engine/src/main/assets/characters/hero.oeac \
-     --textures oea-engine/src/main/assets/characters/hero
+     --out oea-engine/src/main/assets/characters/hero_rigged.oeac \
+     --textures oea-engine/src/main/assets/characters/hero_rigged
    ```
+
+   `--auto-rig` forces the fitted-skeleton path; it also runs by itself when the
+   GLB has no `skins`. `--texture-size 512` (the default) re-encodes the albedo
+   down from a 4096 px source.
 
    Or point `--out` at a staging folder and copy both outputs to a device's
    OEA private `games/arena/characters/` folder for testing:

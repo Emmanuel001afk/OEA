@@ -101,6 +101,38 @@ def texture_average(folder: Path, name: str, fallback: int) -> RGB:
     return tuple(v // max(1, count) for v in total)  # type: ignore[return-value]
 
 
+_TEXTURE_CACHE: Dict[str, Tuple[int, int, List[bytes]]] = {}
+
+
+def texture_sample(folder: Path, name: str) -> Optional[Tuple[int, int, List[bytes]]]:
+    """Decoded rows for a part texture, cached — or None if it is unreadable."""
+    if not name:
+        return None
+    key = str(folder / name)
+    if key in _TEXTURE_CACHE:
+        return _TEXTURE_CACHE[key]
+    path = folder / name
+    if not path.exists():
+        return None
+    from concept_to_oeac import read_png_rgb
+    try:
+        w, h, rows = read_png_rgb(path)
+    except (ValueError, OSError):
+        return None
+    _TEXTURE_CACHE[key] = (w, h, rows)
+    return _TEXTURE_CACHE[key]
+
+
+def sample_uv(tex: Tuple[int, int, List[bytes]], u: float, v: float) -> RGB:
+    """Bilinear-free nearest sample at (u, v), wrapping like the GL texture."""
+    w, h, rows = tex
+    x = int((u % 1.0) * w) % w
+    y = int((v % 1.0) * h) % h
+    o = x * 3
+    line = rows[y]
+    return (line[o], line[o + 1], line[o + 2])
+
+
 # --------------------------------------------------------------------- matrices
 
 def _mat_identity() -> List[float]:
@@ -389,7 +421,8 @@ def render(
         verts = part.get("verts") or part.get("vertices") or []
         tex_rgb = texture_average(tex_dir, part.get("tex", ""), part["color"]) if tex_dir else \
             ((part["color"] >> 16) & 255, (part["color"] >> 8) & 255, part["color"] & 255)
-        textured = bool(part.get("tex")) and tex_dir is not None
+        tex_src = texture_sample(tex_dir, part.get("tex", "")) if tex_dir is not None else None
+        textured = tex_src is not None
         idx = part.get("idx") or part.get("indices") or []
 
         # camera-space vertices, flat normals per triangle
@@ -429,17 +462,24 @@ def render(
             if abs(den) < 1e-9:
                 continue
 
-            # vertex colours (linear) blended to the texture mean
+            # Albedo: vertex colour (linear), times the texture fetched at this
+            # triangle's UV centroid. Sampling the texture — rather than using
+            # its mean colour — is what makes the preview show what the phone
+            # will show: a wrong UV unwrap or a missing albedo becomes visible
+            # here instead of on a device.
             base = [0.0, 0.0, 0.0]
             for k in range(3):
                 s = 0.0
                 for v in (a, b, c):
                     s += verts[v * 20 + 8 + k]
-                base[k] = s / 3.0
-            if textured:
-                tint = [_srgb_to_linear(tex_rgb[k] / 255.0) for k in range(3)]
+                base[k] = max(0.0, s / 3.0)
+            if textured and tex_src is not None:
+                u = (verts[a * 20 + 6] + verts[b * 20 + 6] + verts[c * 20 + 6]) / 3.0
+                v = (verts[a * 20 + 7] + verts[b * 20 + 7] + verts[c * 20 + 7]) / 3.0
+                srgb = sample_uv(tex_src, u, v)
                 for k in range(3):
-                    base[k] = max(base[k], 0.0) * tint[k] + tint[k] * 0.35
+                    base[k] *= _srgb_to_linear(srgb[k] / 255.0) * 1.15
+                base = [c_ + 0.012 for c_ in base]
 
             ndl = max(0.0, n[0] * key[0] + n[1] * key[1] + n[2] * key[2])
             ndf = max(0.0, n[0] * fill[0] + n[1] * fill[1] + n[2] * fill[2])

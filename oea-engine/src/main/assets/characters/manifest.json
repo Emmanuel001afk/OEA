@@ -43,9 +43,9 @@
     {
       "id": "hero",
       "name": "Ranger 01",
-      "role": "Local player",
-      "asset": "characters/hero.oeac",
-      "textures": "characters/hero",
+      "role": "Local player \u00b7 imported",
+      "asset": "characters/hero_rigged.oeac",
+      "textures": "characters/hero_rigged",
       "color": 4281347888
     }
   ]
