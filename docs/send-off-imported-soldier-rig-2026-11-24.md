@@ -233,10 +233,14 @@ For comparison, the shipped procedural hero at the same poses: bind
 better than the hand-built one.
 
 Poses were also rendered and looked at — front, three-quarter, side and back in
-`/tmp/gv/ship-views.png`, and bind / T-pose / aim / crouch in
-`/tmp/gv/ship-poses.png`. The bind pose is clean; the T-pose reads as an A-pose
-24° wider; the aim and crouch poses bend at the measured joints with no skin
-poking through the vest.
+`docs/images/send-off-hero-rigged-views.png`, and bind / T-pose / aim / crouch in
+`docs/images/send-off-hero-rigged-poses.png`. The bind pose is clean; the T-pose
+reads as an A-pose 24° wider; the aim and crouch poses bend at the measured
+joints with no skin poking through the vest.
+
+![The imported hero from four angles](images/send-off-hero-rigged-views.png)
+
+![Bind, T-pose, aim and crouch, skinned by the engine's pose maths](images/send-off-hero-rigged-poses.png)
 
 ## 6. Tests
 
