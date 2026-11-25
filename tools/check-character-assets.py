@@ -47,8 +47,24 @@ def fail(msg: str) -> None:
     raise SystemExit(1)
 
 
-def shells(idx: list[int]) -> list[list[int]]:
-    parent = list(range(max(idx) + 1))
+def shells(idx: list[int], verts: list[float]) -> list[list[int]]:
+    """Triangle groups that form one surface, on *welded* topology.
+
+    A GLB stores one vertex per split normal, so a 17-shell character becomes
+    ~1000 disjoint strips once you look at the raw indices. Those strips are
+    open surfaces with no inside, and the winding test is meaningless on them,
+    so positions are welded first (at 0.1 mm) and the test runs on real shells.
+    """
+    key_of: dict[tuple[int, int, int], int] = {}
+    remap: list[int] = []
+    for i in range(len(verts) // STRIDE):
+        o = i * STRIDE
+        key = (round(verts[o] * 10000), round(verts[o + 1] * 10000), round(verts[o + 2] * 10000))
+        if key not in key_of:
+            key_of[key] = len(key_of)
+        remap.append(key_of[key])
+
+    parent = list(range(len(key_of)))
 
     def find(a: int) -> int:
         while parent[a] != a:
@@ -56,15 +72,15 @@ def shells(idx: list[int]) -> list[list[int]]:
             a = parent[a]
         return a
 
-    for t in range(0, len(idx), 3):
-        a, b, c = idx[t], idx[t + 1], idx[t + 2]
+    for t in range(0, len(idx) - 2, 3):
+        a, b, c = remap[idx[t]], remap[idx[t + 1]], remap[idx[t + 2]]
         for x, y in ((a, b), (b, c)):
             ra, rb = find(x), find(y)
             if ra != rb:
                 parent[rb] = ra
     groups: dict[int, list[int]] = {}
-    for t in range(0, len(idx), 3):
-        groups.setdefault(find(idx[t]), []).extend((idx[t], idx[t + 1], idx[t + 2]))
+    for t in range(0, len(idx) - 2, 3):
+        groups.setdefault(find(remap[idx[t]]), []).extend((idx[t], idx[t + 1], idx[t + 2]))
     return list(groups.values())
 
 
@@ -98,7 +114,7 @@ def check_part(name: str, part: dict, textures: Path) -> None:
         if abs(total - 1.0) > 1e-2:
             fail(f"{name}/{part['name']}: vertex {i} weights sum to {total:.3f}")
 
-    for group in shells(idx):
+    for group in shells(idx, verts):
         centre = [0.0, 0.0, 0.0]
         uniq = set(group)
         for v in uniq:
@@ -108,6 +124,7 @@ def check_part(name: str, part: dict, textures: Path) -> None:
         n = float(len(uniq))
         centre = [c / n for c in centre]
         score = 0.0
+        area = 0.0
         for t in range(0, len(group), 3):
             pa = [verts[group[t + k] * STRIDE + j] for j, k in enumerate((0, 1, 2))]
             pb = [verts[group[t + 1] * STRIDE + j] for j in (0, 1, 2)]
@@ -117,8 +134,16 @@ def check_part(name: str, part: dict, textures: Path) -> None:
             fn = (e1[1] * e2[2] - e1[2] * e2[1],
                   e1[2] * e2[0] - e1[0] * e2[2],
                   e1[0] * e2[1] - e1[1] * e2[0])
+            area += 0.5 * math.sqrt(sum(v * v for v in fn))
             mid = [(pa[j] + pb[j] + pc[j]) / 3.0 - centre[j] for j in range(3)]
             score += sum(fn[j] * mid[j] for j in range(3))
+        # A shell with no surface area has no inside, so it has no winding — it
+        # is a degenerate sliver (a collapsed quad edge, a zero-length strap)
+        # that draws nothing either way and must not fail the test. Rounding
+        # the signed score is the same decision: a shell whose score is a
+        # rounding error from zero cannot be called inside-out.
+        if area < 1e-5:
+            continue
         if score < 0:
             fail(f"{name}/{part['name']}: a shell is wound inward "
                  f"({len(set(group))} vertices) — it is invisible with back-face culling")
@@ -235,8 +260,18 @@ def main() -> int:
             fail(f"{name}: {tris} triangles is too heavy for a phone character")
         print(f"  {name:11s} {len(parts)} parts  {tris:5d} tris  bind + poses ok")
 
+    # Every .oeac on disk has to be in the manifest, and every .texture it names
+    # has to exist. An asset that no manifest entry points at is 900 KiB of dead
+    # weight in the APK; one that points at a missing texture renders untextured
+    # on a phone with no error at all.
+    referenced = {entry["asset"] for entry in entries}
+    for oeac in sorted((ASSETS / "characters").glob("*.oeac")):
+        rel = f"characters/{oeac.name}"
+        if rel not in referenced:
+            fail(f"{rel} is bundled but no manifest entry uses it — dead weight in the APK")
+
     print(f"CHARACTER ASSETS OK — {len(entries)} characters, 19 bones, "
-          f"normalised weights, outward winding, poses behave")
+          f"normalised weights, outward winding, poses behave, no orphans")
     return 0
 
 

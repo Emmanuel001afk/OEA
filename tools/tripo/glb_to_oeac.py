@@ -32,6 +32,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+Vec3 = Tuple[float, float, float]
+
 MAGIC = b"OEAC"
 VERSION = 1
 BONE_NAMES = [
@@ -262,6 +264,23 @@ def node_matrices(doc: Dict[str, Any], overrides: Optional[Dict[int, Tuple[List[
     return [m for m in out if m is not None]  # type: ignore[misc]
 
 
+def texture_source(doc: Dict[str, Any], tex_index: int) -> Optional[int]:
+    """The image index behind a texture, following extensions.
+
+    `EXT_texture_webp` and friends declare `source` inside the extension object
+    instead of on the texture itself, so reading `textures[i]["source"]` alone
+    finds nothing and the import silently loses its albedo — which is exactly
+    what a character then looks like: untextured.
+    """
+    texture = doc.get("textures", [])[tex_index] if tex_index < len(doc.get("textures", [])) else {}
+    for ext in texture.get("extensions", {}).values():
+        if isinstance(ext, dict) and "source" in ext:
+            return int(ext["source"])
+    if "source" in texture:
+        return int(texture["source"])
+    return None
+
+
 def image_bytes(doc: Dict[str, Any], binary: bytes, source_dir: Path, index: int) -> Tuple[bytes, str]:
     image = doc["images"][index]
     if "bufferView" in image:
@@ -278,6 +297,102 @@ def image_bytes(doc: Dict[str, Any], binary: bytes, source_dir: Path, index: int
         mime = "image/png" if data[:4] == b"\x89PNG" else "image/jpeg"
     ext = ".jpg" if "jpeg" in mime or "jpg" in mime else ".png"
     return data, ext
+
+
+# --------------------------------------------------------------------- auto-rig
+
+def shrink_texture(path: Path, size: int) -> Optional[str]:
+    """Rewrites an extracted texture as a small indexed PNG, returning its new name.
+
+    Generated models ship 4096x4096 albedo maps — 3 MB, for a character 300 px
+    tall on a phone. Re-encoding to a 512 px indexed PNG costs ~40 dB less
+    memory and looks identical at gameplay distance. Uses ImageMagick when it
+    is on the machine; when it is not, the original is left alone and reported,
+    because a wrong-format texture is better than a silently missing one.
+    """
+    import shutil
+    import subprocess
+
+    convert = shutil.which("convert") or shutil.which("magick")
+    if convert is None:
+        return None
+    # PNG24, not PNG8: the in-repo PNG reader (concept_to_oeac.read_png_rgb)
+    # accepts only 8-bit truecolour, so an indexed PNG would make the preview
+    # renderer throw even though Android's decoder would have been happy.
+    target = path.with_name("tex_albedo.png")
+    cmd = [convert, str(path), "-resize", f"{size}x{size}", "-strip",
+           "-dither", "FloydSteinberg", "-colors", "128", "PNG24:" + str(target)]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=180)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if target.exists() and target.stat().st_size > 0:
+        if target != path:
+            path.unlink(missing_ok=True)
+        return target.name
+    return None
+
+
+def collect_primitives(doc: Dict[str, Any], binary: bytes, source_dir: Path,
+                       tex_dir: Optional[Path], save_textures: bool) -> Tuple[List[Vec3], List[Vec3],
+                                                                              List[Tuple[float, float]],
+                                                                              List[int], str, int]:
+    """Every triangle in the file, in one vertex list, for an unrigged auto-rig.
+
+    Materials are collapsed into a single part because the skin we are about to
+    fit is what makes the mesh worth having; a 40-material split would mean 40
+    draw calls and 40 texture binds on a phone. The first base-colour texture
+    found is kept as the part's albedo.
+    """
+    globals_ = node_matrices(doc)
+    positions: List[Vec3] = []
+    normals: List[Vec3] = []
+    uvs: List[Tuple[float, float]] = []
+    indices: List[int] = []
+    texture = ""
+    colour = 0xFF808080
+
+    for node_index, node in enumerate(doc.get("nodes", [])):
+        if "mesh" not in node:
+            continue
+        mesh = doc["meshes"][node["mesh"]]
+        m = globals_[node_index]
+        for prim in mesh.get("primitives", []):
+            attrs = prim.get("attributes", {})
+            if "POSITION" not in attrs:
+                continue
+            base = len(positions)
+            p = read_accessor(doc, binary, attrs["POSITION"])
+            n = read_accessor(doc, binary, attrs["NORMAL"]) if "NORMAL" in attrs else [[0.0, 1.0, 0.0]] * len(p)
+            t = read_accessor(doc, binary, attrs["TEXCOORD_0"]) if "TEXCOORD_0" in attrs else [[0.0, 0.0]] * len(p)
+            for i, point_ in enumerate(p):
+                positions.append(tuple(point(m, point_)))
+                normals.append(tuple(direction(m, n[i])))
+                uvs.append((float(t[i][0]), float(t[i][1])))
+            if "indices" in prim:
+                indices.extend(base + int(v) for v in read_accessor(doc, binary, prim["indices"]))
+            else:
+                indices.extend(range(base, base + len(p)))
+
+            material = doc.get("materials", [{}])[prim["material"]] if "material" in prim else {}
+            pbr = material.get("pbrMetallicRoughness", {})
+            if texture == "" and tex_dir is not None:
+                tex_index = pbr.get("baseColorTexture", {}).get("index")
+                if tex_index is not None:
+                    image_index = texture_source(doc, tex_index)
+                    if image_index is not None:
+                        data, ext = image_bytes(doc, binary, source_dir, image_index)
+                        name = f"tex_albedo{ext}"
+                        if save_textures:
+                            tex_dir.mkdir(parents=True, exist_ok=True)
+                            (tex_dir / name).write_bytes(data)
+                        texture = name
+            if colour == 0xFF808080:
+                colour = to_argb(pbr.get("baseColorFactor", [0.5, 0.5, 0.5, 1.0]))
+
+    if not positions:
+        raise ValueError("GLB has no POSITION data to rig")
+    return positions, normals, uvs, indices, texture, colour
 
 
 # --------------------------------------------------------------------- conversion
@@ -323,8 +438,7 @@ def build_parts(doc: Dict[str, Any], binary: bytes, source_dir: Path, tex_dir: O
         texture = ""
         tex_index = pbr.get("baseColorTexture", {}).get("index")
         if tex_index is not None and tex_dir is not None:
-            doc_texture = doc["textures"][tex_index]
-            image_index = doc_texture.get("source")
+            image_index = texture_source(doc, tex_index)
             if image_index is not None:
                 if image_index not in texture_names:
                     data, ext = image_bytes(doc, binary, source_dir, image_index)
@@ -466,6 +580,9 @@ def sample_animation(doc: Dict[str, Any], binary: bytes, anim: Dict[str, Any], n
 
 def convert(args: argparse.Namespace) -> None:
     doc, binary = read_glb(args.glb)
+    if getattr(args, "auto_rig", False) or not any("skin" in n and "mesh" in n for n in doc.get("nodes", [])):
+        convert_unrigged(args, doc, binary)
+        return
     node_index, _ = pick_primitive(doc, binary)
     node = doc["nodes"][node_index]
     skin = doc["skins"][node["skin"]]
@@ -537,6 +654,52 @@ def convert(args: argparse.Namespace) -> None:
     write_oeac(args.out, inverse_bind, parts, scaled_clips)
 
 
+def convert_unrigged(args: argparse.Namespace, doc: Dict[str, Any], binary: bytes) -> None:
+    """Imports a GLB with no skin by fitting OEA's skeleton to it.
+
+    A generated character usually arrives as one static mesh in an A-pose. The
+    skin, joints and inverse binds are all manufactured here, by measurement,
+    so the phone gets the same `.oeac` a rigged import would produce — the
+    loader cannot tell the difference, and neither can the game.
+    """
+    import autorig
+
+    positions, normals, uvs, indices, texture, colour = collect_primitives(
+        doc, binary, args.glb.parent, args.textures, not args.no_textures)
+
+    if texture and not args.no_textures:
+        source = args.textures / texture
+        if source.exists():
+            before = source.stat().st_size
+            renamed = shrink_texture(source, args.texture_size)
+            if renamed:
+                texture = renamed
+                after = (args.textures / renamed).stat().st_size
+                print(f"  texture: {before // 1024} KiB -> {after // 1024} KiB "
+                      f"({args.texture_size}px indexed PNG)")
+            else:
+                print(f"  texture: kept {texture} ({before // 1024} KiB) — "
+                      f"ImageMagick not found, so it is not re-encoded")
+
+    parts, inverse_bind_matrices, joints = autorig.bind(
+        positions, normals, uvs, indices,
+        height=args.height,
+        name="body",
+        texture=texture,
+        colour=colour,
+    )
+
+    print(f"  auto-rig: {len(positions)} vertices, crotch at "
+          f"{joints[autorig.PELVIS][1] - 0.072:.2f} m, "
+          f"shoulders at {joints[autorig.SHOULDER_L][1]:.2f} m")
+    for label, index in (("pelvis", autorig.PELVIS), ("head", autorig.HEAD),
+                        ("hand_L", autorig.HAND_L), ("foot_L", autorig.FOOT_L)):
+        x, y, z = joints[index]
+        print(f"    {label:7s} ({x:+.3f}, {y:.3f}, {z:+.3f})")
+
+    write_oeac(args.out, inverse_bind_matrices, parts, [])
+
+
 def write_string(out: bytearray, value: str) -> None:
     raw = value.encode("utf-8")[:255]
     out.append(len(raw))
@@ -581,6 +744,10 @@ def main() -> int:
     parser.add_argument("--in-place", action="store_true", help="remove root translation from animation clips")
     parser.add_argument("--no-animations", action="store_true", help="skip animation sampling")
     parser.add_argument("--no-textures", action="store_true", help="skip texture extraction")
+    parser.add_argument("--texture-size", type=int, default=512,
+                        help="max albedo texture dimension after import (default 512)")
+    parser.add_argument("--auto-rig", action="store_true",
+                        help="fit OEA's skeleton to an unrigged mesh (runs automatically when the GLB has no skin)")
     args = parser.parse_args()
     if args.textures is None:
         args.textures = args.out.parent / (args.out.stem + "_textures")

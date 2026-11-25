@@ -415,6 +415,23 @@ def bind_matrices() -> List[List[float]]:
     return [oeac.mat_invert(m) for m in world]
 
 
+def _imported_ids(assets: Path) -> set:
+    """Character ids in the manifest whose asset is not the procedural body."""
+    manifest_path = assets / "characters" / "manifest.json"
+    if not manifest_path.exists():
+        return set()
+    try:
+        previous = json.loads(manifest_path.read_text())
+    except (ValueError, OSError):
+        return set()
+    imported = set()
+    for entry in previous.get("characters", []):
+        asset = str(entry.get("asset", ""))
+        if asset and not asset == f"characters/{entry.get('id')}.oeac":
+            imported.add(entry.get("id"))
+    return imported
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--image", type=Path, default=Path("tools/tripo/concepts/send-off-soldier-concept.png"))
@@ -427,6 +444,14 @@ def main() -> int:
     try:
         base = analyse(args.image)["colours"]
         IDs = sorted(VARIANTS) if args.all else [args.variant]
+        if args.all:
+            # `hero` is no longer procedural: it is the imported, auto-rigged
+            # soldier from tools/tripo/autorig.py, and generating over it would
+            # silently replace the modelled character with the primitive body.
+            states = _imported_ids(args.assets)
+            IDs = [v for v in IDs if v not in states]
+            if states:
+                print("skipping " + ", ".join(sorted(states)) + " — imported, not procedural")
         manifest = {"characters": []}
         for variant_id in IDs:
             cfg = VARIANTS[variant_id]
@@ -445,6 +470,23 @@ def main() -> int:
             print(f"{variant_id}: {cfg['name']} — {cfg['role']}")
         if args.all:
             manifest_path = args.assets / "characters" / "manifest.json"
+            # Keep any harness that is not procedural. `hero` can be replaced by
+            # an imported, auto-rigged character (tools/tripo/autorig.py), and
+            # regenerating the manifest must not quietly drop it back to the
+            # procedural body — nor leave the procedural .oeac orphaned on disk.
+            if manifest_path.exists():
+                try:
+                    previous = json.loads(manifest_path.read_text())
+                except (ValueError, OSError):
+                    previous = {"characters": []}
+                generated = {entry["id"] for entry in manifest["characters"]}
+                for entry in previous.get("characters", []):
+                    if entry.get("id") not in generated:
+                        manifest["characters"].append(entry)
+                        print(f"kept {entry['id']} ({entry.get('role', '')}) — not procedural")
+                order = {name: i for i, name in enumerate(
+                    ["bot_heavy", "bot_medic", "bot_night", "bot_ranger", "bot_scout", "hero"])}
+                manifest["characters"].sort(key=lambda e: order.get(e["id"], 99))
             manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
             print(f"wrote {manifest_path}")
     except (ValueError, OSError, KeyError, struct.error) as exc:
