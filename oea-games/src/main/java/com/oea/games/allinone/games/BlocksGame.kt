@@ -126,6 +126,13 @@ class BlocksGame : ArcadeBaseGame() {
         return w to h
     }
 
+    private fun dragOrigin(piece: Piece, fx: Float, fy: Float): Pair<Float, Float> {
+        val (pw, ph) = pieceBounds(piece)
+        val originX = fx - (pw * cell) / 2f
+        val originY = fy - (ph * cell) - cell * 1.6f
+        return originX to originY
+    }
+
     // -------------------------------------------------------------------- touch
 
     override fun touch(phase: ArcadeTouch, x: Float, y: Float, width: Float, height: Float): Boolean {
@@ -154,11 +161,9 @@ class BlocksGame : ArcadeBaseGame() {
             ArcadeTouch.UP -> {
                 if (dragIndex < 0) return false
                 val piece = tray[dragIndex] ?: return false
-                val (pw, _) = pieceBounds(piece)
-                val anchorX = x - grabX + pieceScale * pw / 2f
-                val anchorY = y - grabY + pieceScale * 2f / 2f
-                val col = ((anchorX - gridRect.left - pieceScale / 2f) / cell).roundToInt()
-                val row = ((anchorY - gridRect.top - pieceScale / 2f) / cell).roundToInt()
+                val (originX, originY) = dragOrigin(piece, x, y)
+                val col = ((originX - gridRect.left) / cell).roundToInt()
+                val row = ((originY - gridRect.top) / cell).roundToInt()
                 if (canPlace(piece, col, row)) {
                     place(piece, col, row)
                     tray[dragIndex] = null
@@ -288,11 +293,9 @@ class BlocksGame : ArcadeBaseGame() {
         if (dragIndex >= 0) {
             val piece = tray[dragIndex]
             if (piece != null) {
-                val (pw, _) = pieceBounds(piece)
-                val anchorX = dragFx - grabX + pieceScale * pw / 2f
-                val anchorY = dragFy - grabY + pieceScale / 2f
-                val col = ((anchorX - gridRect.left - pieceScale / 2f) / cell).roundToInt()
-                val row = ((anchorY - gridRect.top - pieceScale / 2f) / cell).roundToInt()
+                val (originX, originY) = dragOrigin(piece, dragFx, dragFy)
+                val col = ((originX - gridRect.left) / cell).roundToInt()
+                val row = ((originY - gridRect.top) / cell).roundToInt()
                 val valid = canPlace(piece, col, row)
                 for ((dx, dy) in piece.cells) {
                     val c = col + dx
@@ -320,8 +323,8 @@ class BlocksGame : ArcadeBaseGame() {
         if (dragIndex >= 0) {
             val piece = tray[dragIndex]
             if (piece != null) {
-                val (pw, ph) = pieceBounds(piece)
-                drawPiece(canvas, piece, dragFx - grabX + pieceScale * pw / 2f, dragFy - grabY + pieceScale * ph / 2f, pieceScale, anchorTopLeft = true)
+                val (originX, originY) = dragOrigin(piece, dragFx, dragFy)
+                drawPiece(canvas, piece, originX, originY, cell, anchorTopLeft = true)
             }
         }
     }

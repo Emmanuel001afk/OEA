@@ -96,14 +96,12 @@ class LudoGame : ArcadeBaseGame() {
     private var positions = Array(4) { IntArray(4) { -1 } }
     private var captures = IntArray(4)
     private var turn = 0
-    private var dieOne = 0
-    private var dieTwo = 0
-    private var shownOne = 6
-    private var shownTwo = 3
+    private var die = 0
+    private var shownDie = 6
     private var rolled = false
     private var rolling = 0f
-    private var doubles = false
-    private var doubleCount = 0
+    private var bonusRoll = false
+    private var sixCount = 0
     private var aiThink = 0f
     private var passDelay = 0f
     private var message = ""
@@ -120,20 +118,34 @@ class LudoGame : ArcadeBaseGame() {
     /** Both seats are people in pass-and-play; otherwise seats 1–3 are the AI. */
     private fun isAi(seat: Int): Boolean = !twoPlayer && seat != 0
 
+    // Hop animation state for moving tokens square-by-square.
+    private var animSeat = -1
+    private var animToken = -1
+    private var animFrom = -1
+    private var animTo = -1
+    private var animTime = 0f
+    private var animDuration = 0f
+    private var animExtraRoll = false
+    private var animDistance = 0
+
     override fun onStart() {
         positions = Array(4) { IntArray(4) { -1 } }
         captures = IntArray(4)
         turn = 0
-        dieOne = 0
-        dieTwo = 0
-        shownOne = 6
-        shownTwo = 3
+        die = 0
+        shownDie = 6
         rolled = false
         rolling = 0f
-        doubles = false
-        doubleCount = 0
+        bonusRoll = false
+        sixCount = 0
         aiThink = 0f
         passDelay = 0f
+        animSeat = -1
+        animToken = -1
+        animFrom = -1
+        animTo = -1
+        animTime = 0f
+        animDuration = 0f
         legal = ArrayList()
         message = "Roll two dice — the total is your move. A six on either die brings a token out."
     }
@@ -198,8 +210,6 @@ class LudoGame : ArcadeBaseGame() {
             when {
                 position == 56 -> Unit
                 position == -1 -> if (canEnter) moves += token
-                // The last home-column square is one step from the centre, and
-                // two dice cannot roll a one, so any total steps in from there.
                 position == 55 -> moves += token
                 position + dice <= 56 -> moves += token
             }
@@ -212,6 +222,13 @@ class LudoGame : ArcadeBaseGame() {
     override fun update(dt: Float) {
         super.update(dt)
         if (done()) return
+        if (animSeat >= 0) {
+            animTime += dt
+            if (animTime >= animDuration) {
+                commitMove()
+            }
+            return
+        }
         if (rolling > 0f) {
             rolling -= dt
             shownOne = 1 + (elapsed * 17f).toInt() % 6
@@ -220,7 +237,7 @@ class LudoGame : ArcadeBaseGame() {
                 shownOne = dieOne
                 shownTwo = dieTwo
                 legal = ArrayList(legalMoves(turn))
-                val total = "${dieOne} + ${dieTwo} = $dice"
+                val total = "$dieOne + $dieTwo = $dice"
                 if (legal.isEmpty()) {
                     message = "${nameOf(turn)} rolled $total — no legal move."
                     passDelay = 0.9f
@@ -247,15 +264,19 @@ class LudoGame : ArcadeBaseGame() {
 
     override fun touch(phase: ArcadeTouch, x: Float, y: Float, width: Float, height: Float): Boolean {
         if (done() || phase != ArcadeTouch.DOWN) return false
-        if (isAi(turn) || passDelay > 0f) return false
+        if (isAi(turn) || passDelay > 0f || animSeat >= 0) return false
         if (!rolled && rolling <= 0f && ArcadeDraw.inside(rollRect, x, y)) {
             roll()
             return true
         }
         if (rolled && rolling <= 0f) {
-            val hit = tokenRects.firstOrNull { (seat, token, rect) ->
-                seat == turn && ArcadeDraw.inside(rect, x, y) && legal.contains(token)
-            }
+            val hit = tokenRects
+                .filter { (seat, token, rect) -> seat == turn && ArcadeDraw.inside(rect, x, y) && legal.contains(token) }
+                .minByOrNull { (_, _, rect) ->
+                    val dx = rect.centerX() - x
+                    val dy = rect.centerY() - y
+                    dx * dx + dy * dy
+                }
             if (hit != null) {
                 move(turn, hit.second)
                 return true
@@ -292,19 +313,40 @@ class LudoGame : ArcadeBaseGame() {
     }
 
     private fun move(seat: Int, token: Int) {
-        if (dieOne == 0 || done()) return
+        if (dieOne == 0 || done() || animSeat >= 0) return
         val position = positions[seat][token]
         if (position == 56) return
-        // The total on the two dice is the distance moved. Leaving the yard
-        // uses the whole roll: the token appears on its start square. A token on
-        // the last home-column square steps into the centre with any total,
-        // because the dice cannot make the single step on their own.
         val target = when {
             position == -1 -> 0
             position == 55 -> 56
             else -> position + dice
         }
         if (target > 56) return
+        animSeat = seat
+        animToken = token
+        animFrom = position
+        animTo = target
+        val steps = if (position == -1) 1 else (target - position).coerceAtLeast(1)
+        animDuration = (steps * 0.065f).coerceIn(0.14f, 0.52f)
+        animTime = 0f
+        animExtraRoll = doubles
+        animDistance = dice
+        rolled = false
+        legal = ArrayList()
+        dieOne = 0
+        dieTwo = 0
+        doubles = false
+    }
+
+    private fun commitMove() {
+        val seat = animSeat
+        val token = animToken
+        val target = animTo
+        animSeat = -1
+        animToken = -1
+        animFrom = -1
+        animTo = -1
+        if (seat < 0 || token < 0) return
         var announcement = ""
 
         if (target == 56) {
@@ -335,17 +377,10 @@ class LudoGame : ArcadeBaseGame() {
             return
         }
 
-        val extraRoll = doubles
-        val distance = dice
-        rolled = false
-        legal = ArrayList()
-        dieOne = 0
-        dieTwo = 0
-        doubles = false
-        if (extraRoll) {
+        if (animExtraRoll) {
             message = listOfNotNull(
                 announcement.takeIf { it.isNotEmpty() },
-                "Doubles — $distance moved, roll again."
+                "Doubles — $animDistance moved, roll again."
             ).joinToString(" ")
             if (isAi(turn)) aiThink = 0.7f
         } else {
@@ -636,8 +671,9 @@ class LudoGame : ArcadeBaseGame() {
                 val point = tokenPoint(seat, token)
                 val finished = positions[seat][token] == 56
                 val radius = if (finished) cell * 0.21f else cell * 0.3f
-                val rect = RectF(point.x - radius, point.y - radius, point.x + radius, point.y + radius)
-                val movable = seat == turn && !isAi(turn) && rolled && rolling <= 0f && legal.contains(token)
+                val hitRadius = cell * 0.62f
+                val rect = RectF(point.x - hitRadius, point.y - hitRadius, point.x + hitRadius, point.y + hitRadius)
+                val movable = seat == turn && !isAi(turn) && rolled && rolling <= 0f && animSeat < 0 && legal.contains(token)
                 if (movable) {
                     ArcadeDraw.circle(canvas, point.x, point.y, radius + cell * (0.1f + pulse * 0.09f),
                         0x33FFD34D, ArcadeColors.GOLD, cell * 0.05f)
@@ -681,7 +717,38 @@ class LudoGame : ArcadeBaseGame() {
         canvas.drawPath(path, ArcadeDraw.paint(color, size * 0.34f))
     }
 
+    private fun squareCenter(seat: Int, token: Int, position: Int): PointF = when {
+        position == -1 -> yardPoint(seat, token)
+        position == 56 -> finishedPoint(seat, token)
+        position <= 50 -> {
+            val index = absolute(seat, position)
+            val spot = track[index]
+            cellRect(spot.first, spot.second).let { PointF(it.centerX(), it.centerY()) }
+        }
+        else -> {
+            val spot = homeCell(seat, position - 51)
+            cellRect(spot.first, spot.second).let { PointF(it.centerX(), it.centerY()) }
+        }
+    }
+
     private fun tokenPoint(seat: Int, token: Int): PointF {
+        if (seat == animSeat && token == animToken && animDuration > 0f) {
+            val t = (animTime / animDuration).coerceIn(0f, 1f)
+            if (animFrom == -1) {
+                val a = yardPoint(seat, token)
+                val b = squareCenter(seat, token, animTo)
+                val arc = sin(t * Math.PI).toFloat() * cell * 0.45f
+                return PointF(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t - arc)
+            }
+            val steps = (animTo - animFrom).coerceAtLeast(1)
+            val scaled = t * steps
+            val stepIdx = scaled.toInt().coerceAtMost(steps - 1)
+            val frac = scaled - stepIdx
+            val a = squareCenter(seat, token, animFrom + stepIdx)
+            val b = squareCenter(seat, token, animFrom + stepIdx + 1)
+            val arc = sin(frac * Math.PI).toFloat() * cell * 0.28f
+            return PointF(a.x + (b.x - a.x) * frac, a.y + (b.y - a.y) * frac - arc)
+        }
         val position = positions[seat][token]
         return when {
             position == -1 -> yardPoint(seat, token)
@@ -770,8 +837,10 @@ class LudoGame : ArcadeBaseGame() {
             left, top + diceSize + height * 0.022f, height * 0.0115f, 0x99FFFFFF.toInt(), bold = true)
 
         // Roll button.
-        rollRect = RectF(width * 0.545f, top, width * 0.945f, top + diceSize)
-        val canRoll = !rolled && rolling <= 0f && !isAi(turn) && !done()
+        val rollH = maxOf(diceSize * 1.18f, height * 0.076f)
+        val rollTop = top - (rollH - diceSize) * 0.5f
+        rollRect = RectF(width * 0.545f, rollTop, width * 0.945f, rollTop + rollH)
+        val canRoll = !rolled && rolling <= 0f && animSeat < 0 && !isAi(turn) && !done()
         val activeColor = seats[turn].color
         if (canRoll) {
             ArcadeDraw.panel(canvas, RectF(rollRect.left - 2f, rollRect.top - 2f, rollRect.right + 2f, rollRect.bottom + 2f),
