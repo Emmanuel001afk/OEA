@@ -54,6 +54,12 @@ class OeaIconController(private val context: Context) {
     private val store = OeaDataStore.get(context)
 
     fun installedPacks(): List<IconPack> {
+        // Scanning every installed app for an appfilter.xml costs hundreds of
+        // milliseconds on a phone with many apps, and Settings asks for the
+        // list on every render. The answer only changes when a pack is
+        // installed or updated, so it is cached process-wide and dropped by
+        // invalidatePackage() when a package changes.
+        packsCache?.let { return it }
         val candidates = linkedMapOf<String, String>()
         val actions = listOf(
             "org.adw.launcher.THEMES",
@@ -85,7 +91,9 @@ class OeaIconController(private val context: Context) {
                 if (hasFilter) candidates[app.packageName] = app.loadLabel(packageManager).toString()
             }
         }
-        return candidates.map { IconPack(it.key, it.value) }.sortedBy { it.label.lowercase() }
+        val result = candidates.map { IconPack(it.key, it.value) }.sortedBy { it.label.lowercase() }
+        packsCache = result
+        return result
     }
 
     /** Styled icon for a launcher activity (shape, pack and themed treatment applied). */
@@ -119,7 +127,9 @@ class OeaIconController(private val context: Context) {
      *
      * A cached icon is delivered immediately, on the calling thread, so a warm Home
      * is unchanged. The callback is never invoked more than once, and duplicate
-     * requests for the same icon while one is already running are dropped.
+     * requests for the same icon while one is already running join the same load.
+     * A load that fails twice still answers its waiters with the default icon:
+     * a tile must never be left with a hole because one resolve lost a race.
      */
     fun request(packageName: String, className: String? = null, onReady: (Drawable) -> Unit) {
         val style = currentStyle()
@@ -142,26 +152,70 @@ class OeaIconController(private val context: Context) {
         // session can lose a race with the package manager (the app catalogue is ready
         // before the icon service is) and then the tile would stay blank for the rest
         // of the session: request() was its only chance, and it had already returned.
-        // One delayed retry covers that, off the main thread; if it fails too, the
-        // tiles are released and draw their own letter plate instead of a hole.
+        // One delayed retry covers that, off the main thread. The pending entry is
+        // kept across the retry so callers arriving in between join the same load
+        // instead of starting a competing one, and a second failure answers the
+        // waiters with the default icon rather than leaving them unanswered.
+        fun deliver(drawable: Drawable) {
+            val listeners = synchronized(waiting) { waiting.toList() }
+            main.post { listeners.forEach { listener -> runCatching { listener(drawable) } } }
+        }
         fun attempt(tries: Int) {
             runCatching {
                 resolveExecutor.execute {
                     // load() puts the bitmap in the cache before the waiters are released,
                     // so a request that races this delivery finds it and is answered at once.
                     val bitmap = runCatching { load(key, packageName, className, style) }.getOrNull()
-                    pending.remove(key)
                     if (bitmap != null) {
-                        val drawable = BitmapDrawable(context.resources, bitmap)
-                        val listeners = synchronized(waiting) { waiting.toList() }
-                        main.post { listeners.forEach { listener -> runCatching { listener(drawable) } } }
+                        pending.remove(key, waiting)
+                        deliver(BitmapDrawable(context.resources, bitmap))
                     } else if (tries > 0) {
                         main.postDelayed({ attempt(tries - 1) }, 500L)
+                    } else {
+                        pending.remove(key, waiting)
+                        deliver(fallbackDrawable(style))
                     }
                 }
-            }.onFailure { pending.remove(key) }
+            }.onFailure {
+                // The executor refused the task; this runs on the caller's
+                // thread, so answer with the raw default icon, never a render.
+                pending.remove(key, waiting)
+                deliver(
+                    runCatching { packageManager.defaultActivityIcon }?.getOrNull()
+                        ?: BitmapDrawable(context.resources)
+                )
+            }
         }
         attempt(1)
+    }
+
+    /**
+     * The default icon for a tile whose real icon is still loading. Home shows
+     * this immediately instead of an empty slot, then swaps in the real icon
+     * when [request] answers. This runs on the UI thread during a bind, so it
+     * never renders: it hands out a fresh copy of the system's default icon
+     * drawable (tiles mutate bounds on the drawable they hold). A fresh
+     * drawable is returned on every call.
+     */
+    fun placeholder(): Drawable? {
+        placeholderState?.let { state -> state.newDrawable()?.mutate()?.let { return it } }
+        val drawable = runCatching { packageManager.defaultActivityIcon }?.getOrNull() ?: return null
+        drawable.constantState?.let { placeholderState = it }
+        return drawable.mutate()
+    }
+
+    /** The default icon in the current style, for a resolve that failed twice. */
+    private fun fallbackDrawable(style: Style): Drawable {
+        placeholderCache[style.key]?.let { return BitmapDrawable(context.resources, it) }
+        val bitmap = runCatching {
+            render(packageManager.defaultActivityIcon, false, style)
+        }.getOrNull()?.takeUnless { isBlank(it) }
+        if (bitmap != null) {
+            placeholderCache[style.key] = bitmap
+            return BitmapDrawable(context.resources, bitmap)
+        }
+        return runCatching { packageManager.defaultActivityIcon }?.getOrNull()
+            ?: BitmapDrawable(context.resources)
     }
 
     fun iconBitmap(packageName: String, className: String? = null): Bitmap? {
@@ -222,7 +276,15 @@ class OeaIconController(private val context: Context) {
 
     /** Warms the cache for [apps]; call from a background thread. */
     fun preload(apps: List<Pair<String, String>>) {
-        apps.forEach { (pkg, cls) -> runCatching { iconBitmap(pkg, cls) } }
+        val style = currentStyle()
+        apps.forEach { (pkg, cls) ->
+            // Skip icons already warm or already being resolved for a tile:
+            // rendering them a second time here only steals CPU from the
+            // loads Home is actually waiting for.
+            val key = cacheKey(style, pkg, cls)
+            if (rendered.get(key) != null || pending.containsKey(key)) return@forEach
+            runCatching { iconBitmap(pkg, cls) }
+        }
     }
 
     /**
@@ -253,12 +315,15 @@ class OeaIconController(private val context: Context) {
 
     fun invalidate() {
         rendered.evictAll()
+        placeholderCache.clear()
     }
 
     fun invalidatePackage(packageName: String) {
         rawStates.keys.filter { it.contains("|$packageName/") || it.contains("|ov:pack:$packageName:") }.forEach { rawStates.remove(it) }
         rendered.snapshot().keys.filter { it.contains("|$packageName/") || it.contains("|ov:pack:$packageName:") }.forEach { rendered.remove(it) }
         stamps.remove(packageName)
+        // The installed-pack list may have gained or lost this package.
+        packsCache = null
         // An updated icon pack changes every icon it themes.
         if (packageName == store.iconPackPackage()) {
             packMappings.remove(packageName)
@@ -645,12 +710,24 @@ class OeaIconController(private val context: Context) {
         /** Icons being resolved off the UI thread, with the callbacks waiting on each. */
         private val pending = ConcurrentHashMap<String, MutableList<(Drawable) -> Unit>>()
         private val main = android.os.Handler(android.os.Looper.getMainLooper())
-        private val resolveExecutor = Executors.newSingleThreadExecutor { task ->
+        // A small pool, not one thread: Home binds a screenful of tiles at
+        // once, and a single worker delivered their icons one by one while
+        // the rest of the screen sat blank. Three workers fill a cold Home
+        // in parallel without the memory churn of an unbounded pool.
+        private val resolveExecutor = Executors.newFixedThreadPool(
+            Runtime.getRuntime().availableProcessors().coerceIn(3, 4)
+        ) { task ->
             Thread(task, "OeaIconResolve").apply {
                 isDaemon = true
                 priority = Thread.NORM_PRIORITY - 1
             }
         }
+        /** Installed icon packs, or null when the scan has not run yet. */
+        @Volatile private var packsCache: List<IconPack>? = null
+        /** One shaped default icon per style, for resolve fallbacks. */
+        private val placeholderCache = ConcurrentHashMap<String, Bitmap>()
+        /** The system's default icon, cached so binds never touch PackageManager twice. */
+        @Volatile private var placeholderState: Drawable.ConstantState? = null
         @Volatile private var diskWrites = 0
         private val diskExecutor = Executors.newSingleThreadExecutor { task ->
             Thread(task, "OeaIconDisk").apply {
@@ -662,6 +739,7 @@ class OeaIconController(private val context: Context) {
         private val rawFromPack = ConcurrentHashMap<String, Boolean>()
         private val packMappings = ConcurrentHashMap<String, Map<String, String>>()
         private val packIconNamesCache = ConcurrentHashMap<String, List<String>>()
+        private val shapePaths = ConcurrentHashMap<String, Path>()
         private val rendered = object : LruCache<String, Bitmap>(
             (Runtime.getRuntime().maxMemory() / 7).coerceAtMost(56L * 1024 * 1024).toInt()
 ) {
@@ -670,6 +748,16 @@ class OeaIconController(private val context: Context) {
 
         /** Shape outline used by icons and folder tiles; null means the device's own mask. */
         fun shapePath(shape: String, size: Int): Path? {
+            // The squircle and dotted outlines cost real trigonometry and a
+            // path union per icon; every icon on a screen shares one shape
+            // and size, so the outline is built once and copied per caller.
+            shapePaths["$shape|$size"]?.let { return Path(it) }
+            val built = buildShapePath(shape, size) ?: return null
+            shapePaths["$shape|$size"] = built
+            return Path(built)
+        }
+
+        private fun buildShapePath(shape: String, size: Int): Path? {
             val s = size.toFloat()
             return when (shape) {
                 "circle" -> Path().apply { addCircle(s / 2f, s / 2f, s / 2f, Path.Direction.CW) }

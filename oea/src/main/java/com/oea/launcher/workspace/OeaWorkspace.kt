@@ -1772,7 +1772,9 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
             item.shortcutId?.let { id -> shortcuts.find(item.packageName, id)?.let { shortcuts.icon(it) } }
         }
         val appIcon = app?.let { icons.peek(it.packageName, it.className) }
-        tile.icon = shortcutIcon ?: appIcon
+        // A cold shortcut tile shows the default icon until its app icon
+        // arrives, instead of an empty slot.
+        tile.icon = shortcutIcon ?: appIcon ?: icons.placeholder()
         tile.smallBadge = if (shortcutIcon != null) appIcon else null
         // A shortcut's own icon comes from LauncherApps once per shortcut (cached in
         // shortcutIconCache). The app's icon — the tile's own when the shortcut has
@@ -1795,9 +1797,10 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
      *
      * [OeaIconController.peek] only reads the memory cache: a warm Home looks
      * exactly as before, and a cold one (fresh process with the disk cache warm, or
-     * after a memory trim) shows the label immediately while the icon is resolved on
-     * a background thread. The callback checks the tile's key first, so a recycled
-     * drawer row can never end up with the previous app's icon.
+     * after a memory trim) shows the default icon immediately while the real
+     * one is resolved on a background thread. The callback checks the tile's
+     * key first, so a recycled drawer row can never end up with the previous
+     * app's icon.
      */
     private fun iconFor(tile: OeaTileView, app: OeaAppInfo): android.graphics.drawable.Drawable? {
         val cached = icons.peek(app.packageName, app.className)
@@ -1806,7 +1809,7 @@ class OeaWorkspace(context: Context) : FrameLayout(context) {
         icons.request(app.packageName, app.className) { drawable ->
             if (tile.key == key && tile.kind == OeaTileView.Kind.APP) tile.icon = drawable
         }
-        return null
+        return icons.placeholder()
     }
 
     /** The same non-blocking treatment for the up-to-four icons drawn on a folder tile. */
