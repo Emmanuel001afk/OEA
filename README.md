@@ -91,22 +91,17 @@ its own joint. It runs in the APK workflow before the compile.
 
 The resulting application ID is `com.oea.launcher`.
 
-### On a laptop
+### On a laptop or desktop
 
-OEA is an Android launcher, so it runs on a laptop by running Android on the
-laptop and setting OEA as its Home app (Waydroid, Android-x86, or the Android
-Studio emulator). Build the x86_64 APK, or download it from the
-[`oea-laptop-latest`](https://github.com/Emmanuel001afk/OEA/releases/tag/oea-laptop-latest)
-release, then follow [OEA on a laptop](docs/oea-on-a-laptop.md). On Windows,
-extract `OEA-laptop-windows.zip` and double-click `OEA-Laptop-Setup.cmd`; it
-sets up Android, installs the release APK and makes OEA Home.
+Use **OEA Desktop** on Windows 10/11 x64 for a native desktop launcher—no
+Android emulator. It discovers Windows Start Menu and desktop shortcuts, opens
+installed Windows apps, and brings over OEA's search, favorites, recents,
+categories and theme logic. See [OEA Desktop](docs/oea-desktop.md) for features
+and the installer build. The Android launcher remains available for Android;
+[OEA on an Android laptop](docs/oea-on-a-laptop.md) covers Waydroid and emulator
+setups when you specifically want Android running on the computer.
 
-```bash
-./tools/laptop/build-apk.sh          # -> dist/OEA-laptop-x86_64.apk (release)
-./tools/laptop/install-waydroid.sh   # or install-emulator.sh
-```
-
-Release builds run R8 (`minifyEnabled` + `shrinkResources`) with the rules in `oea/proguard-rules.pro` and `gradle/proguard-game.pro`, ship only the `arm64-v8a` and `armeabi-v7a` native libraries, and store native libraries compressed. Every CI run prints the resulting APK sizes in the workflow summary. See [Independent games, same polish, smaller APKs](docs/games-independent-polish-and-apk-size-2026-10-17.md).
+Standard phone release builds run R8 (`minifyEnabled` + `shrinkResources`) with the rules in `oea/proguard-rules.pro` and `gradle/proguard-game.pro`, ship `arm64-v8a` and `armeabi-v7a` native libraries, and store them compressed. The Android-on-laptop APK variant adds `x86_64` while retaining the phone ABIs. Every CI run prints the resulting APK sizes in the workflow summary. See [Independent games, same polish, smaller APKs](docs/games-independent-polish-and-apk-size-2026-10-17.md).
 
 ### Updating without losing your Home
 

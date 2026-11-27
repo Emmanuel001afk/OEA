@@ -1,0 +1,49 @@
+name: OEA Desktop Windows
+
+on:
+  push:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/oea-desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/oea-desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oea-desktop-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-package:
+    name: Test and package x64 Windows apps
+    runs-on: windows-latest
+    steps:
+      - name: Check out OEA
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Run desktop tests
+        working-directory: desktop
+        run: npm test
+      - name: Build installer and portable executable
+        working-directory: desktop
+        run: npm run dist:win
+      - name: Upload Windows executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: oea-desktop-windows
+          path: dist/desktop-installer/*.exe
+          if-no-files-found: error
+          retention-days: 30

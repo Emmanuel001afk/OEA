@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#071014">
+  <title>OEA Desktop</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-frame" id="app-frame" data-accent="teal">
+    <header class="windowbar">
+      <div class="window-brand drag-region">
+        <div class="brand-glyph" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </div>
+        <span class="brand-word">OEA</span>
+        <span class="brand-divider"></span>
+        <span class="brand-product">DESKTOP</span>
+      </div>
+      <div class="windowbar-caption drag-region">YOUR WORKSPACE, REIMAGINED</div>
+      <div class="window-actions no-drag">
+        <button class="window-action" data-window="minimize" aria-label="Minimize window" title="Minimize">−</button>
+        <button class="window-action maximize-action" data-window="toggle-maximize" aria-label="Maximize or restore window" title="Maximize">□</button>
+        <button class="window-action close-action" data-window="close" aria-label="Close window" title="Close">×</button>
+      </div>
+    </header>
+
+    <div class="desktop-layout">
+      <aside class="sidebar" aria-label="OEA navigation">
+        <div class="sidebar-brand">
+          <div class="sidebar-logo" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <div>
+            <div class="sidebar-title">OEA</div>
+            <div class="sidebar-caption">DESKTOP HOME</div>
+          </div>
+        </div>
+
+        <div class="sidebar-section-label">WORKSPACE</div>
+        <nav class="primary-nav">
+          <button class="nav-item active" data-page="home" aria-current="page">
+            <span class="nav-icon" data-icon="home"></span><span>Home</span><span class="nav-active-dot"></span>
+          </button>
+          <button class="nav-item" data-page="apps">
+            <span class="nav-icon" data-icon="grid"></span><span>All apps</span><span class="nav-count" id="nav-app-count">—</span>
+          </button>
+          <button class="nav-item" data-page="favorites">
+            <span class="nav-icon" data-icon="star"></span><span>Favorites</span><span class="nav-count" id="nav-favorite-count">0</span>
+          </button>
+          <button class="nav-item" data-page="recent">
+            <span class="nav-icon" data-icon="clock"></span><span>Recent</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-section-label side-tools-label">DESKTOP TOOLS</div>
+        <div class="tool-nav">
+          <button class="tool-nav-item" data-quick-tool="calculator"><span class="tool-mini tone-teal" data-icon="calculator"></span><span>Calculator</span></button>
+          <button class="tool-nav-item" data-quick-tool="explorer"><span class="tool-mini tone-blue" data-icon="folder"></span><span>File Explorer</span></button>
+          <button class="tool-nav-item" data-quick-tool="settings"><span class="tool-mini tone-violet" data-icon="settings"></span><span>Settings</span></button>
+        </div>
+
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-footer-card">
+          <div class="connection-orb"><span></span></div>
+          <div class="connection-copy">
+            <span class="connection-title" id="connection-title">This PC</span>
+            <span class="connection-caption" id="connection-caption">Desktop ready</span>
+          </div>
+          <span class="connection-state" aria-label="Ready"></span>
+        </div>
+        <button class="nav-item settings-nav" data-page="settings">
+          <span class="nav-icon" data-icon="settings"></span><span>Preferences</span>
+        </button>
+        <div class="sidebar-version">OEA Desktop <span id="app-version">Preview</span></div>
+      </aside>
+
+      <main class="main-pane">
+        <div class="main-scroll">
+          <div class="page-toolbar">
+            <div class="page-heading">
+              <div class="eyebrow" id="page-eyebrow">OEA / HOME</div>
+              <h1 id="page-title">Welcome back</h1>
+              <p id="page-subtitle">A calmer way to get to everything on this PC.</p>
+            </div>
+            <div class="toolbar-controls">
+              <label class="search-box" for="app-search">
+                <span class="search-icon" data-icon="search"></span>
+                <input id="app-search" type="search" autocomplete="off" spellcheck="false" placeholder="Search your apps…" aria-label="Search apps">
+                <kbd>Ctrl K</kbd>
+              </label>
+              <button class="icon-button refresh-button" id="refresh-apps" aria-label="Refresh apps" title="Refresh app list"><span data-icon="refresh"></span></button>
+            </div>
+          </div>
+
+          <div class="page-content" id="page-content" aria-live="polite"></div>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="shared/search.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
