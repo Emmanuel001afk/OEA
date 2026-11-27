@@ -53,6 +53,14 @@ object OeaNotesApp {
     private const val KEY_ARCHIVED = "archived_notes"
     private const val KEY_TRASH = "trash_notes"
 
+    private val NOTE_COLORS = listOf(
+        "default" to "Default",
+        "yellow" to "Yellow",
+        "green" to "Green",
+        "blue" to "Blue",
+        "pink" to "Pink"
+    )
+
     /** How long a deleted note can be brought back. */
     private const val TRASH_DAYS = 30L
     private const val DAY_MS = 24L * 60L * 60L * 1000L
