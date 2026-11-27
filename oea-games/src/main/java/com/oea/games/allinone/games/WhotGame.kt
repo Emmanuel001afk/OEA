@@ -249,7 +249,7 @@ class WhotGame : ArcadeBaseGame() {
             return false
         }
         if (turn != 0 && !twoPlayer) return false
-        val cardIndex = handRects.indexOfFirst { ArcadeDraw.inside(it, x, y) }
+        val cardIndex = handRects.indexOfLast { ArcadeDraw.inside(it, x, y) }
         if (cardIndex >= 0) {
             val hand = hands[turn]
             val card = hand.getOrNull(cardIndex) ?: return false
@@ -337,19 +337,14 @@ class WhotGame : ArcadeBaseGame() {
         val topCard = top
         if (topCard != null) {
             val rect = RectF(width * 0.42f, deckTop - cardH * 0.1f, width * 0.42f + cardW * 1.25f, deckTop - cardH * 0.1f + cardH * 1.25f)
-            ArcadeDraw.panel(canvas, rect, 0x22FFFFFF, cardW * 0.14f)
             if (topCard.isWhot) {
-                ArcadeDraw.text(canvas, "WHOT", rect.centerX(), rect.centerY() - rect.height() * 0.08f, rect.width() * 0.26f,
-                    ArcadeColors.WHITE, bold = true, align = Paint.Align.CENTER)
+                ArcadeDraw.card(canvas, rect, "20", "★", ArcadeColors.INK, faceUp = true, backColor = ArcadeColors.PLUM)
                 if (calledShape >= 0) {
-                    ArcadeDraw.text(canvas, "→ ${shapeGlyphs[calledShape]}", rect.centerX(), rect.centerY() + rect.height() * 0.18f,
-                        rect.width() * 0.3f, shapeColors[calledShape], bold = true, align = Paint.Align.CENTER)
+                    ArcadeDraw.text(canvas, "→ ${shapeGlyphs[calledShape]}", rect.centerX(), rect.centerY() + rect.height() * 0.24f,
+                        rect.width() * 0.28f, shapeColors[calledShape], bold = true, align = Paint.Align.CENTER)
                 }
             } else {
-                ArcadeDraw.text(canvas, shapeGlyphs[topCard.shape], rect.centerX(), rect.centerY() - rect.height() * 0.1f,
-                    rect.width() * 0.46f, shapeColors[topCard.shape], bold = true, align = Paint.Align.CENTER)
-                ArcadeDraw.text(canvas, topCard.number.toString(), rect.left + rect.width() * 0.16f, rect.top + rect.height() * 0.26f,
-                    rect.height() * 0.16f, shapeColors[topCard.shape], bold = true)
+                ArcadeDraw.card(canvas, rect, topCard.number.toString(), shapeGlyphs[topCard.shape], shapeColors[topCard.shape])
             }
             if (calledShape >= 0) {
                 ArcadeDraw.text(canvas, "CALLED", width * 0.42f + cardW * 0.6f, deckTop - cardH * 0.24f, height * 0.011f,
