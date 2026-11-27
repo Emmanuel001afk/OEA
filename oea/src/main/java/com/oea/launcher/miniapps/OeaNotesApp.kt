@@ -9,6 +9,8 @@ import android.text.SpannableStringBuilder
 import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import com.oea.launcher.R
 import com.oea.launcher.applock.OeaAppLockStore
@@ -514,23 +516,46 @@ object OeaNotesApp {
         return shell.root
     }
 
+    /**
+     * The note body: a real writing surface, not a four-line slot inside a
+     * sheet. It opens at ten lines (about 240dp, comfortably above the 48dp
+     * minimum touch target) and grows with the text up to sixty lines before
+     * it scrolls internally, so long notes never push the editor around.
+     */
     private fun multilineField(kit: OeaKit, hint: String, initial: String): android.widget.EditText =
         kit.field(hint, initial).apply {
             isSingleLine = false
-            minLines = 4
-            maxLines = 9
+            minLines = 10
+            maxLines = 60
+            minimumHeight = kit.dp(240)
+            textSize = 17f
+            setPadding(kit.dp(16), kit.dp(14), kit.dp(16), kit.dp(14))
             gravity = Gravity.TOP or Gravity.START
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
         }
 
+    /** Focuses [field] and raises the keyboard, the way [OeaKit.prompt] does. */
+    private fun focusAndShowKeyboard(host: Activity, field: android.widget.EditText) {
+        field.post {
+            field.requestFocus()
+            host.getSystemService(InputMethodManager::class.java)?.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
     private fun createNote(host: Activity, kit: OeaAppKit, private: Boolean, onDone: () -> Unit) {
-        kit.sheet(if (private) "New private note" else "New note", if (private) "Protected with your App Lock PIN" else null) { panel, dialog ->
-            val titleField = kit.field("Title", "")
+        // A full-screen editor: the body gets the whole screen to breathe in
+        // instead of a four-line slot squeezed into a sheet under the keyboard.
+        kit.editorSheet(if (private) "New private note" else "New note", if (private) "Protected with your App Lock PIN" else null) { content, actions, dialog ->
+            val titleField = kit.field("Title", "").apply { textSize = 20f }
             val textField = multilineField(kit, "Write your note…", "")
             val folderField = kit.field("Folder (General, Work, Ideas…)", "General")
             val tagField = kit.field("Tag (optional)", "")
+            titleField.imeOptions = EditorInfo.IME_ACTION_NEXT
+            titleField.setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_NEXT) { textField.requestFocus(); true } else false
+            }
             val colorRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(4), 0, 0) }
             var selectedColor = "default"
             fun paintColors() {
@@ -539,17 +564,17 @@ object OeaNotesApp {
                     colorRow.addView(kit.chip(label, colorId == selectedColor) {
                         selectedColor = colorId
                         paintColors()
-                    }, LinearLayout.LayoutParams(-2, kit.dp(40)).apply { rightMargin = kit.dp(6) })
+                    }, LinearLayout.LayoutParams(-2, kit.dp(48)).apply { rightMargin = kit.dp(6) })
                 }
             }
             paintColors()
-            panel.addView(titleField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(textField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(folderField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(tagField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(kit.hscroll(colorRow), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(kit.buttonRow(
-                kit.quietButton("Cancel") { dialog.dismiss() },
+            content.addView(titleField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+            content.addView(textField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+            content.addView(folderField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+            content.addView(tagField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+            content.addView(kit.hscroll(colorRow), LinearLayout.LayoutParams(-1, -2))
+            actions.addView(kit.buttonRow(
+                kit.quietButton("Cancel") { kit.hideKeyboard(textField); dialog.dismiss() },
                 kit.primaryButton("Save note") {
                     val title = titleField.text.toString().trim()
                     val text = textField.text.toString().trim()
@@ -568,28 +593,36 @@ object OeaNotesApp {
                         false,
                         title = title
                     ) { onDone() }
+                    kit.hideKeyboard(textField)
                     dialog.dismiss()
                 }
-            ))
+            ), LinearLayout.LayoutParams(-1, -2))
+            focusAndShowKeyboard(host, titleField)
         }
     }
 
     private fun createChecklistNote(host: Activity, kit: OeaAppKit, onDone: () -> Unit) {
-        kit.sheet("New checklist", "Put one item on each line") { panel, dialog ->
-            val titleField = kit.field("List title", "")
+        kit.editorSheet("New checklist", "Put one item on each line") { content, actions, dialog ->
+            val titleField = kit.field("List title", "").apply { textSize = 20f }
             val itemsField = multilineField(kit, "Buy groceries\nCall Alex\nSend invoice", "")
-            panel.addView(titleField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(itemsField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-            panel.addView(kit.buttonRow(
-                kit.quietButton("Cancel") { dialog.dismiss() },
+            titleField.imeOptions = EditorInfo.IME_ACTION_NEXT
+            titleField.setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_NEXT) { itemsField.requestFocus(); true } else false
+            }
+            content.addView(titleField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+            content.addView(itemsField, LinearLayout.LayoutParams(-1, -2))
+            actions.addView(kit.buttonRow(
+                kit.quietButton("Cancel") { kit.hideKeyboard(itemsField); dialog.dismiss() },
                 kit.primaryButton("Create list") {
                     val title = titleField.text.toString().trim().ifBlank { "Checklist" }
                     val items = itemsField.text.toString().lineSequence().map { it.trim() }.filter { it.isNotBlank() }.map { "[ ] $it" }.joinToString("\n")
                     val fullText = if (items.isBlank()) title else "$title\n$items"
                     createNoteWithText(host, fullText, "checklist", "General", false, "default", true, title = title) { onDone() }
+                    kit.hideKeyboard(itemsField)
                     dialog.dismiss()
                 }
-            ))
+            ), LinearLayout.LayoutParams(-1, -2))
+            focusAndShowKeyboard(host, titleField)
         }
     }
 
@@ -662,19 +695,52 @@ object OeaNotesApp {
             val actionsGroup = kit.group(panel)
             kit.row(actionsGroup, R.drawable.oic_edit, "Edit note", null, chevron = true) {
                 dialog.dismiss()
-                kit.sheet("Edit note", null) { editPanel, editDialog ->
-                    val editor = multilineField(kit, "Note", note.text)
-                    editPanel.addView(editor, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
-                    editPanel.addView(kit.buttonRow(
-                        kit.quietButton("Cancel") { editDialog.dismiss() },
+                kit.editorSheet("Edit note", null) { editContent, editActions, editDialog ->
+                    val titleField = kit.field("Title", note.title).apply { textSize = 20f }
+                    val editor = multilineField(kit, "Write your note…", note.text)
+                    val folderField = kit.field("Folder (General, Work, Ideas…)", note.folder.ifBlank { "General" })
+                    val tagField = kit.field("Tag (optional)", note.tag)
+                    titleField.imeOptions = EditorInfo.IME_ACTION_NEXT
+                    titleField.setOnEditorActionListener { _, actionId, _ ->
+                        if (actionId == EditorInfo.IME_ACTION_NEXT) { editor.requestFocus(); true } else false
+                    }
+                    val colorRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, kit.dp(4), 0, 0) }
+                    var selectedColor = note.color.ifBlank { "default" }
+                    fun paintColors() {
+                        colorRow.removeAllViews()
+                        NOTE_COLORS.forEach { (colorId, label) ->
+                            colorRow.addView(kit.chip(label, colorId == selectedColor) {
+                                selectedColor = colorId
+                                paintColors()
+                            }, LinearLayout.LayoutParams(-2, kit.dp(48)).apply { rightMargin = kit.dp(6) })
+                        }
+                    }
+                    paintColors()
+                    editContent.addView(titleField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+                    editContent.addView(editor, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+                    editContent.addView(folderField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+                    editContent.addView(tagField, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(10) })
+                    editContent.addView(kit.hscroll(colorRow), LinearLayout.LayoutParams(-1, -2))
+                    editActions.addView(kit.buttonRow(
+                        kit.quietButton("Cancel") { kit.hideKeyboard(editor); editDialog.dismiss() },
                         kit.primaryButton("Save") {
                             val t = editor.text.toString().trim()
                             if (t.isEmpty()) return@primaryButton
-                            updateNote(host, note, t)
+                            val updated = note.copy(
+                                title = titleField.text.toString().trim(),
+                                text = t,
+                                folder = folderField.text.toString().trim().ifBlank { "General" },
+                                tag = tagField.text.toString().trim(),
+                                color = selectedColor,
+                                updated = System.currentTimeMillis()
+                            )
+                            updateNoteFull(host, note, updated)
+                            kit.hideKeyboard(editor)
                             editDialog.dismiss()
                             onDone()
                         }
-                    ))
+                    ), LinearLayout.LayoutParams(-1, -2))
+                    focusAndShowKeyboard(host, editor)
                 }
             }
             kit.row(actionsGroup, R.drawable.oic_push_pin, if (note.pinned) "Unpin note" else "Pin to top", null) {
@@ -726,7 +792,7 @@ object OeaNotesApp {
                                 onDone()
                             }
                         }
-                        panel.addView(kit.text("Or type a custom folder:", 12f, kit.palette.textSecondary).apply { setPadding(kit.dp(4), kit.dp(8), kit.dp(4), kit.dp(4)) }, LinearLayout.LayoutParams(-1, -2))
+                        movePanel.addView(kit.text("Or type a custom folder:", 12f, kit.palette.textSecondary).apply { setPadding(kit.dp(4), kit.dp(8), kit.dp(4), kit.dp(4)) }, LinearLayout.LayoutParams(-1, -2))
                         val customFolder = kit.field("Folder name", note.folder.ifBlank { "General" })
                         movePanel.addView(customFolder, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = kit.dp(8) })
                         movePanel.addView(kit.buttonRow(

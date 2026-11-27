@@ -809,6 +809,91 @@ open class OeaKit(val context: Context, var palette: OeaPalette) {
         return dialog
     }
 
+    /**
+     * A full-screen editor: the surface for writing, not for choosing.
+     *
+     * A bottom sheet is the right shape for a menu or a confirmation, but a
+     * cramped one for typing — when the keyboard opens it takes half the
+     * screen and the input is left with a sliver. Every notes app worth
+     * comparing with (Keep, Apple Notes) edits full-screen instead, so this
+     * dialog fills the window: [build] adds fields to the scrolling content
+     * and its primary actions to the bar pinned above the keyboard, which
+     * stays reachable without scrolling the sheet. The caller focuses a
+     * field and shows the keyboard, exactly as [prompt] does.
+     */
+    fun editorSheet(title: String?, subtitle: String? = null, build: (content: LinearLayout, actions: LinearLayout, dialog: Dialog) -> Unit): Dialog {
+        val activity = context as? Activity ?: throw IllegalStateException("Editors need an Activity context")
+        val dialog = Dialog(activity)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val root = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(palette.background)
+            // An editor must never vanish because a tap landed outside its
+            // fields: that tap is how a half-written note gets lost. Back
+            // still dismisses (it is the Cancel button's twin).
+            isClickable = true
+        }
+        dialog.setCanceledOnTouchOutside(false)
+        val header = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(20), dp(6))
+        }
+        if (!title.isNullOrBlank()) {
+            header.addView(text(title, 21f, palette.text, OeaType.medium).apply { setPadding(dp(4), 0, dp(4), 0) })
+        }
+        if (!subtitle.isNullOrBlank()) {
+            header.addView(text(subtitle, 13.5f, palette.textSecondary).apply {
+                setPadding(dp(4), dp(4), dp(4), 0)
+                setLineSpacing(dpf(2f), 1f)
+            })
+        }
+        root.addView(header, LinearLayout.LayoutParams(-1, -2))
+        val content = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(6), dp(20), dp(12))
+        }
+        val scroll = ScrollView(activity).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            isFocusable = false
+            addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val actions = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(20), dp(8), dp(20), dp(12))
+        }
+        root.addView(actions, LinearLayout.LayoutParams(-1, -2))
+        build(content, actions, dialog)
+        // Edge-to-edge: the framework no longer resizes for the keyboard, so
+        // the status bar pads the header and the keyboard (or the navigation
+        // bar, when it is hidden) pads the action bar. The content above
+        // shrinks with the keyboard instead of hiding behind it.
+        val actionsBaseBottom = actions.paddingBottom
+        root.setOnApplyWindowInsetsListener { v, insets ->
+            val bars = OeaInsets.bars(insets)
+            v.setPadding(bars[0], bars[1], bars[2], 0)
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            actions.setPadding(actions.paddingLeft, actions.paddingTop, actions.paddingRight, actionsBaseBottom + maxOf(bars[3], ime))
+            insets
+        }
+        dialog.setContentView(root)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setGravity(Gravity.CENTER)
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        root.translationY = activity.resources.displayMetrics.heightPixels.toFloat()
+        dialog.setOnShowListener {
+            root.animate().translationY(0f).setDuration(260L).setInterpolator(DecelerateInterpolator(1.8f)).start()
+        }
+        dialog.show()
+        return dialog
+    }
+
     /** Single choice list in a sheet; [onPick] fires once and the sheet closes. */
     fun choose(title: String, subtitle: String? = null, options: List<String>, selected: Int, descriptions: List<String?> = emptyList(), onPick: (Int) -> Unit) {
         sheet(title, subtitle) { panel, dialog ->
