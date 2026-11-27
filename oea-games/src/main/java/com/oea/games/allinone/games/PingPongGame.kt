@@ -193,8 +193,9 @@ class PingPongGame : ArcadeBaseGame() {
                 paddleTwo = nx.coerceIn(paddleW / 2f, 1f - paddleW / 2f)
             }
         } else {
+            val previous = paddleOne
             paddleOne = nx.coerceIn(paddleW / 2f, 1f - paddleW / 2f)
-            spin = ((nx - paddleOne) * 8f).coerceIn(-1f, 1f)
+            spin = ((paddleOne - previous) * 24f).coerceIn(-1f, 1f)
         }
         return true
     }
