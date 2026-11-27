@@ -1,10 +1,13 @@
-# OEA on a laptop: the setup that works
+# Android OEA on a laptop (optional emulator route)
 
-**OEA is the launcher. Android is the operating system underneath it.** OEA's
-Home screen, app drawer, folders, dock, widgets, search, arcade and games all
-talk to Android APIs — `PackageManager`, the HOME intent, `AppWidgetHost`,
-`TelecomManager`. OEA cannot be a Windows/macOS/Linux desktop shell, because
-there is no Android underneath to launch.
+> **For the native Windows launcher with no emulator, see [OEA Desktop](oea-desktop.md).**
+> This guide is only for running the Android OEA app inside Android on a laptop.
+
+**OEA Android is the launcher. Android is the operating system underneath it.**
+Its Home screen, app drawer, folders, dock, widgets, search, arcade and games
+use Android APIs — `PackageManager`, the HOME intent, `AppWidgetHost`, and
+`TelecomManager`. This optional route runs Android (Waydroid or an emulator) on
+the computer and installs the Android app there.
 
 So the configuration that actually works is:
 
@@ -16,22 +19,20 @@ So the configuration that actually works is:
 That is a real, supported setup, not a workaround. It is what this document
 sets up, with scripts in `tools/laptop/`.
 
-## Is there an OEA.exe?
+## Native Windows app or Android emulator?
 
-No, and there cannot be one that keeps OEA intact. A Windows `.exe` runs on
-Windows; OEA's Home screen, app drawer and widgets *are* Android APIs. The
-finished artifact is therefore:
+OEA Desktop now provides the native Windows launcher experience as a separate
+app. It discovers and opens Windows programs directly, with no Android runtime;
+see [OEA Desktop](oea-desktop.md). This guide does not install that desktop
+build. It covers the Android OEA APK for people who specifically want Android
+and the phone-only OEA features on their computer.
 
-- **`OEA-laptop-x86_64.apk`** — the same **release** build as the phone APK
-  (R8-minified, resource-shrunk, signed), with x86_64 native libraries added so
-  it installs where laptop Android runs. Not a debug build.
-- **`OEA-laptop-windows.zip`** — that APK plus a double-click
-  **`OEA-Laptop-Setup.cmd`** that prepares an Android emulator, installs OEA,
-  sets it as Home and opens it.
+For this Android route, the artifacts are:
 
-The `.cmd` is the closest legitimate equivalent of an installer `.exe`: it is
-the finished, one-double-click Windows path, with Android underneath as OEA
-requires.
+- **`OEA-laptop-x86_64.apk`** — a minified, resource-shrunk release build with
+  x86_64 native libraries added for laptop Android.
+- **`OEA-laptop-windows.zip`** — the APK plus the existing `.cmd` and
+  PowerShell setup files for creating an Android emulator.
 
 ## Pick your Android-on-laptop environment
 
@@ -49,7 +50,7 @@ the default arm64 APK is the right one.
 
 ## The two-minute version
 
-### Windows: double-click
+### Windows: Android emulator
 
 1. Download **`OEA-laptop-windows.zip`** from the
    [`oea-laptop-latest`](https://github.com/Emmanuel001afk/OEA/releases/tag/oea-laptop-latest)
@@ -154,13 +155,14 @@ open but have nothing to talk to without a modem. That is expected on a laptop.
 | Black screen after setting OEA as Home | Resize the window once, or `adb shell am force-stop com.oea.launcher` and press Home. |
 | Games run but the 3D engine is slow | Enable GPU/host rendering: emulator `-gpu host`; Waydroid uses the host GPU by default; Android-x86 needs Mesa with GLES 3. |
 
-## Why not a native desktop OEA?
+## How the native desktop version differs
 
-A native build would be a different product: it would launch desktop
-applications, not Android ones, and would have to reimplement Home, the drawer,
-widgets, notifications, Telecom and device policy. That is a desktop shell, not
-a port of OEA. Keeping OEA on Android — including Android running on the
-laptop — is what preserves the launcher, the arcade and every app it manages.
+OEA Desktop uses the host OS to discover and launch Windows apps, while the
+Android version continues to use Android's PackageManager and HOME role. The
+shared launcher model is search, categories, favorites, recents and themes; the
+OS integration is a separate adapter. Android-only features—SIM, Telecom,
+phone widgets and Android notification services—need their own desktop
+implementations and are not claimed to work in the native desktop build.
 
 ## Files
 

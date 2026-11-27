@@ -1,12 +1,13 @@
-# OEA on a laptop
+# Android OEA on a laptop (optional emulator route)
 
-OEA is an Android launcher, so the configuration that works is **Android on the
-laptop, OEA as its Home app**. These scripts build the laptop APK and install it
-into either Waydroid (Linux/Wayland) or the Android Studio emulator.
+These scripts run the **Android OEA app** on a laptop by installing it into
+Waydroid (Linux/Wayland) or an Android Studio emulator. For the native Windows
+app launcher that discovers and opens desktop programs directly—with no
+emulator—see [`OEA Desktop`](../../docs/oea-desktop.md).
 
 ```bash
 ./tools/laptop/build-apk.sh                  # release x86_64 -> dist/OEA-laptop-x86_64.apk
-./tools/laptop/build-apk.sh arm64-v8a        # Apple Silicon emulator
+./tools/laptop/build-apk.sh arm64-v8a        # Apple Silicon / ARM64 Android image
 
 ./tools/laptop/install-waydroid.sh           # Waydroid, pre-installed
 ./tools/laptop/install-emulator.sh           # creates/starts an API 36 AVD
@@ -17,14 +18,13 @@ into either Waydroid (Linux/Wayland) or the Android Studio emulator.
 ./tools/laptop/install-emulator.sh ~/Downloads/app.apk
 ```
 
-On Windows the download to use is `OEA-laptop-windows.zip`: extract it and
-double-click `OEA-Laptop-Setup.cmd`. There is no OEA `.exe` because OEA is an
-Android launcher; the `.cmd` installs the release APK into an Android emulator
-and sets it as Home.
+On Windows, `OEA-laptop-windows.zip` is specifically the Android-emulator
+bundle: extract it and double-click `OEA-Laptop-Setup.cmd`. It installs the
+Android release APK and selects OEA as Android Home. It is not required by OEA
+Desktop.
 
-The scripts are idempotent and safe to re-run. `waydroid init -s GAPPS` is the
-step that adds Play Store/Play Services; without it, OEA and sideloaded APKs
-still work.
+The scripts are safe to re-run. `waydroid init -s GAPPS` is the step that adds
+Play Store/Play Services; without it, OEA and sideloaded APKs still work.
 
-Full setup, expectations, display tuning and troubleshooting:
+Full Android-on-laptop setup, expectations, display tuning and troubleshooting:
 [`docs/oea-on-a-laptop.md`](../../docs/oea-on-a-laptop.md).

@@ -13,6 +13,7 @@ bin
 .kotlin
 local.properties
 build
+dist/
 .DS_Store
 keystore.properties
 *.jks
