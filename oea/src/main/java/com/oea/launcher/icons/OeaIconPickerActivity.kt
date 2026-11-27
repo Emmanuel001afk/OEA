@@ -73,7 +73,12 @@ class OeaIconPickerActivity : Activity() {
         }
         currentRow.addView(
             ImageView(this).apply {
-                setImageDrawable(controller.icon(packageName, className))
+                // Async: a cold resolve here blocked the picker's first paint.
+                val cached = controller.peek(packageName, className)
+                setImageDrawable(cached ?: controller.placeholder())
+                if (cached == null) {
+                    controller.request(packageName, className) { drawable -> setImageDrawable(drawable) }
+                }
             },
             LinearLayout.LayoutParams(kit.dp(52), kit.dp(52))
         )

@@ -2587,7 +2587,18 @@ open class OeaSystemToolsActivity : Activity() {
                 val iconFrame = row.getChildAt(1) as FrameLayout
                 val iconView = iconFrame.getChildAt(0) as ImageView
                 val frost = iconFrame.getChildAt(1) as FrameLayout
-                iconView.setImageDrawable(icons.icon(app.packageName, null))
+                // Async like every other list: a synchronous resolve here
+                // blocked scrolling on every cold row, and passing a null
+                // class name showed OEA's own apps under one shared icon.
+                val iconKey = app.packageName + "/" + app.className
+                iconView.tag = iconKey
+                val cachedIcon = icons.peek(app.packageName, app.className)
+                iconView.setImageDrawable(cachedIcon ?: icons.placeholder())
+                if (cachedIcon == null) {
+                    icons.request(app.packageName, app.className) { drawable ->
+                        if (iconView.tag == iconKey) iconView.setImageDrawable(drawable)
+                    }
+                }
                 if (frozen) iconView.colorFilter = grayscale else iconView.clearColorFilter()
                 iconView.alpha = if (frozen) 0.55f else 1f
                 frost.background = kit.oval(ice, palette.card, 2)
@@ -3222,14 +3233,28 @@ open class OeaSystemToolsActivity : Activity() {
                     isClickable = true
                     setOnClickListener { launchApp(app) }
                 }
-                preview.addView(ImageView(this).apply { setImageDrawable(kit.appIcon(app)) }, FrameLayout.LayoutParams(dp(84), dp(84), Gravity.CENTER))
+                // Async: up to 60 cards each asked for two icons synchronously,
+                // which froze this screen on a cold cache. The tag guards the
+                // callback even though cards are rebuilt on every render.
+                val cardIconKey = app.packageName + "/" + app.className
+                preview.addView(ImageView(this).apply {
+                    tag = cardIconKey
+                    setImageDrawable(kit.appIconAsync(app) { drawable ->
+                        if (tag == cardIconKey) setImageDrawable(drawable)
+                    } ?: OeaIconController.shared(this@OeaSystemToolsActivity).placeholder())
+                }, FrameLayout.LayoutParams(dp(84), dp(84), Gravity.CENTER))
                 preview.addView(kit.text(if (usageAccess) relativeUseTime(lastUsed[app.packageName] ?: 0L) else "Usage access off", 11.5f, palette.text, OeaType.medium).apply {
                     setPadding(dp(10), dp(5), dp(10), dp(5))
                     background = kit.rounded(OeaTheme.alpha(palette.background, 0xCC), 12)
                 }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(12) })
                 card.addView(preview, LinearLayout.LayoutParams(-1, dp(250)).apply { bottomMargin = dp(12) })
                 val appRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                appRow.addView(ImageView(this).apply { setImageDrawable(kit.appIcon(app)) }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { rightMargin = dp(10) })
+                appRow.addView(ImageView(this).apply {
+                    tag = cardIconKey
+                    setImageDrawable(kit.appIconAsync(app) { drawable ->
+                        if (tag == cardIconKey) setImageDrawable(drawable)
+                    } ?: OeaIconController.shared(this@OeaSystemToolsActivity).placeholder())
+                }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { rightMargin = dp(10) })
                 appRow.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(kit.text(app.label + if (locked) " • Locked" else "", 15f, palette.text, OeaType.medium).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
