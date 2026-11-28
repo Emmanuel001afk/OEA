@@ -472,6 +472,11 @@ jobs:
               --tests 'com.oea.launcher.miniapps.OeaSubtitlesTest' \
               --tests 'com.oea.launcher.miniapps.OeaSubtitleFilesTest' \
               --tests 'com.oea.launcher.miniapps.OeaSubtitleLanguagesTest' \
+              --tests 'com.oea.launcher.miniapps.OeaAudioTest' \
+              --tests 'com.oea.launcher.miniapps.OeaSpeechRegionsTest' \
+              --tests 'com.oea.launcher.miniapps.OeaCaptionsTest' \
+              --tests 'com.oea.launcher.miniapps.OeaMatroskaTest' \
+              --tests 'com.oea.launcher.miniapps.OeaTranslateTest' \
               --tests 'com.oea.launcher.miniapps.OeaVipFramesTest' \
               --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-vip.log"; then
             { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-vip.log" || true; } | head -60 | while IFS= read -r line; do
@@ -568,6 +573,50 @@ jobs:
           grep -Fq 'fun isRightToLeft(text: String)' "$SUBS"
           grep -Fq 'fun display(text: String)' "$SUBS"
           grep -Fq 'fun toSrt(track: Track)' "$SUBS"
+          # Subtitles written from the sound: the clock comes from the audio, and
+          # the recognizer is only ever asked what was said in a measured region.
+          REGIONS=$SRC/OeaSpeechRegions.kt
+          CAPTION=$SRC/OeaAutoCaption.kt
+          AUDIO=$SRC/OeaAudio.kt
+          CAPTIONS=$SRC/OeaCaptions.kt
+          grep -Fq 'object OeaSpeechRegions' "$REGIONS"
+          grep -Fq 'class Detector(val sampleRate: Int' "$REGIONS"
+          grep -Fq 'fun finish(): List<Region>' "$REGIONS"
+          grep -Fq 'val CAPTION_RATE = 16_000' "$AUDIO"
+          grep -Fq 'class Resampler(val fromRate: Int, val toRate: Int = CAPTION_RATE)' "$AUDIO"
+          grep -Fq 'fun wavHeader(' "$AUDIO"
+          grep -Fq 'object OeaCaptions' "$CAPTIONS"
+          grep -Fq 'fun cues(' "$CAPTIONS"
+          # One session per measured region, fed through a pipe: never a microphone.
+          grep -Fq 'RecognizerIntent.EXTRA_AUDIO_SOURCE' "$CAPTION"
+          grep -Fq 'EXTRA_AUDIO_SOURCE_SAMPLING_RATE, OeaAudio.CAPTION_RATE' "$CAPTION"
+          grep -Fq 'createOnDeviceSpeechRecognizer(activity)' "$CAPTION"
+          grep -Fq 'detector.push(pcm)' "$CAPTION"
+          grep -Fq 'OeaSpeechRegions.Detector(OeaAudio.CAPTION_RATE)' "$CAPTION"
+          grep -Fq 'OeaCaptions.cues(regions, told, clipMs' "$CAPTION"
+          ! grep -Fq 'EXTRA_AUDIO_INJECT_SOURCE' "$CAPTION"
+          ! grep -Fq 'AudioRecord(' "$CAPTION"
+          # It refuses below Android 13 instead of recording the microphone.
+          grep -Fq 'Build.VERSION_CODES.TIRAMISU' "$CAPTION"
+          # The run lives and dies with the player.
+          grep -Fq 'captionJob?.stop()' "$PLAYER"
+          grep -Fq 'OeaAutoCaption(this, uri' "$PLAYER"
+          # MKV tracks muxed into the film are read from the container itself.
+          MKV=$SRC/OeaMatroska.kt
+          grep -Fq 'object OeaMatroska' "$MKV"
+          grep -Fq 'const val ORIGIN_PREFIX = "embedded:"' "$MKV"
+          grep -Fq 'OeaMatroska.looksMatroska(clip)' "$PLAYER"
+          grep -Fq 'OeaMatroska.read(clip)' "$PLAYER"
+          ! grep -Fq 'S_HDMV/PGS' "$SRC/OeaSubtitleFiles.kt"
+          # Translation runs off the UI thread and keeps the timings.
+          TRANSLATE=$SRC/OeaTranslate.kt
+          grep -Fq 'object OeaTranslate' "$TRANSLATE"
+          grep -Fq 'TranslatorOptions.Builder()' "$TRANSLATE"
+          grep -Fq 'fun translated(' "$TRANSLATE"
+          grep -Fq 'OeaTranslate.translate(track, target)' "$PLAYER"
+          grep -Fq 'fun captionLanguageTag(context: Context)' "$STORE"
+          grep -Fq 'fun setCaptionLanguageTag(context: Context, tag: String)' "$STORE"
+          grep -Fq 'OeaCaptions.provenance(outcome.onDevice)' "$PLAYER"
       - name: Clock formatting regression tests
         run: |
           set -o pipefail

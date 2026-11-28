@@ -28,6 +28,7 @@ object OeaVipStore {
     private const val KEY_SUBTITLES = "subtitle_files"
     private const val KEY_SUB_LANGUAGE = "subtitle_language"
     private const val KEY_SUB_SECOND = "subtitle_second_language"
+    private const val KEY_CAPTION_LANGUAGE = "caption_language"
 
     /** "the phone's own language" and "no second line" are real choices, not blanks. */
     const val LANGUAGE_AUTO = "auto"
@@ -200,6 +201,27 @@ object OeaVipStore {
     fun secondSubtitleLanguage(context: Context): OeaSubtitleLanguages.Language? {
         val tag = secondSubtitleTag(context)
         if (tag == LANGUAGE_OFF) return null
+        return OeaSubtitleLanguages.byTag(tag)
+    }
+
+    /**
+     * The language spoken in the films you watch — what a written-from-sound
+     * track is transcribed in.
+     *
+     * Kept apart from the *subtitle* language on purpose: a viewer who reads
+     * Yoruba subtitles over English films has one of each, and confusing the two
+     * would transcribe every film in the wrong language. `auto` means the
+     * phone's own.
+     */
+    fun captionLanguageTag(context: Context): String =
+        prefs(context).getString(KEY_CAPTION_LANGUAGE, LANGUAGE_AUTO) ?: LANGUAGE_AUTO
+
+    fun setCaptionLanguageTag(context: Context, tag: String) =
+        prefs(context).edit().putString(KEY_CAPTION_LANGUAGE, tag.ifBlank { LANGUAGE_AUTO }).apply()
+
+    fun captionLanguage(context: Context): OeaSubtitleLanguages.Language? {
+        val tag = captionLanguageTag(context)
+        if (tag == LANGUAGE_AUTO) return OeaSubtitleLanguages.deviceDefault()
         return OeaSubtitleLanguages.byTag(tag)
     }
 
