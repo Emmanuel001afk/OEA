@@ -98,10 +98,15 @@ will be wrong somewhere, every time. The cues say where they came from — "writ
 from the sound by the phone's own recognizer" — and the timings, unlike the
 words, are exact.
 
-## 3. The tracks inside the MKV
+## 3. The tracks inside the file
 
-`OeaMatroska` walks the container's element tree: `Segment` → `Tracks` for what
-each track is, then every `Cluster` → `SimpleBlock`/`BlockGroup` for what it says.
+Two readers, because the two containers hide text in opposite ways.
+
+`OeaMatroska` walks the element tree: `Segment` → `Tracks` for what each track
+is, then every `Cluster` → `SimpleBlock`/`BlockGroup` for what it says.
+`OeaMp4` reads the sample tables first — `stts` for how long each sample shows,
+`stsz`/`stsc`/`stco` for where its bytes are — and then jumps to them, because an
+MP4 gives nothing away by walking.
 
 | Track type | Read? | How |
 |---|---|---|
@@ -110,6 +115,8 @@ each track is, then every `Cluster` → `SimpleBlock`/`BlockGroup` for what it s
 | `S_TEXT/ASS`, `S_TEXT/SSA` | yes | the ninth field of the block; styling dropped, words kept |
 | `S_HDMV/PGS`, `S_VOBSUB` | no | a bitmap, not text: turning a picture of a word into a word is a different job |
 | laced blocks | no | subtitle frames are almost never laced, and splitting one wrongly shifts every later cue |
+| MP4 `tx3g` / `text` / `sbtl` | yes | the two-byte length prefix and the UTF-8 after it |
+| MP4 `c608`/`c708` caption channels | no | bitmap characters again |
 
 Timing comes from the cluster timecode plus the block's signed 16-bit offset, and
 a cue's length from `BlockDuration` when the file declares one; otherwise the next
@@ -121,11 +128,13 @@ An embedded track is remembered like any other: its origin is
 that opens next time, re-found by walking the container again rather than by
 pretending it is a file.
 
-**Not read:** text tracks inside an **MP4/MOV** (`tx3g`). They need the sample
-tables (`stts`/`stsz`/`stsc`/`stco`) walked rather than a block stream, and they
-are rare in the films people download; the honest answer is that an MP4 with
-burned-in-free soft subtitles still needs a `.srt` beside it or a run of the
-written-from-sound path.
+**Still not read:** bitmap subtitles in either container (PGS, VobSub, `c608`).
+Text is the job here; a picture of a word needs a different pipeline, and a
+wrong guess would be worse than the honest gap.
+
+The language of an MP4 track comes from the packed ISO-639-2 code in `mdhd` — a
+real field, fifteen bits of three five-bit letters — so an untagged `tx3g` track
+says "language not named" rather than being called English.
 
 ## 4. Translation, with the model named
 
@@ -158,16 +167,21 @@ Unit tests, all run on JVM in CI (`OeaAudioTest`, `OeaSpeechRegionsTest`,
 | `OeaSpeechRegionsTest` | 9 | two sentences on their own bounds, a cough dropped, a breath not splitting a line, a monologue cut at ≤ 8 s, a loud music bed, streaming equals one-shot, the last line kept |
 | `OeaCaptionsTest` | 11 | capitalisation, punctuation, `[MUSIC]`/`(applause)`/`♪` dropped, two-line wrapping, region timing preserved, gaps not invented, duplicates merged |
 | `OeaMatroskaTest` | 11 | a Matroska file built byte by byte in the test: UTF-8 track, SDH name, forced track, `BlockDuration`, an ASS dialogue field, bitmap and video tracks left alone, origins |
+| `OeaMp4Test` | 6 | an MP4 built box by box: `tx3g` samples timed from `stts`, the video track ignored, the packed language unpacked, an untagged track honest about it |
 | `OeaTranslateTest` | 9 | every offered language has a name, Chinese/Norwegian/legacy codes, unsupported languages refused, timings preserved, blank answers keeping their words |
 
-51 new tests, 93 subtitle tests in total. The VIP CI step runs them by name, and
-28 new guard checks keep the shape: the timing comes from regions
+57 new tests, 99 subtitle tests in total. The VIP CI step runs them by name, and
+35 new guard checks keep the shape: the timing comes from regions
 (`grep 'OeaSpeechRegions.Detector'`), the recognizer is never asked to open the
 microphone (`! grep 'AudioRecord('`), the deprecated inject-source extra is not
 used (`! grep 'EXTRA_AUDIO_INJECT_SOURCE'`), embedded tracks are found on the
 probe thread (`grep 'OeaMatroska.read(clip)'` inside the `PROBE.execute` block's
 file), the offset is applied once, and translation never runs on the UI thread
 (`grep 'PROBE.execute'` around `OeaTranslate.translate`).
+
+MP4 reading has its own guards: `object OeaMp4`, `fun looksMp4(file: File)`, and
+both container readers called from the player's probe thread — `OeaMp4.read(clip)`
+next to `OeaMatroska.read(clip)`.
 
 ### Device checklist
 
@@ -176,23 +190,25 @@ file), the offset is applied once, and translation never runs on the UI thread
    it re-opens on the same choice next time.
 2. **An MKV with only PGS**: no track is offered, and the sheet still says
    "no subtitles in this clip" rather than showing a broken row.
-3. **Android 12 and below**: "Write subtitles from the sound" refuses with the
+3. **An MP4 with a `tx3g` track** (`ffprobe` shows `mov_text`): the language
+   appears with its badge and the cues land where the picture's dialogue does.
+4. **Android 12 and below**: "Write subtitles from the sound" refuses with the
    Android 13 sentence. Nothing is recorded.
-4. **Android 13+ with an offline pack** (Settings › Speech services › offline
+5. **Android 13+ with an offline pack** (Settings › Speech services › offline
    recognition): a two-minute clip of clear speech produces cues whose first line
    starts within ~200 ms of the first word, and the sheet never says "online".
-5. **The same clip with no offline pack**: the sheet says the audio will be sent
+6. **The same clip with no offline pack**: the sheet says the audio will be sent
    to an online recognizer *before* it starts.
-6. **Stop**: pressing Stop mid-run leaves no partial track and the temporary PCM
+7. **Stop**: pressing Stop mid-run leaves no partial track and the temporary PCM
    in `cache/` is gone (`vip-caption-*.pcm`).
-7. **A silent clip** (a title card): the run ends with "no speech was found",
+8. **A silent clip** (a title card): the run ends with "no speech was found",
    not an empty track.
-8. **Twenty-minute run from a playhead**: cues begin at or after that position
+9. **Twenty-minute run from a playhead**: cues begin at or after that position
    and nothing before it appears.
-9. **Translate an `.srt` beside a film into French**: the model downloads once,
+10. **Translate an `.srt` beside a film into French**: the model downloads once,
    the cues stay where they were, and the pill switches to `FR`.
-10. **Translate into Yoruba**: not offered anywhere in the sheet.
-11. **Leave the player mid-run**: the run stops, no notification, no thread left
+11. **Translate into Yoruba**: not offered anywhere in the sheet.
+12. **Leave the player mid-run**: the run stops, no notification, no thread left
     reading a file that is closed.
 
 ## Sources
