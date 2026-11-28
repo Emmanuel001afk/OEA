@@ -66,9 +66,11 @@ object OeaCaptions {
             val text = tidy(told.getOrNull(index))
             if (text.isEmpty() || text == previous) return@forEachIndexed
             val start = region.startMs.coerceAtLeast(0L)
-            val end = minOf(region.endMs, if (durationMs > 0L) durationMs else region.endMs)
-                .coerceAtLeast(start + 600L)
-                .coerceAtMost(limitMs)
+            // The film's end is a ceiling, not a suggestion: a cue that starts
+            // 500 ms before the credits must stop at the credits.
+            val ceiling = if (durationMs > 0L) minOf(durationMs, limitMs) else limitMs
+            val end = minOf(region.endMs, ceiling)
+                .coerceAtLeast(minOf(start + 600L, ceiling))
             if (end - start < 300L) return@forEachIndexed
             out.add(OeaSubtitles.Cue(start, end, wrap(text, LINE_CHARS)))
             previous = text
@@ -96,8 +98,8 @@ object OeaCaptions {
 
     /** What a generated track says about itself, for the sheet. */
     fun provenance(onDevice: Boolean): String = if (onDevice) {
-        "Written from the sound by the phone's own recognizer. Timings measured from the audio."
+        "Written from the sound by the phone's own recognizer — the audio never leaves the phone. Timings measured from the audio."
     } else {
-        "Written from the sound by an online recognizer — the clip's audio left the phone. Timings measured from the audio."
+        "Written from the sound by an online recognizer — the clip's audio left the phone for it. Timings measured from the audio."
     }
 }

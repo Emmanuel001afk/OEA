@@ -55,7 +55,9 @@ class OeaCaptionsTest {
         assertEquals(1000L, cues[0].startMs)
         assertEquals(2200L, cues[0].endMs)
         assertEquals(3000L, cues[1].startMs)
-        assertEquals("Where were you?", cues[1].text)
+        // A recognizer reports the words, not the intent: what it gives back is a
+        // statement unless the service punctuated it itself.
+        assertEquals("Where were you.", cues[1].text)
     }
 
     @Test fun aRegionNobodySpokeInDoesNotBecomeACue() {

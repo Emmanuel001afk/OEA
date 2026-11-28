@@ -108,7 +108,14 @@ class OeaMatroskaTest {
     private fun sample(): java.io.File = write(
         matroska(
             tracks +
-                cluster(1000L, block(2, 0, "Hello there"), block(2, 2000, "Second line")) +
+                cluster(
+                    1000L,
+                    block(2, 0, "Hello there"),
+                    block(2, 2000, "Second line"),
+                    // A forced track carries only the foreign dialogue, and a
+                    // track with no cues at all is not offered as a track.
+                    block(3, 500, "Bonjour")
+                ) +
                 element(
                     0x1F43B675L,
                     element(0xE7L, uint(10_000L)),
