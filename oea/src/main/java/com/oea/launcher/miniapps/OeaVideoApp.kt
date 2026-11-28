@@ -43,8 +43,9 @@ import java.util.Locale
  *  * an audio tab that lists music and recordings with their album, duration and
  *    size, played by the same player;
  *  * selection with share, favourite, delete and "add to playlist";
- *  * long-press on a tile, real details from the file's own track table, and a
- *    subtitle loader that reads sidecar `.srt`/`.vtt` files.
+ *  * long-press on a tile, real details from the file's own track table, and
+ *    multi-language subtitles: the player is handed the path of every clip, so it
+ *    finds each one's `.srt`/`.vtt` files and the language their names announce.
  */
 object OeaVideoApp {
 
@@ -656,9 +657,13 @@ internal class VipScreen(val host: Activity, val palette: OeaPalette) {
                     putExtra(OeaVipPlayerActivity.EXTRA_QUEUE, ArrayList(playableQueue.map { it.toString() }))
                     putExtra(OeaVipPlayerActivity.EXTRA_QUEUE_TITLES, ArrayList(list.map { it.name }))
                     putExtra(OeaVipPlayerActivity.EXTRA_INDEX, at)
-                    OeaMediaProbe.siblingFile(item, OeaSubtitles.SUBTITLE_EXTENSIONS)?.let {
-                        putExtra(OeaVipPlayerActivity.EXTRA_SIDECAR, it.path)
-                    }
+                    // Where each clip lives, so the player can find its subtitle
+                    // files itself — a MediaStore row reaches it as a content URI
+                    // with no folder to walk.
+                    putExtra(
+                        OeaVipPlayerActivity.EXTRA_QUEUE_PATHS,
+                        ArrayList(list.map { entry -> entry.localPath.orEmpty() })
+                    )
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             )

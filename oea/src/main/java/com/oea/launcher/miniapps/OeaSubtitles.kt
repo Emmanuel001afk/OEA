@@ -2,34 +2,52 @@ package com.oea.launcher.miniapps
 
 import android.content.Context
 import android.net.Uri
-import java.io.BufferedReader
 import java.io.File
 import java.util.Locale
 import java.util.regex.Pattern
 
 /**
- * Subtitles VIP can actually render.
+ * Subtitles VIP can actually render, in every language it is handed.
  *
  * The player used to say "detect sidecar .srt … show placeholder". A placeholder
  * in a video player is the worst kind of promise, so this parses the two formats
  * people really have next to their files — SubRip (`.srt`) and WebVTT (`.vtt`) —
  * into cues the player draws, with the inline tags stripped and a timing offset
  * the user can dial in while watching.
+ *
+ * It is also where a track learns what language it is: from its file name when
+ * that says so ([OeaSubtitleFiles.languageIn]), from the words themselves when it
+ * does not (an Arabic cue is not Swedish), and otherwise null, which VIP shows
+ * as "language not named" rather than inventing one.
+ *
+ * A [Track] is plain data — language, flags and where it came from included — so
+ * the player can hold several of them at once, draw two at a time, and put the
+ * one the viewer picked back under the same clip next time.
  */
 object OeaSubtitles {
 
     data class Cue(val startMs: Long, val endMs: Long, val text: String)
 
-    private val TIME = Pattern.compile("""(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})""")
-    private val SHORT_TIME = Pattern.compile("""(\d{1,3}):(\d{2})[,.](\d{1,3})""")
-    private val TAGS = Pattern.compile("""(?s)<[^>]+>|\{[^}]*\}""")
-
-    val SUBTITLE_EXTENSIONS = listOf("srt", "vtt", "ass", "ssa")
-
-    /** A cue list is a plain list on purpose: the player binary-searches it. */
-    class Track(val name: String, val cues: List<Cue>) {
+    /**
+     * One subtitle track.
+     *
+     * [origin] is the path or URI the cues were read from, kept so a choice can
+     * be remembered for the clip it was made on; [forced] and [sdh] are the
+     * filename flags that say this file is only part of a film's dialogue.
+     */
+    data class Track(
+        val name: String,
+        val cues: List<Cue>,
+        val language: OeaSubtitleLanguages.Language? = null,
+        val forced: Boolean = false,
+        val sdh: Boolean = false,
+        val origin: String? = null
+    ) {
         val isEmpty: Boolean get() = cues.isEmpty()
         val count: Int get() = cues.size
+
+        /** "French · Français", or an honest "language not named". */
+        val languageLabel: String get() = language?.label ?: "Language not named"
 
         /** The cue to show at [timeMs], or null. Fast enough for 60 fps. */
         fun at(timeMs: Long): String? {
@@ -57,23 +75,46 @@ object OeaSubtitles {
         }
     }
 
-    /** Reads a subtitle file the user picked (or one OEA found beside the video). */
+    private val TIME = Pattern.compile("""(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})""")
+    private val SHORT_TIME = Pattern.compile("""(\d{1,3}):(\d{2})[.,](\d{1,3})""")
+    private val TAGS = Pattern.compile("""(?s)<[^>]+>|\{[^}]*\}""")
+
+    val SUBTITLE_EXTENSIONS = listOf("srt", "vtt", "ass", "ssa")
+
+    /**
+     * Reads a subtitle file the user picked (or one OEA found beside the video).
+     *
+     * A `file:` URI is opened as a file and anything else through the content
+     * resolver, because the track VIP remembers for a clip is stored as a URI and
+     * a file found beside a film has no content provider behind it.
+     */
     fun load(context: Context, uri: Uri, name: String): Track? = runCatching {
-        val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: return@runCatching null
-        parse(name, text)
+        val file = if (uri.scheme == "file") uri.path?.let(::File)?.takeIf { it.isFile } else null
+        val stream = if (file != null) file.inputStream() else context.contentResolver.openInputStream(uri)
+        val text = stream?.bufferedReader()?.use { it.readText() } ?: return@runCatching null
+        parse(name, text)?.copy(origin = uri.toString())
     }.getOrNull()
 
     fun loadFile(file: File): Track? = try {
         // A file that cannot be read is simply no subtitles, the same quiet answer
         // [load] gives, because VIP asks about this one in passing and a dialog in the
         // middle of a film would be worse than none at all.
-        parse(file.name, file.readText())
+        parse(file.name, file.readText())?.copy(origin = Uri.fromFile(file).toString())
     } catch (error: Throwable) {
         null
     }
 
-    /** Parses SRT/VTT (and only strips the tags SSA/ASS would need, refusing the rest). */
-    fun parse(name: String, raw: String): Track? {
+    /**
+     * Parses SRT/VTT (and only strips the tags SSA/ASS would need, refusing those
+     * two formats outright), naming the language from [language] when a caller
+     * already knows it, from the file name otherwise, and from the script of the
+     * text as a last resort.
+     */
+    fun parse(
+        name: String,
+        raw: String,
+        language: OeaSubtitleLanguages.Language? = null
+    ): Track? {
         // A byte-order mark is not text: left in place it glued the first cue's index
         // ("1") onto the first line of dialogue, because that line no longer looked
         // like a number. Subtitle files written on Windows carry one routinely.
@@ -90,12 +131,21 @@ object OeaSubtitles {
             parseSrt(normalised)
         } ?: return null
         if (cues.isEmpty()) return null
-        return Track(name.substringAfterLast('/').substringBeforeLast('.'), cues)
+        val named = language
+            ?: OeaSubtitleFiles.languageIn(name)
+            ?: OeaSubtitleLanguages.scriptOf(cues.take(120).joinToString(" ") { it.text })
+        return Track(
+            name = name.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.'),
+            cues = cues,
+            language = named,
+            forced = OeaSubtitleFiles.forcedIn(name),
+            sdh = OeaSubtitleFiles.sdhIn(name)
+        )
     }
 
     private fun parseSrt(text: String): List<Cue> {
         val cues = ArrayList<Cue>(256)
-        val blocks = text.split(Regex("\n{2,}"))
+        val blocks = text.split(Regex("\\n{2,}"))
         for (raw in blocks) {
             val lines = raw.trim().split('\n')
             if (lines.isEmpty()) continue
@@ -117,7 +167,7 @@ object OeaSubtitles {
     private fun parseVtt(text: String): List<Cue> {
         val cues = ArrayList<Cue>(256)
         val body = text.substringAfter("WEBVTT", text)
-        body.split(Regex("\n{2,}")).forEach { block ->
+        body.split(Regex("\\n{2,}")).forEach { block ->
             val trimmed = block.trim()
             if (trimmed.isEmpty() || trimmed.startsWith("NOTE") || trimmed.startsWith("STYLE") || trimmed.startsWith("REGION")) return@forEach
             val lines = trimmed.lines()
@@ -165,6 +215,85 @@ object OeaSubtitles {
     /** Rewrites every cue by [offsetMs] — the "subtitles are late" fix. */
     fun shifted(track: Track, offsetMs: Long): Track {
         if (offsetMs == 0L) return track
-        return Track(track.name, track.cues.map { Cue((it.startMs + offsetMs).coerceAtLeast(0L), (it.endMs + offsetMs).coerceAtLeast(1L), it.text) })
+        return track.copy(
+            cues = track.cues.map {
+                Cue(
+                    (it.startMs + offsetMs).coerceAtLeast(0L),
+                    (it.endMs + offsetMs).coerceAtLeast(1L),
+                    it.text
+                )
+            }
+        )
+    }
+
+    // ------------------------------------------------------------------- drawing
+
+    /**
+     * True when the first strong character in [text] reads right to left.
+     *
+     * Decided from the words rather than from the track's label on purpose: a
+     * file called `Movie.ar.srt` and a file called `subs.srt` that happens to be
+     * Arabic both have to put their full stop on the left.
+     */
+    fun isRightToLeft(text: String): Boolean {
+        for (ch in text) {
+            if (ch.isWhitespace() || ch.isDigit()) continue
+            when (Character.getDirectionality(ch)) {
+                Character.DIRECTIONALITY_LEFT_TO_RIGHT -> return false
+                Character.DIRECTIONALITY_RIGHT_TO_LEFT,
+                Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC -> return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * The cue as it should be drawn: a right-to-left line is wrapped in an
+     * isolate so trailing punctuation and any Latin name inside it land where a
+     * reader of that language expects, not at the "end" of a left-to-right run.
+     */
+    fun display(text: String): String {
+        if (text.isEmpty() || text.startsWith('\u202B')) return text
+        return if (isRightToLeft(text)) "\u202B$text\u202C" else text
+    }
+
+    /**
+     * Two languages at once — the picture's own dialogue and the one you read it
+     * in. Returns null when neither has anything to say at [timeMs], which is the
+     * answer that hides the bar instead of leaving an empty bubble on screen.
+     */
+    fun together(first: Track?, second: Track?, timeMs: Long): String? {
+        val primary = first?.takeIf { !it.isEmpty }?.at(timeMs)
+        val other = second?.takeIf { !it.isEmpty && it !== first }?.at(timeMs)
+        if (primary == null && other == null) return null
+        return listOfNotNull(primary, other).joinToString("\n") { display(it) }
+    }
+
+    // ------------------------------------------------------------------ writing
+
+    /**
+     * Writes a track back out as SubRip — the format every other player reads.
+     * Used when a language picked in VIP has to leave VIP (a download with one
+     * track, a phone that needs the file in another app).
+     */
+    fun toSrt(track: Track): String = buildString {
+        track.cues.forEachIndexed { index, cue ->
+            append(index + 1).append('\n')
+            append(stamp(cue.startMs)).append(" --> ").append(stamp(cue.endMs)).append('\n')
+            append(cue.text.trim()).append('\n')
+            if (index != track.cues.lastIndex) append('\n')
+        }
+    }
+
+    private fun stamp(milliseconds: Long): String {
+        val at = milliseconds.coerceAtLeast(0L)
+        return String.format(
+            Locale.ROOT,
+            "%02d:%02d:%02d,%03d",
+            at / 3_600_000L,
+            (at / 60_000L) % 60L,
+            (at / 1_000L) % 60L,
+            at % 1_000L
+        )
     }
 }

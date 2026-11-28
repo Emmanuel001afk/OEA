@@ -63,7 +63,10 @@ import kotlin.math.roundToInt
  *    "play the rest when this one ends" and repeat-all are real;
  *  * resume — a clip you stopped is reopened at the second you left it, with the
  *    choice to start over;
- *  * subtitles from a sidecar `.srt` / `.vtt` / `.ass` file, with offset and size;
+ *  * subtitles in every language a clip has beside it: `.srt` and `.vtt` found by
+ *    name, a language named from the file name (or the script of its words), a
+ *    preferred language remembered per clip, a second language under the first,
+ *    text size, delay, right-to-left lines and a copy written out as `.srt`;
  *  * speed 0.25×–4×, five aspect modes, three repeat modes, a sleep timer, and the
  *    phone's own equaliser, bass boost, loudness and reverb on the audio session;
  *  * drag the left half for brightness, the right half for the media volume,
@@ -85,6 +88,9 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private var isAudio = false
     private var startAtMs = 0L
     private var sidecar: String? = null
+    /* The real path of every clip in the queue, in the same order as the queue.
+       Without it the player only has a content URI and no folder to look in. */
+    private var queuePaths: List<String> = emptyList()
 
     private var player: MediaPlayer? = null
     private var fx: OeaVipAudioFx? = null
@@ -126,7 +132,13 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     /* Cover art for the notification and the lock screen, read off the frame thread. */
     private var artwork: Bitmap? = null
     private var subtitlesOn = true
+    /* The line on screen, and the one under it, both already carrying the offset. */
     private var subtitleTrack: OeaSubtitles.Track? = null
+    private var secondaryTrack: OeaSubtitles.Track? = null
+    /* Every track this clip has, one per language, read once when it opens. */
+    private var subtitleTracks: List<OeaSubtitles.Track> = emptyList()
+    /* The track waiting for Android's create-a-document sheet to come back. */
+    private var exportTrack: OeaSubtitles.Track? = null
     private var subtitleOffset = 0L
     private var subtitleScale = 1f
 
@@ -307,6 +319,15 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     private fun current(): Entry? = entries.getOrNull(index)
 
+    /**
+     * Where the clip at [at] lives on disk, or null when Android only gave VIP a
+     * content URI. Per clip matters: the sidecar used to be a single path on the
+     * Intent, so when the queue moved to the next episode the first episode's
+     * track could be painted over it.
+     */
+    private fun localClipAt(at: Int): File? =
+        queuePaths.getOrNull(at)?.takeIf { it.isNotBlank() }?.let(::File)?.takeIf { it.isFile }
+
     /** @return false when the Intent carries nothing playable and the activity is finishing. */
     private fun readIntent(): Boolean {
         val data = intent?.data
@@ -336,6 +357,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         startAtMs = intent.getLongExtra(EXTRA_START_AT, 0L)
         durationMs = intent.getLongExtra(EXTRA_DURATION, 0L).coerceAtLeast(0L)
         sidecar = intent.getStringExtra(EXTRA_SIDECAR)
+        queuePaths = runCatching { intent.getStringArrayListExtra(EXTRA_QUEUE_PATHS) }.getOrNull().orEmpty()
         rotation = OeaVipStore.rotationOf(this)
         applyRotation()
         aspect = OeaVipStore.aspectOf(this)
@@ -424,6 +446,11 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         subtitleView = text("", 19f, Color.WHITE, OeaType.medium).apply {
             gravity = Gravity.CENTER
             maxLines = 3
+            // A right-to-left film centres its lines the same way, and each line's
+            // own direction comes from its first strong character (or the isolate
+            // [OeaSubtitles.display] adds), not from the phone's language.
+            textDirection = View.TEXT_DIRECTION_FIRST_STRONG
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
             setTextColor(Color.WHITE)
             setLineSpacing(dp(2).toFloat(), 1f)
             setPadding(dp(14), dp(8), dp(14), dp(8))
@@ -864,7 +891,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             requestFocus()
             runCatching { mp.start() }
             onPlayStateChanged()
-            loadSidecar()
+            loadSubtitles()
             openFrames()
         }
         created.setOnInfoListener { _, what, _ ->
@@ -952,48 +979,85 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     }
 
     /**
-     * Subtitles for this clip, in the order they can actually be found: the file
-     * VIP remembered for it, a sidecar beside it on disk, then nothing.
+     * Every subtitle file this clip has, in every language it has them in.
+     *
+     * Files come from three places, in this order of authority: the one VIP
+     * remembered for this exact clip (a language chosen by hand last time), the
+     * files found beside it — same folder and `Subs/`, matched by name — and the
+     * track the launcher already knew about. All of them are parsed here, on the
+     * probe thread: subtitle files are small, and switching language while the
+     * film runs must not go back to the card.
+     *
+     * Precedence for what opens: the remembered track, else the viewer's
+     * preferred language, else the first complete named track, else anything.
      */
-    private fun loadSidecar() {
+    private fun loadSubtitles() {
         base = null
-        subtitleName = null
+        baseSecondary = null
         subtitleTrack = null
+        secondaryTrack = null
+        subtitleTracks = emptyList()
         subtitleView.visibility = View.GONE
-        ccPill.text = "Subtitles"
-        val clip = current()?.uri ?: return
-        val remembered = OeaVipStore.subtitleFor(this, clip)
-        val from = sidecar
+        updateSubtitlePill()
+        val entry = current() ?: return
+        val clip = localClipAt(index)
+        val single = sidecar?.takeIf { index == 0 }
+        val remembered = OeaVipStore.subtitleFor(this, entry.uri)
+        val preferred = OeaVipStore.preferredSubtitleLanguage(this)
+        val second = OeaVipStore.secondSubtitleLanguage(this)
         val sequence = ++subtitleSeq
         PROBE.execute {
             val app = applicationContext
-            val found: Pair<String, OeaSubtitles.Track>? = runCatching {
-                remembered?.let { uri ->
-                    OeaSubtitles.load(app, uri, uri.lastPathSegment?.substringAfterLast('/') ?: "subtitles")
-                        ?.let { (uri.lastPathSegment?.substringAfterLast('/') ?: "subtitles") to it }
-                } ?: run {
-                    val beside = from?.let { File(it) }?.takeIf { it.isFile } ?: run {
-                        val path = clip.path ?: return@run null
-                        val file = File(path)
-                        val parent = file.parentFile ?: return@run null
-                        OeaSubtitles.SUBTITLE_EXTENSIONS
-                            .map { extension -> File(parent, file.name.substringBeforeLast('.') + ".$extension") }
-                            .firstOrNull { it.isFile }
-                    } ?: return@run null
-                    runCatching { OeaSubtitles.loadFile(beside) }.getOrNull()?.let { beside.name to it }
+            // The folder walk runs here, on the probe thread, not on the tap that
+            // started the film: a folder of a thousand files is a disk read.
+            val files = ArrayList<File>(4)
+            if (clip != null) files += OeaMediaProbe.subtitleFilesFor(clip, preferred)
+            single?.let { path ->
+                val file = File(path)
+                if (file.isFile && files.none { it.absolutePath == file.absolutePath }) files.add(file)
+            }
+            val loaded = ArrayList<OeaSubtitles.Track>(files.size + 1)
+            files.forEach { file ->
+                // A .ass beside the film is not read: its dialogue is styled, and
+                // guessing at it would put the wrong words under the picture.
+                runCatching { OeaSubtitles.loadFile(file) }.getOrNull()
+                    ?.takeIf { !it.isEmpty }
+                    ?.let { track -> if (loaded.none { other -> other.name == track.name }) loaded.add(track) }
+            }
+            remembered?.let { uri ->
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "subtitles"
+                val track = OeaSubtitles.load(app, uri, name)?.takeIf { !it.isEmpty }
+                if (track != null) {
+                    loaded.removeAll { it.name == track.name || it.origin == track.origin }
+                    loaded.add(0, track)
                 }
-            }.getOrNull()
+            }
             handler.post {
                 // The probe can outlive the clip that asked for it — a big file on a
                 // slow card, a subtitle behind a content provider. Without this token
                 // the previous clip's cues were painted over the one now playing.
                 if (isDestroyed || sequence != subtitleSeq) return@post
-                if (found == null) return@post
-                val (name, track) = found
-                base = track
-                subtitleTrack = OeaSubtitles.shifted(track, subtitleOffset)
-                subtitleName = name
-                ccPill.text = if (subtitlesOn) "${track.count} cues" else "Subtitles off"
+                subtitleTracks = loaded
+                val rememberedTrack = remembered?.let { uri -> loaded.firstOrNull { it.origin == uri.toString() } }
+                val open = rememberedTrack
+                    ?: loaded.firstOrNull { preferred != null && it.language?.tag == preferred.tag && !it.forced }
+                    ?: loaded.firstOrNull { preferred != null && it.language?.tag == preferred.tag }
+                    ?: loaded.firstOrNull { !it.forced }
+                    ?: loaded.firstOrNull()
+                if (open != null) {
+                    base = open
+                    subtitleTrack = OeaSubtitles.shifted(open, subtitleOffset)
+                }
+                // A second line only when it is a different track: two copies of
+                // the same cues stacked is not "bilingual", it is a doubled line.
+                if (second != null) {
+                    val other = loaded.firstOrNull { it.language?.tag == second.tag && it.name != open?.name }
+                    if (other != null) {
+                        baseSecondary = other
+                        secondaryTrack = OeaSubtitles.shifted(other, subtitleOffset)
+                    }
+                }
+                updateSubtitlePill()
                 paintSubtitle()
             }
         }
@@ -1236,23 +1300,74 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         }
     }
 
+    /**
+     * Draws the cue under the picture — in one language, or in two when a second
+     * was chosen, with each line carrying its own direction.
+     *
+     * The track already has the offset baked in, so the lookup is at the position
+     * on the clock. It used to be position + offset on a track that had already
+     * been shifted, which applied the delay twice: a five-second nudge moved the
+     * words ten.
+     */
     private fun paintSubtitle() {
-        val track = subtitleTrack
-        if (track == null || !subtitlesOn || track.isEmpty) {
+        if (!subtitlesOn) {
             if (subtitleView.visibility != View.GONE) subtitleView.visibility = View.GONE
             return
         }
-        val line = track.at(positionMs + subtitleOffset)
+        val line = OeaSubtitles.together(subtitleTrack, secondaryTrack, positionMs)
         if (line == null) {
-            subtitleView.visibility = View.GONE
+            if (subtitleView.visibility != View.GONE) subtitleView.visibility = View.GONE
             return
         }
         if (subtitleView.text != line) {
             subtitleView.text = line
-            subtitleView.textSize = 19f * subtitleScale
+            subtitleView.textSize = 19f * subtitleScale * subtitleTypeScale()
         }
         subtitleView.visibility = View.VISIBLE
     }
+
+    /** Chinese, Japanese and Korean need a little more size to read as easily. */
+    private fun subtitleTypeScale(): Float =
+        if (subtitleTrack?.language?.wideGlyphs == true || secondaryTrack?.language?.wideGlyphs == true) 1.12f else 1f
+
+    /**
+     * Keeps the pill saying what is actually under the picture: the language
+     * badge (`EN`), both when two are drawn (`EN + YO`), and never a cue count —
+     * the count belongs in the sheet, not in a control you glance at.
+     */
+    private fun updateSubtitlePill() {
+        val primary = subtitleTrack
+        val second = secondaryTrack
+        ccPill.text = when {
+            !subtitlesOn -> "Subtitles off"
+            primary == null -> "Subtitles"
+            second != null -> "${badgeOf(primary)} + ${badgeOf(second)}"
+            else -> badgeOf(primary)
+        }
+    }
+
+    private fun badgeOf(track: OeaSubtitles.Track?): String = track?.language?.badge ?: "CC"
+
+    /** Everything about this clip's subtitles in one line, for the sheet header. */
+    private fun subtitleSummary(): String {
+        val primary = subtitleTrack
+        val found = subtitleTracks.size
+        val files = when {
+            found == 0 -> "no files beside this clip"
+            found == 1 -> "one file beside this clip"
+            else -> "$found files beside this clip"
+        }
+        val now = primary?.let { "${it.language?.english ?: "language not named"} • ${it.count} cues" }
+        return listOfNotNull(now, files).joinToString(" • ")
+    }
+
+    /** Full tracks before forced ones, named languages first, then by name. */
+    private fun orderedTracks(): List<OeaSubtitles.Track> = subtitleTracks.sortedWith(
+        compareBy<OeaSubtitles.Track> { if (it.forced) 1 else 0 }
+            .thenBy { if (it.language == null) 1 else 0 }
+            .thenBy { it.language?.english ?: "" }
+            .thenBy { it.name.lowercase(Locale.getDefault()) }
+    )
 
     /** Keeps the strip of pills describing what is actually happening. */
     private fun updateQueueUi() {
@@ -1765,20 +1880,23 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     }
 
     private fun showSubtitleSheet() {
-        sheet("Subtitles", subtitleTrack?.let { "${it.name} • ${it.count} cues" } ?: "No file loaded") { panel ->
+        val found = orderedTracks()
+        val remembered = OeaVipStore.subtitleFor(this, current()?.uri)
+        val pickedByHand = remembered?.takeIf { uri -> found.none { it.origin == uri.toString() } }
+        sheet("Subtitles", subtitleSummary()) { panel ->
             val group = panel.group()
             panel.switch(group, R.drawable.oic_subtitles, "Show them", "Drawn over the picture, above the controls", subtitlesOn) { value ->
                 subtitlesOn = value
                 OeaVipStore.setSubtitlesOn(this, value)
                 paintSubtitle()
-                ccPill.text = if (value) (subtitleTrack?.let { "${it.count} cues" } ?: "Subtitles") else "Subtitles off"
+                updateSubtitlePill()
             }
             panel.slider(
                 panel.panel, "Text size", 0.6f, 2.4f, 0, subtitleScale,
                 { value -> "${(value * 100).roundToInt()}%" },
                 { value, final ->
                     subtitleScale = value
-                    subtitleView.textSize = 19f * value
+                    paintSubtitle()
                     if (final) OeaVipStore.setSubtitleSize(this, value)
                 }
             )
@@ -1788,31 +1906,244 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 { value, final ->
                     subtitleOffset = value.toLong()
                     base?.let { subtitleTrack = OeaSubtitles.shifted(it, subtitleOffset) }
+                    baseSecondary?.let { secondaryTrack = OeaSubtitles.shifted(it, subtitleOffset) }
                     paintSubtitle()
                     if (final) OeaVipStore.setSubtitleOffset(this, subtitleOffset)
                 }
             )
+
+            if (found.isEmpty()) {
+                panel.heading("No subtitle files found")
+                panel.note("VIP looks beside the clip and one folder down — Subs, Subtitles, Captions — for .srt and .vtt files named after it. One that lives somewhere else can be picked below.")
+            } else {
+                panel.heading(if (found.size == 1) "The file beside this clip" else "${found.size} subtitle files")
+                val list = panel.group()
+                found.forEach { track ->
+                    val chosen = track.name == subtitleTrack?.name
+                    panel.row(
+                        list,
+                        if (chosen) R.drawable.oic_check else R.drawable.oic_subtitles,
+                        track.language?.label ?: track.name,
+                        listOfNotNull(
+                            "${track.count} cues",
+                            if (track.forced) "forced" else null,
+                            if (track.sdh) "SDH" else null
+                        ).joinToString(" • "),
+                        value = track.language?.badge,
+                        selected = chosen,
+                        onClick = {
+                            chooseSubtitle(track)
+                            panel.dismiss()
+                        }
+                    )
+                }
+                panel.row(
+                    list, R.drawable.oic_close, "Nothing",
+                    "Take the words off the picture without forgetting this choice",
+                    selected = subtitleTrack == null || !subtitlesOn,
+                    onClick = {
+                        subtitlesOn = false
+                        OeaVipStore.setSubtitlesOn(this, false)
+                        paintSubtitle()
+                        updateSubtitlePill()
+                        panel.dismiss()
+                    }
+                )
+            }
+
+            if (found.size > 1) {
+                panel.heading("Second language")
+                val second = panel.group()
+                panel.row(second, R.drawable.oic_close, "Off", "One language at a time",
+                    selected = secondaryTrack == null, onClick = {
+                        chooseSecond(null)
+                        panel.dismiss()
+                    })
+                found.filter { it.name != subtitleTrack?.name }.forEach { track ->
+                    val chosen = track.name == secondaryTrack?.name
+                    panel.row(
+                        second,
+                        if (chosen) R.drawable.oic_check else R.drawable.oic_subtitles,
+                        track.language?.label ?: track.name,
+                        "Under the first line",
+                        value = track.language?.badge,
+                        selected = chosen,
+                        onClick = {
+                            chooseSecond(track)
+                            panel.dismiss()
+                        }
+                    )
+                }
+            }
+
+            panel.heading("Preferred language")
+            val preference = panel.group()
+            val preferred = OeaVipStore.preferredSubtitleLanguage(this)
+            panel.row(
+                preference, R.drawable.oic_public,
+                preferred?.label ?: "Language not in the list",
+                if (OeaVipStore.subtitleLanguageTag(this) == OeaVipStore.LANGUAGE_AUTO) "The phone's own language" else "Opened first when a clip has it",
+                onClick = {
+                    panel.dismiss()
+                    showPreferredLanguageSheet()
+                }
+            )
+
             panel.heading("Load a file")
-            val pick = panel.group()
-            panel.row(pick, R.drawable.oic_folder, "Pick a subtitle file",
-                "A .srt, .vtt or .ass anywhere on this phone", onClick = {
+            val load = panel.group()
+            panel.row(
+                load, R.drawable.oic_folder, "Pick a subtitle file",
+                "A .srt or .vtt anywhere on this phone", onClick = {
                     panel.dismiss()
                     pickSubtitleFile()
-                })
-            val remembered = subtitleName
-            if (remembered != null) {
-                panel.row(pick, R.drawable.oic_check, remembered, "Kept for this clip only", onClick = {
-                    forgetSubtitles()
-                    panel.dismiss()
-                })
+                }
+            )
+            subtitleTrack?.let { current ->
+                panel.row(
+                    load, R.drawable.oic_file_download, "Save this language as .srt",
+                    current.language?.let { "${it.english}, ${current.count} cues, as it is drawn" } ?: "${current.count} cues",
+                    onClick = {
+                        panel.dismiss()
+                        saveSubtitleFile(current)
+                    }
+                )
             }
-            panel.note("VIP reads the cues itself and draws them, so the style, size and delay are yours. Subtitles embedded in the file stay with whoever plays it next.")
+            if (pickedByHand != null) {
+                panel.row(
+                    load, R.drawable.oic_refresh,
+                    "Forget ${pickedByHand.lastPathSegment ?: "the picked file"}",
+                    "VIP goes back to the files beside the clip", onClick = {
+                        forgetSubtitles()
+                        panel.dismiss()
+                    }
+                )
+            }
+            panel.note("VIP reads .srt and .vtt itself, so the size, the delay and which language sits under which are yours. A track muxed inside the video is not read: Android's player can select one but never hands it over. Nothing is translated — a track is drawn in the language it was written in.")
         }
+    }
+
+    /**
+     * Switches the language under the picture and remembers it for this clip: the
+     * same episode a week later opens on the language you watched it in.
+     */
+    private fun chooseSubtitle(track: OeaSubtitles.Track) {
+        base = track
+        subtitleTrack = OeaSubtitles.shifted(track, subtitleOffset)
+        subtitlesOn = true
+        OeaVipStore.setSubtitlesOn(this, true)
+        // The same file cannot be both lines.
+        if (secondaryTrack?.name == track.name) {
+            baseSecondary = null
+            secondaryTrack = null
+            OeaVipStore.setSecondSubtitleTag(this, OeaVipStore.LANGUAGE_OFF)
+        }
+        OeaVipStore.rememberSubtitle(this, current()?.uri, sourceOf(track))
+        paintSubtitle()
+        updateSubtitlePill()
+    }
+
+    /** Puts a second language under the first, or takes it away with null. */
+    private fun chooseSecond(track: OeaSubtitles.Track?) {
+        if (track == null || track.name == subtitleTrack?.name) {
+            baseSecondary = null
+            secondaryTrack = null
+            OeaVipStore.setSecondSubtitleTag(this, OeaVipStore.LANGUAGE_OFF)
+        } else {
+            baseSecondary = track
+            secondaryTrack = OeaSubtitles.shifted(track, subtitleOffset)
+            subtitlesOn = true
+            OeaVipStore.setSubtitlesOn(this, true)
+            OeaVipStore.setSecondSubtitleTag(this, track.language?.tag ?: OeaVipStore.LANGUAGE_OFF)
+        }
+        paintSubtitle()
+        updateSubtitlePill()
+    }
+
+    /** Where a track's cues were read from, as a URI that can be read again. */
+    private fun sourceOf(track: OeaSubtitles.Track): Uri? =
+        track.origin?.let { runCatching { Uri.parse(it) }.getOrNull() }
+
+    /**
+     * Writes the language on screen out as SubRip, through Android's own
+     * create-a-document sheet: a track that exists only beside this film can then
+     * travel to another player, another phone or a translator.
+     */
+    private fun saveSubtitleFile(track: OeaSubtitles.Track) {
+        val stem = title.substringBeforeLast('.').ifBlank { "subtitles" }
+        val name = "$stem.${track.language?.primary ?: "und"}.srt"
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/x-subrip"
+            putExtra(Intent.EXTRA_TITLE, name)
+        }
+        val started = runCatching {
+            startActivityForResult(intent, REQUEST_EXPORT_SUBTITLE)
+            true
+        }.getOrDefault(false)
+        if (!started) {
+            toast("Android would not open the save sheet")
+            return
+        }
+        exportTrack = track
+    }
+
+    /**
+     * The language VIP reaches for first. The languages beside this clip come
+     * before the full list: finding the three you own among a hundred is not a
+     * setting, it is a search.
+     */
+    private fun showPreferredLanguageSheet() {
+        val current = OeaVipStore.subtitleLanguageTag(this)
+        sheet("Preferred language", "Opened first whenever a clip has more than one") { panel ->
+            val auto = panel.group()
+            val phone = OeaSubtitleLanguages.deviceDefault()
+            panel.row(
+                auto, R.drawable.oic_public, "The phone's language",
+                phone?.let { "Now $it" } ?: "Taken from the phone's own setting",
+                selected = current == OeaVipStore.LANGUAGE_AUTO, onClick = {
+                    OeaVipStore.setSubtitleLanguageTag(this, OeaVipStore.LANGUAGE_AUTO)
+                    panel.dismiss()
+                    toast("Preferred subtitle language: the phone's")
+                }
+            )
+            val here = orderedTracks().mapNotNull { it.language }.distinctBy { it.tag }
+            if (here.isNotEmpty()) {
+                panel.heading("Beside this clip")
+                val local = panel.group()
+                here.forEach { language -> languageRow(panel, local, language, current) }
+            }
+            panel.heading("Every language VIP knows")
+            val all = panel.group()
+            OeaSubtitleLanguages.all.forEach { language -> languageRow(panel, all, language, current) }
+            panel.note("A language VIP does not have a name for still works: the cues are drawn exactly the same, and the badge says CC. This is only the order VIP looks in.")
+        }
+    }
+
+    private fun languageRow(
+        panel: OeaVipSheet,
+        group: LinearLayout,
+        language: OeaSubtitleLanguages.Language,
+        current: String
+    ) {
+        val chosen = current == language.tag
+        panel.row(
+            group,
+            if (chosen) R.drawable.oic_check else 0,
+            language.label,
+            null,
+            value = language.badge,
+            selected = chosen,
+            onClick = {
+                OeaVipStore.setSubtitleLanguageTag(this, language.tag)
+                panel.dismiss()
+                toast("Preferred subtitle language: ${language.english}")
+            }
+        )
     }
 
     /** The un-shifted cues, so the offset slider never stacks up on itself. */
     private var base: OeaSubtitles.Track? = null
-    private var subtitleName: String? = null
+    private var baseSecondary: OeaSubtitles.Track? = null
 
     private fun showAspectSheet() {
         sheet("Picture", "${videoWidth}×${videoHeight} in the file") { panel ->
@@ -1982,11 +2313,10 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                 panel.dismiss()
                 showEqualizerSheet()
             })
-            panel.row(primary, R.drawable.oic_subtitles, "Subtitles",
-                subtitleTrack?.let { "${it.name} • ${it.count} cues" } ?: "none beside this file", onClick = {
-                    panel.dismiss()
-                    showSubtitleSheet()
-                })
+            panel.row(primary, R.drawable.oic_subtitles, "Subtitles", subtitleSummary(), onClick = {
+                panel.dismiss()
+                showSubtitleSheet()
+            })
             panel.row(primary, R.drawable.oic_timer, "Sleep timer",
                 if (sleepDeadline > 0L) "on" else if (sleepAfterClip) "after this clip" else "off", onClick = {
                     panel.dismiss()
@@ -2191,6 +2521,23 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_EXPORT_SUBTITLE) {
+            val track = exportTrack
+            exportTrack = null
+            val target = data?.data
+            if (resultCode != RESULT_OK || target == null || track == null) return
+            PROBE.execute {
+                val text = OeaSubtitles.toSrt(track)
+                val written = runCatching {
+                    contentResolver.openOutputStream(target)?.use { stream -> stream.write(text.toByteArray()) }
+                    true
+                }.getOrDefault(false)
+                handler.post {
+                    toast(if (written) "Saved ${track.count} cues as ${track.language?.english ?: "subtitles"}" else "That file could not be written")
+                }
+            }
+            return
+        }
         if (requestCode != REQUEST_SUBTITLE || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         val name = uri.lastPathSegment ?: "subtitles"
@@ -2204,29 +2551,38 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     toast("No cues could be read from that file")
                     return@post
                 }
-                applySubtitles(name, track)
+                applySubtitles(track)
                 OeaVipStore.rememberSubtitle(this, current()?.uri, uri)
-                toast("Subtitles loaded — ${track.count} cues")
+                OeaVipStore.setSubtitlesOn(this, true)
+                val language = track.language
+                toast(
+                    if (language != null) "Subtitles loaded — ${track.count} cues in ${language.english}"
+                    else "Subtitles loaded — ${track.count} cues"
+                )
             }
         }
     }
 
-    private fun applySubtitles(name: String, track: OeaSubtitles.Track) {
+    /**
+     * A file picked by hand joins this clip's tracks instead of replacing them, so
+     * the languages found beside the film stay one tap away.
+     */
+    private fun applySubtitles(track: OeaSubtitles.Track) {
+        if (subtitleTracks.none { it.origin == track.origin }) {
+            subtitleTracks = subtitleTracks + track
+        }
         base = track
         subtitleTrack = OeaSubtitles.shifted(track, subtitleOffset)
-        subtitleName = name
-        ccPill.text = "${track.count} cues"
+        subtitlesOn = true
         paintSubtitle()
+        updateSubtitlePill()
     }
 
+    /** Forgets the file picked by hand; the ones beside the clip are found again. */
     private fun forgetSubtitles() {
-        base = null
-        subtitleTrack = null
-        subtitleName = null
-        subtitleView.visibility = View.GONE
-        ccPill.text = "Subtitles"
         OeaVipStore.rememberSubtitle(this, current()?.uri, null)
-        toast("Subtitles removed from this clip")
+        loadSubtitles()
+        toast("Forgetting the file picked for this clip")
     }
 
     private fun safeExternalUri(uri: Uri): Uri? {
@@ -2345,6 +2701,13 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         const val EXTRA_START_AT = "oea.vip.start_at"
         const val EXTRA_DURATION = "oea.vip.duration"
         const val EXTRA_SIDECAR = "oea.vip.sidecar"
+
+        /**
+         * One absolute path per clip in the queue, in queue order, empty when the
+         * clip has none. Sent by VIP's library because only it knows where a
+         * MediaStore row lives; the player walks that folder on its probe thread.
+         */
+        const val EXTRA_QUEUE_PATHS = "oea.vip.queue_paths"
         const val EXTRA_QUEUE = "oea.vip.queue"
         const val EXTRA_QUEUE_TITLES = "oea.vip.queue_titles"
         const val EXTRA_INDEX = "oea.vip.index"
@@ -2373,6 +2736,7 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         private const val VOLUME_GAIN = 0.6f
 
         private const val REQUEST_SUBTITLE = 4321
+        private const val REQUEST_EXPORT_SUBTITLE = 4323
         private const val REQUEST_NOTIFICATIONS = 4322
 
         /** Big enough for the shade and a lock screen, small enough to be free. */

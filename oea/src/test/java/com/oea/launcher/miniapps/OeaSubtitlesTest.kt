@@ -1,6 +1,7 @@
 package com.oea.launcher.miniapps
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -117,5 +118,83 @@ class OeaSubtitlesTest {
         assertNull(OeaSubtitles.parse("film.ass", "[Script Info]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello"))
         assertNull(OeaSubtitles.parse("empty.srt", ""))
         assertNull(OeaSubtitles.parse("noise.srt", "this file has no timings at all"))
+    }
+
+    // ------------------------------------------------------------ multi-language
+
+    @Test fun theTrackKnowsItsLanguageFromTheFileName() {
+        assertEquals("fr", OeaSubtitles.parse("Movie.fr.srt", srt)!!.language?.tag)
+        assertEquals("yo", OeaSubtitles.parse("Movie.Yoruba.srt", srt)!!.language?.tag)
+        assertEquals("pt-BR", OeaSubtitles.parse("Movie.pt-BR.srt", srt)!!.language?.tag)
+        assertEquals("en", OeaSubtitles.parse("Movie.eng.vtt", srt)!!.language?.tag)
+    }
+
+    @Test fun aFileWithNoLanguageInItsNameIsNamedByItsScript() {
+        val arabic = "1\n00:00:01,000 --> 00:00:02,000\nمرحبا بكم"
+        assertEquals("ar", OeaSubtitles.parse("subtitles.srt", arabic)!!.language?.tag)
+        // Latin letters cannot name a language, so the track says so instead.
+        assertNull(OeaSubtitles.parse("subtitles.srt", srt)!!.language)
+    }
+
+    @Test fun aTrackWithoutALanguageSaysSoInWords() {
+        assertEquals("Language not named", OeaSubtitles.parse("subtitles.srt", srt)!!.languageLabel)
+        assertEquals("Français · French", OeaSubtitles.parse("Movie.fr.srt", srt)!!.languageLabel)
+    }
+
+    @Test fun theFileFlagsSurviveParsing() {
+        val forced = OeaSubtitles.parse("Movie.en.forced.srt", srt)!!
+        assertTrue(forced.forced)
+        assertFalse(forced.sdh)
+        assertTrue(OeaSubtitles.parse("Movie.en.sdh.srt", srt)!!.sdh)
+    }
+
+    @Test fun anOffsetKeepsTheLanguageTheFlagsAndTheSource() {
+        val track = OeaSubtitles.parse("Movie.en.forced.srt", srt)!!
+            .copy(origin = "file:///films/Movie.en.forced.srt")
+        val later = OeaSubtitles.shifted(track, 750L)
+        assertEquals("en", later.language?.tag)
+        assertTrue(later.forced)
+        assertEquals("file:///films/Movie.en.forced.srt", later.origin)
+        assertEquals(1_750L, later.cues[0].startMs)
+        assertEquals(2, later.count)
+    }
+
+    @Test fun rightToLeftCuesAreIsolatedAndOthersAreNot() {
+        val arabic = "مرحبا"
+        assertEquals("\u202B$arabic\u202C", OeaSubtitles.display(arabic))
+        assertEquals("Hello", OeaSubtitles.display("Hello"))
+        assertTrue(OeaSubtitles.isRightToLeft(arabic))
+        assertTrue(OeaSubtitles.isRightToLeft("שלום"))
+        assertFalse(OeaSubtitles.isRightToLeft("Hello مرحبا"))
+        assertFalse(OeaSubtitles.isRightToLeft("1984"))
+        // A line already isolated is not isolated twice.
+        assertEquals("\u202B$arabic\u202C", OeaSubtitles.display(OeaSubtitles.display(arabic)))
+    }
+
+    @Test fun twoLanguagesAreDrawnUnderEachOther() {
+        val english = OeaSubtitles.parse("Movie.en.srt", srt)!!
+        val french = OeaSubtitles.parse(
+            "Movie.fr.srt",
+            "1\n00:00:01,000 --> 00:00:02,500\nBonjour\n\n2\n00:00:03,000 --> 00:00:04,000\nDeux"
+        )!!
+        assertEquals("Hello\nBonjour", OeaSubtitles.together(english, french, 1_500L))
+        assertEquals("Two\nDeux", OeaSubtitles.together(english, french, 3_500L))
+        // One language alone still draws.
+        assertEquals("Hello", OeaSubtitles.together(english, null, 1_500L))
+        // The same file is not painted twice.
+        assertEquals("Hello", OeaSubtitles.together(english, english, 1_500L))
+        // Silence is silence, not the last line held on screen.
+        assertNull(OeaSubtitles.together(english, french, 2_900L))
+        assertNull(OeaSubtitles.together(null, null, 1_500L))
+    }
+
+    @Test fun aTrackCanBeWrittenBackOutAndReadAgain() {
+        val track = OeaSubtitles.parse("Movie.en.srt", srt)!!
+        val written = OeaSubtitles.toSrt(track)
+        assertTrue(written.startsWith("1\n00:00:01,000 --> 00:00:02,500\nHello\n"))
+        assertTrue(written.contains("\n\n2\n00:00:03,000 --> 00:00:04,000\nTwo\n"))
+        val again = OeaSubtitles.parse("Movie.en.srt", written)!!
+        assertEquals(track.cues, again.cues)
+        assertEquals(track.count, again.count)
     }
 }
