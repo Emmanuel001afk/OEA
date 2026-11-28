@@ -193,7 +193,10 @@ object OeaSubtitleLanguages {
 
     private val tagIndex: Map<String, Language> = LinkedHashMap<String, Language>().apply {
         CATALOGUE.forEach { language ->
-            putIfAbsent(language.tag, language)
+            // Keys are lower case because every lookup is: a stored "zh-Hant" and
+            // a filename's "zh-hant" have to reach the same entry, and "zh-hant"
+            // must be Traditional Chinese rather than the "zh" alias's Simplified.
+            putIfAbsent(language.tag.lowercase(Locale.ROOT), language)
             language.aliases.forEach { putIfAbsent(it.lowercase(Locale.ROOT), language) }
         }
     }

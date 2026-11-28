@@ -107,12 +107,13 @@ class OeaSubtitleFilesTest {
         assertEquals("Movie.en.srt", OeaSubtitleFiles.best(all, null)?.name)
     }
 
-    @Test fun aCompleteTrackComesBeforeAForcedOneAndAnUnnamedOne() {
+    @Test fun aCompleteTrackComesBeforeAForcedOneAndANamedOneBeforeAnUnnamedOne() {
         val all = found("Movie.mkv", "Movie.en.forced.srt", "Movie.de.srt", "Movie.srt")
-        val ordered = OeaSubtitleFiles.sorted(all, null)
+        // A forced track is only the foreign dialogue, so any complete track beats
+        // it — even one whose language the name does not announce.
         assertEquals(
-            listOf("Movie.de.srt", "Movie.en.forced.srt", "Movie.srt"),
-            ordered.map { it.name }
+            listOf("Movie.de.srt", "Movie.srt", "Movie.en.forced.srt"),
+            OeaSubtitleFiles.sorted(all, null).map { it.name }
         )
     }
 
