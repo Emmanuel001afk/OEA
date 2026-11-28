@@ -476,6 +476,7 @@ jobs:
               --tests 'com.oea.launcher.miniapps.OeaSpeechRegionsTest' \
               --tests 'com.oea.launcher.miniapps.OeaCaptionsTest' \
               --tests 'com.oea.launcher.miniapps.OeaMatroskaTest' \
+              --tests 'com.oea.launcher.miniapps.OeaMp4Test' \
               --tests 'com.oea.launcher.miniapps.OeaTranslateTest' \
               --tests 'com.oea.launcher.miniapps.OeaVipFramesTest' \
               --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-vip.log"; then
@@ -607,6 +608,11 @@ jobs:
           grep -Fq 'const val ORIGIN_PREFIX = "embedded:"' "$MKV"
           grep -Fq 'OeaMatroska.looksMatroska(clip)' "$PLAYER"
           grep -Fq 'OeaMatroska.read(clip)' "$PLAYER"
+          MP4=$SRC/OeaMp4.kt
+          grep -Fq 'object OeaMp4' "$MP4"
+          grep -Fq 'fun looksMp4(file: File)' "$MP4"
+          grep -Fq 'OeaMp4.looksMp4(clip)' "$PLAYER"
+          grep -Fq 'OeaMp4.read(clip)' "$PLAYER"
           ! grep -Fq 'S_HDMV/PGS' "$SRC/OeaSubtitleFiles.kt"
           # Translation runs off the UI thread and keeps the timings.
           TRANSLATE=$SRC/OeaTranslate.kt

@@ -1036,8 +1036,16 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             // Subtitles muxed into the container itself. A season download almost
             // always has them and almost never has files beside it, and the player
             // used to say "no subtitle files found" about a film that had four.
-            if (clip != null && OeaMatroska.looksMatroska(clip)) {
-                OeaMatroska.read(clip).forEach { track ->
+            if (clip != null) {
+                // Matroska hands text over as a stream of blocks; MP4 keeps it in
+                // sample tables. Both are read here, on the probe thread, never on
+                // the tap that started the film.
+                val embedded = when {
+                    OeaMatroska.looksMatroska(clip) -> OeaMatroska.read(clip)
+                    OeaMp4.looksMp4(clip) -> OeaMp4.read(clip)
+                    else -> emptyList()
+                }
+                embedded.forEach { track ->
                     if (loaded.none { other -> other.origin == track.origin }) loaded.add(track)
                 }
             }
