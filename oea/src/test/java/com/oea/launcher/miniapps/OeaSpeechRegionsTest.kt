@@ -3,6 +3,7 @@ package com.oea.launcher.miniapps
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -44,14 +45,22 @@ class OeaSpeechRegionsTest {
 
     private val settings = OeaSpeechRegions.Settings()
 
+    /** Measured regions are allowed to be a fifth of a second out; nothing else is. */
+    private fun assertNear(expected: Long, actual: Long, tolerance: Long) {
+        assertTrue(
+            "expected $expected ± $tolerance but was $actual",
+            abs(expected - actual) <= tolerance
+        )
+    }
+
     @Test fun twoSentencesBecomeTwoRegionsOnTheirOwnBounds() {
         val audio = clip(silence(1000), voice(1200), silence(900), voice(800), silence(1000))
         val regions = OeaSpeechRegions.find(audio, rate, settings)
         assertEquals(2, regions.size)
-        assertEquals(1000L, regions[0].startMs, 200L)
-        assertEquals(2200L, regions[0].endMs, 200L)
-        assertEquals(3100L, regions[1].startMs, 200L)
-        assertEquals(3900L, regions[1].endMs, 200L)
+        assertNear(1000L, regions[0].startMs, 200L)
+        assertNear(2200L, regions[0].endMs, 200L)
+        assertNear(3100L, regions[1].startMs, 200L)
+        assertNear(3900L, regions[1].endMs, 200L)
     }
 
     @Test fun aCoughIsNotALineOfDialogue() {
@@ -117,8 +126,8 @@ class OeaSpeechRegionsTest {
     @Test fun theDetectorReportsHowMuchAudioItHeard() {
         val detector = OeaSpeechRegions.Detector(rate, settings)
         detector.push(silence(1000))
-        assertEquals(1000L, detector.durationMs, 30L)
+        assertNear(1000L, detector.durationMs, 30L)
         detector.push(silence(500))
-        assertEquals(1500L, detector.durationMs, 30L)
+        assertNear(1500L, detector.durationMs, 30L)
     }
 }
