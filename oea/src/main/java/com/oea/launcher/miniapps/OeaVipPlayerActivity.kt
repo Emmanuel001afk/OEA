@@ -25,6 +25,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.speech.SpeechRecognizer
 import android.util.Rational
 import android.view.Gravity
 import android.view.MotionEvent
@@ -139,6 +140,14 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     private var subtitleTracks: List<OeaSubtitles.Track> = emptyList()
     /* The track waiting for Android's create-a-document sheet to come back. */
     private var exportTrack: OeaSubtitles.Track? = null
+
+    /**
+     * The run that writes subtitles from the soundtrack, if one is going, and
+     * the sheet reporting on it. Kept so leaving the player stops the work
+     * instead of leaving a thread reading a film that is no longer playing.
+     */
+    private var captionJob: OeaAutoCaption? = null
+    private var captionSheet: OeaVipSheet? = null
     private var subtitleOffset = 0L
     private var subtitleScale = 1f
 
@@ -1024,7 +1033,18 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     ?.takeIf { !it.isEmpty }
                     ?.let { track -> if (loaded.none { other -> other.name == track.name }) loaded.add(track) }
             }
+            // Subtitles muxed into the container itself. A season download almost
+            // always has them and almost never has files beside it, and the player
+            // used to say "no subtitle files found" about a film that had four.
+            if (clip != null && OeaMatroska.looksMatroska(clip)) {
+                OeaMatroska.read(clip).forEach { track ->
+                    if (loaded.none { other -> other.origin == track.origin }) loaded.add(track)
+                }
+            }
             remembered?.let { uri ->
+                // An embedded track has no file to reopen: it is found again by
+                // walking the container, which has just happened above.
+                if (uri.toString().startsWith(OeaMatroska.ORIGIN_PREFIX)) return@let
                 val name = uri.lastPathSegment?.substringAfterLast('/') ?: "subtitles"
                 val track = OeaSubtitles.load(app, uri, name)?.takeIf { !it.isEmpty }
                 if (track != null) {
@@ -1353,9 +1373,9 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         val primary = subtitleTrack
         val found = subtitleTracks.size
         val files = when {
-            found == 0 -> "no files beside this clip"
-            found == 1 -> "one file beside this clip"
-            else -> "$found files beside this clip"
+            found == 0 -> "nothing to read for this clip"
+            found == 1 -> "one track for this clip"
+            else -> "$found tracks for this clip"
         }
         val now = primary?.let { "${it.language?.english ?: "language not named"} • ${it.count} cues" }
         return listOfNotNull(now, files).joinToString(" • ")
@@ -1913,8 +1933,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             )
 
             if (found.isEmpty()) {
-                panel.heading("No subtitle files found")
-                panel.note("VIP looks beside the clip and one folder down — Subs, Subtitles, Captions — for .srt and .vtt files named after it. One that lives somewhere else can be picked below.")
+                panel.heading("No subtitles in this clip")
+                panel.note("VIP looks beside the clip and one folder down — Subs, Subtitles, Captions — for .srt and .vtt files named after it, and inside an MKV for tracks muxed into it. One that lives somewhere else can be picked below, and one that does not exist at all can be written from the sound.")
             } else {
                 panel.heading(if (found.size == 1) "The file beside this clip" else "${found.size} subtitle files")
                 val list = panel.group()
@@ -2018,7 +2038,32 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
                     }
                 )
             }
-            panel.note("VIP reads .srt and .vtt itself, so the size, the delay and which language sits under which are yours. A track muxed inside the video is not read: Android's player can select one but never hands it over. Nothing is translated — a track is drawn in the language it was written in.")
+            panel.heading("From the sound")
+            val sound = panel.group()
+            val spoken = OeaVipStore.captionLanguage(this)
+            panel.row(
+                sound, R.drawable.oic_mic,
+                "Write subtitles from the sound",
+                spoken?.let { "Heard as ${it.english} • timed from the audio" }
+                    ?: "The phone's recognizer • timed from the audio",
+                onClick = {
+                    panel.dismiss()
+                    showCaptionSheet()
+                }
+            )
+            val translatable = subtitleTrack?.takeIf { OeaTranslate.supports(it.language?.tag) }
+            if (translatable != null) {
+                panel.row(
+                    sound, R.drawable.oic_public,
+                    "Translate this into another language",
+                    "${translatable.language?.english}, ${translatable.count} cues, on the phone",
+                    onClick = {
+                        panel.dismiss()
+                        showTranslateSheet(translatable)
+                    }
+                )
+            }
+            panel.note("VIP reads .srt and .vtt itself and the text tracks muxed into an MKV, so the size, the delay and which language sits under which are yours. What it cannot find it can write from the soundtrack on Android 13 or newer — timed from the audio, worded by the phone's recognizer — and any track it has can be translated on the device.")
         }
     }
 
@@ -2123,7 +2168,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
         panel: OeaVipSheet,
         group: LinearLayout,
         language: OeaSubtitleLanguages.Language,
-        current: String
+        current: String,
+        onPick: ((OeaSubtitleLanguages.Language) -> Unit)? = null
     ) {
         val chosen = current == language.tag
         panel.row(
@@ -2134,11 +2180,238 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
             value = language.badge,
             selected = chosen,
             onClick = {
-                OeaVipStore.setSubtitleLanguageTag(this, language.tag)
+                if (onPick != null) {
+                    onPick(language)
+                } else {
+                    OeaVipStore.setSubtitleLanguageTag(this, language.tag)
+                    toast("Preferred subtitle language: ${language.english}")
+                }
                 panel.dismiss()
-                toast("Preferred subtitle language: ${language.english}")
             }
         )
+    }
+
+    // ------------------------------------------------- writing from the sound
+
+    /**
+     * The sheet that writes subtitles for a clip that has none.
+     *
+     * The spoken language is asked for separately from the subtitle language on
+     * purpose: a viewer may read Yoruba subtitles over English films, and
+     * transcribing an English film as Yoruba produces confident nonsense. The
+     * first thing the sheet says is who does the listening, because an online
+     * recognizer means the film's audio leaves the phone.
+     */
+    private fun showCaptionSheet() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            toast("Writing subtitles from the sound needs Android 13 or newer")
+            return
+        }
+        val onDevice = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(this) }.getOrDefault(false)
+        val spoken = OeaVipStore.captionLanguage(this)
+        sheet(
+            "Write subtitles from the sound",
+            if (onDevice) "The phone's own recognizer, offline" else "An online recognizer"
+        ) { panel ->
+            panel.note(
+                if (onDevice) {
+                    "VIP measures where somebody is speaking, then asks the phone's offline recognizer what was said in each stretch. The clip's audio never leaves the phone. The words are only as good as the language pack installed on it."
+                } else {
+                    "This phone has no offline recognizer OEA can use, so the words come from an online one and the clip's audio is sent to it. The timing is still measured here, from the sound itself."
+                }
+            )
+            val language = panel.group()
+            panel.row(
+                language, R.drawable.oic_mic,
+                "Spoken language",
+                spoken?.let { "Heard as ${it.english}" } ?: "The phone's own language",
+                onClick = {
+                    panel.dismiss()
+                    showCaptionLanguageSheet()
+                }
+            )
+            panel.heading("How much of it")
+            val range = panel.group()
+            panel.row(range, R.drawable.oic_subtitles, "The whole clip", "Every voice in it, in order", onClick = {
+                panel.dismiss()
+                startCaption(0L, Long.MAX_VALUE)
+            })
+            panel.row(
+                range, R.drawable.oic_timer, "From here for 20 minutes",
+                "Starting at ${clock(positionMs)}", onClick = {
+                    panel.dismiss()
+                    startCaption(positionMs, positionMs + 20 * 60_000L)
+                }
+            )
+            panel.note("Transcribing a film takes time: the phone listens to all of it, then works through each stretch of speech. You can stop it at any point, and a finished track can be saved as .srt or translated like any other.")
+        }
+    }
+
+    /** What the recognizer is told to listen for. */
+    private fun showCaptionLanguageSheet() {
+        val current = OeaVipStore.captionLanguageTag(this)
+        sheet("Spoken language", "What the recognizer is told to listen for") { panel ->
+            val phone = OeaSubtitleLanguages.deviceDefault()
+            panel.row(
+                panel.group(), R.drawable.oic_public, "The phone's language",
+                phone?.let { "Now $it" } ?: "Taken from the phone's own setting",
+                selected = current == OeaVipStore.LANGUAGE_AUTO, onClick = {
+                    OeaVipStore.setCaptionLanguageTag(this, OeaVipStore.LANGUAGE_AUTO)
+                    panel.dismiss()
+                    toast("Listening for the phone's language")
+                }
+            )
+            panel.heading("Every language VIP knows")
+            val all = panel.group()
+            OeaSubtitleLanguages.all.forEach { language ->
+                languageRow(panel, all, language, current) { picked ->
+                    OeaVipStore.setCaptionLanguageTag(this, picked.tag)
+                    toast("Listening for ${picked.english}")
+                }
+            }
+            panel.note("The recognizer needs a language pack for this. When it has none it says so, rather than returning English-sounding guesses.")
+        }
+    }
+
+    /** Starts the run and puts a sheet on screen that says how it is going. */
+    private fun startCaption(fromMs: Long, toMs: Long) {
+        val uri = current()?.uri ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            toast("Writing subtitles from the sound needs Android 13 or newer")
+            return
+        }
+        captionJob?.stop()
+        val job = OeaAutoCaption(this, uri, OeaVipStore.captionLanguage(this)?.tag.orEmpty())
+        captionJob = job
+        val sheet = OeaVipSheet.build(
+            this, OeaTheme.resolve(this), "Writing subtitles",
+            "Timing from the sound • words from the recognizer"
+        )
+        val line = sheet.status("Listening to the sound")
+        val detail = sheet.status("")
+        sheet.buttons("Stop" to { job.stop() })
+        sheet.show()
+        captionSheet = sheet
+        job.start(
+            fromMs = fromMs,
+            toMs = toMs,
+            onProgress = { progress ->
+                line.text = if (progress.total == 0) {
+                    progress.line
+                } else {
+                    "Transcribing ${progress.index} of ${progress.total}"
+                }
+                detail.text = if (progress.total == 0) {
+                    ""
+                } else {
+                    "${progress.heard} lines heard\n${progress.line}"
+                }
+            },
+            onDone = { outcome -> finishCaption(outcome) }
+        )
+    }
+
+    private fun finishCaption(outcome: OeaAutoCaption.Outcome) {
+        captionJob = null
+        captionSheet?.dismiss()
+        captionSheet = null
+        when (outcome) {
+            is OeaAutoCaption.Outcome.Done -> {
+                val language = OeaVipStore.captionLanguage(this)
+                val track = OeaSubtitles.Track(
+                    name = "${title.substringBeforeLast('.')} • ${language?.badge ?: "CC"} written",
+                    cues = outcome.cues,
+                    language = language,
+                    origin = null
+                )
+                applySubtitles(track)
+                OeaVipStore.setSubtitlesOn(this, true)
+                showCaptionResult(track, outcome)
+            }
+            is OeaAutoCaption.Outcome.Failed -> toast(outcome.reason)
+            OeaAutoCaption.Outcome.Cancelled -> toast("Stopped writing subtitles")
+        }
+    }
+
+    private fun showCaptionResult(track: OeaSubtitles.Track, outcome: OeaAutoCaption.Outcome.Done) {
+        sheet("Written from the sound", "${track.count} cues • ${outcome.heard} lines heard") { panel ->
+            panel.note(OeaCaptions.provenance(outcome.onDevice))
+            val group = panel.group()
+            panel.row(
+                group, R.drawable.oic_file_download, "Save it as .srt",
+                "Then it is a subtitle file like any other", onClick = {
+                    panel.dismiss()
+                    saveSubtitleFile(track)
+                }
+            )
+            panel.row(
+                group, R.drawable.oic_public, "Translate it into another language",
+                "On the phone, keeping these timings", onClick = {
+                    panel.dismiss()
+                    showTranslateSheet(track)
+                }
+            )
+            panel.row(group, R.drawable.oic_close, "Use it as it is", "Nothing else asked of it", onClick = {
+                panel.dismiss()
+            })
+            panel.note("A transcript written from sound is never a studio subtitle: names, accents and hard words will be wrong somewhere. The timings are measured from the audio, so those are exact.")
+        }
+    }
+
+    // ------------------------------------------------------------ translating
+
+    /** The languages a ready-made track can become, on this phone. */
+    private fun showTranslateSheet(track: OeaSubtitles.Track) {
+        val targets = OeaTranslate.targets(track.language)
+        val source = track.language
+        sheet(
+            "Translate",
+            "${track.count} cues • ${source?.english ?: "language not named"} in"
+        ) { panel ->
+            if (source == null) {
+                panel.heading("The language is not named")
+                panel.note("Translation needs to know what it is reading. A file named after its language — Movie.fr.srt — is named for free; something else can be picked in the subtitle sheet by choosing a file whose name says so.")
+            } else if (targets.isEmpty()) {
+                panel.heading("No model for this language")
+                panel.note("The on-device translator has no model that reads ${source.english}.")
+            } else {
+                panel.heading("Into")
+                val group = panel.group()
+                targets.forEach { language ->
+                    panel.row(
+                        group, R.drawable.oic_public, language.label, null,
+                        value = language.badge, onClick = {
+                            panel.dismiss()
+                            translateInto(track, language)
+                        }
+                    )
+                }
+                panel.note(OeaTranslate.DOWNLOAD_NOTE + " Translation goes through English, so the result reads like a translation rather than an original.")
+            }
+        }
+    }
+
+    /** Runs the translation off the UI thread, with a sheet that admits what it is doing. */
+    private fun translateInto(track: OeaSubtitles.Track, target: OeaSubtitleLanguages.Language) {
+        val sheet = OeaVipSheet.build(
+            this, OeaTheme.resolve(this), "Translating",
+            "Into ${target.english} • on the phone"
+        )
+        sheet.status("Downloading the model, if this is the first time")
+        sheet.buttons("Stop" to { })
+        sheet.show()
+        PROBE.execute {
+            val translated = OeaTranslate.translate(track, target)
+            handler.post {
+                sheet.dismiss()
+                if (translated == null) {
+                    toast("That translation could not be done on this phone")
+                    return@post
+                }
+                applySubtitles(translated)
+                toast("Translated into ${target.english}")
+            }
+        }
     }
 
     /** The un-shifted cues, so the offset slider never stacks up on itself. */
@@ -2658,6 +2931,8 @@ class OeaVipPlayerActivity : Activity(), OeaVipAudioService.Control {
     }
 
     override fun onDestroy() {
+        captionJob?.stop()
+        captionJob = null
         handler.removeCallbacksAndMessages(null)
         saveProgress()
         runCatching { unregisterReceiver(pipReceiver) }

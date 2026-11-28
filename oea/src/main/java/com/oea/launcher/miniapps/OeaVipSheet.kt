@@ -92,6 +92,26 @@ internal class OeaVipSheet private constructor(
         )
     }
 
+    /**
+     * A line that changes while something runs — a transcription saying what it
+     * just heard, a translation saying which model it is fetching.
+     *
+     * Returns the view so the caller can keep writing to it; a sheet that only
+     * ever says "working" is indistinguishable from one that has hung.
+     */
+    fun status(value: String): TextView {
+        val line = TextView(activity).apply {
+            text = value
+            setTextColor(0xCCFFFFFF.toInt())
+            textSize = 13f
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(6), dp(10), dp(6), dp(4))
+            maxLines = 3
+        }
+        panel.addView(line, LinearLayout.LayoutParams(-1, -2))
+        return line
+    }
+
     /** A settings row inside [group]. [selected] lights the icon up. */
     fun row(
         group: LinearLayout,

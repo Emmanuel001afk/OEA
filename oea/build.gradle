@@ -78,6 +78,12 @@ dependencies {
     implementation libs.androidx.recyclerview
     implementation libs.androidx.exifinterface
 
+    // Translating a track that already exists, on the phone rather than on a
+    // server. ML Kit's models are about 30 MB per language and arrive through
+    // Play services the first time a language is asked for, so VIP downloads
+    // one only when the viewer picks that language.
+    implementation "com.google.mlkit:translate:17.0.3"
+
     // The stability rules (fault policy), the theme catalogue, the wave detector
     // and the bundled-wallpaper model are pure Kotlin, so they are covered by
     // fast JVM tests rather than a device.
