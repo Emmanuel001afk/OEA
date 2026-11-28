@@ -38,12 +38,17 @@ internal object OeaVipDetails {
         val panels = arrayOfNulls<LinearLayout>(1)
         val dialog: Dialog = kit.sheet(item.name.substringBeforeLast('.'), "${item.album} • ${OeaMediaLibrary.formatSize(item.size)}") { panel, _ ->
             panels[0] = panel
-            render(host, kit, panel, item, null, null)
+            render(host, kit, panel, item, null, null, emptyList())
         }
         runCatching { dialog.show() }
         PROBE.execute {
             val app = host.applicationContext
             val clip = runCatching { OeaMediaProbe.probe(app, item.uri) }.getOrNull()
+            // Reading the folder is a disk walk, so it happens on this thread with
+            // the container read, not on the frame that opens the sheet.
+            val subtitles = runCatching {
+                OeaMediaProbe.subtitleCandidates(item, OeaVipStore.preferredSubtitleLanguage(host))
+            }.getOrNull().orEmpty()
             val playable = runCatching {
                 val media = android.media.MediaMetadataRetriever()
                 media.setDataSource(app, item.uri)
@@ -56,7 +61,7 @@ internal object OeaVipDetails {
                 val panel = panels[0] ?: return@post
                 if (host.isDestroyed || !dialog.isShowing) return@post
                 panel.removeAllViews()
-                render(host, kit, panel, item, clip, playable)
+                render(host, kit, panel, item, clip, playable, subtitles)
             }
         }
     }
@@ -67,7 +72,8 @@ internal object OeaVipDetails {
         panel: LinearLayout,
         item: OeaMediaLibrary.Item,
         clip: OeaMediaProbe.Clip?,
-        playable: Boolean?
+        playable: Boolean?,
+        subtitles: List<OeaSubtitleFiles.Candidate>
     ) {
         val kindLabel = when (item.kind) {
             OeaMediaLibrary.Kind.VIDEO -> "Video"
@@ -120,14 +126,26 @@ internal object OeaVipDetails {
             }
             kit.note(panel, "Android's player takes one video track and one audio track at a time. A player that switched between them would have to ship its own decoder, and OEA does not bundle one.")
         }
-        val sidecar = runCatching { OeaMediaProbe.siblingFile(item, OeaSubtitles.SUBTITLE_EXTENSIONS) }.getOrNull()
         val file = kit.group(panel)
         kit.row(file, R.drawable.oic_folder, "Where it lives", pathOf(item).ifBlank { "Private to the app that wrote it" }, chevron = false) {
             copyPath(host, pathOf(item))
         }
-        kit.row(file, R.drawable.oic_subtitles, "Subtitles beside it",
-            sidecar?.name ?: "none — VIP looks for .srt, .vtt, .ass and .ssa",
-            value = if (sidecar != null) "ready" else null, chevron = false)
+        kit.row(
+            file, R.drawable.oic_subtitles, "Subtitles beside it",
+            when {
+                subtitles.isEmpty() -> "none — VIP looks for .srt and .vtt named after the clip, here and in Subs, Subtitles or Captions"
+                else -> subtitles.joinToString(" • ") { candidate ->
+                    val name = candidate.language?.english ?: candidate.name
+                    if (candidate.note.isBlank()) name else "$name, ${candidate.note}"
+                }
+            },
+            value = when {
+                subtitles.isEmpty() -> null
+                subtitles.size == 1 -> "1 file"
+                else -> "${subtitles.size} files"
+            },
+            chevron = false
+        )
         val actions = LinearLayout(host).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER

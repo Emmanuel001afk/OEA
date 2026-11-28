@@ -269,4 +269,85 @@ object OeaMediaProbe {
             .flatMap { candidate -> listOfNotNull(File(parent, "$base.$candidate").takeIf { it.isFile }) }
             .firstOrNull()
     }
+
+    /** Where subtitle files travel besides the clip's own folder. */
+    private val SUBTITLE_FOLDERS = listOf("Subs", "Subtitles", "Captions", "subs", "subtitles", "captions")
+
+    /** A ceiling on one folder walk: a card with thousands of files is not a library. */
+    private const val SUBTITLE_SCAN_LIMIT = 500
+
+    /**
+     * Every subtitle file that belongs to [item], in every language beside it.
+     *
+     * [siblingFile] answers "is there one"; this answers "which ones, and in what
+     * language" — the difference between a film with the German track under it
+     * and a film with English, French and Yoruba to choose from. Same folder and
+     * the usual one-folder-down (`Subs/`, `Subtitles/`, `Captions/`), matched by
+     * name with [OeaSubtitleFiles] so a neighbouring film's subtitles cannot
+     * attach themselves to this one.
+     *
+     * Only OEA-owned files can be listed this way: scoped storage does not let an
+     * app read arbitrary neighbours of a MediaStore row, which is why VIP also
+     * offers "Pick a subtitle file" through the system document picker.
+     */
+    fun subtitleFiles(item: OeaMediaLibrary.Item, preferred: OeaSubtitleLanguages.Language? = null): List<File> =
+        if (!item.local) emptyList() else subtitleFilesFor(item.localPath?.let(::File), preferred)
+
+    /** The same list as [subtitleFiles], with the language each name announces. */
+    fun subtitleCandidates(
+        item: OeaMediaLibrary.Item,
+        preferred: OeaSubtitleLanguages.Language? = null
+    ): List<OeaSubtitleFiles.Candidate> =
+        if (!item.local) emptyList() else subtitleCandidatesFor(item.localPath?.let(::File), preferred)
+
+    /**
+     * The same walk from a plain [clip] — the player's form, because the activity
+     * is handed absolute paths rather than library rows, and because walking a
+     * folder belongs on the thread that reads the cues, not on the tap that
+     * started playback.
+     */
+    fun subtitleFilesFor(clip: File?, preferred: OeaSubtitleLanguages.Language? = null): List<File> {
+        if (clip == null) return emptyList()
+        val folder = subtitleFolder(clip)
+        if (folder.isEmpty()) return emptyList()
+        return OeaSubtitleFiles.sorted(
+            OeaSubtitleFiles.candidates(clip.name, folder.values.map { it.name }),
+            preferred
+        ).mapNotNull { candidate -> folder[candidate.name.lowercase(Locale.ROOT)] }
+    }
+
+    fun subtitleCandidatesFor(
+        clip: File?,
+        preferred: OeaSubtitleLanguages.Language? = null
+    ): List<OeaSubtitleFiles.Candidate> {
+        if (clip == null) return emptyList()
+        val folder = subtitleFolder(clip)
+        if (folder.isEmpty()) return emptyList()
+        return OeaSubtitleFiles.sorted(
+            OeaSubtitleFiles.candidates(clip.name, folder.values.map { it.name }),
+            preferred
+        )
+    }
+
+    /**
+     * The subtitle files around a clip, keyed by lower-case name. The clip's own
+     * folder wins over `Subs/` when both hold a file with the same name.
+     */
+    private fun subtitleFolder(clip: File): Map<String, File> {
+        val parent = clip.parentFile ?: return emptyMap()
+        val found = LinkedHashMap<String, File>()
+        fun take(directory: File) {
+            val files = runCatching { directory.listFiles() }.getOrNull() ?: return
+            files.forEach { file ->
+                if (found.size >= SUBTITLE_SCAN_LIMIT) return
+                if (!file.isFile || !OeaSubtitleFiles.isSubtitle(file.name)) return@forEach
+                found.putIfAbsent(file.name.lowercase(Locale.ROOT), file)
+            }
+        }
+        take(parent)
+        SUBTITLE_FOLDERS.forEach { name ->
+            File(parent, name).takeIf { it.isDirectory }?.let { take(it) }
+        }
+        return found
+    }
 }

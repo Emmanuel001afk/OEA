@@ -470,6 +470,8 @@ jobs:
           set -o pipefail
           if ! ./gradlew :oea:testDebugUnitTest \
               --tests 'com.oea.launcher.miniapps.OeaSubtitlesTest' \
+              --tests 'com.oea.launcher.miniapps.OeaSubtitleFilesTest' \
+              --tests 'com.oea.launcher.miniapps.OeaSubtitleLanguagesTest' \
               --tests 'com.oea.launcher.miniapps.OeaVipFramesTest' \
               --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle-vip.log"; then
             { grep -E '^e: |FAILED|AssertionError|Exception:|What went wrong' "$RUNNER_TEMP/gradle-vip.log" || true; } | head -60 | while IFS= read -r line; do
@@ -541,6 +543,31 @@ jobs:
           grep -Fq 'removePrefix("\uFEFF")' "$SUBS"
           ! grep -Fq 'CUE_ID' "$SUBS"
           grep -Fq 'lines.drop(timeAt + 1)' "$SUBS"
+          # Multi-language subtitles: a language catalogue, a file matcher, and a
+          # player that finds every track instead of the first one it sees.
+          LANGS=$SRC/OeaSubtitleLanguages.kt
+          FILES=$SRC/OeaSubtitleFiles.kt
+          VIDEO=$SRC/OeaVideoApp.kt
+          grep -Fq 'object OeaSubtitleLanguages' "$LANGS"
+          grep -Fq 'fun scriptOf(text: String)' "$LANGS"
+          grep -Fq 'rightToLeft' "$LANGS"
+          grep -Fq 'object OeaSubtitleFiles' "$FILES"
+          grep -Fq 'fun candidates(videoName: String' "$FILES"
+          grep -Fq 'fun languageIn(fileName: String)' "$FILES"
+          grep -Fq 'fun subtitleFilesFor(clip: File?' "$SRC/OeaMediaProbe.kt"
+          grep -Fq 'OeaMediaProbe.subtitleFilesFor(clip, preferred)' "$PLAYER"
+          grep -Fq 'OeaSubtitles.together(subtitleTrack, secondaryTrack, positionMs)' "$PLAYER"
+          grep -Fq 'fun preferredSubtitleLanguage(context: Context)' "$STORE"
+          grep -Fq 'fun secondSubtitleLanguage(context: Context)' "$STORE"
+          grep -Fq 'EXTRA_QUEUE_PATHS' "$PLAYER"
+          grep -Fq 'EXTRA_QUEUE_PATHS' "$VIDEO"
+          # Discovery is a disk read: it stays off the tap that starts playback.
+          ! grep -Fq 'subtitleFiles(' "$VIDEO"
+          # The offset lives in the cues, so the lookup is at the position itself.
+          ! grep -Fq 'track.at(positionMs + subtitleOffset)' "$PLAYER"
+          grep -Fq 'fun isRightToLeft(text: String)' "$SUBS"
+          grep -Fq 'fun display(text: String)' "$SUBS"
+          grep -Fq 'fun toSrt(track: Track)' "$SUBS"
       - name: Clock formatting regression tests
         run: |
           set -o pipefail

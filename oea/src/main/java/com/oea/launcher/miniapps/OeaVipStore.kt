@@ -26,6 +26,12 @@ object OeaVipStore {
     private const val KEY_SUB_SIZE = "subtitle_size"
     private const val KEY_SUB_ON = "subtitle_enabled"
     private const val KEY_SUBTITLES = "subtitle_files"
+    private const val KEY_SUB_LANGUAGE = "subtitle_language"
+    private const val KEY_SUB_SECOND = "subtitle_second_language"
+
+    /** "the phone's own language" and "no second line" are real choices, not blanks. */
+    const val LANGUAGE_AUTO = "auto"
+    const val LANGUAGE_OFF = "off"
     private const val KEY_HIDE_CONTROLS = "hide_controls_ms"
     private const val KEY_HINT = "hint_gestures_seen"
 
@@ -158,6 +164,43 @@ object OeaVipStore {
         rows.removeAll { it.startsWith("$key$SEP_FIELD") }
         rows.add(0, "$key$SEP_FIELD${subtitle ?: "none"}")
         prefs(context).edit().putString(KEY_SUBTITLES, rows.filter { it.isNotBlank() }.take(100).joinToString(SEP_ROW)).apply()
+    }
+
+    /**
+     * The language VIP should reach for when a clip has several tracks.
+     *
+     * `auto` means the phone's own language, resolved at the moment of use: a
+     * viewer who switches the phone to Yoruba gets Yoruba subtitles without
+     * setting anything else. A tag is remembered as a tag, so a language that is
+     * not in the catalogue today still survives an update.
+     */
+    fun subtitleLanguageTag(context: Context): String =
+        prefs(context).getString(KEY_SUB_LANGUAGE, LANGUAGE_AUTO) ?: LANGUAGE_AUTO
+
+    fun setSubtitleLanguageTag(context: Context, tag: String) =
+        prefs(context).edit().putString(KEY_SUB_LANGUAGE, tag.ifBlank { LANGUAGE_AUTO }).apply()
+
+    fun preferredSubtitleLanguage(context: Context): OeaSubtitleLanguages.Language? {
+        val tag = subtitleLanguageTag(context)
+        if (tag == LANGUAGE_AUTO) return OeaSubtitleLanguages.deviceDefault()
+        return OeaSubtitleLanguages.byTag(tag)
+    }
+
+    /**
+     * The second language drawn under the first — the "original plus the one I
+     * read" pair language learners and mixed households use. `off` by default:
+     * two tracks at once is a choice, never something VIP decides on its own.
+     */
+    fun secondSubtitleTag(context: Context): String =
+        prefs(context).getString(KEY_SUB_SECOND, LANGUAGE_OFF) ?: LANGUAGE_OFF
+
+    fun setSecondSubtitleTag(context: Context, tag: String) =
+        prefs(context).edit().putString(KEY_SUB_SECOND, tag.ifBlank { LANGUAGE_OFF }).apply()
+
+    fun secondSubtitleLanguage(context: Context): OeaSubtitleLanguages.Language? {
+        val tag = secondSubtitleTag(context)
+        if (tag == LANGUAGE_OFF) return null
+        return OeaSubtitleLanguages.byTag(tag)
     }
 
     // ------------------------------------------------------------------ history
